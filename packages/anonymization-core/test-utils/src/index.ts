@@ -71,6 +71,7 @@ export function createMockConfig(overrides?: Partial<EngineConfig>): EngineConfi
       timeouts: {
         "pdf-parse": 30000,
         "ocr-page": 60000,
+        "ocr-orient": 60000,
         "ner-page": 20000,
         "render-page": 10000,
         "export-page": 30000,
@@ -78,6 +79,7 @@ export function createMockConfig(overrides?: Partial<EngineConfig>): EngineConfi
       maxRetries: {
         "pdf-parse": 1,
         "ocr-page": 2,
+        "ocr-orient": 0,
         "ner-page": 1,
         "render-page": 1,
         "export-page": 1,
@@ -86,6 +88,7 @@ export function createMockConfig(overrides?: Partial<EngineConfig>): EngineConfi
       maxRetryDelayMs: 2000,
       cancelSlaMs: 200,
       idleDisposeMs: 60000,
+      nerIdleDisposeMs: 15000,
     },
     pdf: { maxPageCount: 10000 },
     ner: {
@@ -95,7 +98,7 @@ export function createMockConfig(overrides?: Partial<EngineConfig>): EngineConfi
       batchSize: 1,
       enabled: false,
     },
-    ocr: { languages: ["spa"], dpi: 300 },
+    ocr: { languages: ["spa"], dpi: 300, maxLiveImageBytes: 128 * 1024 * 1024 },
     grouping: { similarityThreshold: 0.88, minAliasFrequency: 1 },
     render: { previewScale: 0.5, fullScale: 2, jpegQuality: 80, cachePages: 16 },
     export: { defaultDpi: 300, defaultImageFormat: "png", defaultJpegQuality: 80 },

@@ -29,6 +29,7 @@ import {
   isEngineErrorCode,
   WorkerCrashedError,
   makeTransferable,
+  MAX_EDIT_CHECKPOINTS,
   MAX_RENDER_SCALE,
   normalizeForComparison,
   PREVIEW_CACHE_MAX_BYTES,
@@ -44,6 +45,9 @@ import type {
   BoundingBox,
   CoreRuntimeOptions,
   Document,
+  EditPreview,
+  EditPreviewGroup,
+  EditPreviewRequest,
   EncodedPageImage,
   EngineConfig,
   EngineContext,
@@ -52,7 +56,9 @@ import type {
   ExportOptions,
   ExportRequested,
   ExportSavePayload,
+  GroupRemoveRequested,
   GroupUpdateRequested,
+  EventPayloadMap,
   ICache,
   IEngine,
   IEventBus,
@@ -63,15 +69,21 @@ import type {
   Occurrence,
   OccurrenceRef,
   OcrRegion,
+  OcrOrientationPayload,
+  OcrOrientationResult,
+  OcrPagePayload,
   Page,
   PageParsed,
   PersonGender,
   PersonGenderChoice,
   PreviewUpdated,
   RenderLegendPayload,
+  WorkerJob,
+  WorkerJobPayload,
   RenderPagePayload,
   RenderRequested,
   Replacement,
+  ReplacementPreviews,
   TextMatch,
   Word,
   WorkerFactory,
@@ -247,10 +259,11 @@ describe("@anonly/shared — Contracts", () => {
         "WORKER_JOB_CANCELLED",
         "WORKER_JOB_TIMEOUT",
         "WORKER_POOL_SATURATED",
-        // UI (8)
+        // UI (9)
         "GROUP_UPDATE_REQUESTED",
         "GROUP_MERGE_REQUESTED",
         "GROUP_SPLIT_REQUESTED",
+        "GROUP_REMOVE_REQUESTED", // ADR-171 §1
         "RULE_CREATED",
         "RULE_UPDATED",
         "RULE_DELETED",
@@ -266,10 +279,11 @@ describe("@anonly/shared — Contracts", () => {
   describe("EngineErrorCode", () => {
     it("tiene exactamente el set completo de códigos de Contracts.md §4", () => {
       const expected = [
-        // PDF (4)
+        // PDF (5)
         "PDF_PASSWORD_REQUIRED",
         "PDF_INVALID",
         "PDF_CORRUPTED",
+        "PDF_PAGE_ROTATED", // ADR-140
         "PDF_TIMEOUT",
         // OCR (3)
         "OCR_PAGE_FAILED",
@@ -289,10 +303,11 @@ describe("@anonly/shared — Contracts", () => {
         "RENDER_PAGE_FAILED",
         "RENDER_TIMEOUT",
         "RENDER_FAILED", // fatal de batch (ADR-031)
-        // Export (3)
+        // Export (4)
         "EXPORT_FAILED",
         "EXPORT_NO_ENABLED_GROUPS",
         "EXPORT_TIMEOUT",
+        "EXPORT_UNRESOLVED_CONFLICTS", // ADR-176 §1
         // Generic (5)
         "ENGINE_NOT_INITIALIZED",
         "ENGINE_DISPOSED",
@@ -420,6 +435,12 @@ describe("@anonly/shared — Contracts", () => {
         enabled: true,
         aliases: ["34.567.891", "34567891"],
         replacementValueUserSet: false,
+        replacementPreviews: {
+          placeholder: "[DNI 01]",
+          mask: "[DNI 01]",
+          synthetic: "[DNI 01]",
+          placeholderLadder: ["[DNI 01]"],
+        },
         needsReview: false,
         createdAt: 0,
         updatedAt: 0,
@@ -496,6 +517,12 @@ describe("@anonly/shared — Contracts", () => {
       enabled: true,
       aliases: ["Juan Pérez"],
       replacementValueUserSet: false,
+      replacementPreviews: {
+        placeholder: "[PERSONA 01]",
+        mask: "[PERSONA 01]",
+        synthetic: "[PERSONA 01]",
+        placeholderLadder: ["[PERSONA 01]"],
+      },
       needsReview: false,
       createdAt: 0,
       updatedAt: 0,
@@ -542,6 +569,187 @@ describe("@anonly/shared — Contracts", () => {
         personGender: "neutral",
       });
       void group;
+    });
+  });
+
+  describe("EntityGroup.replacementPreviews (ADR-170 §1)", () => {
+    const previews: ReplacementPreviews = {
+      placeholder: "[PERSONA 01]",
+      mask: "XX.XXX.XXX",
+      synthetic: "María Gómez",
+      placeholderLadder: ["[PERSONA 01]", "[PERS 01]", "[PRS-01]"],
+    };
+
+    const baseGroup: EntityGroup = {
+      id: "g1",
+      type: EntityType.Person,
+      canonicalValue: "Juan Pérez",
+      members: [],
+      replacementMode: ReplacementMode.Placeholder,
+      replacementValue: "[PERSONA 01]",
+      indexInType: 1,
+      enabled: true,
+      aliases: ["Juan Pérez"],
+      replacementValueUserSet: false,
+      replacementPreviews: previews,
+      needsReview: false,
+      createdAt: 0,
+      updatedAt: 0,
+    };
+
+    it("es un campo requerido: no se puede omitir (compile-time)", () => {
+      const missingPreviews = (): EntityGroup =>
+        // @ts-expect-error — replacementPreviews es requerido (ADR-170 §1); assert de compile-time
+        ({
+          id: "g1",
+          type: EntityType.Person,
+          canonicalValue: "Juan Pérez",
+          members: [],
+          replacementMode: ReplacementMode.Placeholder,
+          replacementValue: "[PERSONA 01]",
+          indexInType: 1,
+          enabled: true,
+          aliases: ["Juan Pérez"],
+          replacementValueUserSet: false,
+          needsReview: false,
+          createdAt: 0,
+          updatedAt: 0,
+        });
+      void missingPreviews;
+    });
+
+    it("tipa placeholder/mask/synthetic/placeholderLadder", () => {
+      expect(baseGroup.replacementPreviews.placeholder).toBe("[PERSONA 01]");
+      expect(baseGroup.replacementPreviews.mask).toBe("XX.XXX.XXX");
+      expect(baseGroup.replacementPreviews.synthetic).toBe("María Gómez");
+      expect(baseGroup.replacementPreviews.placeholderLadder).toEqual([
+        "[PERSONA 01]",
+        "[PERS 01]",
+        "[PRS-01]",
+      ]);
+    });
+
+    it("no tiene entrada para redact: solo placeholder/mask/synthetic/placeholderLadder", () => {
+      expect(Object.keys(baseGroup.replacementPreviews).sort()).toEqual([
+        "mask",
+        "placeholder",
+        "placeholderLadder",
+        "synthetic",
+      ]);
+    });
+
+    it("es readonly (compile-time, ADR-008)", () => {
+      const mutate = (): void => {
+        // @ts-expect-error — placeholder es readonly (ADR-008); assert de compile-time
+        baseGroup.replacementPreviews.placeholder = "x";
+      };
+      void mutate;
+      expect(baseGroup.replacementPreviews.placeholder).toBe("[PERSONA 01]");
+    });
+
+    it("placeholderLadder es ReadonlyArray (compile-time, ADR-008)", () => {
+      const mutate = (): void => {
+        // @ts-expect-error — ReadonlyArray<string> no expone push (ADR-008)
+        baseGroup.replacementPreviews.placeholderLadder.push("x");
+      };
+      void mutate;
+      expect(baseGroup.replacementPreviews.placeholderLadder).toHaveLength(3);
+    });
+
+    it("invariante: con replacementValueUserSet=false, replacementPreviews[replacementMode] === replacementValue para placeholder/mask/synthetic", () => {
+      const placeholderGroup: EntityGroup = {
+        ...baseGroup,
+        replacementMode: ReplacementMode.Placeholder,
+        replacementValue: previews.placeholder,
+      };
+      expect(placeholderGroup.replacementPreviews.placeholder).toBe(
+        placeholderGroup.replacementValue,
+      );
+
+      const maskGroup: EntityGroup = {
+        ...baseGroup,
+        replacementMode: ReplacementMode.Mask,
+        replacementValue: previews.mask,
+      };
+      expect(maskGroup.replacementPreviews.mask).toBe(maskGroup.replacementValue);
+
+      const syntheticGroup: EntityGroup = {
+        ...baseGroup,
+        replacementMode: ReplacementMode.Synthetic,
+        replacementValue: previews.synthetic,
+      };
+      expect(syntheticGroup.replacementPreviews.synthetic).toBe(syntheticGroup.replacementValue);
+    });
+  });
+
+  describe("EditPreviewRequest / EditPreviewGroup / EditPreview (ADR-170 §2)", () => {
+    it("EditPreviewRequest discrimina por kind: type/merge/split", () => {
+      const typeReq: EditPreviewRequest = { kind: "type", groupId: "g1", type: EntityType.DNI };
+      const mergeReq: EditPreviewRequest = {
+        kind: "merge",
+        sourceGroupId: "g1",
+        targetGroupIds: ["g2", "g3"],
+      };
+      const splitReq: EditPreviewRequest = {
+        kind: "split",
+        groupId: "g1",
+        occurrenceIds: ["occ-1"],
+      };
+      expect(typeReq.kind).toBe("type");
+      expect(mergeReq.kind).toBe("merge");
+      expect(splitReq.kind).toBe("split");
+    });
+
+    it("EditPreviewGroup.groupId acepta string o null (null = grupo nuevo de un split)", () => {
+      const existing: EditPreviewGroup = {
+        groupId: "g1",
+        type: EntityType.Person,
+        indexInType: 1,
+        canonicalValue: "Juan Pérez",
+        memberCount: 2,
+        replacementMode: ReplacementMode.Placeholder,
+        replacementValue: "[PERSONA 01]",
+      };
+      const created: EditPreviewGroup = { ...existing, groupId: null, indexInType: 2 };
+      expect(existing.groupId).toBe("g1");
+      expect(created.groupId).toBeNull();
+    });
+
+    it("EditPreview.groups es un ReadonlyArray<EditPreviewGroup>", () => {
+      const group: EditPreviewGroup = {
+        groupId: "g1",
+        type: EntityType.DNI,
+        indexInType: 1,
+        canonicalValue: "34.567.891",
+        memberCount: 1,
+        replacementMode: ReplacementMode.Placeholder,
+        replacementValue: "[DNI 01]",
+      };
+      const preview: EditPreview = { groups: [group] };
+      expect(preview.groups).toHaveLength(1);
+      const mutate = (): void => {
+        // @ts-expect-error — ReadonlyArray<EditPreviewGroup> no expone push (ADR-008)
+        preview.groups.push(group);
+      };
+      void mutate;
+    });
+
+    it("es readonly (compile-time, ADR-008)", () => {
+      const group: EditPreviewGroup = {
+        groupId: "g1",
+        type: EntityType.DNI,
+        indexInType: 1,
+        canonicalValue: "34.567.891",
+        memberCount: 1,
+        replacementMode: ReplacementMode.Placeholder,
+        replacementValue: "[DNI 01]",
+      };
+      const mutate = (): void => {
+        // @ts-expect-error — indexInType es readonly (ADR-008); assert de compile-time
+        group.indexInType = 2;
+      };
+      void mutate;
+      expect(group.indexInType).toBe(1);
     });
   });
 
@@ -619,6 +827,12 @@ describe("@anonly/shared — Contracts", () => {
         enabled: true,
         aliases: ["Juan"],
         replacementValueUserSet: false,
+        replacementPreviews: {
+          placeholder: "[PERSONA 01]",
+          mask: "[PERSONA 01]",
+          synthetic: "[PERSONA 01]",
+          placeholderLadder: ["[PERSONA 01]"],
+        },
         needsReview: false,
         createdAt: 0,
         updatedAt: 0,
@@ -690,6 +904,26 @@ describe("@anonly/shared — Contracts", () => {
       expect(payload.options.includeOriginalMetadata).toBe(false);
       // `includeOriginalMetadata: false` es literal por tipo. Verificado por typecheck.
     });
+
+    it("GroupRemoveRequested tipa documentId/groupId (ADR-171 §1)", () => {
+      const payload: GroupRemoveRequested = { documentId: "d1", groupId: "g1" };
+      expect(payload.documentId).toBe("d1");
+      expect(payload.groupId).toBe("g1");
+      const mutate = (): void => {
+        // @ts-expect-error — groupId es readonly (ADR-008); assert de compile-time
+        payload.groupId = "g2";
+      };
+      void mutate;
+    });
+
+    it("EventPayloadMap tiene entrada para GROUP_REMOVE_REQUESTED (ADR-171 §1)", () => {
+      // Indexa el map: sin la entrada, el typecheck falla (ADR-171 §1).
+      const handler = (payload: EventPayloadMap[EngineEvents.GROUP_REMOVE_REQUESTED]): void => {
+        expect(payload.groupId).toBe("g1");
+      };
+      const typed: GroupRemoveRequested = { documentId: "d1", groupId: "g1" };
+      handler(typed);
+    });
   });
 
   describe("Transferable", () => {
@@ -730,6 +964,12 @@ describe("@anonly/shared — Contracts", () => {
 
     it("PREVIEW_CACHE_MAX_BYTES es 200 MB (Contracts.md §6)", () => {
       expect(PREVIEW_CACHE_MAX_BYTES).toBe(200 * 1024 * 1024);
+    });
+  });
+
+  describe("MAX_EDIT_CHECKPOINTS (ADR-172 §1)", () => {
+    it("es 50 (Contracts.md §6)", () => {
+      expect(MAX_EDIT_CHECKPOINTS).toBe(50);
     });
   });
 
@@ -1615,6 +1855,7 @@ describe("@anonly/shared — Contracts", () => {
           timeouts: {
             "pdf-parse": 30000,
             "ocr-page": 60000,
+            "ocr-orient": 60000,
             "ner-page": 20000,
             "render-page": 10000,
             "export-page": 30000,
@@ -1622,6 +1863,7 @@ describe("@anonly/shared — Contracts", () => {
           maxRetries: {
             "pdf-parse": 1,
             "ocr-page": 2,
+            "ocr-orient": 0,
             "ner-page": 1,
             "render-page": 1,
             "export-page": 1,
@@ -1630,6 +1872,7 @@ describe("@anonly/shared — Contracts", () => {
           maxRetryDelayMs: 2000,
           cancelSlaMs: 200,
           idleDisposeMs: 60000,
+          nerIdleDisposeMs: 15000,
         },
         pdf: { maxPageCount: 10000 },
         ner: {
@@ -1642,6 +1885,7 @@ describe("@anonly/shared — Contracts", () => {
         ocr: {
           languages: ["spa", "eng"],
           dpi: 300,
+          maxLiveImageBytes: 128 * 1024 * 1024,
         },
         grouping: {
           similarityThreshold: 0.88,
@@ -1732,6 +1976,53 @@ describe("@anonly/shared — Contracts", () => {
       // @ts-expect-error R-11: todo dato público es readonly.
       payload.degraded = [];
       expect(payload.degraded).toBeDefined();
+    });
+  });
+
+  describe("OCR orientation transport (ADR-164)", () => {
+    it("exposes the dedicated job payload/result and requires orientation on OCR pages", () => {
+      const orientationPayload: OcrOrientationPayload = {
+        documentId: "doc-orientation",
+        pageIndex: 3,
+        image: { bytes: new ArrayBuffer(0), format: "png", widthPx: 100, heightPx: 40 },
+        languages: ["spa", "eng"],
+        timeoutMs: 60000,
+      };
+      const orientationResult: OcrOrientationResult = {
+        orientation: 270,
+        inkRatio: 0.5,
+        osdHadVerdict: true,
+      };
+      const page: OcrPagePayload = {
+        ...orientationPayload,
+        dpi: 300,
+        orientation: orientationResult.orientation,
+      };
+
+      expect(orientationPayload.timeoutMs).toBe(60000);
+      expect(page.orientation).toBe(270);
+    });
+
+    it("WorkerJobPayload admits OcrOrientationPayload (ADR-164 §2.1)", () => {
+      const payload: WorkerJobPayload = {
+        documentId: "doc-orientation",
+        pageIndex: 0,
+        image: { bytes: new ArrayBuffer(0), format: "png", widthPx: 10, heightPx: 10 },
+        languages: ["spa"],
+        timeoutMs: 1000,
+      } satisfies OcrOrientationPayload;
+      const job: WorkerJob = {
+        id: "j1",
+        type: "ocr-orient",
+        payload,
+        priority: 0,
+        signalId: "s1",
+        createdAt: 0,
+        retries: 0,
+        maxRetries: 0,
+        timeoutMs: 1000,
+      };
+      expect(job.payload).toBe(payload);
     });
   });
 });

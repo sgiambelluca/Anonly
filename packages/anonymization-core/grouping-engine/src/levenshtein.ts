@@ -56,3 +56,77 @@ export function levenshteinNormalized(a: string, b: string): number {
   const maxLen = Math.max(a.length, b.length);
   return 1 - distance / maxLen;
 }
+
+/**
+ * Exact threshold predicate with a conservative Levenshtein band.
+ * Keeps the current floating point comparison as the final decision.
+ */
+export function levenshteinNormalizedAtLeast(a: string, b: string, threshold: number): boolean {
+  if (
+    a.length === 0 ||
+    b.length === 0 ||
+    !Number.isFinite(threshold) ||
+    threshold <= 0 ||
+    threshold >= 1
+  ) {
+    return levenshteinNormalized(a, b) >= threshold;
+  }
+
+  const maxLen = Math.max(a.length, b.length);
+  const radius = Math.min(maxLen, Math.ceil((1 - threshold) * maxLen) + 1);
+  if (radius >= maxLen) return levenshteinNormalized(a, b) >= threshold;
+  if (Math.abs(a.length - b.length) > radius) return false;
+
+  const sentinel = radius + 1;
+  let prefixLength = 0;
+  while (
+    prefixLength < a.length &&
+    prefixLength < b.length &&
+    a.charAt(prefixLength) === b.charAt(prefixLength)
+  ) {
+    prefixLength += 1;
+  }
+  let aEnd = a.length;
+  let bEnd = b.length;
+  while (aEnd > prefixLength && bEnd > prefixLength && a.charAt(aEnd - 1) === b.charAt(bEnd - 1)) {
+    aEnd -= 1;
+    bEnd -= 1;
+  }
+  const trimmedA = a.slice(prefixLength, aEnd);
+  const trimmedB = b.slice(prefixLength, bEnd);
+  if (trimmedA.length === 0 || trimmedB.length === 0) {
+    const distance = Math.max(trimmedA.length, trimmedB.length);
+    return distance <= radius && 1 - distance / maxLen >= threshold;
+  }
+  if (Math.abs(trimmedA.length - trimmedB.length) > radius) return false;
+
+  let previousRow = new Array<number>(trimmedB.length + 1).fill(sentinel);
+  let currentRow = new Array<number>(trimmedB.length + 1).fill(sentinel);
+  for (let j = 0; j <= Math.min(trimmedB.length, radius); j++) previousRow[j] = j;
+
+  for (let i = 1; i <= trimmedA.length; i++) {
+    const start = Math.max(1, i - radius);
+    const end = Math.min(trimmedB.length, i + radius);
+    if (i <= radius) currentRow[0] = i;
+    else currentRow[0] = sentinel;
+    if (start > 1) currentRow[start - 1] = sentinel;
+    if (end < trimmedB.length) previousRow[end] = sentinel;
+    let rowMinimum = currentRow[0] ?? sentinel;
+    for (let j = start; j <= end; j++) {
+      const substitutionCost = trimmedA.charAt(i - 1) === trimmedB.charAt(j - 1) ? 0 : 1;
+      const deletion = (previousRow[j] ?? sentinel) + 1;
+      const insertion = (currentRow[j - 1] ?? sentinel) + 1;
+      const substitution = (previousRow[j - 1] ?? sentinel) + substitutionCost;
+      const distance = Math.min(deletion, insertion, substitution);
+      currentRow[j] = distance;
+      rowMinimum = Math.min(rowMinimum, distance);
+    }
+    if (rowMinimum > radius) return false;
+    const swap = previousRow;
+    previousRow = currentRow;
+    currentRow = swap;
+  }
+
+  const distance = previousRow[trimmedB.length] ?? sentinel;
+  return distance <= radius && 1 - distance / maxLen >= threshold;
+}

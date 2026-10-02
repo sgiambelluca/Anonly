@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=workers | dependencias=03_Data_Model.md,04_Event_System.md,06_Pipeline.md,adr/ADR-035-Hito9-Pools-InProcess-Retryable.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-042-WorkerOutbound-Completed-Result-Unknown.md,adr/ADR-043-RenderEngine-Reparto-Host-Worker-Kernel.md,adr/ADR-045-OcrEngine-Pool-Propia-Kernel-Puro.md,adr/ADR-046-NerEngine-Pool-Propia-Kernel-Puro.md,adr/ADR-053-Pdfjs-Dentro-De-Un-Worker-Fuentes-Y-Cmaps.md,adr/ADR-055-Decodificacion-Del-Resultado-Que-Cruza-Un-Worker.md | audiencia=IA+humanos | fase=1 (actualizado en fase 9/10: entrega por fases ADR-035; transporte, EVENT, payloads y ExportWorker por ADR-036; COMPLETED.result unknown por ADR-042; RenderWorker kernel, unload-document y re-priming por ADR-043; OcrWorker kernel por ADR-045; NerWorker kernel y enrutamiento de PROGRESS por ADR-046; invariante de decodificación en §2.2 por ADR-055 y regla transversal de pdf.js-en-Worker en §7 por ADR-053, ambos del cierre de fase 10) -->
+<!-- CONTEXT: scope=workers | dependencias=03_Data_Model.md,04_Event_System.md,06_Pipeline.md,adr/ADR-035-Hito9-Pools-InProcess-Retryable.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-042-WorkerOutbound-Completed-Result-Unknown.md,adr/ADR-043-RenderEngine-Reparto-Host-Worker-Kernel.md,adr/ADR-045-OcrEngine-Pool-Propia-Kernel-Puro.md,adr/ADR-046-NerEngine-Pool-Propia-Kernel-Puro.md,adr/ADR-053-Pdfjs-Dentro-De-Un-Worker-Fuentes-Y-Cmaps.md,adr/ADR-055-Decodificacion-Del-Resultado-Que-Cruza-Un-Worker.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,adr/ADR-167-El-Modelo-De-NER-Se-Libera-A-Los-15-s-De-Inactividad.md | audiencia=IA+humanos | fase=1 (actualizado en fase 9/10: entrega por fases ADR-035; transporte, EVENT, payloads y ExportWorker por ADR-036; COMPLETED.result unknown por ADR-042; RenderWorker kernel, unload-document y re-priming por ADR-043; OcrWorker kernel por ADR-045; NerWorker kernel y enrutamiento de PROGRESS por ADR-046; invariante de decodificación en §2.2 por ADR-055 y regla transversal de pdf.js-en-Worker en §7 por ADR-053, ambos del cierre de fase 10); §2.2/§2.3/§7.3/§7.4 en fase 11 por ADR-158: el ráster de OCR viaja codificado (PNG) y se clona en vez de transferirse -->
 
 # Anonly — Arquitectura de Workers (TAD bloque 8)
 
@@ -8,7 +8,7 @@
 
 **Entrega por fases (ADR-035)**: el Hito 9 implementa los cuatro pools como colas de concurrencia **in-process** con la semántica completa de este documento (colas prioritarias, límites, backpressure, reintentos, eventos `WORKER_*`, cancelación), despachando por llamada directa a los métodos públicos de cada motor. El transporte por Web Workers de SO reales (`postMessage`, transferables §2.3, entry-points por motor) llega en el Hito 10, donde existe el bundler de `apps/react-client`. Este documento sigue siendo la arquitectura objetivo.
 
-**Pools ≠ workers (ADR-036 §1)**: hay **cuatro pools** (§1.1) y **cinco entry-points de worker** (§7.1–§7.5). El ExportWorker (§7.5) es un worker único dedicado sin `WorkerPool` propio: lo posee el lado host de `export-engine`, no hay quinta clave en `WorkerPoolConfig`. Los `Worker` reales entran al Core por factories inyectadas en `createCore` (`CoreRuntimeOptions`, `Contracts.md` §3.5); sin factory para un kind, ese despacho queda in-process (ADR-035 §1) — la migración es motor por motor. Cada motor entrega dos mitades en su propio paquete: el **entry-point** (corre el motor real en el worker con un `EngineContext` puente) y el **host-bridge** (re-emite los eventos en el bus real del host — ADR-013 §6 — y completa efectos de host: blob URLs, depósito en `ctx.cache`). **Excepciones sancionadas al "corre el motor real"**: RenderWorker (ADR-043), OcrWorker (ADR-045) y NerWorker (ADR-046) corren **kernels sin estado por documento** — la clase del motor, con su estado, eventos y efectos de cache, queda entera host-side y despacha a su pool por un puerto interno; en esos tres, el entry-point no necesita bus puente ni cache local. En el NerWorker, además, el ciclo de vida del modelo (lo único observable que solo puede ocurrir dentro del worker) viaja por `PROGRESS` y lo traduce a eventos el motor, en host (ADR-046 §4). El **ExportWorker** (ADR-047) es la cuarta excepción y la única **con estado**: es un ensamblador de un documento a la vez (el `PDFDocument` de pdf-lib se construye incrementalmente y no puede quedarse en host), con reglas explícitas de reset e idempotencia en §7.5 — el resto del motor sigue host-side igual que los otros tres.
+**Pools ≠ workers (ADR-036 §1, ADR-164)**: hay **cuatro pools configurables** (§1.1) y **seis entry-points de worker** (§7.1–§7.6, objetivo T-5). El nuevo servicio de orientación usa un WorkerPool de tamaño fijo 1, sin nueva clave de tamaño configurable. El ExportWorker (§7.5) es un worker único dedicado sin `WorkerPool` propio: lo posee el lado host de `export-engine`, no hay quinta clave en `WorkerPoolConfig`. Los `Worker` reales entran al Core por factories inyectadas en `createCore` (`CoreRuntimeOptions`, `Contracts.md` §3.5); sin factory para un kind, ese despacho queda in-process (ADR-035 §1) — la migración es motor por motor. Cada motor entrega dos mitades en su propio paquete: el **entry-point** (corre el motor real en el worker con un `EngineContext` puente) y el **host-bridge** (re-emite los eventos en el bus real del host — ADR-013 §6 — y completa efectos de host: blob URLs, depósito en `ctx.cache`). **Excepciones sancionadas al "corre el motor real"**: RenderWorker (ADR-043), OcrWorker (ADR-045) y NerWorker (ADR-046) corren **kernels sin estado por documento** — la clase del motor, con su estado, eventos y efectos de cache, queda entera host-side y despacha a su pool por un puerto interno; en esos tres, el entry-point no necesita bus puente ni cache local. En el NerWorker, además, el ciclo de vida del modelo (lo único observable que solo puede ocurrir dentro del worker) viaja por `PROGRESS` y lo traduce a eventos el motor, en host (ADR-046 §4). El **ExportWorker** (ADR-047) es la cuarta excepción y la única **con estado**: es un ensamblador de un documento a la vez (el `PDFDocument` de pdf-lib se construye incrementalmente y no puede quedarse en host), con reglas explícitas de reset e idempotencia en §7.5 — el resto del motor sigue host-side igual que los otros tres.
 
 ---
 
@@ -21,12 +21,13 @@ Cada tipo de trabajo tiene su **propio pool**, separado. No se mezclan tipos en 
 | Pool | Tipo de job | Tamaño default | Justificación del tamaño |
 |---|---|---|---|
 | `PdfPool` | `pdf-parse` | `min(max(nCPU-1, 1), 4)` | CPU-bound al parsear, pero PDF.js es mayormente sync en worker. |
-| `OcrPool` | `ocr-page` | `1` a `2` | Tesseract.js es muy pesado de memoria y CPU. Más de 2 satura RAM en móviles. |
+| `OcrPool` | `ocr-page` | `1` a `2` | Una instancia LSTM por worker; orientación en servicio independiente (ADR-164). |
+| `OcrOrientationPool` | `ocr-orient` | `1` fijo por Core | Una instancia legacy/osd compartida; cola máxima de OCR, sin clave nueva de tamaño. |
 | `NerPool` | `ner-page` | `1` a `2` | ONNX Runtime Web con WASM/SIMD: un modelo cargado por worker. Más workers = más RAM. |
 | `RenderPool` | `render-page` (incluye la rasterización para OCR — `RasterizePagePayload`, ADR-034 §1/ADR-036 §4) | `min(max(nCPU-1, 1), 4)` | Canvas + pdfjs son razonablemente paralelizables. |
 | ExportWorker (único, **no** es un pool) | `export-page` | `1` fijo | Ensamblado pdf-lib estrictamente secuencial sobre un solo `PDFDocument` (no thread-safe); una cola multi-worker no aporta. Dueño: lado host de `export-engine` (ADR-036 §1). Desde ADR-047 §2 su transporte es una instancia de `WorkerPool` con `size: 1` construida por el façade — reuso de mensajería, **no** un quinto pool: sigue sin clave propia en `WorkerPoolConfig` y sin cola prioritaria. |
 
-`nCPU = navigator.hardwareConcurrency ?? 4`. Override por config del usuario (setting "Rendimiento").
+`nCPU = navigator.hardwareConcurrency ?? 4`. Override por config del usuario (setting "Rendimiento"): los perfiles de ADR-194 mandan `ocrPoolSize` de 1, 2, 4 o 6, y los de 4 y 6 suben además `ocr.maxLiveImageBytes`. Los defaults de esta tabla no cambian.
 
 ### 1.2 Componentes
 
@@ -78,7 +79,7 @@ El mecanismo que lo impone: **cada motor angosta su propio puerto interno de des
 |---|---|---|---|
 | `EncodedPageImage` (preview, export, rasterizado) | worker → host | **sí** | El kernel lo postea y no guarda referencia. Es el caso más frecuente: uno por página por render. |
 | `ArrayBuffer` del PDF final (`save`) | worker → host | **sí** | El assembler llama `discardState()` justo después. |
-| `OcrPagePayload.imageData` (~8 MB por página A4 a 300 dpi) | host → worker | **sí** | El host lo rasteriza para ese job y lo suelta. |
+| `OcrPagePayload.image` — `EncodedPageImage` PNG, unos pocos MB por página A4 a 300 dpi (ADR-158 §2) | host → worker | **NO** | El reintento del pool reusa el buffer (ADR-079), así que transferirlo lo dejaría *detached* en el segundo intento. Hasta ADR-158 este campo era `imageData: ImageData` y sí se transfería: eran ~35 MB crudos por página —el `~8 MB` que decía esta fila nunca fue el tamaño RGBA correcto, ver ADR-143 §1.1—, y a unos pocos MB codificados el ahorro de transferir ya no compensa el riesgo. |
 | `LoadDocumentPayload.buffer` (el PDF entero) | host → worker | **NO, nunca** | Es el buffer retenido del Orchestrator, y viaja por `broadcast` al mismo tiempo a N workers: el primer transfer lo detacharía y los N-1 restantes recibirían 0 bytes. Transferirlo reintroduce el bug #6 del PR10. |
 
 Regla de fondo: **worker → host siempre es seguro** (el worker descarta o muere después de postear); **host → worker se justifica caso por caso**. Por eso `broadcast()` no acepta transfer list — es la garantía estructural de que nadie puede transferir un `load-document` por error.
@@ -107,7 +108,7 @@ export type WorkerOutbound =
 Cualquier `ArrayBuffer` que viaje Host→Worker o Worker→Host se transfiere con `postMessage(msg, [buffer])`, no con structured clone. Esto vacía el buffer del lado emisor (zero-copy). Aplica a (precisiones ADR-036 §4):
 
 - `pdf-parse`: el `ArrayBuffer` del PDF se transfiere al worker. Lo transferido es una **copia**: el Orchestrator retiene el original de la etapa 0 para `RenderEngine.loadDocument` (`06_Pipeline.md` §3, ADR-030).
-- `ocr-page`: la `ImageData` de la página rasterizada viaja con su buffer subyacente en la transfer list — `postMessage(msg, [imageData.data.buffer])` (una `ImageData` no es transferible por sí misma; su clon estructurado referencia el buffer transferido, zero-copy).
+- `ocr-page` (ADR-158 §2/§5): la página viaja **codificada** (`EncodedPageImage`, PNG) y **se clona, no se transfiere** — el reintento reusa el buffer (ADR-079). Hasta ADR-158 viajaba como `ImageData` con su buffer en la transfer list — `postMessage(msg, [imageData.data.buffer])` (una `ImageData` no es transferible por sí misma; su clon estructurado referencia el buffer transferido, zero-copy).
 - `load-document` (control, no job — §7.4): el buffer se **clona** por cada RenderWorker; transferirlo vaciaría el original retenido.
 - `render-page`: la `ImageData` resultante se transfiere de vuelta; en `mode: "full"`, también `encoded.bytes` (`EncodedPageImage`, ADR-034 §3).
 - `export-page`: el `ArrayBuffer` final del PDF se transfiere de vuelta en el `COMPLETED` del job `ExportSavePayload` (§7.5).
@@ -147,6 +148,7 @@ El orchestrator debe asegurar que **no** se use el buffer transferido después d
 |---|---|---|
 | `pdf-parse` | 30 s por página | `WORKER_JOB_TIMEOUT` → reintentar 1 vez → `PDF_INVALID` |
 | `ocr-page` | 60 s por página | reintentar hasta `maxRetries = 2` → `OCR_PAGE_FAILED` |
+| `ocr-orient` | 60 s desde obtener turno, incluyendo init/decode/detect | retries del pool 0; OCR_TIMEOUT vuelve al loop de página (ADR-164) |
 | `ner-page` | 20 s por página | reintentar 1 vez → mantener ocurrencias Regex, descartar NER de esa página con warning |
 | `render-page` | 10 s por página | reintentar 1 vez → `PREVIEW_PAGE_FAILED` |
 | `export-page` | 30 s por página | reintentar 1 vez → `EXPORT_FAILED` |
@@ -183,6 +185,7 @@ Cada pool tiene una `PriorityQueue<WorkerJob>` ordenada por:
 |---|---|
 | `pdf-parse` (página visible en UI) | 100 |
 | `pdf-parse` (página no visible) | 50 |
+| `ocr-orient` | 90 (FIFO entre iguales) |
 | `ocr-page` (página visible) | 90 |
 | `ocr-page` (página no visible) | 40 |
 | `ner-page` (página visible) | 80 |
@@ -241,7 +244,7 @@ Y **factories propias** para `CMapReaderFactory`/`StandardFontDataFactory`, inye
 
 **Ciclo de vida** (el OcrWorker es un **kernel de reconocimiento sin estado por documento**, ADR-045 §1: la clase `OcrEngine` — loop por página, retry/timeout, eventos, depósito en `ctx.cache` — vive entera host-side y le despacha por su puerto interno con `maxRetriesOverride: 0`; el único estado del kernel es la instancia tesseract con su set de idiomas):
 - `INIT`: carga `tesseract.js` y descarga/initializa el modelo `spa+eng` (default). Publica `READY` con `{ workerId, languages: ["spa","eng"], modelVersion }`.
-- `RUN(ocr-page)`: recibe `OcrPagePayload { documentId, pageIndex, imageData, dpi, languages }` (`03_Data_Model.md` §18; `imageData` transferida, §2.3). Si `languages` difiere del set cargado, re-crea la instancia tesseract (cubre `reanalyze` con `ocr.languages`, ADR-038 §5.3). Reconoce. Emite `PROGRESS` (opcional). Responde `COMPLETED` con `{ words: Word[], confidence }` — **sin** emitir eventos de dominio ni tocar cache: `OCR_PAGE_FINISHED` y el depósito de las `Word[]` los hace el motor en el host al resolver el job, en ese orden (ADR-014 §1, ADR-045 §4).
+- `RUN(ocr-page)`: recibe `OcrPagePayload { documentId, pageIndex, image, dpi, languages, orientation }` (`Contracts.md` §7.1; `image` es un `EncodedPageImage` PNG **clonado, no transferido** — ADR-158 §2/§5, §2.3). Desde ADR-160 el kernel **no materializa la página completa en el camino común**: el reconocimiento recibe los bytes codificados tal cual (el `loadImage` de tesseract.js acepta `Blob` y el core decodifica adentro del WASM), el OSD separado (§7.6) ya recibió un bitmap reducido a `OSD_SCALE`, y las franjas de margen de ADR-121 se recortan en la propia decodificación. Solo el camino de ADR-120 con orientación ≠ 0 —el ~1 % de las páginas— decodifica la página entera. Si `languages` difiere del set cargado, re-crea la instancia tesseract (cubre `reanalyze` con `ocr.languages`, ADR-038 §5.3). Reconoce. Emite `PROGRESS` (opcional). Responde `COMPLETED` con `{ words: Word[], confidence }` — **sin** emitir eventos de dominio ni tocar cache: `OCR_PAGE_FINISHED` y el depósito de las `Word[]` los hace el motor en el host al resolver el job, en ese orden (ADR-014 §1, ADR-045 §4).
 - `CANCEL`: checkpoint entre líneas de texto reconocidas (Tesseract expone callback de progreso).
 - `DISPOSE`: libera Tesseract worker y memoria temporal.
 
@@ -271,7 +274,7 @@ Y **factories propias** para `CMapReaderFactory`/`StandardFontDataFactory`, inye
 - `INIT`: crea OffscreenCanvas. Publica `READY`.
 - `load-document`: mensaje de **control broadcast** (no es un `WorkerJobType` encolable — un job iría a un solo worker idle y los demás quedarían sin documento; ADR-036 §4): el host lo envía a **cada** worker del pool con `LoadDocumentPayload { documentId, buffer, password? }` (buffer **clonado** por worker, ver §2.3). Crea el `PDFDocumentProxy` interno con pdfjs-dist, `getDocument({ data, password, ...opciones de la regla transversal de §7 })` (ADR-030; `password` por ADR-050; fuentes, CMaps y factories propias por ADR-053 — este kernel **sí** lleva `disableFontFace: true`, porque rasteriza). Responde `COMPLETED` con `{ pageCount }` (el host lo retiene junto al buffer — ADR-043 §3). **El worker no retiene el `password`**: lo usa para abrir el proxy y lo descarta de su scope (`08_Security_Model.md` §6.1.4). El que sí lo retiene es el host, junto al buffer, para el re-priming de §7.4/ADR-043 §5 — sin eso, un worker reemplazado tras crash no podría recargar un documento protegido.
 - `unload-document`: control broadcast simétrico (`UnloadDocumentPayload { documentId }`, ADR-043 §4): libera el `PDFDocumentProxy` de ese documento en cada worker a mitad de sesión (`DOCUMENT_CLOSED`). Idempotente. Responde `COMPLETED`.
-- `RUN(render-page)`: recibe `RenderPagePayload` (`03_Data_Model.md` §18) **o** `RasterizePagePayload { documentId, pageIndex, scale, region? }` (rasterización para OCR, sin eventos de preview — ADR-034 §1/ADR-036 §4; `region` opcional en puntos de página desde ADR-065 §5 — ausente es la página entera, y **no altera la discriminación por forma**, que sigue siendo `"pageIndex" in payload`) **o** `RenderLegendPayload { rows, pageWidthPt, pageHeightPt }` (página de leyenda del export — ADR-059 §5). Precondición: documento cargado vía `load-document` (ADR-030) — **salvo `RenderLegendPayload`, que es la única excepción**: no corresponde a ninguna página de ningún PDF, es un dibujo puro sobre un canvas en blanco y no toca pdfjs. Responde `COMPLETED` con `{ imageData: ImageData }` (transferido) y, en `mode: "full"`, `encoded` (`EncodedPageImage`, ADR-034 §3); la leyenda responde directamente con `encoded`.
+- `RUN(render-page)`: recibe `RenderPagePayload` (`03_Data_Model.md` §18) **o** `RasterizePagePayload { documentId, pageIndex, scale, region? }` (rasterización para OCR, sin eventos de preview — ADR-034 §1/ADR-036 §4; `region` opcional en puntos de página desde ADR-065 §5 — ausente es la página entera, y **no altera la discriminación por forma**, que sigue siendo `"pageIndex" in payload`) **o** `RenderLegendPayload { rows, pageWidthPt, pageHeightPt }` (página de leyenda del export — ADR-059 §5). Precondición: documento cargado vía `load-document` (ADR-030) — **salvo `RenderLegendPayload`, que es la única excepción**: no corresponde a ninguna página de ningún PDF, es un dibujo puro sobre un canvas en blanco y no toca pdfjs. Responde `COMPLETED` según la forma del payload (ADR-158 §1): un `RenderPagePayload` devuelve `{ imageData: ImageData }` (transferido) más `encoded` (`EncodedPageImage`, ADR-034 §3) en `mode: "full"`; un **`RasterizePagePayload` devuelve `EncodedPageImage` (PNG), no píxeles** — el kernel encodea con `convertToBlob` sobre el canvas que ya tiene, que es el mismo encode que antes hacía tesseract.js del otro lado de la frontera; la leyenda responde directamente con `encoded`.
 - `CANCEL`: checkpoint entre operaciones de Canvas.
 - `DISPOSE`: libera OffscreenCanvas y destruye los `PDFDocumentProxy` cargados.
 
@@ -299,6 +302,44 @@ Y **factories propias** para `CMapReaderFactory`/`StandardFontDataFactory`, inye
 
 ---
 
+### 7.6 OcrOrientationWorker (ADR-164, T-5)
+
+Entry `ocr-engine/worker/orientation-entry.ts`, subpath `orientation-worker`,
+factory `ocr-orientation`. Kernel por instancia con solo legacy/osd; recibe
+OcrOrientationPayload y devuelve OcrOrientationResult (Contracts §7.2).
+`createCore` construye el WorkerPool size 1, PoolKey `ocr-orientation`, lo
+inyecta en OcrEngine y lo dispone. ManagedPoolKey excluye export y orientación.
+Sin factory el puerto serial ejecuta el kernel local exclusivo del motor.
+
+La secuencia OCR vigente es reserva → producir PNG → dispatch ocr-orient →
+decodificar ángulo → dispatch ocr-page con orientación → cache/evento → liberar
+reserva. OcrWorker §7.2 solo reconoce; sus referencias anteriores a un OSD
+propio quedan supersedidas. No hay comunicación directa worker↔worker.
+
+**Adelanto (ADR-164 §2.3, 2026-09-15)**: con puerto LSTM inyectado y
+`ocrPoolSize: 2`, el host admite hasta tres requests bajo el mismo presupuesto
+RGBA de 128 MiB. Dos LSTM reconocen mientras el tercer consumidor prepara su
+imagen/orientación; no se crea un tercer LSTM. Tamaño 1, otros tamaños y
+fallback sin puerto conservan su límite previo. La reserva se conserva hasta
+terminar reconocimiento/retry, incluida cualquier espera. No hay cache de
+todo el documento ni nuevo campo público de configuración.
+
+Timeout OSD 60000 ms desde obtener turno, enviado en payload (no depende de
+INIT). Retries propios 0; el loop de página decide reintentar OCR_TIMEOUT.
+Cancel/timeout terminan el Tesseract hijo e invalidan la generación antes del
+próximo request; carga/bitmap tardíos se limpian. Cola cancelable, límites y
+limpieza: ADR-164 §3. Por jobId se correlacionan regiones e intentos.
+Invalidar desvincula la promesa de carga vieja: ni el siguiente job ni dispose
+esperan una inicialización invalidada que nunca resuelve. Su resolución tardía
+limpia solo su worker, sin modificar la generación nueva.
+
+Pruebas obligatorias de transporte/fáçade: factory nueva usada; orientación
+serial y LSTM concurrente; sobre inválido y error serializado; crash reconstruye
+worker; dispose de Core libera ambos pools; el manager no crea otro OSD.
+No usar señales de progreso como resultado de orientación.
+
+---
+
 ## 8. Inicialización perezosa
 
 Ningún pool se crea al cargar la app. Se crea bajo demanda:
@@ -311,7 +352,7 @@ Ningún pool se crea al cargar la app. Se crea bajo demanda:
 
 ### 8.1 Liberación por inactividad (ADR-080)
 
-Cada pool libera **sus workers** tras `idleDisposeMs` de inactividad (`WorkerPoolConfig`, default 60 s). El temporizador vive en el propio `WorkerPool` —no en `WorkerPoolManager`, que solo administra el pool de `pdf` desde ADR-043/045/046/047—, porque es el único que puede evaluar la condición.
+Cada pool libera **sus workers** tras `idleDisposeMs` de inactividad (`WorkerPoolConfig`, default 60 s). **El pool de NER usa su propio valor**, `nerIdleDisposeMs` (default 15 s, ADR-167 §2): T-8 midió que soltar su modelo al terminar la detección le trasladaba ~1,2 s y ~500-600 MB de pico al documento siguiente, y que un temporizador corto captura casi todo el beneficio sin ese costo. El temporizador vive en el propio `WorkerPool` —no en `WorkerPoolManager`, que solo administra el pool de `pdf` desde ADR-043/045/046/047—, porque es el único que puede evaluar la condición.
 
 **Ocioso** son las cuatro condiciones a la vez:
 
@@ -324,6 +365,8 @@ Las dos últimas no son redundantes: un job remoto puede estar en vuelo sin cont
 El temporizador se **rearma al quedar ocioso** (no al acceder al pool) y se **cancela al entrar un job**: un job de diez minutos no dispara la liberación a los sesenta segundos.
 
 **`releaseIdleWorkers()` no es `dispose()`**: termina los `WorkerLike` vivos y limpia `remoteWorkers`, pero el pool **sigue usable** — el próximo `dispatch` reconstruye el worker por el camino perezoso de arriba y, si el pool tiene `onWorkerCreated`, lo re-primea antes del primer job. `dispose()` sigue siendo terminal. `idleDisposeMs: 0` desactiva el mecanismo (lo usan los tests, que no pueden depender de temporizadores reales).
+
+**Toda baja efectiva se notifica** (ADR-167 §3): `onWorkersReleased(listener)` registra un listener que el pool invoca cada vez que `releaseIdleWorkers()` devuelve `true`, **por cualquier camino** —el temporizador o una llamada explícita—, y devuelve la función de desuscripción. `true` significa que la guarda no frenó la baja y que al volver ningún worker del pool conserva estado cargado, incluido el caso de cero workers vivos (ADR-167 §4). Existe porque el temporizador liberaba sin avisarle a nadie: el motor de NER dejaba su flag de modelo cargado en `true` con los workers ya terminados, y la recarga siguiente salía **muda** —medido, ~2 s sin `NER_MODEL_READY`—. Con 60 s eso era un rincón; con los 15 s de NER habría sido el caso común.
 
 > La redacción anterior era *"cada pool puede destruirse tras `DOCUMENT_CLOSED` + idle > 60 s"*. El `DOCUMENT_CLOSED` se retira a propósito: el pool es infraestructura y **no escucha el bus**. La condición de arriba es más general y lo cubre — cerrar un documento deja de generar jobs, así que el pool cae en ocioso solo. Y cubre además el caso que la redacción vieja dejaba afuera: un documento abierto y quieto veinte minutos.
 
@@ -356,7 +399,8 @@ export interface WorkerPoolConfig {
   readonly baseRetryDelayMs: number;
   readonly maxRetryDelayMs: number;
   readonly cancelSlaMs: number;            // 200
-  readonly idleDisposeMs: number;          // 60000
+  readonly idleDisposeMs: number;          // 60000 — todos los pools menos NER
+  readonly nerIdleDisposeMs: number;       // 15000 — solo el pool de NER (ADR-167)
 }
 ```
 

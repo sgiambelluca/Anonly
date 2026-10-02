@@ -179,7 +179,12 @@ describe("PdfEngine — edge case tests", () => {
           numPages: 2,
           getPage: vi.fn((_pageNum: number) =>
             Promise.resolve({
-              getViewport: vi.fn(() => ({ width: 595, height: 842 })),
+              rotate: 0,
+              getViewport: vi.fn(() => ({
+                width: 595,
+                height: 842,
+                transform: [1, 0, 0, -1, 0, 842],
+              })),
               getTextContent: vi.fn(() =>
                 Promise.resolve({
                   items: [{ str: "Safe", transform: [1, 0, 0, 1, 50, 800], width: 30, height: 12 }],
@@ -364,12 +369,22 @@ describe("PdfEngine — edge case tests", () => {
             const textless = i === 1;
             return textless
               ? {
-                  getViewport: vi.fn(() => ({ width: 595, height: 842 })),
+                  rotate: 0,
+                  getViewport: vi.fn(() => ({
+                    width: 595,
+                    height: 842,
+                    transform: [1, 0, 0, -1, 0, 842],
+                  })),
                   getTextContent: vi.fn(() => Promise.resolve({ items: [] })),
                   getOperatorList: vi.fn(() => Promise.resolve({ fnArray: [], argsArray: [] })),
                 }
               : {
-                  getViewport: vi.fn(() => ({ width: 595, height: 842 })),
+                  rotate: 0,
+                  getViewport: vi.fn(() => ({
+                    width: 595,
+                    height: 842,
+                    transform: [1, 0, 0, -1, 0, 842],
+                  })),
                   getTextContent: vi.fn(() =>
                     Promise.resolve({
                       items: [
@@ -398,7 +413,12 @@ describe("PdfEngine — edge case tests", () => {
       vi.mocked(getDocument).mockReturnValue(
         mockGetDocumentResult(
           createMockPdfDocument(1, () => ({
-            getViewport: vi.fn(() => ({ width: 595, height: 500 })),
+            rotate: 0,
+            getViewport: vi.fn(() => ({
+              width: 595,
+              height: 500,
+              transform: [1, 0, 0, -1, 0, 500],
+            })),
             getTextContent: vi.fn(() =>
               Promise.resolve({
                 items: [
@@ -610,7 +630,7 @@ describe("PdfEngine — edge case tests", () => {
       const abortController = new AbortController();
 
       const mockPage = {
-        getViewport: vi.fn(() => ({ width: 595, height: 842 })),
+        getViewport: vi.fn(() => ({ width: 595, height: 842, transform: [1, 0, 0, -1, 0, 842] })),
         getTextContent: vi.fn(() => Promise.resolve({ items: [] })),
         getOperatorList: vi.fn(() => Promise.resolve({ fnArray: [], argsArray: [] })),
       };

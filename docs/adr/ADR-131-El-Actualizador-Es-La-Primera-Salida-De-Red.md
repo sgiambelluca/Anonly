@@ -78,6 +78,8 @@ Queda **expresamente descartado** el fork de Squirrel.Mac con la verificación r
 
 Solo lo que el protocolo necesita para pedir un archivo: nada de telemetría, nada de identificadores, y **jamás** contenido, nombre o metadato de un documento. La consulta le revela a GitHub la IP y la versión instalada, y eso **se dice en la UI y en el README** en vez de esperar a que alguien lo descubra. El chequeo es desactivable.
 
+> **Nota del 2026-09-26 (ADR-188).** Durante un tiempo el código no cumplió este punto: al retirar el `setAutomatic` que confundía buscar con instalar (ADR-132 §3), la búsqueda quedó incondicional. ADR-188 lo restituye con una preferencia propia, «Buscar actualizaciones automáticamente», separada de «Actualizar automáticamente».
+
 ### 6. Versionado con Changesets
 
 `@changesets/cli` ya está instalado y sin configurar. Pasa a ser la fuente del número de versión: hoy todo está en `0.0.0` y un actualizador que compara versiones no puede funcionar así.

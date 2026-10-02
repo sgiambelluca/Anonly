@@ -21,6 +21,14 @@ export interface PipelineSlice {
   readonly groupCount: number;
   readonly conflictCount: number;
   readonly modelLoading: { modelId: string; progress: number } | null;
+  /**
+   * `pageIndex` del último `OCR_PAGE_FINISHED` (ADR-152 §3): la pantalla de
+   * escaneo lo usa para mostrar "página X de Y" durante `OCRing`, numerado
+   * sobre `document.store.pageCount` y no sobre el tamaño del trabajo de OCR
+   * (`current`/`total` de esta misma store). `null` hasta que termine la
+   * primera página.
+   */
+  readonly lastOcrPageIndex: number | null;
   readonly exportProgress: { current: number; total: number } | null;
   readonly exportResult: { blobUrl: string; sizeBytes: number } | null;
   readonly error: SerializedEngineError | null;
@@ -32,6 +40,27 @@ export interface PipelineSlice {
    * motivó—. Vacío es el caso sano.
    */
   readonly failedJobs: FailedJobs;
+  /**
+   * ADR-168 §4: la última etapa observada antes de `Failed`, o `null` si el
+   * pipeline no falló. `Importing`/`Extracting` = fallo de importación: la UI
+   * cierra el documento y vuelve a `LoadScreen` con el error en la `DropZone`
+   * (`components/screens/importFailure.ts`). La registra el bridge al recibir
+   * `PIPELINE_FAILED`, con el `stage` que este store tenía en ese momento.
+   */
+  readonly failedAtStage: PipelineStage | null;
+  /**
+   * ADR-168 §5: las etapas que el pipeline atravesó en el documento vigente.
+   * Alimenta `ScanSteps` (`scanStepFlow.ts`): sin esto no hay forma de saber si
+   * el paso "Leer" se salteó porque el PDF ya tenía texto. Se vacía en cada
+   * `DOCUMENT_IMPORTED`.
+   */
+  readonly visitedStages: ReadonlySet<PipelineStage>;
+  /**
+   * Hay un `reanalyze` en curso: lo enciende `actions.reanalyze` y lo apaga en
+   * un `finally`. Con él, `PIPELINE_CANCELLED` deja `Ready` y no `Cancelled`
+   * (`React_Client.md` §2.2 regla 2, Orchestrator §13.22).
+   */
+  readonly reanalyzeInFlight: boolean;
   setState(patch: Partial<PipelineSlice>): void;
   reset(): void;
 }
@@ -46,10 +75,14 @@ const initialState: PipelineData = {
   groupCount: 0,
   conflictCount: 0,
   modelLoading: null,
+  lastOcrPageIndex: null,
   exportProgress: null,
   exportResult: null,
   error: null,
   failedJobs: {},
+  failedAtStage: null,
+  visitedStages: new Set(),
+  reanalyzeInFlight: false,
 };
 
 export const usePipelineStore = create<PipelineSlice>((set) => ({

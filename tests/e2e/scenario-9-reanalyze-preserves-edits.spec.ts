@@ -39,6 +39,23 @@ test("un reanalyze preserva las ediciones previas del usuario", async ({ page })
   await installSettingsOverride(page, { nerEnabled: false });
   await openApp(page, "networkidle");
 
+  // Atribución CC-BY visible en el producto (ADR-070 §5, ADR-060 §11). Desde
+  // ADR-168 §3 vive en `AboutDialog`, que se abre desde el pie de la pantalla
+  // de carga — la primera que ve todo usuario — y no dentro de Configuración.
+  await page.getByRole("button", { name: "Acerca de…" }).click();
+  const aboutDialog = page.getByRole("dialog", { name: "Acerca de Anonly" });
+  await expect(aboutDialog).toBeVisible();
+  const creditsSection = aboutDialog.getByRole("region", { name: "Datos de terceros" });
+  await expect(creditsSection.getByText(/Nombres Permitidos/)).toBeVisible();
+  const licenseLink = creditsSection.getByRole("link", { name: "CC-BY-2.5-AR" });
+  await expect(licenseLink).toBeVisible();
+  await expect(licenseLink).toHaveAttribute(
+    "href",
+    "https://creativecommons.org/licenses/by/2.5/ar/",
+  );
+  await aboutDialog.getByRole("button", { name: "Cerrar" }).first().click();
+  await expect(aboutDialog).toHaveCount(0);
+
   const file = await textTenPagesFile();
   await page.locator('input[type="file"]').setInputFiles(file);
 
@@ -66,14 +83,13 @@ test("un reanalyze preserva las ediciones previas del usuario", async ({ page })
     .getByRole("group", { name: "Acciones del grupo" })
     .getByRole("button", { name: "Fusionar con…" })
     .click();
-  const mergeDialog = page.getByRole("dialog", { name: "Fusionar grupo" });
+  const mergeDialog = page.getByRole("dialog", { name: "Fusionar entidades" });
   await expect(mergeDialog).toBeVisible();
-  await mergeDialog.getByRole("combobox", { name: "Grupo destino 1" }).click();
-  await page.getByRole("option", { name: /18\.445\.212/ }).click();
-  await mergeDialog.getByRole("button", { name: "Fusionar" }).click();
+  await mergeDialog.getByRole("checkbox", { name: /18\.445\.212/ }).click();
+  await mergeDialog.getByRole("button", { name: "Fusionar 2 entidades" }).click();
   await expect(mergeDialog).toHaveCount(0);
   await expect(dni3).toHaveCount(0);
-  await expect(dni2).toContainText("(2)");
+  await expect(dni2).toHaveAccessibleName(/, 2 ocurrencias?,/);
 
   // Edición 3: decisión "por tipo" sobre DNI — debe seguir aplicando tras el
   // reanalyze.
@@ -107,19 +123,6 @@ test("un reanalyze preserva las ediciones previas del usuario", async ({ page })
   const settingsDialog = page.getByRole("dialog", { name: "Configuración" });
   await expect(settingsDialog).toBeVisible();
 
-  // Atribución CC-BY visible en el producto (ADR-070 §5, ADR-060 §11): el
-  // crédito del léxico de género y el enlace a su licencia se ven dentro del
-  // diálogo que ya está abierto para este escenario.
-  const aboutSection = settingsDialog.getByRole("region", { name: "Acerca de" });
-  await expect(aboutSection).toBeVisible();
-  await expect(aboutSection.getByRole("link", { name: /Nombres Permitidos/ })).toBeVisible();
-  const licenseLink = aboutSection.getByRole("link", { name: "CC-BY-2.5-AR" });
-  await expect(licenseLink).toBeVisible();
-  await expect(licenseLink).toHaveAttribute(
-    "href",
-    "https://creativecommons.org/licenses/by/2.5/ar/",
-  );
-
   /*
    * El disparador es **Idiomas del documento**. Hasta ADR-126 este escenario
    * activaba acá la detección de nombres, que era el otro setting que dispara
@@ -146,7 +149,7 @@ test("un reanalyze preserva las ediciones previas del usuario", async ({ page })
   await expect(dni1.getByRole("button", { name: /^Modo de reemplazo de / })).toHaveAccessibleName(
     /Ocultar parcialmente/,
   );
-  await expect(dni2).toContainText("(2)");
+  await expect(dni2).toHaveAccessibleName(/, 2 ocurrencias?,/);
   await expect(dni2.getByRole("button", { name: /^Modo de reemplazo de / })).toHaveAccessibleName(
     /Ocultar parcialmente/,
   );

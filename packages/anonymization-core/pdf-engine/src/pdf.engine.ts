@@ -22,6 +22,7 @@ import { getDocument, OPS, type PDFDocumentProxy, type PDFPageProxy } from "pdfj
 import {
   PdfCorruptedError,
   PdfInvalidError,
+  PdfPageRotatedError,
   PdfPasswordRequiredError,
   PdfTimeoutError,
 } from "./pdf.errors.js";
@@ -189,8 +190,19 @@ function unitVectorOrDefault(x: number, y: number, fallback: Vector2): Vector2 {
 const RIGHT_ANGLE_TOLERANCE_DEG = 1e-6;
 const POPULATED_ROTATIONS: readonly (90 | 180 | 270)[] = [90, 180, 270];
 
+/*
+ * ADR-141 §3: `dir` compuesto vive en un marco con `y` hacia abajo (la parte
+ * lineal del viewport incluye el volteo de eje — en `rotate: 0` es
+ * `[1, 0, 0, -1]`), mientras que `atan2` mide ángulos suponiendo `y` hacia
+ * arriba. Negar `dir.y` antes de medir es lo que convierte esa medición en el
+ * ángulo VISUAL — el que un humano ve al mirar la hoja, que es la convención
+ * que ADR-090 §4 fijó para `bbox.rotation` (90 ⇒ avanza hacia arriba en
+ * pantalla, y decreciente) y que ADR-067 ya consume. Omitir la negación
+ * intercambia 90 ↔ 270 para el mismo texto físico — ver la tabla medida de
+ * ADR-141 §3.
+ */
 function deriveRotation(dir: Vector2): 90 | 180 | 270 | undefined {
-  const angleDeg = ((Math.atan2(dir.y, dir.x) * 180) / Math.PI + 360) % 360;
+  const angleDeg = ((Math.atan2(-dir.y, dir.x) * 180) / Math.PI + 360) % 360;
   for (const candidate of POPULATED_ROTATIONS) {
     if (Math.abs(angleDeg - candidate) < RIGHT_ANGLE_TOLERANCE_DEG) return candidate;
   }
@@ -198,11 +210,15 @@ function deriveRotation(dir: Vector2): 90 | 180 | 270 | undefined {
 }
 
 /*
- * ADR-063 §2: el bbox de un run/token es la envolvente axis-aligned del
- * paralelogramo origin -> +dir·width -> +up·height, convertida a origen
- * arriba-izquierda (y = pageHeight - yMax). Con dir=(1,0)/up=(0,1) (0°) se
- * reduce carácter por carácter a la fórmula anterior a ADR-063 (§13 caso 21):
- * no hay regresión para texto horizontal.
+ * ADR-063 §2 / ADR-141 §2: el bbox de un run/token es la envolvente
+ * axis-aligned del paralelogramo origin -> +dir·width -> +up·height. `origin`/
+ * `dir`/`up` llegan ya compuestos con `viewport.transform` (ADR-141): ese
+ * compuesto YA incluye la inversión del eje `y` de la página presentada, así
+ * que `yMin` es directamente el borde superior — voltear de nuevo acá sería
+ * voltear dos veces (ADR-141 §2, el error que ADR-141 existe para evitar).
+ * Con dir=(1,0)/up=(0,1) (0°, sin rotación) esto reduce carácter por carácter
+ * a la fórmula anterior a ADR-063/141 (§13 caso 21): no hay regresión para
+ * texto horizontal en un documento sin `/Rotate`.
  */
 function boundingBoxFromParallelogram(
   origin: Vector2,
@@ -210,7 +226,6 @@ function boundingBoxFromParallelogram(
   up: Vector2,
   width: number,
   height: number,
-  pageHeight: number,
 ): BoundingBox {
   const corners: readonly Vector2[] = [
     origin,
@@ -232,7 +247,7 @@ function boundingBoxFromParallelogram(
   const rotation = deriveRotation(dir);
   return {
     x: xMin,
-    y: pageHeight - yMax,
+    y: yMin,
     width: xMax - xMin,
     height: yMax - yMin,
     ...(rotation !== undefined ? { rotation } : {}),
@@ -285,16 +300,15 @@ function inkBoxFromParallelogram(
   up: Vector2,
   width: number,
   height: number,
-  pageHeight: number,
   extents: FontExtents | undefined,
 ): BoundingBox {
   if (extents === undefined) {
-    return boundingBoxFromParallelogram(origin, dir, up, width, height, pageHeight);
+    return boundingBoxFromParallelogram(origin, dir, up, width, height);
   }
   const drop = extents.descent * height;
   const baseline: Vector2 = { x: origin.x - up.x * drop, y: origin.y - up.y * drop };
   const inkHeight = (extents.ascent + extents.descent) * height;
-  return boundingBoxFromParallelogram(baseline, dir, up, width, inkHeight, pageHeight);
+  return boundingBoxFromParallelogram(baseline, dir, up, width, inkHeight);
 }
 
 /*
@@ -325,10 +339,13 @@ function sumGlyphAdvances(
  * ADR-097 §5: cuántos items multi-palabra encontraron su lugar en el flujo. Solo esos
  * consultan la tabla, así que solo esos aportan a la pregunta que decide si
  * alguna vez conviene la opción B de `Post_Hito10.8_Pendientes.md` §24.
+ * `merged` es de ADR-142 §4: cuántas veces el último token de un item y el
+ * primero del siguiente resultaron ser la misma palabra partida por pdf.js.
  */
 interface TextRunJoinStats {
   readonly eligible: number;
   readonly joined: number;
+  readonly merged: number;
 }
 
 interface ConvertedTextItems {
@@ -336,10 +353,75 @@ interface ConvertedTextItems {
   readonly joinStats: TextRunJoinStats;
 }
 
+/*
+ * ADR-142 §1.6: mismo factor con el que el extractor de pdf.js decide que un
+ * hueco entre glifos no es un espacio (`TRACKING_SPACE_FACTOR`,
+ * pdf.worker.mjs). Si el hueco entre el último glifo de un item y el primero
+ * del siguiente fuera mayor, el propio pdf.js habría sintetizado un espacio y
+ * no estaríamos ante una palabra partida — así que reusar su umbral no es una
+ * elección arbitraria, es la misma pregunta que ya contestó el extractor.
+ */
+const TRACKING_SPACE_FACTOR = 0.102;
+
+/** ADR-142 §1.4: mismo versor de avance/ascenso, con tolerancia de punto flotante. */
+function vectorsClose(a: Vector2, b: Vector2, epsilon = 1e-9): boolean {
+  return Math.abs(a.x - b.x) <= epsilon && Math.abs(a.y - b.y) <= epsilon;
+}
+
+/*
+ * ADR-142 §2: envolvente axis-aligned de dos cajas de tinta ya orientadas
+ * igual (condición 4 del ADR ya lo garantiza antes de llegar acá). Con
+ * kerning negativo los fragmentos pueden superponerse; la envolvente sigue
+ * siendo correcta porque toma mín/máx de las cuatro coordenadas.
+ */
+function envelopeOfInkBoxes(a: BoundingBox, b: BoundingBox): BoundingBox {
+  const xMin = Math.min(a.x, b.x);
+  const yMin = Math.min(a.y, b.y);
+  const xMax = Math.max(a.x + a.width, b.x + b.width);
+  const yMax = Math.max(a.y + a.height, b.y + b.height);
+  return {
+    x: xMin,
+    y: yMin,
+    width: xMax - xMin,
+    height: yMax - yMin,
+    ...(a.rotation !== undefined ? { rotation: a.rotation } : {}),
+  };
+}
+
+/**
+ * ADR-142 §2: concatena dos fragmentos de una palabra partida entre items —
+ * sin separador, normalizado NFC **después** de concatenar (un diacrítico
+ * combinante partido entre items solo compone así).
+ */
+function mergeSplitWord(a: Word, b: Word): Word {
+  return {
+    text: (a.text + b.text).normalize("NFC"),
+    bbox: envelopeOfInkBoxes(a.bbox, b.bbox),
+    pageIndex: a.pageIndex,
+    confidence: 1.0,
+    source: "pdf",
+  };
+}
+
+/** ADR-142 §1: lo que se necesita del último token alineado de un item para decidir si el próximo lo continúa. */
+interface PendingWordTail {
+  readonly dir: Vector2;
+  readonly up: Vector2;
+  readonly height: number;
+  readonly lastGlyphIndex: number;
+}
+
 function convertTextItemsToWords(
   textContent: TextContentLike,
   pageIndex: number,
-  pageHeight: number,
+  // ADR-141 §2: `item.transform` llega en el marco CRUDO de
+  // `getTextContent()` — nunca aplicó `/Rotate`. Se compone con
+  // `viewport.transform` antes de usarlo, igual que el resto de la geometría
+  // del módulo. Default identidad para el camino de anotaciones (§3 más
+  // abajo llama a esta función con un item sintético cuyo `transform` sale de
+  // `ctm.current`, que ya viene compuesto — componer OTRA vez ahí sería
+  // voltear/rotar dos veces).
+  viewportMatrix: Matrix2D = IDENTITY_MATRIX_2D,
   originCorrections: ReadonlyArray<TextOriginCorrection> = [],
   glyphs: ReadonlyArray<PageGlyph> = [],
   glyphIndex: GlyphIndex = new Map(),
@@ -347,16 +429,46 @@ function convertTextItemsToWords(
   const words: Word[] = [];
   let eligible = 0;
   let joined = 0;
+  let merged = 0;
+
+  // ADR-142 §1: cola del item anterior, candidata a empalmarse con el
+  // primero del próximo. `undefined` cuando el anterior no calificó (no
+  // alineó, terminó en espacio, o hubo un hueco/salto de línea en el medio).
+  let pendingTail: PendingWordTail | undefined;
 
   for (const item of textContent.items) {
-    if (!item.str || item.str.trim().length === 0 || !item.transform) continue;
+    if (!item.str || item.str.trim().length === 0 || !item.transform) {
+      // Un item vacío/blanco es, por definición, un espacio real entre lo
+      // que vino antes y lo que sigue: nunca es una palabra partida.
+      pendingTail = undefined;
+      continue;
+    }
 
     const str = item.str;
-    const reportedX = item.transform[4] ?? 0;
-    const reportedY = item.transform[5] ?? 0;
+    // ADR-141 §2.1/§2.2: origen y parte lineal (de donde salen `dir`/`up`)
+    // compuestos con `viewport.transform` — no alcanza con corregir `x`/`y`,
+    // a 90°/270° la palabra cambia de orientación y ancho/alto se
+    // intercambian. Con `viewportMatrix` identidad (0° o camino de
+    // anotaciones ya compuesto) esto es exactamente `item.transform` tal cual
+    // llegaba antes de ADR-141: no hay regresión para texto horizontal.
+    const rawItemMatrix: Matrix2D = [
+      item.transform[0] ?? 1,
+      item.transform[1] ?? 0,
+      item.transform[2] ?? 0,
+      item.transform[3] ?? 1,
+      item.transform[4] ?? 0,
+      item.transform[5] ?? 0,
+    ];
+    const composedItemMatrix = composeMatrix(viewportMatrix, rawItemMatrix);
+    const reportedX = composedItemMatrix[4];
+    const reportedY = composedItemMatrix[5];
     // ADR-068: si el origen reportado coincide con uno que se sabe desplazado
     // por el word spacing, se usa el que dibuja el renderer. Sin coincidencia
-    // —el caso de todo documento sin `Tw`— el item queda intacto.
+    // —el caso de todo documento sin `Tw`— el item queda intacto. Las dos
+    // fuentes que se comparan acá (`reportedX`/`reportedY` y
+    // `originCorrections`) están compuestas por igual (ADR-141 §2.3): si un
+    // lado se compusiera y el otro no, el empalme dejaría de alinear en toda
+    // página rotada.
     const correction = originCorrections.find(
       (c) =>
         Math.abs(c.from.x - reportedX) <= ORIGIN_CORRECTION_EPSILON &&
@@ -366,43 +478,33 @@ function convertTextItemsToWords(
     const originY = correction?.to.y ?? reportedY;
     const width = item.width ?? 0;
     const height = item.height ?? 12;
-    const dir = unitVectorOrDefault(item.transform[0] ?? 0, item.transform[1] ?? 0, {
-      x: 1,
-      y: 0,
-    });
-    const up = unitVectorOrDefault(item.transform[2] ?? 0, item.transform[3] ?? 0, {
-      x: 0,
-      y: 1,
-    });
+    // ADR-141 §2: el fallback de un versor degenerado (§13 caso 20) también
+    // se compone — es un default en espacio crudo, y `dir`/`up` acá son
+    // siempre presentados. Sin esto, un `up` degenerado cae al eje crudo
+    // aunque el resto del token ya esté compuesto (mismo error de "componer
+    // en tres de los cuatro lugares" que ADR-141, Consecuencias, advierte).
+    const dir = unitVectorOrDefault(
+      composedItemMatrix[0],
+      composedItemMatrix[1],
+      composeVector(viewportMatrix, { x: 1, y: 0 }),
+    );
+    const up = unitVectorOrDefault(
+      composedItemMatrix[2],
+      composedItemMatrix[3],
+      composeVector(viewportMatrix, { x: 0, y: 1 }),
+    );
 
     const extents = fontExtentsOf(textContent.styles, item.fontName);
     const tokens = [...str.matchAll(/\S+/g)];
 
-    if (tokens.length <= 1) {
-      const text = (tokens[0]?.[0] ?? str).normalize("NFC");
-      const bbox = inkBoxFromParallelogram(
-        { x: originX, y: originY },
-        dir,
-        up,
-        width,
-        height,
-        pageHeight,
-        extents,
-      );
-      words.push({ text, bbox, pageIndex, confidence: 1.0, source: "pdf" });
-      continue;
-    }
-
     /*
-     * ADR-102 §2: se ubica el arranque del item en el flujo de glifos y se
-     * alinea carácter a carácter. Si alinea, el origen y el ancho de cada
-     * token salen de los glifos reales; si no, queda el ancho promedio de
-     * ADR-020 §1 — el camino de reserva, intacto (ADR-102 §4).
-     */
-    eligible++;
-    /*
-     * ADR-108 §4: `getTextContent` aplica `Tw` a todo espacio y el flujo solo a
-     * los que lo llevan (§1), así que en un run con espacios iniciales de
+     * ADR-142 §3: la alineación se calcula para TODO item, tenga uno o más
+     * tokens — el fragmento típico de una palabra partida ("N") es
+     * justamente un item de un solo token, y sin su glifo de arranque acá el
+     * empalme de más abajo nunca tiene a quién mirar.
+     *
+     * ADR-108 §4: `getTextContent` aplica `Tw` a todo espacio y el flujo solo
+     * a los que lo llevan (§1), así que en un run con espacios iniciales de
      * fuente compuesta los dos orígenes difieren — 58,3 pt en la línea de la
      * fecha de la pericia. Ese es exactamente el par que mide ADR-068: el
      * reportado es `from` y el que dibuja el renderer es `to`. Se busca por el
@@ -414,43 +516,114 @@ function convertTextItemsToWords(
         ? reportedStart
         : findGlyphAt(glyphs, glyphIndex, originX, originY);
     const mapping = start < 0 ? undefined : alignToGlyphs(glyphs, str, start);
-    if (mapping !== undefined) joined++;
-    const charWidth = str.length > 0 ? width / str.length : 0;
-    for (const token of tokens) {
-      const tokenText = token[0];
-      if (tokenText === undefined) continue;
-      const offset = token.index ?? 0;
-      const end = offset + tokenText.length;
-      const anchor = mapping === undefined ? undefined : glyphs[mapping[offset] ?? -1];
-      const advance = charWidth * offset;
-      const tokenWidth =
-        mapping === undefined
-          ? charWidth * tokenText.length
-          : sumGlyphAdvances(glyphs, mapping, offset, end);
-      const tokenOrigin: Vector2 =
-        anchor !== undefined
-          ? { x: anchor.x, y: anchor.y }
-          : { x: originX + dir.x * advance, y: originY + dir.y * advance };
+
+    if (tokens.length > 1) {
+      // ADR-097 §5: solo los items multi-palabra consultan la tabla de
+      // avances; `merged` (ADR-142 §4) cuenta aparte, incluye items de un
+      // solo token y no cambia el significado de este contador.
+      eligible++;
+      if (mapping !== undefined) joined++;
+    }
+
+    const itemWords: Word[] = [];
+    if (tokens.length <= 1) {
+      const text = (tokens[0]?.[0] ?? str).normalize("NFC");
       const bbox = inkBoxFromParallelogram(
-        tokenOrigin,
+        { x: originX, y: originY },
         dir,
         up,
-        tokenWidth,
+        width,
         height,
-        pageHeight,
         extents,
       );
-      words.push({
-        text: tokenText.normalize("NFC"),
-        bbox,
-        pageIndex,
-        confidence: 1.0,
-        source: "pdf",
-      });
+      itemWords.push({ text, bbox, pageIndex, confidence: 1.0, source: "pdf" });
+    } else {
+      const charWidth = str.length > 0 ? width / str.length : 0;
+      for (const token of tokens) {
+        const tokenText = token[0];
+        if (tokenText === undefined) continue;
+        const offset = token.index ?? 0;
+        const end = offset + tokenText.length;
+        const anchor = mapping === undefined ? undefined : glyphs[mapping[offset] ?? -1];
+        const advance = charWidth * offset;
+        const tokenWidth =
+          mapping === undefined
+            ? charWidth * tokenText.length
+            : sumGlyphAdvances(glyphs, mapping, offset, end);
+        const tokenOrigin: Vector2 =
+          anchor !== undefined
+            ? { x: anchor.x, y: anchor.y }
+            : { x: originX + dir.x * advance, y: originY + dir.y * advance };
+        const bbox = inkBoxFromParallelogram(tokenOrigin, dir, up, tokenWidth, height, extents);
+        itemWords.push({
+          text: tokenText.normalize("NFC"),
+          bbox,
+          pageIndex,
+          confidence: 1.0,
+          source: "pdf",
+        });
+      }
     }
+
+    /*
+     * ADR-142 §1: las seis condiciones. La 1 (los dos items alinearon) y la 3
+     * (sin espacio de por medio) ya están cubiertas por `mapping !== undefined`
+     * acá y por `pendingTail`/`startsWithSpace` — un item que terminó en
+     * espacio nunca deja `pendingTail`, y uno que empieza con espacio no
+     * puede empalmar con lo anterior.
+     */
+    const firstWord = itemWords[0];
+    const startsWithSpace = /^\s/.test(str);
+    if (
+      pendingTail !== undefined &&
+      firstWord !== undefined &&
+      mapping !== undefined &&
+      !startsWithSpace &&
+      vectorsClose(pendingTail.dir, dir) &&
+      vectorsClose(pendingTail.up, up)
+    ) {
+      const b0Index = mapping[0];
+      // Condición 2: el primer glifo de B es exactamente el siguiente del
+      // último de A en el flujo continuo — un glifo en el medio (de espacio
+      // o de cualquier otra cosa) cancela el empalme.
+      if (b0Index !== undefined && b0Index === pendingTail.lastGlyphIndex + 1) {
+        const glyphA = glyphs[pendingTail.lastGlyphIndex];
+        const glyphB = glyphs[b0Index];
+        if (glyphA !== undefined && glyphB !== undefined) {
+          const deltaX = glyphB.x - (glyphA.x + dir.x * glyphA.advance);
+          const deltaY = glyphB.y - (glyphA.y + dir.y * glyphA.advance);
+          // Condición 6: hueco a lo largo del avance, proyectado sobre `dir`.
+          const alongAdvance = deltaX * dir.x + deltaY * dir.y;
+          // Condición 5: desplazamiento transversal, proyectado sobre `up`.
+          const transverse = Math.abs(deltaX * up.x + deltaY * up.y);
+          if (
+            transverse <= SAME_LINE_TOLERANCE &&
+            alongAdvance < TRACKING_SPACE_FACTOR * pendingTail.height
+          ) {
+            const previousWord = words.pop();
+            if (previousWord !== undefined) {
+              itemWords[0] = mergeSplitWord(previousWord, firstWord);
+              merged++;
+            }
+          }
+        }
+      }
+    }
+
+    words.push(...itemWords);
+
+    // ADR-142 §1: cola de ESTE item para el próximo — según su propia
+    // alineación real, sin importar si su propio primer token se acaba de
+    // empalmar con el anterior (transitividad: la regla se pliega de a pares).
+    const endsWithSpace = /\s$/.test(str);
+    const lastGlyphIndex = mapping?.at(-1);
+    pendingTail =
+      mapping !== undefined && !endsWithSpace && lastGlyphIndex !== undefined && lastGlyphIndex >= 0
+        ? { dir, up, height, lastGlyphIndex }
+        : undefined;
   }
 
-  return { words, joinStats: { eligible, joined } };
+  return { words, joinStats: { eligible, joined, merged } };
 }
 
 /*
@@ -913,12 +1086,26 @@ function applyMatrix(m: Matrix2D, x: number, y: number): Vector2 {
 }
 
 /*
+ * Como `applyMatrix`, pero para un VECTOR (dirección), no un punto: ignora la
+ * traslación (`e`/`f`). ADR-141 §2: el versor de reserva de
+ * `unitVectorOrDefault` para un `dir`/`up` degenerado (magnitud 0, §13 caso
+ * 20) es un default en espacio CRUDO — tiene que componerse con
+ * `viewport.transform` igual que cualquier otro versor, o la reserva queda
+ * en el marco viejo mientras el resto del token ya está en el presentado.
+ */
+function composeVector(m: Matrix2D, v: Vector2): Vector2 {
+  return { x: m[0] * v.x + m[2] * v.y, y: m[1] * v.x + m[3] * v.y };
+}
+
+/*
  * ADR-065 §1: "aplicándola [la CTM] al cuadrado unidad sale el rectángulo de
  * esa imagen en puntos de página". Envolvente axis-aligned de los cuatro
- * vértices, convertida a origen arriba-izquierda (mismo patrón que
- * `boundingBoxFromParallelogram`, ADR-063 §2).
+ * vértices. `ctm` ya viene compuesta con `viewport.transform` (ADR-141 §2: el
+ * `CtmTracker` arranca en `viewportMatrix`, no en identidad), así que `yMin`
+ * es directamente el borde superior de la página presentada — sin flip
+ * adicional (mismo motivo que `boundingBoxFromParallelogram`).
  */
-function imageRectFromCTM(ctm: Matrix2D, pageHeight: number): BoundingBox {
+function imageRectFromCTM(ctm: Matrix2D): BoundingBox {
   const corners: readonly Vector2[] = [
     applyMatrix(ctm, 0, 0),
     applyMatrix(ctm, 1, 0),
@@ -931,7 +1118,7 @@ function imageRectFromCTM(ctm: Matrix2D, pageHeight: number): BoundingBox {
   const xMax = Math.max(...xs);
   const yMin = Math.min(...ys);
   const yMax = Math.max(...ys);
-  return { x: xMin, y: pageHeight - yMax, width: xMax - xMin, height: yMax - yMin };
+  return { x: xMin, y: yMin, width: xMax - xMin, height: yMax - yMin };
 }
 
 /*
@@ -962,6 +1149,25 @@ const IMAGE_PAINT_OPS: ReadonlySet<number> = new Set([
   OPS.paintInlineImageXObject,
 ]);
 
+const NON_PAINTING_OPS: ReadonlySet<number> = new Set([
+  OPS.save,
+  OPS.restore,
+  OPS.transform,
+  OPS.dependency,
+  OPS.beginAnnotation,
+  OPS.endAnnotation,
+  OPS.beginText,
+  OPS.setFont,
+  OPS.setTextMatrix,
+  OPS.moveText,
+  OPS.setCharSpacing,
+  OPS.setWordSpacing,
+  OPS.setHScale,
+  OPS.setLeading,
+  OPS.setLeadingMoveText,
+  OPS.nextLine,
+]);
+
 function isNumberArray(value: unknown): value is ReadonlyArray<number> {
   return Array.isArray(value) && value.every((v) => typeof v === "number");
 }
@@ -981,14 +1187,35 @@ function toMatrix2D(args: ReadonlyArray<number>): Matrix2D {
  * página, porque las dos anidaciones no están balanceadas entre sí (una
  * anotación puede tener más `restore` que `save`, o viceversa, sin que eso
  * desincronice el resto de la página).
+ *
+ * ADR-141 §2: `pageCurrent` arranca en `baseMatrix` (`viewport.transform`,
+ * nunca identidad) — así todo lo que se compone encima (`transform()`,
+ * `beginAnnotation()`, y por lo tanto los glifos de ADR-102, las
+ * correcciones de origen de ADR-068 y los rects de imagen de ADR-065) queda
+ * en el marco presentado sin tocar un solo call site de esas funciones. Un
+ * `restore()` de página sin `save()` previo cae de vuelta a `baseMatrix`, no
+ * a la identidad cruda — es la misma CTM con la que arrancó el recorrido.
  */
 class CtmTracker {
-  private pageCurrent: Matrix2D = IDENTITY_MATRIX_2D;
+  private pageCurrent: Matrix2D;
   private readonly pageStack: Matrix2D[] = [];
 
   private insideAnnotationFlag = false;
   private annotationCurrent: Matrix2D = IDENTITY_MATRIX_2D;
   private readonly annotationStack: Matrix2D[] = [];
+  // ADR-141 §2, mismo criterio que `baseMatrix` para la pila de página: la
+  // semilla de la anotación vigente (`beginAnnotation.transform × CTM de
+  // página`, fijada en `beginAnnotation`), no la identidad cruda. Un
+  // `restore()` sin `save()` previo DENTRO de una anotación tiene que caer
+  // de vuelta a esa semilla — es la misma CTM con la que arrancó la
+  // anotación — y no a `IDENTITY_MATRIX_2D`, que ignora el flip/rotación de
+  // la página y deja el texto de la anotación espejado en una página sin
+  // rotar.
+  private annotationSeed: Matrix2D = IDENTITY_MATRIX_2D;
+
+  constructor(private readonly baseMatrix: Matrix2D) {
+    this.pageCurrent = baseMatrix;
+  }
 
   get current(): Matrix2D {
     return this.insideAnnotationFlag ? this.annotationCurrent : this.pageCurrent;
@@ -1008,9 +1235,9 @@ class CtmTracker {
 
   restore(): void {
     if (this.insideAnnotationFlag) {
-      this.annotationCurrent = this.annotationStack.pop() ?? IDENTITY_MATRIX_2D;
+      this.annotationCurrent = this.annotationStack.pop() ?? this.annotationSeed;
     } else {
-      this.pageCurrent = this.pageStack.pop() ?? IDENTITY_MATRIX_2D;
+      this.pageCurrent = this.pageStack.pop() ?? this.baseMatrix;
     }
   }
 
@@ -1028,12 +1255,17 @@ class CtmTracker {
   beginAnnotation(transform: Matrix2D): void {
     this.insideAnnotationFlag = true;
     this.annotationCurrent = composeMatrix(this.pageCurrent, transform);
+    // ADR-141 §2: guarda la semilla de ESTA anotación para que `restore()`
+    // tenga a qué caer de vuelta si el operator list de la anotación tiene
+    // más `restore` que `save` (O-2, unbalanced restore).
+    this.annotationSeed = this.annotationCurrent;
     this.annotationStack.length = 0;
   }
 
   endAnnotation(): void {
     this.insideAnnotationFlag = false;
     this.annotationCurrent = IDENTITY_MATRIX_2D;
+    this.annotationSeed = IDENTITY_MATRIX_2D;
     this.annotationStack.length = 0;
   }
 }
@@ -1061,19 +1293,33 @@ function parseBeginAnnotationArgs(args: unknown): BeginAnnotationArgs | undefine
   };
 }
 
-// El `rect` de beginAnnotation viaja en el mismo espacio que `item.transform`
-// (origen abajo-izquierda, y-up); se convierte a origen arriba-izquierda con
-// el mismo patrón que el resto del módulo (ADR-066 §3, el oráculo).
+/*
+ * El `rect` de `beginAnnotation` viaja en el mismo espacio crudo que
+ * `item.transform` (`/Rect` en espacio de usuario de página, independiente de
+ * cualquier CTM de content stream — ADR-066 §3, el oráculo). ADR-141 §2.4: se
+ * compone con `viewport.transform` igual que el resto de la geometría del
+ * módulo, aplicada a los CUATRO vértices (no a `[x0,y0]`/`[x1,y1]` como si
+ * siguieran siendo esquinas opuestas del rectángulo compuesto — con rotación
+ * en la composición ya no lo son necesariamente).
+ */
 function annotationRectToBoundingBox(
   rect: readonly [number, number, number, number],
-  pageHeight: number,
+  viewport: Matrix2D,
 ): BoundingBox {
   const [x0, y0, x1, y1] = rect;
-  const xMin = Math.min(x0, x1);
-  const xMax = Math.max(x0, x1);
-  const yMin = Math.min(y0, y1);
-  const yMax = Math.max(y0, y1);
-  return { x: xMin, y: pageHeight - yMax, width: xMax - xMin, height: yMax - yMin };
+  const corners: readonly Vector2[] = [
+    applyMatrix(viewport, x0, y0),
+    applyMatrix(viewport, x1, y0),
+    applyMatrix(viewport, x0, y1),
+    applyMatrix(viewport, x1, y1),
+  ];
+  const xs = corners.map((p) => p.x);
+  const ys = corners.map((p) => p.y);
+  const xMin = Math.min(...xs);
+  const xMax = Math.max(...xs);
+  const yMin = Math.min(...ys);
+  const yMax = Math.max(...ys);
+  return { x: xMin, y: yMin, width: xMax - xMin, height: yMax - yMin };
 }
 
 /*
@@ -1372,8 +1618,14 @@ function appendRunGlyphs(into: PageGlyph[], args: unknown, text: TextState, ctm:
 
   const composed = composeMatrix(ctm, text.textMatrix);
   const scale = Math.hypot(composed[0], composed[1]);
-  const dirX = scale === 0 ? 1 : composed[0] / scale;
-  const dirY = scale === 0 ? 0 : composed[1] / scale;
+  // ADR-141 §2: `ctm` ya está compuesta con `viewport.transform` (el
+  // CtmTracker arranca en `viewportMatrix`) — el fallback degenerado
+  // (`Tm` sin parte lineal utilizable) tiene que salir de componer el eje
+  // por defecto con `ctm`, no de un `(1,0)` crudo (mismo caso 20 que
+  // `unitVectorOrDefault` en `convertTextItemsToWords`).
+  const fallbackDir = scale === 0 ? composeVector(ctm, { x: 1, y: 0 }) : undefined;
+  const dirX = fallbackDir?.x ?? composed[0] / scale;
+  const dirY = fallbackDir?.y ?? composed[1] / scale;
 
   let accumulated = 0;
   for (const glyph of glyphs as ReadonlyArray<unknown>) {
@@ -1539,6 +1791,12 @@ function buildAnnotationTextRun(
 
 interface AnnotationsAndImages {
   readonly imageRects: ReadonlyArray<BoundingBox>;
+  readonly rasterCandidates: ReadonlyArray<{
+    readonly nativeWidth: number | undefined;
+    readonly nativeHeight: number | undefined;
+    readonly ctm: Matrix2D;
+  }>;
+  readonly hasAdditionalPainting: boolean;
   readonly annotationWords: ReadonlyArray<Word>;
   // ADR-068: origen real de los runs de PÁGINA cuyo `transform` de
   // `getTextContent` viene desplazado por el word spacing.
@@ -1559,12 +1817,18 @@ interface AnnotationsAndImages {
 function walkOperatorListForAnnotationsAndImages(
   operatorList: OperatorListLike,
   pageIndex: number,
-  pageHeight: number,
+  viewportMatrix: Matrix2D,
   documentId: string,
   logger: ILogger,
 ): AnnotationsAndImages {
-  const ctm = new CtmTracker();
+  const ctm = new CtmTracker(viewportMatrix);
   const imageRects: BoundingBox[] = [];
+  const rasterCandidates: Array<{
+    readonly nativeWidth: number | undefined;
+    readonly nativeHeight: number | undefined;
+    readonly ctm: Matrix2D;
+  }> = [];
+  let hasAdditionalPainting = false;
   const annotationWords: Word[] = [];
   const originCorrections: TextOriginCorrection[] = [];
   const pageGlyphs: PageGlyph[] = [];
@@ -1597,7 +1861,7 @@ function walkOperatorListForAnnotationsAndImages(
       const parsed = parseBeginAnnotationArgs(args);
       if (parsed !== undefined) {
         ctm.beginAnnotation(parsed.transform);
-        currentAnnotationRect = annotationRectToBoundingBox(parsed.rect, pageHeight);
+        currentAnnotationRect = annotationRectToBoundingBox(parsed.rect, viewportMatrix);
         currentAnnotationId = parsed.id;
       } else {
         // Forma inesperada de beginAnnotation: se preserva la separación de
@@ -1647,11 +1911,16 @@ function walkOperatorListForAnnotationsAndImages(
     } else if (fn === OPS.nextLine) {
       text.nextLine();
     } else if (ctm.isInsideAnnotation && (fn === OPS.showText || fn === OPS.showSpacedText)) {
+      hasAdditionalPainting = true;
       const run = buildAnnotationTextRun(args, text, ctm.current);
       if (run !== undefined) {
         // ADR-097 §3: el camino de anotaciones NO usa la tabla de avances —
         // acá la cadena y la geometría salen de la misma fuente, así que no
         // hay dos fuentes que empalmar.
+        // `run.transform` sale de `ctm.current`, ya compuesto con
+        // `viewport.transform` (ADR-141 §2: el CtmTracker arranca en
+        // `viewportMatrix`) — se deja `viewportMatrix` en su default
+        // identidad para no componer dos veces.
         const { words } = convertTextItemsToWords(
           {
             items: [
@@ -1659,7 +1928,6 @@ function walkOperatorListForAnnotationsAndImages(
             ],
           },
           pageIndex,
-          pageHeight,
         );
         for (const word of words) {
           if (currentAnnotationRect === undefined) continue;
@@ -1677,6 +1945,7 @@ function walkOperatorListForAnnotationsAndImages(
         }
       }
     } else if (!ctm.isInsideAnnotation && (fn === OPS.showText || fn === OPS.showSpacedText)) {
+      hasAdditionalPainting = true;
       // ADR-068: el texto de página lo extrae `getTextContent()`; de este
       // recorrido salen la corrección del origen (ver `buildOriginCorrection`)
       // y —ADR-102 §1— los glifos del run, al flujo continuo de la página.
@@ -1687,11 +1956,74 @@ function walkOperatorListForAnnotationsAndImages(
       // ADR-066 §5: `ctm.current` ya aplica beginAnnotation.transform cuando
       // la imagen está dentro de una anotación — corrige el defecto latente
       // de ADR-065, Contexto §4.
-      imageRects.push(imageRectFromCTM(ctm.current, pageHeight));
+      imageRects.push(imageRectFromCTM(ctm.current));
+      if (fn === OPS.paintImageMaskXObject) {
+        // A mask is not a demonstrably self-contained raster for this ADR.
+        hasAdditionalPainting = true;
+        continue;
+      }
+      const imageArgs = Array.isArray(args) ? (args as ReadonlyArray<unknown>) : [];
+      const inlineDimensions =
+        fn === OPS.paintInlineImageXObject && isRecord(imageArgs[0]) ? imageArgs[0] : undefined;
+      const nativeWidth =
+        typeof imageArgs[1] === "number"
+          ? imageArgs[1]
+          : inlineDimensions !== undefined && typeof inlineDimensions.width === "number"
+            ? inlineDimensions.width
+            : undefined;
+      const nativeHeight =
+        typeof imageArgs[2] === "number"
+          ? imageArgs[2]
+          : inlineDimensions !== undefined && typeof inlineDimensions.height === "number"
+            ? inlineDimensions.height
+            : undefined;
+      rasterCandidates.push({ nativeWidth, nativeHeight, ctm: ctm.current });
+    } else if (fn !== undefined) {
+      // Unknown operators are treated as painting: preserving the cap requires
+      // proof that the image is the complete painted content.
+      if (!NON_PAINTING_OPS.has(fn)) hasAdditionalPainting = true;
     }
   }
 
-  return { imageRects, annotationWords, originCorrections, pageGlyphs };
+  return {
+    imageRects,
+    rasterCandidates,
+    hasAdditionalPainting,
+    annotationWords,
+    originCorrections,
+    pageGlyphs,
+  };
+}
+
+function deriveOcrDpiCap(
+  requiresOCR: boolean,
+  rasterCandidates: ReadonlyArray<{
+    readonly nativeWidth: number | undefined;
+    readonly nativeHeight: number | undefined;
+    readonly ctm: Matrix2D;
+  }>,
+  hasAdditionalPainting: boolean,
+): number | undefined {
+  if (!requiresOCR || hasAdditionalPainting || rasterCandidates.length !== 1) return undefined;
+  const candidate = rasterCandidates[0];
+  if (candidate === undefined) return undefined;
+  const { nativeWidth, nativeHeight, ctm } = candidate;
+  if (
+    nativeWidth === undefined ||
+    nativeHeight === undefined ||
+    !Number.isFinite(nativeWidth) ||
+    !Number.isFinite(nativeHeight) ||
+    nativeWidth <= 0 ||
+    nativeHeight <= 0
+  )
+    return undefined;
+  const axisX = Math.hypot(ctm[0], ctm[1]);
+  const axisY = Math.hypot(ctm[2], ctm[3]);
+  if (!Number.isFinite(axisX) || !Number.isFinite(axisY) || axisX <= 0 || axisY <= 0) {
+    return undefined;
+  }
+  const cap = Math.ceil(72 * Math.max(nativeWidth / axisX, nativeHeight / axisY));
+  return Number.isFinite(cap) && cap > 0 ? cap : undefined;
 }
 
 // Filtro por rectángulo (ADR-065 §1): descarta imágenes < 1% del área de
@@ -1982,6 +2314,14 @@ async function parsePage(
   const viewport = pageProxy.getViewport({ scale: 1 });
   const pageWidth = viewport.width;
   const pageHeight = viewport.height;
+  /*
+   * ADR-141 §1/§2: el marco canónico es el de la página presentada —
+   * `viewport.transform` ya aplicó `/Rotate` y la inversión del eje `y`. Se
+   * compone exactamente una vez, en este productor, sobre las cuatro fuentes
+   * crudas del módulo (items de texto, flujo de glifos + correcciones de
+   * origen, rects de imagen, palabras de anotación); nadie más cambia.
+   */
+  const viewportMatrix = toMatrix2D(viewport.transform);
 
   let textContent: TextContentLike;
   let operatorList: OperatorListLike;
@@ -2001,19 +2341,25 @@ async function parsePage(
 
   // ADR-068: el recorrido del operator list precede a la conversión de items
   // porque produce la corrección de origen que ésta consume.
-  const { imageRects, annotationWords, originCorrections, pageGlyphs } =
-    walkOperatorListForAnnotationsAndImages(
-      operatorList,
-      pageIndex,
-      pageHeight,
-      documentId,
-      logger,
-    );
+  const {
+    imageRects,
+    rasterCandidates,
+    hasAdditionalPainting,
+    annotationWords,
+    originCorrections,
+    pageGlyphs,
+  } = walkOperatorListForAnnotationsAndImages(
+    operatorList,
+    pageIndex,
+    viewportMatrix,
+    documentId,
+    logger,
+  );
 
   const { words: contentWords, joinStats } = convertTextItemsToWords(
     textContent,
     pageIndex,
-    pageHeight,
+    viewportMatrix,
     originCorrections,
     pageGlyphs,
     indexGlyphs(pageGlyphs),
@@ -2033,12 +2379,38 @@ async function parsePage(
     });
   }
 
+  // ADR-142 §4: sin esta cuenta, "¿cada cuánto pasa esto en un documento
+  // real?" tampoco tiene cómo contestarse sin volver a instrumentar a mano.
+  // Un merge que no ocurre no es un error, es la ausencia de una palabra
+  // partida — y `merged` puede ser > 0 aunque `joinStats.eligible` sea 0
+  // (el fragmento típico de una palabra partida es un item de un solo token).
+  if (joinStats.merged > 0) {
+    logger.debug("Palabras empalmadas entre items adyacentes (ADR-142).", {
+      documentId,
+      pageIndex,
+      merged: joinStats.merged,
+    });
+  }
+
+  /*
+   * ADR-140 §2/§3: una página con `/Rotate` distinto de 0 que produce al
+   * menos una palabra nativa (content stream o anotación) mezcla el marco de
+   * `viewport` —que ya aplicó la rotación, y del que salen `pageWidth`/
+   * `pageHeight`— con el de `item.transform`, que no. Una página rotada SIN
+   * texto nativo no entra acá: va entera por OCR, cuyo ráster ya está
+   * rotado por el mismo `getViewport()` (consistente, ADR-140 §3).
+   */
+  if (pageProxy.rotate !== 0 && (contentWords.length > 0 || annotationWords.length > 0)) {
+    throw new PdfPageRotatedError(documentId, pageIndex, pageProxy.rotate);
+  }
+
   // ADR-066 §1: el texto de anotaciones se suma al del content stream — las
   // dos fuentes son disjuntas por construcción (getTextContent() no lee
   // appearance streams).
   const sortedWords = sortWordsByReadingOrder([...contentWords, ...annotationWords]);
   const text = sortedWords.map((w) => w.text).join(" ");
   const requiresOCR = sortedWords.length === 0;
+  const ocrDpiCap = deriveOcrDpiCap(requiresOCR, rasterCandidates, hasAdditionalPainting);
 
   const page: Page = {
     index: pageIndex,
@@ -2048,6 +2420,7 @@ async function parsePage(
     text,
     requiresOCR,
     ocrCompleted: false,
+    ...(ocrDpiCap !== undefined ? { ocrDpiCap } : {}),
   };
 
   // ADR-065 §1/§4: las compuertas de OCR por región solo corren para páginas

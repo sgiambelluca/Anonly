@@ -116,11 +116,9 @@ describe("barrido: gana el último que tocaste (ADR-087 §3.1b)", () => {
     const plan = planApplyDocumentMode([existing]);
 
     expect(plan.updateRuleId).toBe(existing.id);
+    // La global reemplazada NO se borra: se actualiza. Borrarla y crearla de
+    // nuevo la duplicaría (`addRule` no deduplica por id).
     expect(plan.deleteRuleIds).toEqual([]);
-    // La global reemplazada NO va a `sweptRules` (no se borró, se actualizó):
-    // se deshace devolviéndole su modo anterior. Mezclarlas la duplicaría.
-    expect(plan.sweptRules).toEqual([]);
-    expect(plan.previousMode).toBe(ReplacementMode.Mask);
   });
 
   it("el nivel tipo barre SOLO las reglas de grupo de ese tipo", () => {
@@ -147,8 +145,6 @@ describe("barrido: gana el último que tocaste (ADR-087 §3.1b)", () => {
 
     expect(plan.deleteRuleIds).toEqual([]);
     expect(plan.updateRuleId).toBe(undefined);
-    expect(plan.sweptRules).toEqual([]);
-    expect(plan.previousMode).toBe(undefined);
   });
 
   it("las dos órdenes del requisito dan resultados distintos, que es el punto", () => {
@@ -165,26 +161,15 @@ describe("barrido: gana el último que tocaste (ADR-087 §3.1b)", () => {
   });
 });
 
-describe("snapshot del undo", () => {
-  it("sweptRules trae las reglas borradas completas, para recrearlas con su id", () => {
-    const typeRule = rule({ scope: "type", entityType: EntityType.DNI });
-    const groupRule = rule({ scope: "group", groupId: "g1" });
-
-    const plan = planApplyDocumentMode([typeRule, groupRule]);
-
-    expect(new Set(plan.sweptRules)).toEqual(new Set([typeRule, groupRule]));
-  });
-
-  it("separa lo borrado de lo actualizado: la regla del nivel nunca entra a sweptRules", () => {
+describe("barrido y regla del nivel", () => {
+  it("separa lo borrado de lo actualizado: la regla del nivel nunca se barre", () => {
     const existing = rule({ scope: "global", mode: ReplacementMode.Synthetic });
     const groupRule = rule({ scope: "group", groupId: "g1" });
 
     const plan = planApplyDocumentMode([existing, groupRule]);
 
-    // Recrear `existing` la duplicaría: `addRule` no deduplica por id.
-    expect(plan.sweptRules).toEqual([groupRule]);
+    expect(plan.deleteRuleIds).toEqual([groupRule.id]);
     expect(plan.updateRuleId).toBe(existing.id);
-    expect(plan.previousMode).toBe(ReplacementMode.Synthetic);
   });
 });
 

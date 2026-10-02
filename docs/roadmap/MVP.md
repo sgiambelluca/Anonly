@@ -1,5 +1,4 @@
-<!-- CONTEXT: scope=roadmap-mvp | dependencias=00_Project_Vision.md,01_Technical_Architecture_Document.md,adr/ADR-011-Grouping-First.md,adr/ADR-013-PDF-Engine-Hito2-Inline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md,adr/ADR-035-Hito9-Pools-InProcess-Retryable.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-138-Instalador-Universal-De-macOS.md | audiencia=humanos+IA | fase=11.6 (Hitos 1–10 cerrados y mergeados a main; escritorio y verificación de actualizaciones en validación; instalador universal de macOS documentado por ADR-138) -->
-
+<!-- CONTEXT: scope=roadmap-mvp | dependencias=adr/ADR-192-El-Pico-Total-De-Memoria-Tiene-Un-Techo-Medido-Por-Perfil.md,00_Project_Vision.md,01_Technical_Architecture_Document.md,adr/ADR-011-Grouping-First.md,adr/ADR-013-PDF-Engine-Hito2-Inline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md,adr/ADR-035-Hito9-Pools-InProcess-Retryable.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-138-Instalador-Universal-De-macOS.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,adr/ADR-168-Pantallas-De-Carga-Y-Escaneo-Tras-Pruebas-De-Usuario.md,adr/ADR-169-La-Pantalla-De-Trabajo-Tras-Pruebas-De-Usuario.md,adr/ADR-170-Las-Vistas-Previas-De-Edicion-Las-Calcula-El-Core.md,adr/ADR-171-El-Usuario-Puede-Eliminar-Una-Entidad.md,adr/ADR-172-Deshacer-Y-Rehacer-Exactos.md,adr/ADR-173-El-Motor-Rechaza-Fusiones-Y-Divisiones-Invalidas.md,adr/ADR-174-Un-Agregado-Manual-Que-Choca-Se-Resuelve-En-El-Momento.md,adr/ADR-175-Un-Choque-Manual-No-Queda-Colgado.md,adr/ADR-176-Un-Choque-Pendiente-Bloquea-El-Export.md,adr/ADR-177-Una-Entidad-Eliminada-No-Ocupa-Lugar.md,adr/ADR-178-Lo-Contenido-Se-Oculta-Solo-Si-Su-Contenedor-Se-Elimina.md,adr/ADR-179-El-Empaquetado-De-NER-Se-Evalua-Sin-Cambiar-El-Modelo.md,adr/ADR-180-Los-PDFs-Pesados-Se-Miden-Hasta-El-Archivo-Exportado.md,adr/ADR-184-Indice-Exacto-De-Candidatos-Para-Grouping.md,adr/ADR-185-Gates-De-Leak-Y-Stress-En-Electron.md,roadmap/Optimizacion_De_Memoria_Plan.md,roadmap/PDFs_Pesados_Y_Exportacion_Plan.md,roadmap/mediciones/transversal/PDFs_Pesados_Y_Exportacion_Medicion.md,roadmap/mediciones/ner/Empaquetado_NER_Medicion.md,roadmap/Optimizacion_De_Rendimiento.md | audiencia=humanos+IA | fase=11.6 (Hitos 1–10 cerrados; Hito 12.5 de UI y campaña de rendimiento documentados; escritorio y verificación de actualizaciones en validación; Grouping ADR-184 y gates Leak/Stress ADR-185 implementados y validados en macOS y Windows; CI pendiente) -->
 # Anonly — Roadmap MVP
 
 > Define el alcance exacto del primer release. Cualquier cosa fuera de esta lista **no** entra en MVP. v1.0 y v2.0 viven en sus propios docs.
@@ -112,7 +111,7 @@ Orden sugerido (cada hito = un set de PRs):
 - ~~Assets de Tesseract servidos first-party: script `scripts/mirror-assets.ts` + `assets.lock.json` (ver ADR-018).~~ **CERRADO** (PR #11).
 - ~~Integración con PDF Engine (`fuseOcrPage`).~~ **CERRADO** (PR #10).
 - ~~Tests completos.~~ **CERRADO** — `contract.test.ts`, `unit.test.ts`, `edge.test.ts` commiteados en `packages/anonymization-core/ocr-engine/src/__tests__/`.
-- Pendiente: verificación de integridad en runtime de assets (ADR-018 punto 3) → Hito 11.
+- ~~Pendiente: verificación de integridad en runtime de assets (ADR-018 punto 3) → Hito 11.~~ Retirado por ADR-187.
 
 ### Hito 4 — Regex Engine
 - ~~Implementar `regex-engine` con `DEFAULT_PATTERNS_AR`.~~ **CERRADO** (PR #13).
@@ -127,7 +126,7 @@ Orden sugerido (cada hito = un set de PRs):
 - Tests: `contract.test.ts`, `unit.test.ts`, `edge.test.ts`, `snapshot.test.ts`, `cancel.test.ts` commiteados en `packages/anonymization-core/ner-engine/src/__tests__/` (56 tests), cobertura 97.77% líneas. Pendientes: `stress.test.ts` (OOM/pool) → Hito 11 (junto con la infra `tests/stress/`; corregido de "Hito 9" por ADR-034 §6); `perf.test.ts` (recall ≥ 85% / precision ≥ 90%, informativas en MVP, §6) → Hito 11.
 - Correcciones de contrato del hito: mapeo `DATE → Date` y contrato de salida de NER ampliado a cuatro tipos (ADR-023 §2); `NerStarted.modelLoading?` y `batchSize` en palabras (ADR-024).
 - Los tests de integración con Regex (ambos emiten `ENTITY_FOUND`) viven en `tests/integration/` y son Hito 9 (Orchestrator) (ADR-010, `core/Orchestrator.md:239`, precedente `core/OCR_Engine.md:225`).
-- Pendiente: verificación de integridad en runtime del modelo (ADR-018 punto 3, `core/NER_Engine.md` §15.19) → Hito 11.
+- ~~Pendiente: verificación de integridad en runtime del modelo (ADR-018 punto 3, `core/NER_Engine.md` §15.19) → Hito 11.~~ Retirado por ADR-187.
 
 ### Hito 6 — Grouping Engine
 - ~~Implementar `grouping-engine` con matching, conflictos, reglas, fusión/división.~~ **CERRADO** (PR #16).
@@ -546,9 +545,152 @@ De las ~70: **~30 ya estaban cerradas** por hitos posteriores (ADR-053/054/056, 
 - Performance gates (todas las métricas de `00_Project_Vision.md` §7).
 - Leak tests, cancel tests.
 - Security tests.
-- Verificación de integridad en runtime de modelos/wasm (`crypto.subtle.digest` contra `assets.lock.json`, ADR-018 punto 3) en `ocr-engine` y `ner-engine`; hash mismatch → `OCR_MODEL_MISSING` / `NER_MODEL_LOAD_FAILED`. Incluye test de integridad: asset con hash alterado → error tipado, no se carga.
+
+**Gates Leak/Stress (2026-09-25):** ADR-185 y
+`Gates_Leak_Stress_Plan.md` cierran el protocolo sobre Electron empaquetado.
+`test:leak` bloquea por workers/heap JS con GC, sin usar RSS como veredicto;
+`test:stress` es un centinela relativo 50/200 páginas, sin alterar los
+presupuestos contractuales. Ambos están implementados y pasaron localmente en
+macOS arm64 (Leak L1/L2/L3: 10/10 ciclos cada uno; Stress: 3/3 casos) y en
+Windows x64 el 2026-09-26 con los mismos resultados. Esa corrida destapó que
+`test:e2e`, `test:perf`, `test:stress` y `test:leak` no arrancaban en Windows
+(prefijo `VITE_E2E=1` POSIX bajo `cmd.exe`); ADR-186 lo resuelve con
+`cross-env`, `devDependency` sin efecto en el producto. La ejecución real del
+workflow en CI sigue pendiente.
+- Campaña de memoria H-10: T-1/T-2 cerradas, T-3 cerrada inconclusa con la
+  extrapolación lineal descartada; T-4 cerrada como compuerta exacta de franjas
+  blancas (ADR-162), con 137/137 tests scoped verdes. La heurística calibrada para márgenes
+  ruidosos queda separada como T-4b y bloqueada por el corpus de ADR-147.
+  T-6a cerrada e implementada como cap conservador por página de ráster único
+  (ADR-163), con 508/508 tests afectados y gates scoped verdes; T-6b queda en
+  pausa desde el 2026-09-17 por la preferencia de conservar 300 DPI
+  configurados, sin revertir el cap de resolución nativa de T-6a. La campaña
+  posterior de ADR-190 §7 midió el cap contra 300 forzado y el humano decidió
+  conservar el cap nativo (ADR-163, revalidación posterior).
+  **T-5 cerrada el 2026-09-15**:
+  OSD compartido con una página de adelanto implementado y aceptado por el
+  humano, con validación funcional y controles generales verdes. La campaña
+  separada observó −24–25% de tiempo frente al control con igual comportamiento
+  histórico de ImageData, sin ahorro RSS demostrado. Evidencia y límites en
+  `T5_OSD_Compartido_Cierre_Final.md`. Por separado, el perfilado de ImageData
+  cerró y la optimización de franjas I-1 quedó conservada tras A/B reproducible
+  (`Margenes_Menos_Pixeles_Plan.md` §9). I-2 se midió y cerró sin implementación:
+  ahorro cero en P2 tras I-1, 147 ms medios en el único fixture con franjas
+  activas y calidad conservada solo con padding suficiente
+  (`Margenes_Menos_Pixeles_Medicion_I2.md`). Sin reabrir OSD/adelanto.
+  La campaña de márgenes se cerró con I-1; los nuevos objetivos de concurrencia
+  del 2026-09-20 se registran por separado más abajo.
+  El perfilado fuera de OCR M-0..M-3 atribuyó casi todo el tramo posterior al
+  OCR de P2 al trabajo inclusivo de NER; Grouping medido ronda 1 ms
+  (`Perfilado_Tiempo_Fuera_OCR_Medicion_M0_M1.md`). El paso posterior separó
+  carga, despacho y trabajo por lote de NER: la campaña A1/B/A2 quedó
+  cerrada y localizó el costo dominante en la llamada de clasificación,
+  incluida la tokenización interna del modelo, sin optimización implementada
+  (`Perfilado_NER_Interno_Plan.md`,
+  `Perfilado_NER_Interno_Medicion.md`). Esto no cierra los gates de calidad
+  y release del Hito 11. También se midió adelantar la carga del modelo NER
+  durante OCR con un mismo build y tres rondas intercaladas. **Descartado por
+  decisión humana, sin implementación**: la carga temprana no mejoró de forma
+  estable el tiempo total hasta `Ready` y elevó el pico RSS 144–422 MB en
+  las tres rondas; la carga tardía empeoró `Ready` y OCR en las tres. La
+  oportunidad era ocultar ~0,94 s de carga fría y no compensa el costo ni el
+  riesgo de concurrencia. Lo que cierra el tema es que esa oportunidad es más
+  chica que el ruido del banco: la deriva entre dos controles idénticos de una
+  misma ronda fue de 0,06, 1,83 y 2,54 s sobre `Ready`. Cargar el modelo al
+  abrir la aplicación queda descartado aparte, sin medir, por `idleDisposeMs`
+  y memoria ocupada sin documento. Veredicto en
+  `Precalentamiento_NER_Durante_OCR_Medicion.md` §7, anotado como descarte
+  medido en ADR-154 §2 lever 3 (`Precalentamiento_NER_Durante_OCR_Plan.md`;
+  evidencia cruda en `.measure/ner-preload-ocr/20260917T163638Z/`).
+- **Recursos — punto 2 cerrado con alcance medido (2026-09-23; repetido en
+  Windows nativo 2026-09-25):** investigación, instrumentación, 14 corridas
+  P1/P2 en macOS y revisión del plan completadas. Los buffers observados
+  vuelven a cero después del cierre; el residuo histórico de 443–626 MB no es
+  una fuga ni un ahorro demostrados. Se conservan los límites de observación
+  durante NER. La repetición Windows nativa (14/14 corridas, ~7,7 min, mismo
+  tiempo que macOS) confirma que el instrumento es portable y el efecto de la
+  sonda es igual de chico; el lector de presión de `win32` sigue sin existir
+  (no era el objetivo de esta medición), y el proveedor CDP tarda más en
+  recuperarse tras NER que en macOS (recupera a los 120 s, no a los 60 s).
+  Informe: `Atribucion_Recursos_Renderer_Medicion.md`.
+  El orden **2 → 1 → 3** queda con los puntos 2 y 1 cerrados. **El punto 1
+  evaluó el empaquetado del mismo NER el 2026-09-23**: calidad idéntica y menor
+  memoria lineal WASM, pero RSS/M1 sin ventaja atribuible por sobre la deriva;
+  se conserva el modelo de producción A (ADR-179,
+  `Empaquetado_NER_Medicion.md`). El punto 3 (PDFs pesados/exportación) tiene
+  ADR-180 y `PDFs_Pesados_Y_Exportacion_Plan.md` cerrados; el banco opt-in
+  completó nueve corridas y cancelación localmente, con informe en
+  `PDFs_Pesados_Y_Exportacion_Medicion.md`. El banco quedó versionado en
+  `8f0d7f0`; el punto 3 se cierra como caracterización, sin modificar
+  presupuestos ni motores.
+  Alcance canónico: `Optimizacion_De_Memoria_Plan.md` §2ter. No cierra el Hito 11.
+- **Próximos objetivos de tiempo (2026-09-20, planteado; ejecutado en macOS
+  2026-09-23/24 y en Windows nativo 2026-09-25 — la decisión de perfiles sigue
+  sin tomarse):** medir más hilos dentro del único worker NER, más workers de
+  reconocimiento OCR, varios fragmentos independientes por inferencia NER y
+  acotar los peores casos de Regex/Grouping. Las cuatro mediciones están
+  hechas en las dos plataformas: `Hilos_NER_Medicion.md` (hilos ONNX — en
+  macOS más hilos empeora, en Windows mejora; depende del hardware),
+  `Reconocedores_OCR_Medicion.md` (pool OCR — mejora en las dos plataformas,
+  más en Windows), `Lotes_NER_Factibilidad.md` (lotes NER — bloqueado en las
+  dos plataformas por diferencias de calidad, no se adopta),
+  `Patron_Email_Regex_Medicion.md` y `Agrupacion_Difusa_Medicion.md` (Regex ya
+  corregido por ADR-181, confirmado en Windows; Grouping: ADR-184 bajó el peor
+  caso de 2.000 entidades a ~264 ms en macOS y a ~382 ms en Windows, 7,0×, con
+  huellas idénticas. La brecha aparente entre plataformas era del motor
+  JavaScript del banco sintético: con el V8 de Electron, Windows da ~202 ms). Los documentos escaneados dan conteos de detección
+  distintos por plataforma, porque el ráster que llega al OCR cambia con la
+  aceleración por GPU del canvas: no se comparan entre plataformas
+  (`OCR_Entre_Plataformas_Medicion.md`).
+  **Ampliación macOS cerrada el 2026-09-26:** catorce casos OCR, con los
+  sintéticos originales y PNG Windows/WSL fijados, confirmaron que la
+  divergencia entra al rasterizar/reescalar con GPU; ante los mismos píxeles
+  Tesseract coincide. La comparación directa de hashes de R2 entre las tres
+  plataformas sigue sin referencia real compartida. El complemento NER
+  separó carga, panel DOM y cuatro documentos consecutivos por instancia:
+  **48 importaciones válidas**, calidad exacta y 6/8 hilos más lentos que A
+  también al reutilizar el modelo. El complemento Windows (mismo día, 48
+  importaciones válidas) dio lo contrario para los hilos: 6/8 más rápidos que
+  A en los 48 pares, con la misma reutilización y recarga del modelo. No
+  atribuye memoria ni sustituye una prueba de horas. Ver las dos secciones
+  finales de `Hilos_NER_Medicion.md`. No cambia defaults ni cierra los gates del hito.
+  La curva de **memoria WASM OCR 2/3/4 en macOS cerró el 2026-09-26**:
+  36 corridas válidas, 54 snapshots completos y calidad exacta. Incrementos
+  medianos de 141,125 MiB en P2 y 85,8125 MiB en R2; RSS total sin crecimiento
+  lineal. Memoria nativa por worker permanece sin atribución. Informe:
+  `Reconocedores_OCR_Medicion.md`; la evidencia Windows y la decisión de
+  perfiles conservan su seguimiento pendiente.
+  Después de medir hilos NER y workers OCR, revisar los perfiles
+  Bajo/Intermedio/Alto/Automático como propuesta, con Automático mostrando el
+  nivel resuelto según recursos del equipo y evidencia de costo/beneficio.
+  **Hecha el 2026-10-01 (ADR-194):** cinco perfiles (Bajo, Intermedio, Alto,
+  Ultra y Automático), con Automático resolviendo el nivel según la RAM y los
+  hilos del equipo y mostrándolo en Configuración. Techos de memoria por
+  perfil en ADR-194 §7; el de Bajo es provisorio hasta medirlo en Windows.
+  La campaña de DPI descendente cerró sin bajar la resolución del OCR.
+  Los valores actuales no cambian con este plan; un perfil podrá consumir más
+  memoria si la mejora de tiempo lo justifica, con presupuestos explícitos.
+  Alcance y dependencias: `Optimizacion_De_Rendimiento.md`, «Próximos objetivos».
+  No se incorporan experimentos descartados ni se dan por cerrados los gates del hito.
+- Después del hardening: intención de migrar Electron a Tauri para evaluar
+  menor costo del contenedor, como campaña separada (`Future_Ideas.md` §2.5).
+- ~~Verificación de integridad en runtime de modelos/wasm (`crypto.subtle.digest` contra `assets.lock.json`, ADR-018 punto 3) en `ocr-engine` y `ner-engine`; hash mismatch → `OCR_MODEL_MISSING` / `NER_MODEL_LOAD_FAILED`. Incluye test de integridad: asset con hash alterado → error tipado, no se carga.~~ **Retirado por ADR-187 (2026-09-26)**: el verificador vive junto a los assets, fuera del `asar`, así que no cubre la manipulación después de instalar; exigiría además `fetch` desde el Core y una copia transitoria del modelo de NER. Esa amenaza la cubre la firma de código del instalador (Hito 11.5).
 - Audit `pnpm audit`.
 - Bundle size check.
+- **RIESGO FUNCIONAL CERRADO; costo residual aceptado para cerrar la ronda B y registrado como posible trabajo posterior.** ADR-190 implementa un OSD de tamaño fijo, verificación y reintentos automáticos, y confirmación al exportar para páginas marcadas como ilegibles. La campaña de 150/200/250/300 dpi está en `roadmap/mediciones/ocr/ADR190_DPI_2026-09-27.md`: forzar 300 no mejoró recall ni DNI en ninguna de 64 parejas y costó más tiempo y memoria en la mayoría. El humano decidió conservar el cap nativo de ADR-163 (ADR-154, palanca 6). El sondeo posterior de escala (`roadmap/mediciones/ocr/ADR190_OSD_Escala_2026-09-28.md`) halló que el OSD nativo no mejora ningún veredicto respecto de 1754 px y la mitad histórica empeora 22 PDFs; se conserva el tamaño actual. Ocho páginas de dos renglones giradas 180° produjeron históricamente basura confiable sin DNI y sin aviso en ambos brazos de DPI; la enmienda posterior corrige ese hueco.
+  - **Precisión (2026-09-29, verificación independiente de la ronda B):** lo cerrado es el camino sin veredicto OSD. El caso con veredicto OSD equivocado y basura confiable sigue posible y quedó **aceptado por el humano como riesgo conocido** (ADR-190, Consecuencias); ver el ítem ABIERTO de abajo.
+- **ABIERTO — se pierden emails al leer el OCR a menos de 300 dpi (2026-10-01).** Medido en Windows sobre sintéticos de 300 dpi nativos (`mediciones/ocr/DPI_Descendente_Fase1_Windows_2026-10-01.md` §2): a 300 dpi no se pierde ninguna entidad; a 250 dpi se pierde 1 email en `SR`, a 200 dpi 4, y a 150 dpi 1 en `SR` y 2 en `S8`. No es monótono, y en un caso el email se detecta recortado. Es casi lo único que se pierde contra la verdad.
+  - Consecuencia ya tomada: la resolución del OCR no se baja por defecto (decisión del humano, 2026-10-01).
+  - Sin verificar: la causa (lectura del OCR de la `@` o los puntos, o el patrón de Regex), y si un escaneo real de unos 200 dpi nativos, que hoy se lee a esa resolución (ADR-163), sufre la misma pérdida.
+  - Qué falta: investigar la causa con los sintéticos del arnés (`tests/perf/README.md`, «Campaña de DPI descendente»). Si se arregla en la detección, 200 dpi vuelve a ser candidata.
+- **ABIERTO — riesgo residual aceptado (ADR-190, 2026-09-29).** Página escasa girada con veredicto OSD equivocado y lectura de basura con confianza ≥ 60: se exporta sin tapar y sin aviso. No apareció en el corpus medido. Candidato para v1.0: recalibrar el criterio de lectura fiable o verificar ángulos en páginas escasas.
+  - Qué pasa: en una página con muy poco texto (dos líneas), el OSD de `orientation-kernel.ts` puede elegir un ángulo equivocado con confianza ≥ 1. `MIN_ORIENTATION_CONFIDENCE = 1` es muy bajo: ADR-119 §4 midió entre 1 y 2 de confianza con 0 de 4 ángulos acertados.
+  - Por qué era silencioso en ese caso: los ocho fallos medidos superaban el umbral provisional de una palabra con confianza ≥ 60; el OSD no daba veredicto y el `inkRatio` quedaba por debajo de 0,002. Antes de la enmienda, esas lecturas se clasificaban como fiables.
+  - Origen: es anterior a esta branch (ADR-090/119, 2026-09-02) y es del bloque B5.
+  - Cierre técnico: la matriz de OCR real a cuatro ángulos completó 380/380 observaciones (`roadmap/mediciones/ocr/ADR190_OSD_Recuperacion_2026-09-28.md`) y demostró que el ángulo correcto recupera los cuatro tokens y el DNI en 16/16 PDFs de dos renglones. La enmienda para OSD sin veredicto se implementó; QUALITY final completó 128/128 y recuperó el DNI en 64/64 PDFs con texto, con precisión/recall completos en los 16 escasos. Los cuatro controles de figuras quedaron sin lectura fiable, con aviso y exportación censurada. Sol aprobó B4/B5/B6 técnicamente. Los sondeos dirigidos del build final encontraron +209,10 MiB de pico y +2.237 ms de tiempo mediano en los 16 escasos frente al baseline sin recuperación. El humano aceptó ese costo para cerrar la ronda B y dejó su optimización como posible trabajo futuro (`Future_Ideas.md` §6); no se afirma que el presupuesto M2 de ADR-146 esté cumplido. Registro de reanudación: `Revision_Por_Bloques_Hardening.md` §4.1.
+- **CUMPLE, con margen chico — presupuesto M2 (ADR-192; medido el 2026-10-01).** Los ~1,6 GB de ADR-146 eran una suma de estimaciones que nunca se midió. El humano fijó el equipo mínimo soportado en **8 GB de RAM** y techos de M2 por perfil de medición, con la configuración por defecto y en Windows nativo: **P1 ≤ 2,0 GB** y **P2 ≤ 3,0 GB**. Medido sobre `ebd030d`, tres corridas frías y tres calientes: **P1 máximo 1596,8 MB y P2 máximo 2894,2 MB**. Los dos cumplen. El margen de P2 es de 106 MB, menor que el ruido de M2 (~345 MB): una corrida futura puede dar «no cumple» sin que nada haya cambiado. Y el fixture de P2 (216 dpi) no es el peor caso: un escaneo a 300 dpi de 20 páginas dio una mediana de 2928 MiB de pico durante el OCR con la misma configuración (otro instrumento, no comparable contra este techo). Los techos por perfil de rendimiento y un perfil de medición a 300 dpi se definen con los perfiles (`Perfiles_Rendimiento_Revision.md`). Bajar estos techos para soportar equipos más chicos es meta de la v1.0 (`Version_1.0.md` §3).
+- **ABIERTO — aceptado sin implementar (anotado 2026-09-26, revisión de la ronda A, O-5).** Gate de export verificado leyendo el PDF exportado (ADR-148): rasterizar y pasar OCR al archivo exportado, con control sin anonimizar, prueba de geometría y prueba de extremo a extremo. ADR-148 §1 pide que su comando entre en `07_Performance_Strategy.md` §11.4 y en el workflow **en el mismo cambio que lo crea**, así que hasta entonces no figura en esa tabla.
+- **Implementación de ADR-149 §1 en CI (revisión de las rondas A y C).** Cancel: implementado en la ronda A. Performance, Leak y Stress: en la ronda C. El gate de Performance es **solo** `pipeline-timing.spec.ts`; en CI mide y verifica sin aplicar el umbral de 8 s, que se aplica en local antes de cada release con `ANONLY_PERF_ENFORCE_BUDGET=1` (decisión del humano, 2026-09-29). Leak y Stress fallan sin specs y exigen un mínimo ejecutado. Ver `07_Performance_Strategy.md` §11.4.
 
 ### Hito 11.5 — Escritorio (ADR-130, ADR-131, ADR-132)
 
@@ -582,11 +724,73 @@ Insertado con la convención decimal del repo, sin renumerar Release. Adelantado
   Verificación local ya corrida: 50/50 tests del shell; 1962/1962 tests globales; 96,64% de líneas del módulo criptográfico; 24/24 E2E; empaquetado NSIS exitoso y `app-update.yml` inspeccionado con el `publisherName` reservado. Falta cargar/probar el secret real mediante `workflow_dispatch`; ese flujo firma pero no publica, y es el gate final para cerrar el hito antes del tag.
 
 - **ABIERTO, con cobertura parcial resuelta por ADR-137** — El shell completo sigue sin un threshold plano porque `main.ts`, `preload.ts` y `windows-updater.ts` necesitan Electron y los cubren E2E y tests estáticos que no reportan cobertura v8. La superficie criptográfica nueva sí fue aislada como módulo puro, quedó incluida en `vitest.config.ts` con threshold propio ≥85% y mide 96,64% de líneas. Resolver el resto sin exclusiones engañosas sigue siendo política de proyecto y pide su ADR (R-18).
-- **ABIERTO** — Firma de código Windows vía SignPath Foundation (gratis para OSS; requiere el `LICENSE` de la raíz). Complementa ADR-137: autentica la **primera instalación**, da identidad de editor a Windows y permite construir reputación ante SmartScreen. Al integrarlo hay que reemplazar `win.signtoolOptions.publisherName: "__ANONLY_ED25519_ONLY__"` por el CN/DN real del certificado. El callback compuesto ya conserva el verificador Authenticode original y exigirá las dos comprobaciones: Ed25519 primero, Authenticode después.
+- **NO SE HACE — riesgo aceptado (2026-09-26)** — Firma Developer ID y notarización de macOS. No hay vía gratuita: solo las emite Apple con el Apple Developer Program pago, y su exención de cuota excluye a individuos. La app sigue con firma ad-hoc; qué queda sin cubrir y qué sí, en `08_Security_Model.md` §2.3.
+- **ABIERTO, implementado y aprobado (2026-09-26)** — La búsqueda de actualizaciones se puede apagar (ADR-188). ADR-131 §5 la declaraba desactivable y el código buscaba siempre. Se agrega la preferencia «Buscar actualizaciones automáticamente», activada por defecto, y el main no consulta hasta recibir la preferencia del renderer. El revisor aprobó en la ronda 2, con los seis gates en verde. Falta la verificación manual sobre el instalador empaquetado, en Windows y en macOS: con la búsqueda apagada, la app no debe conectarse a GitHub al abrir, y «Buscar actualizaciones ahora» sí debe consultar.
+- **ABIERTO, postulación preparada (2026-09-26)** — Firma de código Windows vía SignPath Foundation (gratis para OSS; requiere el `LICENSE` de la raíz). `CODE_SIGNING.md` y `PRIVACY.md` están listos. Requisitos, borrador del formulario, pasos pendientes del humano (2FA, llevar los documentos a `main`) y plan de integración: `SignPath_Postulacion.md`. Complementa ADR-137: autentica la **primera instalación**, da identidad de editor a Windows y permite construir reputación ante SmartScreen. Al integrarlo hay que reemplazar `win.signtoolOptions.publisherName: "__ANONLY_ED25519_ONLY__"` por el CN/DN real del certificado. El callback compuesto ya conserva el verificador Authenticode original y exigirá las dos comprobaciones: Ed25519 primero, Authenticode después.
 
 ### Hito 12 — Release 0.9.0
+- Revisión de `hardening/plan-2026-09` antes del merge a `main`, por bloques y con un revisor por bloque: `Revision_Por_Bloques_Hardening.md` (plan, orden, seguimiento y commits de cada bloque).
 - Docs finales, README del repo, demo.
+- README: guía del primer arranque en macOS. La app no está notarizada (`08_Security_Model.md` §2.3), así que Gatekeeper la bloquea la primera vez y el usuario tiene que permitirla desde Ajustes → Privacidad y seguridad.
+- README: declarar el **equipo mínimo soportado, 8 GB de RAM** (ADR-192 §1). Hecho el 2026-09-30.
+- **El instalador no lleva los sourcemaps del renderer** (decisión del humano, 2026-09-30). `vite.config.ts` los sigue generando (`sourcemap: true`), pero `electron-builder.yml` los excluye del `extraResources` del renderer: eran ~15 MB en cada instalación y en cada actualización, y la app no reporta errores a ningún lado, así que solo servían a quien abriera las DevTools de la app instalada. Para traducir un stack minificado que reporte un usuario, `release.yml` guarda los `.map` de **ese** build como artefacto interno del workflow, uno por plataforma (`sourcemaps-mac`, `sourcemaps-win`), con 90 días de retención: no viajan al release ni al instalador, y no dependen de que reconstruir el mismo commit dé los mismos bytes (decisión del humano, 2026-09-30). El nombre no empieza con `installers-`, que es el patrón que descarga el job que publica el release. Además, los `.map` llevan el texto fuente (`sourcesContent`), incluidos los ganchos de E2E que `scripts/ci/assert-no-e2e-hooks.mjs` verifica que no estén en el código del release.
 - Publicación de instaladores en GitHub Releases. ~~deploy a CDN estático~~ — no hay hosting: la app no se sirve, se descarga (ADR-130, ADR-131 §1).
+
+### Hito 12.5 — Rediseño desde las pruebas de usuario (ADR-168 a ADR-172)
+
+**Origen**: pruebas de usuario sobre la 0.9.2 y un lienzo de diseño iterado con el humano
+("Anonly — Nueva pantalla inicial", páginas *Inicio y carga*, *Pantalla de trabajo* y su versión
+oscura). Branch de campaña `redesign/ui-pruebas-de-usuario` (ADR-124: un commit = un módulo).
+
+**Docs** (hechos, uno por ADR): ADR-168 (carga y escaneo, "Acerca de" al pie del inicio, enlaces al
+repositorio regularizados, fallo de importación vuelve a ①, flujo de cuatro pasos), ADR-169 (pantalla
+de trabajo, UX-10 diseño estable), ADR-170 (vistas previas calculadas por el Core), ADR-171 (eliminar
+entidad con supresión por sesión), ADR-172 (deshacer y rehacer exactos por puntos de restauración).
+
+**Implementación, en este orden** — cada fila es un commit de un solo módulo:
+
+| # | Qué | Módulo | Depende de | Estado |
+|---|---|---|---|---|
+| 1 | Tipos: `ReplacementPreviews`, `EntityGroup.replacementPreviews`, `EditPreview*`, `GROUP_REMOVE_REQUESTED` + `GroupRemoveRequested` + `EventPayloadMap`, `MAX_EDIT_CHECKPOINTS` | `shared` | — | hecho (`dca2260`) |
+| 2 | `replacementPreviews` (15r) y `previewEdit` | `grouping-engine` | 1 | hecho (`893c4fa`) |
+| 3 | `applyGroupRemove`, `removedValues`, `liftRemoval` (15s) | `grouping-engine` | 1 | hecho (`5079784`) |
+| 4 | `createCheckpoint`/`restoreCheckpoint`/`discardCheckpoints` (15t) | `grouping-engine` | 2, 3 | hecho (`8f82315` + errata `cd8c759`) |
+| 5 | Façade: `previewEdit` (28), `liftRemoval` en `addManualEntity` (29), puntos de restauración con literales retenidos (30) | `anonymization-core/src` | 2-4 | hecho (`6800470`) |
+| 6 | ADR-168: `LoadScreen` en cajas, `DropZone` de cuatro estados, `HowItWorks`, `AboutDialog`, fallo de importación a ①, `ScanSteps` | `apps/react-client` | — | hecho |
+| 7 | ADR-169: lista, avisos, `Tooltip`, franja, género con borde, visor (pellizco, separador), lupa, selección persistente, `EntityTypePicker`, `AddEntityDialog`, Configuración, tokens | `apps/react-client` | — | hecho |
+| 8 | ADR-170: selector de modo exacto y diálogos Fusionar/Dividir/Editar reemplazo/Cambiar tipo con `previewEdit` | `apps/react-client` | 5, 7 | hecho |
+| 9 | ADR-171/172: "Eliminar entidad", `history.store`, atajos, toasts con "Deshacer" | `apps/react-client` | 5, 7 | hecho |
+| 10 | B-1: `replacementPreviews` en los fixtures de `tests/invariants` y `tests/security` | `tests/` | 1 | **hecho** (`029ba67`) |
+| 11 | ADR-173 (15u) y ADR-174 (15v): rechazos de fusión/división y ocurrencia manual retenida | `grouping-engine` | 4 | **hecho** (`356865c`) |
+| 12 | Tipos de ADR-174: `Conflict.heldManual`, `ManualEntityResult.heldConflictIds`, `ConflictResolveRequested.winner` | `shared` (y `anonymization-core/src/types.ts` para `ManualEntityResult`, que vive en el façade, `Contracts.md` §3.5) | — | **hecho** (`4bfb35c`) |
+| 13 | ADR-174 §2 y N-4 del revisor (Orchestrator 31) | `anonymization-core/src` | 11, 12 | **hecho** (`f5148c7`) |
+| 14 | ADR-174 §4 (`ManualOverlapDialog`, toast honesto, entrada de deshacer retirada), N-5 (ranura del error de `SettingsDialog`) y N-2 (tests de los `.ts` sin cobertura) | `apps/react-client` | 13 | **hecho** (`8e27858`, `29c2126`) |
+| 15 | ADR-175 (15w): invariante de `heldManual`, retenida que se oculta sola, `liftRemoval` reabre la decisión | `grouping-engine` | — | **hecho** (`cae65b2`) |
+| 16 | Tipo de ADR-175: `ManualEntityResult.groupIds` | `anonymization-core/src/types.ts` | — | **hecho** (`f0a0db1`) |
+| 17 | ADR-175 §3 (Orchestrator 32) | `anonymization-core/src` | 15, 16 | **hecho** (`93ed554`) |
+| 18 | ADR-175 §1, §3-§5 en la UI, y los no bloqueantes 3, 5 y 7 de la revisión 2 | `apps/react-client` | 17 | **hecho** (`e7380d1`, `e2c6577`) |
+| 19 | `EngineErrorCode.EXPORT_UNRESOLVED_CONFLICTS` (`manualOutcome` es un método de `GroupingEngine` y va en la fila 20) | `shared` | — | **hecho** (`80ab79e`) |
+| 20 | ADR-176 §2-§4 (15x): reapuntar conflictos, `manualOutcome`, `liftRemoval` | `grouping-engine` | 19 | **hecho** (`9e1957a`) |
+| 21 | ADR-176 §1 y §3 (Orchestrator 33) | `anonymization-core/src` | 20 | **hecho** (`50f7edc`) |
+| 22 | ADR-176 §1 en la UI: `ExportButton` bloqueado con motivo y "Resolver" | `apps/react-client` | 21 | **hecho** (`edc223b`, `f9fb9c9`) |
+| 23 | ADR-177 §1-§2 (15y): una entidad eliminada no ocupa lugar; `liftRemoval` olvida los registros no vivos del valor | `grouping-engine` | — | **hecho** (`8fa1794`) |
+| 24 | ADR-177 §4: el motivo de `ExportButton` flota anclado a la derecha | `apps/react-client` | — | **hecho** (`cbb466b`) |
+| 25 | ADR-178 (15z): lo manual contenido queda guardado y se oculta solo si su contenedor se elimina | `grouping-engine` | 23 | **hecho** (`17d4501`) |
+
+**Revisión 1 (2026-09-24): REJECTED** con tres bloqueantes — B-1 (typecheck rojo en `tests/`), B-2 (ADR-170 enumeraba rechazos que el motor no hacía → ADR-173), B-3 (el toast de alta podía mentir → ADR-174) — y no bloqueantes N-1 a N-8. Las filas 10-14 los cierran. N-8 (`scenario-2`/`scenario-5` de E2E) es anterior a esta branch: va en un commit aparte sobre `hardening/plan-2026-09`.
+
+**Revisión 2 (2026-09-24): REJECTED**: B-1 y B-2 cerrados; B-3 abierto por dos caminos —un choque que se "resolvía" solo al desaparecer la detección, y `heldConflictIds` por igualdad exacta de texto—. ADR-175 los cierra (filas 15-18). También cae ahí `mac-packaging.test.ts` de `apps/desktop-shell`: falla fuera de esta branch por los CRLF de `electron-builder.yml` con `core.autocrlf=true`, igual que N-8 (resuelto el 2026-09-26: `.gitattributes` fija `eol=lf`).
+
+**Revisión 3 (2026-09-24): REJECTED**: los dos bloqueantes de la revisión 2 cerrados; tres nuevos —nada bloqueaba el export con un conflicto sin resolver, fusionar/dividir la detección dejaba el choque inalcanzable, y un agregado contenido (ADR-117) rompía el invariante de `groupIds`—. ADR-176 los cierra (filas 19-22).
+
+**Revisión 4 (2026-09-24): REJECTED** — los bloqueantes de la revisión 3 cerrados; quedan dos por entidades eliminadas que siguen ocupando lugar (contención y superposición) y la ranura del motivo de `ExportButton`. Reporte completo: `roadmap/Hito12.5_Revision_R4_Handoff.md`. El humano decidió D1 = A (una entidad eliminada no ocupa lugar, y un agregado manual del valor la vuelve a traer) y D2 = A (motivo flotante a la derecha). ADR-177 los cierra (filas 23-24), junto con B4-0, que encontró el planificador: re-agregar en la misma posición lo eliminado lo descartaba el dedup.
+
+**Revisión 5 (2026-09-24): REJECTED**: B4-0 a B4-3 y N4-1 cerrados; queda B5-1 —con «Perez» agregado a mano antes de eliminar «Juan Perez», la aparición contenida quedaba a la vista y un re-análisis la volvía a ocultar— y N5-1 (15y sin marcar). El humano eligió que lo contenido se oculte solo (opción C): ADR-178 lo cierra (fila 25).
+
+**Revisión 6 (2026-09-24): APPROVED**: B5-1 y N5-1 cerrados. Quedan dos observaciones no bloqueantes: O6-1 (eliminar una entidad puede abrir un choque si lo re-procesado choca con otra), **cerrada** con el caso 69 y su test, y O6-2 (el límite conocido de ADR-117, que es previo). El PR va contra `hardening/plan-2026-09`.
+
+**Reglas de este hito** (además de las de siempre): UX-10 —nada que aparezca desplaza el diseño— se
+revisa en cada PR de la app; los PR 6-9 se verifican en el browser con los dos temas.
 
 ---
 

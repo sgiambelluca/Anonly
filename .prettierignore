@@ -6,6 +6,8 @@ pnpm-lock.yaml
 *.pdf
 **/fixtures/**
 .changeset/*.md
+.measure/**
+.agents/skills/**
 
 # Documentación: el formateo automático de Prettier (especialmente printWidth)
 # rompe el wrap de los docs largos y no aporta valor. Se formatean manualmente.
@@ -16,4 +18,3 @@ CHANGELOG.md
 
 # tsconfigs (con comments y formato específico de TS, prettier no los mejora)
 **/tsconfig*.json
-

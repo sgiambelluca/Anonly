@@ -775,6 +775,7 @@ describe("NerEngine — unit tests", () => {
         params.onProgress?.(0.4, { phase: "model-loading", modelId: "test-model-warm" });
         return params.run();
       },
+      onWorkersReleased: (): (() => void) => () => {},
     };
     const pooledEngine = new NerEngine(pool);
     await pooledEngine.init(warmCtx);
@@ -813,6 +814,7 @@ describe("NerEngine — unit tests", () => {
         params.onProgress?.(1, { phase: "model-ready", modelId: "test-model-dedupe" });
         return params.run();
       },
+      onWorkersReleased: (): (() => void) => () => {},
     };
     const pooledEngine = new NerEngine(pool);
     await pooledEngine.init(dedupCtx);
@@ -830,6 +832,279 @@ describe("NerEngine — unit tests", () => {
     expect(pooledEngine.isModelReady()).toBe(true);
 
     await pooledEngine.dispose();
+  });
+
+  // ─── ADR-167 §3 (spec §13 casos 28/30/31) — onWorkersReleased ───
+
+  describe("onWorkersReleased (ADR-167 §3)", () => {
+    it("subscribes in the constructor and resets modelWarm on a notified release (caso 28)", async () => {
+      asPipelineMock(pipeline).mockResolvedValue(
+        mockTokenClassificationPipeline(() => Promise.resolve([])),
+      );
+      let releaseListener: (() => void) | undefined;
+      const pool = {
+        dispatch: <T>(params: NerPoolDispatchParams<T>): Promise<T> => {
+          params.onProgress?.(1, { phase: "model-ready", modelId: "test-model-release" });
+          return params.run();
+        },
+        onWorkersReleased: (listener: () => void): (() => void) => {
+          releaseListener = listener;
+          return () => {
+            releaseListener = undefined;
+          };
+        },
+      };
+      const pooledEngine = new NerEngine(pool);
+      await pooledEngine.init(ctx);
+      expect(releaseListener).toBeDefined();
+
+      await pooledEngine.processPage(makeNerPageInput("doc-release", 0, ["Juan"]), ctx);
+      expect(pooledEngine.isModelReady()).toBe(true);
+
+      // Simula al pool notificando una baja efectiva (ADR-167 §3): venga del
+      // temporizador de inactividad o de una llamada explícita, el único
+      // rastro que le llega al motor es esta notificación.
+      releaseListener?.();
+
+      expect(pooledEngine.isModelReady()).toBe(false);
+
+      await pooledEngine.dispose();
+    });
+
+    // Discriminante (ADR-149 §2): antes de ADR-167 el motor no se suscribía
+    // a nada — la única baja que reiniciaba `modelWarm` era la que el propio
+    // motor pedía (ADR-166 §1bis, retirado). Una baja que llega por el
+    // temporizador de `WorkerPool` (que nunca pasaba por el motor) dejaba la
+    // recarga siguiente muda: el kernel sí reportaba `model-loading`/
+    // `model-ready`, pero `handleKernelProgress` los deduplicaba contra un
+    // `modelWarm` que seguía en `true`. Medido: ~2 s de recarga sin
+    // `NER_MODEL_READY` (ADR-167 Contexto §4).
+    it("a reload after the pool notifies a release re-emits NER_MODEL_LOADING and NER_MODEL_READY (caso 30)", async () => {
+      asPipelineMock(pipeline).mockResolvedValue(
+        mockTokenClassificationPipeline(() => Promise.resolve([])),
+      );
+      const config = createMockConfig({
+        ner: {
+          modelId: "test-model-reload",
+          quantization: "q8",
+          confidenceThreshold: 0.7,
+          batchSize: 1,
+          enabled: true,
+        },
+      });
+      const reloadCtx = createEngineContext({ config });
+
+      let releaseListener: (() => void) | undefined;
+      // Reporta el par LOADING/READY en cada dispatch, como haría el kernel
+      // de un worker recién reconstruido tras la baja (ADR-046 §4).
+      const pool = {
+        dispatch: <T>(params: NerPoolDispatchParams<T>): Promise<T> => {
+          params.onProgress?.(0.5, { phase: "model-loading", modelId: "test-model-reload" });
+          params.onProgress?.(1, { phase: "model-ready", modelId: "test-model-reload" });
+          return params.run();
+        },
+        onWorkersReleased: (listener: () => void): (() => void) => {
+          releaseListener = listener;
+          return () => {
+            releaseListener = undefined;
+          };
+        },
+      };
+      const pooledEngine = new NerEngine(pool);
+      await pooledEngine.init(reloadCtx);
+      const busEmitSpy = vi.spyOn(reloadCtx.bus, "emit");
+
+      await pooledEngine.processPage(makeNerPageInput("doc-reload-1", 0, ["Juan"]), reloadCtx);
+      expect(pooledEngine.isModelReady()).toBe(true);
+
+      // El temporizador de `nerIdleDisposeMs` vence: el pool notifica.
+      releaseListener?.();
+      expect(pooledEngine.isModelReady()).toBe(false);
+
+      await pooledEngine.processPage(makeNerPageInput("doc-reload-2", 0, ["Pérez"]), reloadCtx);
+      expect(pooledEngine.isModelReady()).toBe(true);
+
+      const loadingCalls = busEmitSpy.mock.calls.filter(
+        ([, event]) => event === EngineEvents.NER_MODEL_LOADING,
+      );
+      const readyCalls = busEmitSpy.mock.calls.filter(
+        ([, event]) => event === EngineEvents.NER_MODEL_READY,
+      );
+      expect(loadingCalls).toHaveLength(2);
+      expect(readyCalls).toHaveLength(2);
+
+      await pooledEngine.dispose();
+    });
+
+    // Caso 33 (enmienda de ADR-167): un pool que despacha in-process (`WorkerPool`
+    // sin `workerFactory`) corre `run()` en este hilo, así que el kernel y el
+    // modelo viven acá y la baja tiene que soltarlos de verdad. El doble es
+    // equivalente: `dispatch` ejecuta `run()` y la baja se notifica a mano.
+    it("an in-process pool release unloads the model and the next page reloads it", async () => {
+      asPipelineMock(pipeline).mockImplementation((_task, _model, options) => {
+        options?.progress_callback?.({ status: "progress", progress: 50, loaded: 50, total: 100 });
+        return Promise.resolve(mockTokenClassificationPipeline(() => Promise.resolve([])));
+      });
+      const config = createMockConfig({
+        ner: {
+          modelId: "test-model-inprocess-release",
+          quantization: "q8",
+          confidenceThreshold: 0.7,
+          batchSize: 1,
+          enabled: true,
+        },
+      });
+      const inProcessCtx = createEngineContext({ config });
+
+      let releaseListener: (() => void) | undefined;
+      const pool = {
+        dispatch: <T>(params: NerPoolDispatchParams<T>): Promise<T> => params.run(),
+        onWorkersReleased: (listener: () => void): (() => void) => {
+          releaseListener = listener;
+          return () => {
+            releaseListener = undefined;
+          };
+        },
+      };
+      const pooledEngine = new NerEngine(pool);
+      await pooledEngine.init(inProcessCtx);
+      const busEmitSpy = vi.spyOn(inProcessCtx.bus, "emit");
+
+      await pooledEngine.processPage(makeNerPageInput("doc-inproc-1", 0, ["Juan"]), inProcessCtx);
+      expect(pooledEngine.isModelReady()).toBe(true);
+      expect(asPipelineMock(pipeline)).toHaveBeenCalledTimes(1);
+
+      releaseListener?.();
+      expect(pooledEngine.isModelReady()).toBe(false);
+
+      await pooledEngine.processPage(makeNerPageInput("doc-inproc-2", 0, ["Pérez"]), inProcessCtx);
+      expect(pooledEngine.isModelReady()).toBe(true);
+      expect(asPipelineMock(pipeline)).toHaveBeenCalledTimes(2);
+
+      const countOf = (event: EngineEvents): number =>
+        busEmitSpy.mock.calls.filter(([, name]) => name === event).length;
+      expect(countOf(EngineEvents.NER_MODEL_LOADING)).toBe(2);
+      expect(countOf(EngineEvents.NER_MODEL_READY)).toBe(2);
+
+      await pooledEngine.dispose();
+    });
+
+    it("without a release notification between two loads, the model is reused: no reload, no LOADING/READY pair (caso 31)", async () => {
+      asPipelineMock(pipeline).mockResolvedValue(
+        mockTokenClassificationPipeline(() => Promise.resolve([])),
+      );
+      const config = createMockConfig({
+        ner: {
+          modelId: "test-model-no-release",
+          quantization: "q8",
+          confidenceThreshold: 0.7,
+          batchSize: 1,
+          enabled: true,
+        },
+      });
+      const noReleaseCtx = createEngineContext({ config });
+
+      // Mismo pool que arriba (reporta LOADING/READY en cada dispatch, como
+      // haría un worker real), pero acá nunca se invoca el listener: el
+      // caso de quien procesa una tanda dentro de `nerIdleDisposeMs`
+      // (ADR-167 §5.3).
+      const pool = {
+        dispatch: <T>(params: NerPoolDispatchParams<T>): Promise<T> => {
+          params.onProgress?.(0.5, { phase: "model-loading", modelId: "test-model-no-release" });
+          params.onProgress?.(1, { phase: "model-ready", modelId: "test-model-no-release" });
+          return params.run();
+        },
+        onWorkersReleased: (): (() => void) => () => {},
+      };
+      const pooledEngine = new NerEngine(pool);
+      await pooledEngine.init(noReleaseCtx);
+      const busEmitSpy = vi.spyOn(noReleaseCtx.bus, "emit");
+
+      await pooledEngine.processPage(
+        makeNerPageInput("doc-no-release-1", 0, ["Juan"]),
+        noReleaseCtx,
+      );
+      await pooledEngine.processPage(
+        makeNerPageInput("doc-no-release-2", 0, ["Pérez"]),
+        noReleaseCtx,
+      );
+
+      const loadingCalls = busEmitSpy.mock.calls.filter(
+        ([, event]) => event === EngineEvents.NER_MODEL_LOADING,
+      );
+      const readyCalls = busEmitSpy.mock.calls.filter(
+        ([, event]) => event === EngineEvents.NER_MODEL_READY,
+      );
+      expect(loadingCalls).toHaveLength(1);
+      expect(readyCalls).toHaveLength(1);
+
+      await pooledEngine.dispose();
+    });
+
+    it("dispose() unsubscribes: a release notified afterward no longer touches modelWarm", async () => {
+      asPipelineMock(pipeline).mockResolvedValue(
+        mockTokenClassificationPipeline(() => Promise.resolve([])),
+      );
+      let releaseListener: (() => void) | undefined;
+      const pool = {
+        dispatch: <T>(params: NerPoolDispatchParams<T>): Promise<T> => params.run(),
+        onWorkersReleased: (listener: () => void): (() => void) => {
+          releaseListener = listener;
+          return () => {
+            releaseListener = undefined;
+          };
+        },
+      };
+      const pooledEngine = new NerEngine(pool);
+      await pooledEngine.init(ctx);
+      expect(releaseListener).toBeDefined();
+
+      await pooledEngine.dispose();
+
+      expect(releaseListener).toBeUndefined();
+    });
+
+    // O-8: `dispose()` desuscribe (test de arriba); sin re-suscribir en
+    // `init()`, un segundo ciclo init→processPage→release dejaba
+    // `modelWarm` sin resetear para siempre — la baja del pool quedaba
+    // muda a partir del primer dispose(), no solo hasta el próximo.
+    it("re-subscribes on a second init() after dispose(), so a later release still resets modelWarm", async () => {
+      asPipelineMock(pipeline).mockResolvedValue(
+        mockTokenClassificationPipeline(() => Promise.resolve([])),
+      );
+      let releaseListener: (() => void) | undefined;
+      const pool = {
+        dispatch: <T>(params: NerPoolDispatchParams<T>): Promise<T> => {
+          params.onProgress?.(1, { phase: "model-ready", modelId: "test-model-resubscribe" });
+          return params.run();
+        },
+        onWorkersReleased: (listener: () => void): (() => void) => {
+          releaseListener = listener;
+          return () => {
+            releaseListener = undefined;
+          };
+        },
+      };
+      const pooledEngine = new NerEngine(pool);
+
+      await pooledEngine.init(ctx);
+      await pooledEngine.processPage(makeNerPageInput("doc-resub-1", 0, ["Juan"]), ctx);
+      expect(pooledEngine.isModelReady()).toBe(true);
+
+      await pooledEngine.dispose();
+      expect(releaseListener).toBeUndefined();
+
+      await pooledEngine.init(ctx);
+      await pooledEngine.processPage(makeNerPageInput("doc-resub-2", 0, ["Pérez"]), ctx);
+      expect(pooledEngine.isModelReady()).toBe(true);
+      expect(releaseListener).toBeDefined();
+
+      releaseListener?.();
+
+      expect(pooledEngine.isModelReady()).toBe(false);
+
+      await pooledEngine.dispose();
+    });
   });
 
   it("deserialized NER_TIMEOUT is retried; deserialized NER_MODEL_MISSING aborts", async () => {
@@ -854,6 +1129,7 @@ describe("NerEngine — unit tests", () => {
         }
         return params.run();
       },
+      onWorkersReleased: (): (() => void) => () => {},
     };
     const timeoutEngine = new NerEngine(timeoutPool);
     await timeoutEngine.init(ctx);
@@ -877,6 +1153,7 @@ describe("NerEngine — unit tests", () => {
         expect(deserialized).not.toBeInstanceOf(NerModelMissingError);
         return Promise.reject(deserialized);
       },
+      onWorkersReleased: (): (() => void) => () => {},
     };
     const missingEngine = new NerEngine(missingPool);
     await missingEngine.init(ctx);

@@ -30,7 +30,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { actions } from "../../core-adapter/actions.js";
 import { subscribePasswordRequired } from "../../core-adapter/bus-bridge.js";
-import { getCoreAsync } from "../../core-adapter/index.js";
+import { subscribeToLiveCore } from "../../core-adapter/index.js";
 import { usePipelineStore } from "../../store/pipeline.store.js";
 import { Button } from "../common/Button.js";
 import { ConfirmDialog } from "../common/ConfirmDialog.js";
@@ -45,20 +45,14 @@ export function PasswordDialog() {
   const stage = usePipelineStore((state) => state.stage);
 
   useEffect(() => {
-    let cancelled = false;
-    let unsubscribe: (() => void) | undefined;
-
-    // `getCoreAsync()`, no `initCore()` (PR17.3): este componente solo
-    // necesita `core.bus`, nunca debe tener autoridad para arrancar
-    // `createCore()` — eso es exclusivo de `App.tsx`, que le pasa el
-    // `EngineConfigOverrides` derivado de `settings.store` (PR16.5). Como los
-    // efectos de los hijos corren antes que los del padre en el mismo commit
-    // de montaje, `PasswordDialog` (hijo de `App`) monta primero: si llamara
-    // a `initCore()` acá, ganaría la carrera de inicialización y el override
-    // de `App.tsx` se perdería en silencio.
-    void getCoreAsync().then((core) => {
-      if (cancelled) return;
-      unsubscribe = subscribePasswordRequired(core.bus, () => {
+    // `subscribeToLiveCore`, no `initCore()` (PR17.3): este componente solo
+    // necesita el bus, nunca debe tener autoridad para arrancar `createCore()`
+    // — eso es exclusivo de `App.tsx`, que le pasa el `EngineConfigOverrides`
+    // derivado de `settings.store` (PR16.5). Y sigue al Core vivo (ADR-194
+    // §9): cada Core tiene su propio bus, y tras una recreación el evento del
+    // Core nuevo no llegaría a una suscripción hecha al montar.
+    return subscribeToLiveCore((bus) =>
+      subscribePasswordRequired(bus, () => {
         if (hasSubmittedRef.current) {
           // El evento se re-emitió para el mismo documentId: el reintento
           // anterior falló (core/Orchestrator.md §13 caso 3).
@@ -67,13 +61,8 @@ export function PasswordDialog() {
         } else {
           setOpen(true);
         }
-      });
-    });
-
-    return () => {
-      cancelled = true;
-      unsubscribe?.();
-    };
+      }),
+    );
   }, []);
 
   // La contraseña fue aceptada (o el documento falló por otra razón): el

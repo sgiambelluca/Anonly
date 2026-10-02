@@ -67,6 +67,21 @@ export interface ViewerSlice {
    * "Agregar como…") sigue siendo local: es trabajo interno suyo.
    */
   readonly searchQuery: string;
+  /**
+   * ADR-190 §4: pedido de "ir a esta página" que no nace del buscador
+   * (`activeMatch`/`scrollNonce` de `PdfViewer`, ADR-169 §7) — hoy solo lo usa
+   * la fila "Ir a la página" de la confirmación de `ExportDialog`, que vive
+   * fuera del árbol del visor y no tiene cómo pasarle una prop. `nonce` fuerza
+   * el salto aunque se pida la misma página dos veces seguidas, mismo
+   * mecanismo que `scrollRequest` en `PageVirtualizer`.
+   *
+   * **Se consume una sola vez** (`consumePageJump`): el visor lo toma y lo
+   * deja en `null`. Sin eso, un `PdfViewer` que se desmonta y vuelve a
+   * montarse con el pedido viejo todavía en el store repetiría el salto y
+   * arrancaría el scroll de un documento donde el usuario ya estaba en otro
+   * lado.
+   */
+  readonly pageJumpRequest: { readonly pageIndex: number; readonly nonce: number } | null;
   setPage(index: number): void;
   setSearchQuery(query: string): void;
   setZoom(z: number): void;
@@ -74,6 +89,13 @@ export interface ViewerSlice {
   setPreview(pageIndex: number, kind: ViewerKind, blobUrl: string): void;
   setPageFailed(pageIndex: number): void;
   setVisibleRange(start: number, end: number): void;
+  requestPageJump(pageIndex: number): void;
+  /**
+   * Toma el pedido de salto pendiente y lo borra del store. Devuelve `null` si
+   * no hay ninguno (o si otro consumidor ya lo tomó): quien lo recibe es el
+   * único que debe saltar.
+   */
+  consumePageJump(): { readonly pageIndex: number; readonly nonce: number } | null;
   reset(): void;
 }
 
@@ -93,6 +115,7 @@ type ViewerData = Pick<
   | "failedPages"
   | "visibleRange"
   | "searchQuery"
+  | "pageJumpRequest"
 >;
 
 const initialState: ViewerData = {
@@ -105,9 +128,12 @@ const initialState: ViewerData = {
   failedPages: new Set(),
   searchQuery: "",
   visibleRange: { start: 0, end: 0 },
+  pageJumpRequest: null,
 };
 
-export const useViewerStore = create<ViewerSlice>((set) => ({
+let jumpNonce = 0;
+
+export const useViewerStore = create<ViewerSlice>((set, get) => ({
   ...initialState,
   setSearchQuery(query) {
     set({ searchQuery: query });
@@ -146,6 +172,18 @@ export const useViewerStore = create<ViewerSlice>((set) => ({
   },
   setVisibleRange(start, end) {
     set({ visibleRange: { start, end } });
+  },
+  requestPageJump(pageIndex) {
+    // Contador propio (no `pageJumpRequest.nonce + 1`): como el pedido se
+    // consume y vuelve a `null`, derivarlo del anterior reiniciaría en 1.
+    jumpNonce += 1;
+    set({ pageJumpRequest: { pageIndex, nonce: jumpNonce } });
+  },
+  consumePageJump() {
+    const request = get().pageJumpRequest;
+    if (request === null) return null;
+    set({ pageJumpRequest: null });
+    return request;
   },
   reset() {
     set(initialState);

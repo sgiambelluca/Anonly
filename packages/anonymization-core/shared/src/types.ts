@@ -87,6 +87,8 @@ export interface Page {
   readonly requiresOCR: boolean;
   readonly ocrCompleted: boolean;
   readonly dpi?: number;
+  /** Cap seguro derivado de un único ráster fuente (ADR-163). */
+  readonly ocrDpiCap?: number;
 }
 
 /**
@@ -198,6 +200,21 @@ export interface OccurrenceRef {
   readonly context?: OccurrenceContext;
 }
 
+/**
+ * ADR-170 §1: lo que valdría `EntityGroup.replacementValue` si el grupo
+ * pasara a cada modo, calculado por Grouping con la misma función
+ * (`computeReplacementValue`) e ignorando `replacementValueUserSet` (cambiar
+ * el modo recalcula, ADR-076 §3). `redact` no tiene entrada: su valor es
+ * siempre `""`. Campo requerido de `EntityGroup` (`03_Data_Model.md` §9).
+ */
+export interface ReplacementPreviews {
+  readonly placeholder: string;
+  readonly mask: string;
+  readonly synthetic: string;
+  /** Niveles distintos de la escalera de ADR-057, del más largo al más corto; incluye `placeholder`. */
+  readonly placeholderLadder: ReadonlyArray<string>;
+}
+
 export interface EntityGroup {
   readonly id: string;
   readonly type: EntityType;
@@ -244,6 +261,13 @@ export interface EntityGroup {
    * detección confiable posterior y se quedaría apagado.
    */
   readonly needsReview: boolean;
+  /**
+   * ADR-170 §1: el valor que tendría el grupo en cada modo (ver
+   * `ReplacementPreviews`). Requerido. Lo calcula Grouping con la misma
+   * función que `replacementValue`; la UI lo muestra en el selector de modo y
+   * en "Editar reemplazo". No lo leen Render ni Export.
+   */
+  readonly replacementPreviews: ReplacementPreviews;
   readonly createdAt: number;
   readonly updatedAt: number;
 }
@@ -305,6 +329,40 @@ export interface TextMatch {
   readonly wordSpan: WordSpan;
 }
 
+// ─── Vistas previas de edición (ADR-170 §2, Contracts.md §3.5) ───
+// Operaciones hipotéticas que la UI muestra antes de confirmar
+// (ui/React_Client.md ADR-169 §10). Los valores salen del mismo código que el
+// pedido real sobre una copia de la sesión; la UI no los reimplementa (U-3).
+export type EditPreviewRequest =
+  | { readonly kind: "type"; readonly groupId: string; readonly type: EntityType }
+  | {
+      readonly kind: "merge";
+      readonly sourceGroupId: string;
+      readonly targetGroupIds: ReadonlyArray<string>;
+    }
+  | {
+      readonly kind: "split";
+      readonly groupId: string;
+      readonly occurrenceIds: ReadonlyArray<string>;
+    };
+
+export interface EditPreviewGroup {
+  /** `null` = el grupo que la operación crearía (la parte nueva de un split). */
+  readonly groupId: string | null;
+  readonly type: EntityType;
+  readonly indexInType: number;
+  readonly canonicalValue: string;
+  readonly memberCount: number;
+  readonly replacementMode: ReplacementMode;
+  readonly replacementValue: string;
+}
+
+export interface EditPreview {
+  // type -> 1 grupo (el reclasificado); merge -> 1 (el sobreviviente);
+  // split -> 2 (el original y el nuevo, en ese orden).
+  readonly groups: ReadonlyArray<EditPreviewGroup>;
+}
+
 export interface RuleTarget {
   readonly kind: RuleScope;
   readonly groupId?: string;
@@ -350,6 +408,11 @@ export interface Conflict {
    * entidad; el modo de reemplazo se elige en la fila del grupo).
    */
   readonly resolvedType?: EntityType;
+  /**
+   * ADR-174 §1: hay una ocurrencia manual retenida esperando que el usuario
+   * decida quién gana (`ConflictResolveRequested.winner`).
+   */
+  readonly heldManual?: true;
 }
 
 export interface PipelineError {
@@ -384,6 +447,7 @@ export interface WorkerJob {
 export type WorkerJobPayload =
   | PdfParsePayload
   | OcrPagePayload
+  | OcrOrientationPayload
   | NerPagePayload
   | RenderPagePayload
   | ExportPagePayload;
@@ -398,13 +462,39 @@ export interface PdfParsePayload {
 export interface OcrPagePayload {
   readonly documentId: string;
   readonly pageIndex: number;
-  // Errata corregida (ADR-036 §4): era ArrayBuffer, que no transporta
-  // width/height y el OcrWorker no puede reconstruir la imagen. Coincide con
-  // OcrPageInput del motor (03_Data_Model.md §18). Transferencia:
-  // postMessage(msg, [imageData.data.buffer]).
-  readonly imageData: ImageData;
+  // ADR-158 §2: imagen CODIFICADA (PNG), no píxeles crudos. Antes era
+  // `imageData: ImageData` (~35 MB por A4 a 300 dpi) — tesseract.js no acepta
+  // píxeles crudos en ningún formato, así que se reconstruía un canvas del
+  // otro lado y se encodeaba igual. Se CLONA, no se transfiere: el reintento
+  // del pool reusa el buffer (ADR-079/ADR-158 §5).
+  readonly image: EncodedPageImage;
+  readonly orientation: OcrOrientation;
   readonly dpi: number;
   readonly languages: ReadonlyArray<string>;
+  // ADR-190 §2 paso 4 y §5: factor con el que el kernel agranda la imagen
+  // decodificada antes de reconocer. Default 1; rango 1 ≤ upscale ≤ 300/dpi.
+  // Las coordenadas se convierten con dpi × upscale (el bbox sigue en puntos).
+  readonly upscale?: number;
+}
+
+export type OcrOrientation = 0 | 90 | 180 | 270;
+
+export interface OcrOrientationPayload {
+  readonly documentId: string;
+  readonly pageIndex: number;
+  readonly image: EncodedPageImage;
+  readonly languages: ReadonlyArray<string>;
+  readonly timeoutMs: number;
+}
+
+export interface OcrOrientationResult {
+  readonly orientation: OcrOrientation;
+  // ADR-190 §3: fracción de píxeles presentes (predicado de ADR-162) sobre la
+  // imagen reducida del OSD, en [0, 1]. La página tiene tinta si
+  // inkRatio ≥ INK_PRESENT_RATIO (0.002).
+  readonly inkRatio: number;
+  /** True only when OSD returned a valid angle with sufficient confidence. */
+  readonly osdHadVerdict: boolean;
 }
 
 // ADR-046 §3/§5: `text` es el texto de UN BATCH de NerConfig.batchSize
@@ -600,6 +690,10 @@ export interface ExportOptions {
   // que ADR-057 pudo abreviar. Default false: sin el flag, el export no cambia en
   // nada. Con el flag, el PDF tiene document.pageCount + 1 páginas.
   readonly includeMarkerLegend: boolean; // default false
+  // ADR-190 §5: páginas que se exportan enteramente negras, con sus mismas
+  // dimensiones, sin pedir su render. Fuera de rango → InvalidInputError;
+  // duplicados se ignoran; ausente o vacío → export idéntico al previo.
+  readonly coveredPages?: ReadonlyArray<number>;
 }
 
 export interface ExportMetadata {

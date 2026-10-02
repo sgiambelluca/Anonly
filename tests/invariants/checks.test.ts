@@ -52,6 +52,14 @@ function group(overrides: Partial<EntityGroup> = {}): EntityGroup {
     aliases: [],
     replacementValueUserSet: false,
     needsReview: false,
+    // ADR-170 §1: requerido en EntityGroup; coherente con replacementValue de
+    // arriba (mismo patrón que makeEntityGroup en grouping-engine/__tests__).
+    replacementPreviews: {
+      placeholder: "[PERSONA 01]",
+      mask: "",
+      synthetic: "",
+      placeholderLadder: ["[PERSONA 01]"],
+    },
     createdAt: 0,
     updatedAt: 0,
     ...overrides,

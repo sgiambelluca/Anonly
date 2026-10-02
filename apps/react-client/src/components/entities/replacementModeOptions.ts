@@ -10,12 +10,12 @@
  * vigente, los cuatro valores del enum son los mismos): cambia solo cómo se
  * los llama.
  *
- * El **ejemplo** se construye con el grupo real de la fila (`buildModeOptions`)
- * y no con un valor genérico: la pregunta que el usuario tiene es qué le pasa
- * *a su dato*.
+ * La **vista previa** de cada opción es la del grupo real de la fila
+ * (`resolveModePreview`, ADR-170): la pregunta que el usuario tiene es qué le
+ * pasa *a su dato*.
  */
 
-import { ReplacementMode } from "@anonly/anonymization-core";
+import { ReplacementMode, type ReplacementPreviews } from "@anonly/anonymization-core";
 
 import type { SelectOption } from "../common/Select.js";
 
@@ -53,51 +53,48 @@ export const REPLACEMENT_MODE_OPTIONS: ReadonlyArray<SelectOption<ReplacementMod
   REPLACEMENT_MODE_ORDER.map((mode) => ({ value: mode, label: REPLACEMENT_MODE_LABEL[mode] }));
 
 /**
- * Ejemplo del efecto de cada modo, para el menú de `ModeSelectMenu`.
- *
- * **El único valor exacto que la UI puede mostrar es el del modo vigente**, y
- * viene del propio grupo: `EntityGroup.replacementValue`, ya resuelto por el
- * Grouping Engine. Los otros tres **no se pueden calcular acá**:
- *
- * - el token de `placeholder` sale de la escalera de abreviaturas de ADR-057
- *   (`[PERSONA 01]`, `[PERS 01]` o `[PRS-01]` según cuánto espacio haya) y,
- *   sobre personas con género resuelto, de ADR-060 (`[MUJER 01]`);
- * - el formato de `mask` sale de `MASK_FORMAT_BY_TYPE`, que vive en
- *   `grouping-engine` — un motor, que la UI **no puede importar** (P-1);
- * - el valor de `synthetic` sale del sintetizador sembrado con el
- *   `EntityGroup.id` (ADR-072 §1).
- *
- * Reimplementar cualquiera de los tres sería exactamente lo que
- * `React_Client.md` U-3 prohíbe, y peor: un ejemplo *casi* correcto es una
- * mentira más difícil de detectar que uno declaradamente esquemático. Una
- * primera versión de este módulo mostraba `[PERSONA 01]` para todos los tipos
- * — un DNI previsualizaba como si fuera una persona.
- *
- * `redact` es la excepción: un bloque negro tiene una sola forma.
+ * ADR-169 §6: la descripción **fija** de cada modo en el menú. No depende del
+ * grupo ni del modo vigente: elegir otra opción solo mueve el tilde, y ningún
+ * texto del menú cambia.
  */
-
-const SCHEMATIC: Readonly<Record<ReplacementMode, string>> = {
-  [ReplacementMode.Placeholder]: "una etiqueta con el tipo y un número",
-  [ReplacementMode.Mask]: "el valor con sus caracteres tapados",
-  [ReplacementMode.Synthetic]: "otro dato del mismo tipo, inventado",
-  [ReplacementMode.Redact]: "███████",
+export const REPLACEMENT_MODE_DESCRIPTION: Readonly<Record<ReplacementMode, string>> = {
+  [ReplacementMode.Placeholder]: "Tipo y número, para seguir quién es quién",
+  [ReplacementMode.Mask]: "Tapa cada letra y conserva la forma",
+  [ReplacementMode.Synthetic]: "Un dato inventado del mismo tipo",
+  [ReplacementMode.Redact]: "Un bloque negro sobre el texto",
 };
 
-export interface ModeExampleContext {
-  /** Valor sobre el que se ilustra. */
-  readonly sample: string;
-  /** Modo vigente del grupo, si el nivel tiene uno. */
-  readonly currentMode?: ReplacementMode;
-  /** `EntityGroup.replacementValue` — el único valor exacto disponible. */
-  readonly currentValue?: string;
-}
+/**
+ * La vista previa de una opción del menú (ADR-169 §6, ADR-170 §1).
+ *
+ * **Exacta, y la calcula el Core**: `EntityGroup.replacementPreviews` trae lo
+ * que valdría `replacementValue` en cada modo para ese grupo —la escalera de
+ * ADR-057, el género de ADR-060, `MASK_FORMAT_BY_TYPE`, el sintetizador de
+ * ADR-072—. La UI **no reimplementa ninguno** (`React_Client.md` U-3): hasta
+ * ADR-170 solo el modo vigente se mostraba exacto y los otros tres eran
+ * esquemáticos, y el menú se reescribía entero al elegir.
+ *
+ * - `redact` no tiene texto: se dibuja el bloque (`"bar"`).
+ * - Sin grupo concreto (nivel documento) no hay vista previa de texto
+ *   (`"none"`): el nivel documento es genérico (`UX_Guidelines.md` §3.5).
+ */
+export type ModePreview =
+  | { readonly kind: "text"; readonly value: string }
+  | { readonly kind: "bar" }
+  | { readonly kind: "none" };
 
-export function describeModeExample(mode: ReplacementMode, context: ModeExampleContext): string {
-  const exact =
-    mode === context.currentMode &&
-    context.currentValue !== undefined &&
-    context.currentValue !== ""
-      ? context.currentValue
-      : SCHEMATIC[mode];
-  return `${context.sample} → ${exact}`;
+export function resolveModePreview(
+  mode: ReplacementMode,
+  previews: ReplacementPreviews | null,
+): ModePreview {
+  if (mode === ReplacementMode.Redact) return { kind: "bar" };
+  if (previews === null) return { kind: "none" };
+  switch (mode) {
+    case ReplacementMode.Placeholder:
+      return { kind: "text", value: previews.placeholder };
+    case ReplacementMode.Mask:
+      return { kind: "text", value: previews.mask };
+    case ReplacementMode.Synthetic:
+      return { kind: "text", value: previews.synthetic };
+  }
 }

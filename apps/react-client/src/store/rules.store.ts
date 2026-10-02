@@ -15,6 +15,12 @@ export interface RulesSlice {
   addRule(rule: Rule): void;
   updateRule(ruleId: string, patch: Partial<Rule>): void;
   removeRule(ruleId: string): void;
+  /**
+   * ADR-172 §2: después de deshacer o rehacer, las reglas vuelven a ser las
+   * del snapshot de Grouping (U-6) — el punto de restauración las incluye y
+   * ningún evento las devuelve.
+   */
+  replaceRules(rules: ReadonlyArray<Rule>): void;
   reset(): void;
 }
 
@@ -30,6 +36,9 @@ export const useRulesStore = create<RulesSlice>((set) => ({
   },
   removeRule(ruleId) {
     set((state) => ({ rules: state.rules.filter((rule) => rule.id !== ruleId) }));
+  },
+  replaceRules(rules) {
+    set({ rules: [...rules] });
   },
   reset() {
     set({ rules: [] });

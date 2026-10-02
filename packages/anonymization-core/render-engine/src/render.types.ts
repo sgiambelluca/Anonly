@@ -41,7 +41,13 @@ export interface RenderPageOutput {
   readonly documentId: string;
   readonly pageIndex: number;
   readonly kind: "original" | "anonymized";
-  readonly imageData: ImageData;
+  /**
+   * ADR-156: opcional, y ausente en la práctica en los dos `mode` — ningún
+   * consumidor de hoy lo lee (verificado sobre todo el repo antes de este
+   * cambio). Se conserva el campo por si algún día hace falta reintroducirlo;
+   * el preview arma su blob desde `encoded`, nunca desde acá.
+   */
+  readonly imageData?: ImageData;
   /**
    * Bytes codificados (PNG/JPEG), presente cuando `mode === "full"`
    * (ADR-034 §3). Generados donde vive el canvas (`convertToBlob`), consumidos

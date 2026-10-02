@@ -39,7 +39,6 @@ import type { EntityGroup, ReplacementMode } from "@anonly/anonymization-core";
 import { ChevronDownIcon } from "lucide-react";
 
 import { useRulesStore } from "../../store/rules.store.js";
-import { showToast } from "../common/toast.js";
 
 import { applyModeAtLevel } from "./applyMode.js";
 import { hasOwnDecision, planApplyGroupMode } from "./modeLevels.js";
@@ -48,9 +47,11 @@ import { REPLACEMENT_MODE_LABEL, REPLACEMENT_MODE_SHORT_LABEL } from "./replacem
 
 export interface ReplacementModeSelectProps {
   readonly group: EntityGroup;
+  /** ADR-169 §2: la fila se resalta mientras el menú está abierto. */
+  readonly onOpenChange?: (open: boolean) => void;
 }
 
-export function ReplacementModeSelect({ group }: ReplacementModeSelectProps) {
+export function ReplacementModeSelect({ group, onOpenChange }: ReplacementModeSelectProps) {
   const rules = useRulesStore((state) => state.rules);
   const ownDecision = hasOwnDecision(rules, group.id);
   const current = group.replacementMode;
@@ -63,34 +64,29 @@ export function ReplacementModeSelect({ group }: ReplacementModeSelectProps) {
       scope: "group",
       mode,
       groupId: group.id,
-      toastText: `${group.canonicalValue} → ${REPLACEMENT_MODE_LABEL[mode]}`,
+      historyLabel: `${group.canonicalValue} → ${REPLACEMENT_MODE_LABEL[mode]}`,
+      // `Components.md` §3.4d/§3.11: la fila no lleva toast —es la acción más
+      // frecuente y es autoevidente—, salvo el único caso donde se pierde algo
+      // de verdad: cambiar el modo recalcula `replacementValue` y descarta el
+      // texto escrito a mano. Con o sin toast, entra a la pila (ADR-172 §3).
+      toastText: group.replacementValueUserSet
+        ? `Se descartó el texto que habías escrito para ${group.canonicalValue}.`
+        : null,
     });
-
-    // ADR-087 §3.3: el único caso del nivel fila donde se pierde algo de
-    // verdad. `grouping.engine.ts` recalcula `replacementValue` y apaga
-    // `replacementValueUserSet` al cambiar el modo, y el texto que el usuario
-    // tipeó no queda guardado en ningún lado — la vía documentada para
-    // "volver" (cambiar el modo y volver al anterior) devuelve el valor
-    // automático, no lo escrito.
-    if (!group.replacementValueUserSet) return;
-    showToast(`Se descartó el texto que habías escrito para ${group.canonicalValue}.`);
   }
 
   return (
     <ModeSelectMenu
       current={current}
-      example={{
-        sample: group.canonicalValue,
-        currentMode: current,
-        currentValue: group.replacementValue,
-      }}
+      // ADR-170 §1: las cuatro vistas previas exactas de esta entidad.
+      previews={group.replacementPreviews}
       onSelect={handleSelect}
+      subject={group.canonicalValue}
+      {...(onOpenChange !== undefined ? { onOpenChange } : {})}
       align="right"
-      // `min-w` y no solo `flex-1`: repartir proporcionalmente dejaba el
-      // selector en 48 px —"Etiquetar" cortado y el caret sin lugar—. Con un
-      // piso, el nombre se queda con todo el resto y el modo sigue legible;
-      // por debajo de eso encoge el nombre, que al menos tiene `title`.
-      className="min-w-[6.5rem] flex-1"
+      // Ancho fijo de columna (ADR-169 §2, UX-10): lo pone la grilla de la
+      // fila; acá solo se llena la celda.
+      className="w-full min-w-0"
     >
       {({ open, toggle }) => (
         <button
@@ -105,7 +101,7 @@ export function ReplacementModeSelect({ group }: ReplacementModeSelectProps) {
           // marca con un punto y con peso de texto, no con un borde — un borde
           // fino acá se confundía con el chip del tipo, que es exactamente el
           // error de alcance que estos tratamientos existen para evitar.
-          className={`flex min-w-0 flex-1 items-center gap-1 rounded px-2 py-1 text-sm hover:bg-bg-tertiary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+          className={`flex w-full min-w-0 items-center gap-1 rounded px-1.5 py-1 text-sm hover:bg-bg-tertiary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
             ownDecision ? "font-medium text-text-primary" : "text-text-secondary"
           }`}
         >
@@ -116,7 +112,9 @@ export function ReplacementModeSelect({ group }: ReplacementModeSelectProps) {
               title="Esta entidad tiene su propio modo y no sigue a su categoría"
             />
           ) : null}
-          <span className="truncate">{REPLACEMENT_MODE_SHORT_LABEL[current]}</span>
+          <span className="min-w-0 flex-1 truncate text-left">
+            {REPLACEMENT_MODE_SHORT_LABEL[current]}
+          </span>
           <ChevronDownIcon className="h-3.5 w-3.5 shrink-0 text-text-secondary" aria-hidden />
         </button>
       )}

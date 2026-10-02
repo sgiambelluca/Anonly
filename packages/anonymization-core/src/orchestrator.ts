@@ -20,7 +20,7 @@
 import { buildPageReplacements } from "@anonly/export-engine";
 import type { ExportEngineInput, RenderPageProvider } from "@anonly/export-engine";
 import type { NerPageInput } from "@anonly/ner-engine";
-import type { OcrPageInput } from "@anonly/ocr-engine";
+import type { OcrImageProducer, OcrPageRequest } from "@anonly/ocr-engine";
 import { decodePdfEngineOutput, fuseOcrPage, fuseOcrRegion } from "@anonly/pdf-engine";
 import type { PdfEngineOutput } from "@anonly/pdf-engine";
 import { RenderFailedError } from "@anonly/render-engine";
@@ -34,14 +34,18 @@ import {
   EventChannel,
   InvalidInputError,
   isEngineErrorCode,
+  MAX_EDIT_CHECKPOINTS,
   PipelineStage,
   type CancelRequested,
   type CoreRuntimeOptions,
   type Document,
   type DocumentClosed,
   type DocumentParsed,
+  type EditPreview,
+  type EditPreviewRequest,
   type EngineConfig,
   type EngineContext,
+  type EntityFound,
   type EntityGroup,
   type EntityGroupCreated,
   type EntityGroupRemoved,
@@ -51,7 +55,6 @@ import {
   type ExportOptions,
   type ExportRequested,
   type GroupingFinished,
-  type ICache,
   type IEventBus,
   type ILogger,
   type ManualEntityRequest,
@@ -87,6 +90,7 @@ import {
   previewBlobKey,
   previewPrefixFor,
 } from "./blob-tracker.js";
+import type { PrefixDeletableCache } from "./cache.js";
 import { OrchestratorDisposedError } from "./errors.js";
 import { selectLineWords } from "./line-words.js";
 import { PipelineStateStore } from "./pipeline-state.js";
@@ -98,10 +102,36 @@ import type {
 } from "./types.js";
 import { WorkerPoolManager, type ManagedPoolKey } from "./worker-pool.js";
 
+const OCR_WORDS_PREFIX = "ocr-words:";
+
 function ocrWordsCacheKey(documentId: string, pageIndex: number): string {
   // Formato de clave documentado (ADR-014 §Decisión, ADR-021 §4): el lado
   // host del OcrPool deposita las Word[] acá — hoy, el propio OcrEngine.
-  return `ocr-words:${documentId}:${pageIndex}`;
+  return `${OCR_WORDS_PREFIX}${documentId}:${pageIndex}`;
+}
+
+/**
+ * ADR-143 §1: `OcrPageRequest.estimatedBytes` — "bytes RGBA estimados por
+ * dimensiones × escala, ANTES de producir". `widthPoints`/`heightPoints` son
+ * los de la página entera o del recorte (ambos en puntos de página, mismo
+ * espacio que `rasterizePage` recibe). `Math.ceil` por eje da una cota
+ * superior segura del raster que `getViewport({ scale })` termina
+ * produciendo — nunca subestima el buffer real, que es lo único que le
+ * importa a una reserva de presupuesto (§3: mejor sobrestimar de más que
+ * dejar pasar una imagen que no entra).
+ */
+function estimateRasterBytes(widthPoints: number, heightPoints: number, scale: number): number {
+  const widthPx = Math.max(0, Math.ceil(widthPoints * scale));
+  const heightPx = Math.max(0, Math.ceil(heightPoints * scale));
+  return widthPx * heightPx * 4; // RGBA
+}
+
+/** ADR-163: el cap solo aplica al descriptor de página completa. */
+function effectiveOcrDpi(page: Page | undefined, configuredDpi: number): number {
+  const cap = page?.ocrDpiCap;
+  return typeof cap === "number" && Number.isFinite(cap) && cap > 0
+    ? Math.min(configuredDpi, cap)
+    : configuredDpi;
 }
 
 // ─── reanalyze (ADR-038 §1): helpers de módulo (sin estado de instancia) ───
@@ -183,10 +213,25 @@ const PRE_READY_STAGES: ReadonlySet<PipelineStage> = new Set([
   PipelineStage.Grouping,
 ]);
 
+/**
+ * ADR-172 §1: precondición de `createEditCheckpoint`/`restoreEditCheckpoint`
+ * — "sesión existente y stage fuera de {Importing, Extracting, OCRing,
+ * Detecting, Grouping}". Literal de `Contracts.md` §3.5: NO incluye `Idle`
+ * (a diferencia de `PRE_READY_STAGES` de arriba, que sí, y que sirve a otro
+ * propósito — la mediación del preview).
+ */
+const CHECKPOINT_BLOCKED_STAGES: ReadonlySet<PipelineStage> = new Set([
+  PipelineStage.Importing,
+  PipelineStage.Extracting,
+  PipelineStage.OCRing,
+  PipelineStage.Detecting,
+  PipelineStage.Grouping,
+]);
+
 export interface PipelineOrchestratorOptions {
   readonly bus: IEventBus;
   readonly logger: ILogger;
-  readonly cache: ICache;
+  readonly cache: PrefixDeletableCache;
   readonly config: EngineConfig;
   readonly engines: AnonymizationCoreEngines;
   /**
@@ -206,7 +251,7 @@ export interface PipelineOrchestratorOptions {
 export class PipelineOrchestrator implements IPipelineOrchestrator {
   private readonly bus: IEventBus;
   private readonly logger: ILogger;
-  private readonly cache: ICache;
+  private readonly cache: PrefixDeletableCache;
   private readonly config: EngineConfig;
   private readonly engines: AnonymizationCoreEngines;
 
@@ -246,6 +291,18 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
   // que ADR-061 existe para cerrar). Se descarta en closeDocument/dispose,
   // mismo patrón que el resto del estado por documento.
   private readonly manualLiteralsByDocument = new Map<string, ManualEntityRequest[]>();
+  // ADR-172 §1: copia de `manualLiteralsByDocument` en el momento de
+  // `createEditCheckpoint`, bajo EL MISMO id que devuelve
+  // `grouping.createCheckpoint` — sin esto, deshacer un agregado manual
+  // dejaría el literal retenido y el próximo re-análisis lo recrearía. Vive
+  // acá (no en GroupingEngine) porque los literales retenidos son estado del
+  // Orchestrator, no de la sesión de Grouping. Mismo ciclo de vida que el
+  // checkpoint de Grouping: se descarta junto con él en `reanalyze` (antes
+  // de reabrir la sesión), `closeDocument` y `dispose`.
+  private readonly checkpointedLiteralsByDocument = new Map<
+    string,
+    Map<string, ReadonlyArray<ManualEntityRequest>>
+  >();
   // ─── Mediación grupos→Render del preview (ADR-044) ───
   // Por documento: groupId → páginas conocidas (members actuales de la última
   // vez que se vio el grupo). Necesario para ENTITY_GROUP_REMOVED (el payload
@@ -258,6 +315,10 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
   private readonly dirtyPagesByDocument = new Map<string, Set<number>>();
   // Evita agendar más de un flush por documento por ráfaga de eventos.
   private readonly flushScheduledDocuments = new Set<string>();
+  // ADR-189 §3: documentos que ya recibieron el precalentado de la página 1
+  // (ADR-151) — evita repetirlo en cada `Ready` posterior (agregado manual,
+  // reanálisis, eliminar, restaurar). Se limpia en `closeDocument`.
+  private readonly prewarmedDocuments = new Set<string>();
   // Controlador por documento del seed/flush del preview mediado (ADR-052
   // §3, v1.5.4): inmune a la cancelación del documento (abortRegistry) pero
   // NO a su baja — closeDocument/dispose lo abortan y lo limpian de acá,
@@ -392,6 +453,10 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     }
 
     this.effectiveConfigByDocument.set(documentId, nextEffective);
+    // ADR-172 §1: descarta todos los puntos de restauración ANTES de reabrir
+    // la sesión — restaurar a un estado anterior a esta re-detección tiraría
+    // lo re-detectado.
+    this.discardEditCheckpoints(documentId);
 
     const controller = this.abortRegistry.get(documentId) ?? this.abortRegistry.create(documentId);
     const ctx = this.ctxFor(controller.signal, documentId);
@@ -468,17 +533,55 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     const ctx = this.ctxFor(controller.signal, documentId);
 
     this.setStage(documentId, PipelineStage.Grouping);
+    // ADR-171 §4: un agregado manual es una decisión NUEVA del usuario y
+    // revierte una eliminación previa de ese valor — antes de reopenSession,
+    // así que la sesión reabierta ya no lo suprime al re-buscarlo. La
+    // re-aplicación automática de literales retenidos (reapplyManualLiterals,
+    // ADR-061 §5) deliberadamente NO llama a esto.
+    this.engines.grouping.liftRemoval(documentId, request.value);
     this.engines.grouping.reopenSession(documentId, { expectRegex: false, expectNer: false });
     // occurrenceCount es el de findLiteral tal cual -- apariciones ANTES del
     // dedup de Grouping (ADR-061 §6 errata, punto 3). No se recalcula contra
     // el árbol de grupos: un valor ya cubierto que se fusiona entero sigue
     // devolviendo N > 0, nunca "grupos nuevos".
-    const result = await this.engines.regex.findLiteral(
-      { document, value: request.value, entityType: request.entityType },
-      ctx,
+    //
+    // ADR-176 §3: mientras dura `findLiteral`, juntamos el `id` de cada
+    // ocurrencia `source: Manual` que EMITE este agregado. Ya no comparamos
+    // ningún valor ni tipo (eso reemplazaba el criterio de ADR-175 §3, que
+    // este ADR retira): Grouping es quien sabe en qué terminó cada una
+    // (agrupada, deduplicada, contenida por ADR-117 o retenida) porque es
+    // quien la procesó -- `manualOutcome` lee esa anotación.
+    const manualOccurrenceIds: string[] = [];
+    const unsubscribeEntityFound = this.bus.on(
+      EventChannel.Regex,
+      EngineEvents.ENTITY_FOUND,
+      (payload: EntityFound) => {
+        if (payload.documentId !== documentId) return;
+        if (payload.occurrence.source !== DetectionSource.Manual) return;
+        manualOccurrenceIds.push(payload.occurrence.id);
+      },
     );
+    let result;
+    try {
+      result = await this.engines.regex.findLiteral(
+        { document, value: request.value, entityType: request.entityType },
+        ctx,
+      );
+    } finally {
+      unsubscribeEntityFound();
+    }
     await this.engines.grouping.finishSession(documentId);
-    return { occurrenceCount: result.occurrenceCount };
+    // ADR-174 §2, ADR-176 §3: heldConflictIds/groupIds salen tal cual de
+    // manualOutcome -- occurrenceCount > 0 con heldConflictIds no vacío NO es
+    // un agregado exitoso (Contracts.md §3.5): la UI abre el diálogo de
+    // choque en vez del toast de alta. El invariante (occurrenceCount > 0 =>
+    // alguna lista no vacía) se cumple por construcción: toda ocurrencia
+    // emitida termina agrupada, deduplicada, contenida o retenida.
+    const { groupIds, heldConflictIds } = this.engines.grouping.manualOutcome(
+      documentId,
+      manualOccurrenceIds,
+    );
+    return { occurrenceCount: result.occurrenceCount, heldConflictIds, groupIds };
   }
 
   /**
@@ -494,6 +597,98 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
       });
     }
     return this.engines.regex.searchText({ document, query });
+  }
+
+  /**
+   * ADR-170 §2: delegación pura. Sin estado propio, sin emitir, sin pasar
+   * por `reopenSession` — es exactamente `GroupingEngine.previewEdit`, que
+   * ya hace todo eso (simulacro sobre una copia descartable de la sesión).
+   * `documentId` sin sesión -> `InvalidInputError`, lanzado por el motor.
+   */
+  previewEdit(documentId: string, request: EditPreviewRequest): EditPreview {
+    this.assertNotDisposed();
+    return this.engines.grouping.previewEdit(documentId, request);
+  }
+
+  /**
+   * ADR-172 §1: precondición común de `createEditCheckpoint`/
+   * `restoreEditCheckpoint` — sesión existente (aproximado acá por
+   * `PipelineState` existente: sin documento importado no hay sesión de
+   * Grouping tampoco) y `stage` fuera de las etapas de una pasada de
+   * detección en curso.
+   */
+  private assertCheckpointableStage(documentId: string, method: string): void {
+    const state = this.state.get(documentId);
+    if (state === undefined || CHECKPOINT_BLOCKED_STAGES.has(state.stage)) {
+      throw new InvalidInputError(
+        `${method} requiere una sesión fuera de una pasada de detección para ${documentId} (actual: ${state?.stage ?? "inexistente"}).`,
+        { documentId, stage: state?.stage },
+      );
+    }
+  }
+
+  /**
+   * ADR-172 §1: delega en `grouping.createCheckpoint` y guarda, bajo el
+   * MISMO id, una copia de los literales manuales retenidos (ADR-061 §5) —
+   * sin ellos, deshacer un agregado manual dejaría el literal retenido y el
+   * próximo re-análisis lo recrearía.
+   */
+  createEditCheckpoint(documentId: string): string {
+    this.assertNotDisposed();
+    this.assertCheckpointableStage(documentId, "createEditCheckpoint");
+    const checkpointId = this.engines.grouping.createCheckpoint(documentId);
+    const literals = this.manualLiteralsByDocument.get(documentId) ?? [];
+    let byDocument = this.checkpointedLiteralsByDocument.get(documentId);
+    if (!byDocument) {
+      byDocument = new Map();
+      this.checkpointedLiteralsByDocument.set(documentId, byDocument);
+    }
+    byDocument.set(checkpointId, [...literals]);
+    /*
+     * ADR-172 §1, hallazgo N-4 del revisor: `grouping.createCheckpoint`
+     * desaloja el punto más viejo al pasar `MAX_EDIT_CHECKPOINTS` (mismo
+     * criterio de "Map preserva orden de inserción, el primero es el más
+     * viejo"). Este mapa crece en lockstep con el de Grouping —una entrada
+     * por cada `createEditCheckpoint` exitoso, bajo el mismo id, nunca de
+     * otra forma—, así que aplicar la MISMA regla acá desaloja exactamente
+     * el mismo id, sin que Grouping tenga que exponer cuál desalojó. Nunca
+     * se guardan más copias de literales que puntos vivos tiene Grouping.
+     */
+    if (byDocument.size > MAX_EDIT_CHECKPOINTS) {
+      const oldestId = byDocument.keys().next().value;
+      if (oldestId !== undefined) byDocument.delete(oldestId);
+    }
+    return checkpointId;
+  }
+
+  /**
+   * ADR-172 §1: delega en `grouping.restoreCheckpoint` (que reemplaza la
+   * sesión y emite la diferencia con los eventos de Grouping de siempre —
+   * el re-render sale solo, por las suscripciones de ADR-044) y restaura los
+   * literales manuales retenidos guardados bajo el mismo id.
+   * `checkpointId` desconocido o descartado -> `InvalidInputError`, lanzado
+   * por el motor.
+   */
+  async restoreEditCheckpoint(documentId: string, checkpointId: string): Promise<void> {
+    this.assertNotDisposed();
+    this.assertCheckpointableStage(documentId, "restoreEditCheckpoint");
+    await this.engines.grouping.restoreCheckpoint(documentId, checkpointId);
+    const literals = this.checkpointedLiteralsByDocument.get(documentId)?.get(checkpointId) ?? [];
+    this.manualLiteralsByDocument.set(documentId, [...literals]);
+  }
+
+  /**
+   * ADR-172 §1: descarta todos los puntos de restauración del documento —
+   * los del propio `GroupingEngine` y la copia de literales retenidos de
+   * este componente. Además de exponerse para que el caller la invoque
+   * (mismo patrón que `cancel`/`closeDocument`), este componente la llama
+   * internamente desde `reanalyze` (antes de reabrir la sesión),
+   * `closeDocument` y `dispose`.
+   */
+  discardEditCheckpoints(documentId: string): void {
+    this.assertNotDisposed();
+    this.engines.grouping.discardCheckpoints(documentId);
+    this.checkpointedLiteralsByDocument.delete(documentId);
   }
 
   /**
@@ -778,9 +973,16 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     this.reanalyzeInFlight.delete(documentId);
     // ADR-061 §5: mismo patrón que el resto del estado por documento.
     this.manualLiteralsByDocument.delete(documentId);
+    // ADR-172 §1: ídem — los puntos de restauración (los de Grouping y esta
+    // copia de literales) no sobreviven al cierre.
+    this.checkpointedLiteralsByDocument.delete(documentId);
     this.groupPagesByDocument.delete(documentId);
     this.dirtyPagesByDocument.delete(documentId);
     this.flushScheduledDocuments.delete(documentId);
+    // ADR-189 §3: la marca de precalentado muere con el documento — uno
+    // nuevo con el mismo id (tras un closeDocument real, nunca reusa la
+    // sesión) vuelve a precalentar en su propio primer Ready.
+    this.prewarmedDocuments.delete(documentId);
     // ADR-052 §3: la baja del documento aborta el controlador del preview
     // mediado (cancelReanalyze deliberadamente NO llega a esta línea — solo
     // closeDocument/dispose bajan el documento).
@@ -788,6 +990,8 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     this.mediatedPreviewControllers.delete(documentId);
     this.blobTracker.revokeByPrefix(previewPrefixFor(documentId));
     this.blobTracker.revokeByPrefix(exportPrefixFor(documentId));
+    // ADR-145 §5: los depósitos de palabras de OCR mueren con el documento.
+    this.cache.deleteByPrefix(`${OCR_WORDS_PREFIX}${documentId}:`);
     this.state.delete(documentId);
     this.releaseActiveDocument(documentId);
 
@@ -803,6 +1007,7 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     this.disposed = true;
 
     this.abortRegistry.clear();
+    this.cache.deleteByPrefix(OCR_WORDS_PREFIX);
     this.pools.disposeAll();
     this.blobTracker.revokeAll();
     this.state.clear();
@@ -816,9 +1021,14 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     this.effectiveConfigByDocument.clear();
     this.reanalyzeInFlight.clear();
     this.manualLiteralsByDocument.clear();
+    // ADR-172 §1: ídem closeDocument — los checkpoints de Grouping ya se
+    // limpian solos vía `this.engines.grouping.dispose()` más abajo; esta
+    // copia de literales retenidos es estado propio de este componente.
+    this.checkpointedLiteralsByDocument.clear();
     this.groupPagesByDocument.clear();
     this.dirtyPagesByDocument.clear();
     this.flushScheduledDocuments.clear();
+    this.prewarmedDocuments.clear();
     // ADR-052 §3: dispose() global es una baja para todo documento con un
     // controlador de preview mediado todavía vivo.
     for (const controller of this.mediatedPreviewControllers.values()) controller.abort();
@@ -1001,90 +1211,142 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     this.failPipeline(documentId, err);
   }
 
+  /**
+   * ADR-157: el pool de OCR se da de baja al terminar esta etapa —éxito,
+   * cancelación o fallo, ver el `finally` al final— en vez de esperar los
+   * 60 s de inactividad de ADR-080. Ese temporizador llega tarde PARA ESTE
+   * POOL por una razón de calendario (ADR-157 §2): sus 60 s de inactividad
+   * transcurren justo mientras corre la detección (NER), que es donde está
+   * el pico de memoria — para cuando el pool se liberaría solo, el pico ya
+   * pasó. `idleDisposeMs` no se toca: gobierna los cinco pools y seguiría
+   * siendo una carrera contra la duración de la detección, no un orden
+   * garantizado. La baja la expone `OcrEngine.releaseIdleWorkers()`
+   * (ADR-157 §1bis): el Orchestrator no tiene ninguna referencia al `OcrPool`
+   * desde ADR-045 (lo construye `create-core.ts` e inyecta directo en el
+   * motor), así que llamar a `this.pools.getPool("ocr")` acá construiría un
+   * pool nuevo, vacío y desconectado — no el que `OcrEngine` usa de verdad.
+   */
   private async runOcrStage(
     documentId: string,
     textlessPages: ReadonlyArray<number>,
     ocrRegions: ReadonlyArray<OcrRegion>,
     ctx: EngineContext,
   ): Promise<void> {
-    // Progreso granular OCR (spec Orchestrator.md §8, ADR-065 §2): total fijo
-    // para toda la etapa (textlessPages.length + ocrRegions.length, ambos
-    // conjuntos disjuntos); current arranca en 0 y lo incrementa
-    // handleOcrPageFinished por cada OCR_PAGE_FINISHED, sea de página entera
-    // o de región.
-    this.progressByDocument.set(documentId, {
-      total: textlessPages.length + ocrRegions.length,
-      current: 0,
-    });
-
-    // ADR-034 §1: adelanta loadDocument a la etapa 2 (bytes retenidos de la
-    // 0). v1.2.1 (bug #6, caso 23): copia — el buffer retenido nunca sale del
-    // Orchestrator (garantizado por ensureRenderDocumentLoaded).
-    await this.ensureRenderDocumentLoaded(documentId);
-
-    const scale = ctx.config.ocr.dpi / 72;
-    const ocrInputs: OcrPageInput[] = [];
-
-    // ADR-043 §2: el Orchestrator deja de envolver `rasterizePage` en
-    // `pool.dispatch({run})` — invoca el método del motor directo; es el
-    // propio `RenderEngine` quien despacha internamente contra su
-    // `RenderPool` (inyectada por el façade en `create-core.ts`). La
-    // limitación de tasa por `waitForCapacity()` que existía acá desaparece
-    // junto con la referencia directa al pool: el límite de concurrencia real
-    // (`renderPoolSize`) lo sigue aplicando la propia pool del motor.
-    for (const pageIndex of textlessPages) {
-      if (ctx.abortSignal.aborted) throw new CancelledError(documentId);
-      const imageData = await this.engines.render.rasterizePage(documentId, pageIndex, scale, ctx);
-      ocrInputs.push({
-        documentId,
-        pageIndex,
-        imageData,
-        dpi: ctx.config.ocr.dpi,
-        languages: ctx.config.ocr.languages,
+    try {
+      // Progreso granular OCR (spec Orchestrator.md §8, ADR-065 §2): total fijo
+      // para toda la etapa (textlessPages.length + ocrRegions.length, ambos
+      // conjuntos disjuntos); current arranca en 0 y lo incrementa
+      // handleOcrPageFinished por cada OCR_PAGE_FINISHED, sea de página entera
+      // o de región.
+      this.progressByDocument.set(documentId, {
+        total: textlessPages.length + ocrRegions.length,
+        current: 0,
       });
+
+      // ADR-034 §1: adelanta loadDocument a la etapa 2 (bytes retenidos de la
+      // 0). v1.2.1 (bug #6, caso 23): copia — el buffer retenido nunca sale del
+      // Orchestrator (garantizado por ensureRenderDocumentLoaded).
+      await this.ensureRenderDocumentLoaded(documentId);
+
+      // ADR-143 §1: los descriptores solo necesitan las dimensiones de página
+      // (en puntos, ya parseadas por el PDF Engine) para estimar bytes — no
+      // hace falta rasterizar nada todavía.
+      const document = this.documents.get(documentId);
+      if (document === undefined) {
+        throw new InvalidInputError(`Documento ${documentId} no disponible para OCR.`, {
+          documentId,
+        });
+      }
+
+      const requests: OcrPageRequest[] = [];
+
+      for (const pageIndex of textlessPages) {
+        const page: Page | undefined = document.pages[pageIndex];
+        const dpi = effectiveOcrDpi(page, ctx.config.ocr.dpi);
+        const scale = dpi / 72;
+        requests.push({
+          documentId,
+          pageIndex,
+          dpi,
+          languages: ctx.config.ocr.languages,
+          estimatedBytes: estimateRasterBytes(page?.width ?? 0, page?.height ?? 0, scale),
+        });
+      }
+
+      // ADR-065 §3/§5: se OCR-ea la región, no la página — el descriptor lleva
+      // `region.bbox` (en puntos de página) y el productor de abajo se lo pasa
+      // a `rasterizePage`, que devuelve solo el recorte. El `OcrPageRequest` es
+      // el de siempre: el OCR Engine no sabe ni necesita saber que su imagen es
+      // un recorte en vez de una página completa (§9 de OCR_Engine.md).
+      for (const region of ocrRegions) {
+        const dpi = ctx.config.ocr.dpi;
+        const scale = dpi / 72;
+        requests.push({
+          documentId,
+          pageIndex: region.pageIndex,
+          region: region.bbox,
+          dpi,
+          languages: ctx.config.ocr.languages,
+          estimatedBytes: estimateRasterBytes(region.bbox.width, region.bbox.height, scale),
+        });
+      }
+
+      // ADR-143 §1: el productor rasteriza recién cuando `processSession` tiene
+      // lugar en la ventana de trabajo — nunca por adelantado. Nunca cruza un
+      // `postMessage` ni entra en `EngineConfig`: vive acá, host-side, porque
+      // llama a `RenderEngine` y un motor no importa a otro (P-1). Mismo
+      // criterio de ADR-043 §2 que ya regía `rasterizePage` acá: el Orchestrator
+      // invoca el método del motor directo, sin envolverlo en `pool.dispatch`.
+      const produce: OcrImageProducer = (request, signal) =>
+        this.engines.render.rasterizePage(
+          request.documentId,
+          request.pageIndex,
+          request.dpi / 72,
+          { ...ctx, abortSignal: signal },
+          request.region,
+        );
+
+      // ADR-045 §2/ADR-143 §3: el Orchestrator deja de envolver `processSession`
+      // en `pool.dispatch({run})` — invoca el método del motor directo; es el
+      // propio `OcrEngine` quien despacha internamente, por página, contra su
+      // `OcrPool` (inyectada por el façade en `create-core.ts`) y reserva el
+      // presupuesto de imágenes vivas (`ocr.maxLiveImageBytes`) antes de pedirle
+      // cada imagen a `produce`.
+      await this.engines.ocr.processSession(requests, produce, ctx);
+
+      // ADR-041 §3: la fusión (ADR-014) la dispara `handleOcrPageFinished` de
+      // forma síncrona por cada `OCR_PAGE_FINISHED` (IEventBus.emit despacha en
+      // línea, 04_Event_System.md §13): para cuando el `await` de arriba
+      // resuelve, todas las fusiones de este batch ya corrieron y persistieron
+      // en `this.documents`. Ya no hace falta esperar promesas de fusión
+      // pendientes (waitForPendingFusions se eliminó junto con el bookkeeping
+      // asíncrono que ya no existe).
+    } finally {
+      // ADR-157 §1/§3/§1bis: baja determinística, no por temporizador —
+      // corre en los tres caminos terminales (éxito, cancelación, fallo).
+      // `OcrEngine.releaseIdleWorkers()` trae su propia guarda (ADR-080,
+      // ADR-157 §1ter): no hace nada si el pool no está ocioso, así que en
+      // cancelación puede ser un no-op silencioso (un job todavía en vuelo
+      // no se interrumpe — `terminate()` no dispara `error` y dejaría esa
+      // promesa colgada para siempre) y la memoria la libera el temporizador
+      // de ADR-080 como hasta hoy. En el camino feliz el pool sí está
+      // ocioso para cuando este `finally` corre. El motor queda usable: el
+      // próximo `processSession` (un futuro `reanalyze` de `ocr.languages`,
+      // `runReanalyzeOcrFlow`) lo reconstruye perezoso, pagando la recarga
+      // del modelo de Tesseract como costo declarado (ADR-157 §2).
+      this.engines.ocr.releaseIdleWorkers();
     }
-
-    // ADR-065 §3/§5: se OCR-ea la región, no la página — `rasterizePage`
-    // recibe `region.bbox` y devuelve solo el recorte (en puntos de página,
-    // el motor la multiplica por `scale` internamente). El `OcrPageInput` es
-    // el de siempre: el OCR Engine no sabe ni necesita saber que su
-    // `imageData` es un recorte en vez de una página completa.
-    for (const region of ocrRegions) {
-      if (ctx.abortSignal.aborted) throw new CancelledError(documentId);
-      const imageData = await this.engines.render.rasterizePage(
-        documentId,
-        region.pageIndex,
-        scale,
-        ctx,
-        region.bbox,
-      );
-      ocrInputs.push({
-        documentId,
-        pageIndex: region.pageIndex,
-        imageData,
-        dpi: ctx.config.ocr.dpi,
-        languages: ctx.config.ocr.languages,
-      });
-    }
-
-    // ADR-045 §2: el Orchestrator deja de envolver `processPages` en
-    // `pool.dispatch({run})` — invoca el método del motor directo; es el
-    // propio `OcrEngine` quien despacha internamente, por página, contra su
-    // `OcrPool` (inyectada por el façade en `create-core.ts`), mismo criterio
-    // que ADR-043 aplicó a `rasterizePage`/`renderPage`. El límite de
-    // concurrencia real (`ocrPoolSize`) lo sigue aplicando la propia pool del
-    // motor.
-    await this.engines.ocr.processPages(ocrInputs, ctx);
-
-    // ADR-041 §3: la fusión (ADR-014) la dispara `handleOcrPageFinished` de
-    // forma síncrona por cada `OCR_PAGE_FINISHED` (IEventBus.emit despacha en
-    // línea, 04_Event_System.md §13): para cuando el `await` de arriba
-    // resuelve, todas las fusiones de este batch ya corrieron y persistieron
-    // en `this.documents`. Ya no hace falta esperar promesas de fusión
-    // pendientes (waitForPendingFusions se eliminó junto con el bookkeeping
-    // asíncrono que ya no existe).
   }
 
+  /**
+   * ADR-167 (reemplaza ADR-166 §1): el pool de NER ya no se da de baja acá.
+   * Se libera solo, por su propio temporizador (`nerIdleDisposeMs`, vive en
+   * `WorkerPool`) — T-8 midió que la baja inmediata le trasladaba al
+   * documento siguiente ~1,2 s y ~500-600 MB de pico de recarga. Asimetría
+   * deliberada con `runOcrStage` (ADR-157): el minuto de OCR transcurre
+   * durante la detección, que sigue y es donde está el pico; el de NER
+   * transcurre después de `PIPELINE_READY`. Ver Orchestrator.md §13 caso 37.
+   */
   private async runDetectionStage(documentId: string, ctx: EngineContext): Promise<void> {
     const document = this.documents.get(documentId);
     if (document === undefined) {
@@ -1170,7 +1432,10 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     const ctx = this.ctxFor(controller.signal, documentId);
 
     // v1.2.1 (bug #6, caso 24): toda la preparación del export (incluido
-    // `ensureRenderDocumentLoaded`) vive dentro del try/catch → `failPipeline`.
+    // `ensureRenderDocumentLoaded` y, desde ADR-176 §1, el guard de
+    // conflictos de abajo) vive dentro del try/catch → `failPipeline`. Un
+    // fallo de `getSnapshot` acá sigue el mismo camino que cualquier otro
+    // fallo de preparación (caso 24, el seatbelt de `handleExportRequested`).
     // El guard de buffer retenido ausente pasa de warn+return silencioso a
     // lanzar InvalidInputError — antes el `EXPORT_REQUESTED` no atendido
     // dejaba el pipeline congelado en `Ready` sin ningún evento; ahora
@@ -1181,9 +1446,28 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     // documento sigue presente, o flujos que lleguen a export sin haber
     // pasado por `runPipelineFrom`/`runOcrStage`).
     try {
+      // ADR-176 §1: un conflicto sin resolver bloquea el export también en
+      // el Core -- la red de seguridad para cualquier llamador que no pase
+      // por la UI (el botón ya queda deshabilitado ahí, ADR-176 §1 UI). Mira
+      // los conflictos ANTES de cambiar de etapa: si hay alguno sin
+      // resolver, no llama a `export()`, no cambia de etapa (sigue
+      // `Ready`), no emite nada y loguea `warn` -- mismo patrón que
+      // `EXPORT_NO_ENABLED_GROUPS` (ADR-032 §3): un `code` en la metadata de
+      // un warn, sin clase de error ni evento. Solo la CANTIDAD en la
+      // metadata, nunca los valores (R-8, `08_Security_Model.md`).
+      const snapshot = this.engines.grouping.getSnapshot(documentId);
+      const unresolvedConflicts = snapshot.conflicts.filter((c) => !c.resolved).length;
+      if (unresolvedConflicts > 0) {
+        this.logger.warn("Hay conflictos sin resolver; el export no se ejecuta.", {
+          documentId,
+          code: EngineErrorCode.EXPORT_UNRESOLVED_CONFLICTS,
+          unresolvedConflicts,
+        });
+        return;
+      }
+
       await this.ensureRenderDocumentLoaded(documentId);
 
-      const snapshot = this.engines.grouping.getSnapshot(documentId);
       const provider = this.makeRenderPageProvider(documentId, options, ctx);
 
       const exportInput: ExportEngineInput = {
@@ -1526,6 +1810,19 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
       groupCount: payload.groupCount,
       conflictCount: payload.conflictCount,
     });
+    // ADR-151 §1: en el mismo turno en que se alcanza Ready, no antes (un
+    // documento cancelado/fallido no llega acá — ver el early return de
+    // arriba) ni al cargar el documento (se tiraría si el usuario cancela a
+    // mitad del escaneo, ver "Alternativas consideradas" del ADR).
+    // ADR-189 §3: solo la PRIMERA vez que este documento llega a `Ready` —
+    // un `Ready` posterior (agregado manual, reanálisis, eliminar o
+    // restaurar) no repite el precalentado; el preview mediado de ADR-044
+    // (`seedAnonymizedPreview`, ya invocado arriba) sigue actualizando las
+    // páginas afectadas en cada uno de esos casos.
+    if (!this.prewarmedDocuments.has(payload.documentId)) {
+      this.prewarmedDocuments.add(payload.documentId);
+      this.prewarmFirstPagePreview(payload.documentId);
+    }
   }
 
   // ─── Mediación grupos→Render del preview (ADR-044) ───
@@ -1718,6 +2015,38 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
         pageIndex,
         reason: err instanceof Error ? err.message : String(err),
       });
+    });
+  }
+
+  /**
+   * Precalienta la página 1 del lado original al llegar a `Ready` (ADR-151
+   * §1): invocación directa (mismo patrón que `renderMediatedPreview`, no la
+   * vía `RENDER_REQUESTED` del visor), así que `RenderEngine` la despacha con
+   * prioridad de "preview no visible" (20, `05_Worker_Architecture.md` §6.2 /
+   * `render.engine.ts` `PREVIEW_PRIORITY_NOT_VISIBLE`) — no puede competir con
+   * un export. Sin `scale`: cae al `previewScale` default, la escala con la
+   * que el visor pide al montar con zoom 1. Best-effort: un fallo se loguea y
+   * nunca escala a `PIPELINE_FAILED` — el preview no es motivo para fallar el
+   * pipeline. No hace falta tocar el visor ni el store: `bus-bridge.ts` ya
+   * escribe todo `PREVIEW_UPDATED` en `viewer.store.previewByPage` haya o no
+   * un visor montado, así que el precalentado queda ahí para cuando ②b monte.
+   */
+  private prewarmFirstPagePreview(documentId: string): void {
+    const ctx = this.mediatedPreviewCtx(documentId);
+    const input: RenderPageInput = {
+      documentId,
+      pageIndex: 0,
+      kind: "original",
+      mode: "preview",
+    };
+    this.engines.render.renderPage(input, ctx).catch((err: unknown) => {
+      this.logger.warn(
+        "Precalentado de la página 1 (lado original) falló (best-effort, ADR-151).",
+        {
+          documentId,
+          reason: err instanceof Error ? err.message : String(err),
+        },
+      );
     });
   }
 

@@ -2,15 +2,17 @@
 
 > Plataforma de **anonimización documental 100% local**. Detecta, agrupa y reemplaza información sensible en archivos PDF y produce un PDF completamente nuevo donde la información original no es recuperable. Ningún byte del documento sale de la máquina del usuario.
 
-**Anonly se entrega como aplicación de escritorio** para macOS y Windows (ADR-130). Se baja el instalador una vez y desde ahí funciona sin conexión: el modelo de detección de nombres y los binarios de OCR viajan adentro del paquete, así que no se descarga nada en el primer uso.
+**Anonly se entrega como aplicación de escritorio** para macOS y Windows (ADR-130). **Equipo mínimo soportado: 8 GB de RAM** (ADR-192): un documento escaneado largo puede usar hasta unos 3 GB mientras se procesa. Se baja el instalador una vez y desde ahí funciona sin conexión: el modelo de detección de nombres y los binarios de OCR viajan adentro del paquete, así que no se descarga nada en el primer uso.
 
 ### Lo único que la app le pide a internet
 
-Buscar si hay una versión nueva. Esa consulta va a GitHub y **le revela tu IP y la versión que tenés instalada** — nada más: nunca el contenido, el nombre ni ningún metadato de un documento, y el chequeo se puede apagar desde Configuración.
+Buscar si hay una versión nueva. Como en cualquier conexión, GitHub ve desde dónde llega la consulta (tu IP) y qué versión tenés instalada — nada más: nunca el contenido, el nombre ni ningún metadato de un documento, y la búsqueda automática se puede apagar desde Configuración (ADR-188; a partir de la versión siguiente a la 0.9.2).
 
 Vale la pena decirlo con precisión: **el Core nunca habla con la red** —hay un gate de CI que lo verifica sobre el código— y el contenedor solo lo hace para consultar versiones y bajar actualizaciones. En macOS y Windows cada actualización se valida con una clave Ed25519 propia antes de instalarse. Esto no firma la primera instalación: Windows seguirá mostrando un editor no verificado hasta integrar Authenticode.
 
 Los instaladores se construyen en CI con logs públicos, y cada release publica el sha256 de cada archivo más una atestación que ata el binario a un commit de este repositorio. Cualquiera puede verificar que lo que bajó salió de este código.
+
+Qué sale de tu computadora, qué queda y cómo borrarlo: [`PRIVACY.md`](./PRIVACY.md). Cómo se firma el instalador de Windows y cómo verificarlo: [`CODE_SIGNING.md`](./CODE_SIGNING.md).
 
 ---
 
@@ -37,7 +39,7 @@ pnpm dev
 Antes de abrir un PR, el subset mínimo de gates:
 
 ```bash
-pnpm lint && pnpm typecheck && pnpm test && pnpm test:contract
+pnpm lint && pnpm typecheck && pnpm test && pnpm test:contract && pnpm format:check
 ```
 
 <details>
@@ -348,7 +350,7 @@ Resumen de reglas clave:
 Antes de abrir un PR, ejecutar:
 
 ```bash
-pnpm lint && pnpm typecheck && pnpm test && pnpm test:contract
+pnpm lint && pnpm typecheck && pnpm test && pnpm test:contract && pnpm format:check
 ```
 
 Todos los gates deben pasar (ver [`docs/architecture/07_Performance_Strategy.md`](./docs/architecture/07_Performance_Strategy.md) §11.4 para la lista completa).

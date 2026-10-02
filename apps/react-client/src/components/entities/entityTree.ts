@@ -8,7 +8,9 @@
  * (mismo criterio que `components/viewer/visibleRange.ts`).
  */
 
-import type { EntityGroup, EntityType } from "@anonly/anonymization-core";
+import { PipelineStage, type EntityGroup, type EntityType } from "@anonly/anonymization-core";
+
+import type { EntitySortOrder } from "../../store/entities.store.js";
 
 /** Búsqueda de `ui/UX_Guidelines.md` §3.2: filtra por `canonicalValue` o `aliases`, case-insensitive. */
 export function filterGroups(
@@ -48,10 +50,61 @@ export function cascadeCheckboxState(groups: ReadonlyArray<EntityGroup>): Cascad
  */
 export function visibleTypeEntries(
   groupsByType: ReadonlyMap<EntityType, ReadonlyArray<EntityGroup>>,
+  sortOrder: EntitySortOrder = "appearance",
 ): ReadonlyArray<readonly [EntityType, ReadonlyArray<EntityGroup>]> {
   return Array.from(groupsByType.entries())
     .filter(([, groups]) => groups.length > 0)
-    .map(([type, groups]) => [type, sortByDocumentOrder(groups)] as const);
+    .map(([type, groups]) => [type, sortGroups(groups, sortOrder)] as const);
+}
+
+/**
+ * ADR-169 §2: orden de las filas dentro de cada tipo. **Solo presentación**:
+ * no cambia `indexInType` ni emite nada al Core.
+ *
+ * - `"appearance"`: `indexInType` ascendente (el orden del documento).
+ * - `"alpha"`: `canonicalValue` con `localeCompare(…, "es")` — "Álvarez" va
+ *   con las A, no después de la Z. Desempate por `indexInType` para que dos
+ *   nombres iguales no bailen entre renders.
+ */
+export function sortGroups(
+  groups: ReadonlyArray<EntityGroup>,
+  sortOrder: EntitySortOrder,
+): ReadonlyArray<EntityGroup> {
+  if (sortOrder === "appearance") return sortByDocumentOrder(groups);
+  return [...groups].sort(
+    (a, b) =>
+      a.canonicalValue.localeCompare(b.canonicalValue, "es", { sensitivity: "base" }) ||
+      a.indexInType - b.indexInType ||
+      a.id.localeCompare(b.id),
+  );
+}
+
+/**
+ * ADR-169 §2 + ADR-087 §6.1: el N.º (y el token) no se muestran hasta que la
+ * pasada de detección terminó — durante el escaneo cada entidad nueva renumera
+ * los índices, y la columna sería el único lugar donde eso se vería. Vuelve a
+ * ocultarse durante un re-análisis por la misma razón.
+ */
+const INDEX_VISIBLE_STAGES: ReadonlySet<PipelineStage> = new Set([
+  PipelineStage.Ready,
+  PipelineStage.Rendering,
+  PipelineStage.Exporting,
+  PipelineStage.Done,
+]);
+
+export function isIndexInTypeVisible(stage: PipelineStage): boolean {
+  return INDEX_VISIBLE_STAGES.has(stage);
+}
+
+/** Resumen de la cabecera del panel: "12 entidades en 4 tipos" (ADR-169 §2). */
+export function summarizeEntities(
+  entries: ReadonlyArray<readonly [EntityType, ReadonlyArray<EntityGroup>]>,
+): string {
+  const total = entries.reduce((sum, [, groups]) => sum + groups.length, 0);
+  const types = entries.length;
+  return `${total} ${total === 1 ? "entidad" : "entidades"} en ${types} ${
+    types === 1 ? "tipo" : "tipos"
+  }`;
 }
 
 /*

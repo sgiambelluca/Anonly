@@ -21,6 +21,10 @@
  * de tener una imagen real: las computa `PdfViewer`/`PageVirtualizer` a partir
  * de `pageLayout.ts` (no hay dimensiones de página reales expuestas por el
  * Core al cliente, ver esa nota en `pageLayout.ts`).
+ *
+ * **Aviso de contenido no leído** (ADR-190 §4, `ui/Components.md` §5.4): ya no
+ * se dibuja acá. Va en una franja fija justo arriba de la imagen, fuera de
+ * ella (`UnreadablePageStrip`), para no tapar el contenido que pide revisar.
  */
 
 import { ImageOffIcon } from "lucide-react";

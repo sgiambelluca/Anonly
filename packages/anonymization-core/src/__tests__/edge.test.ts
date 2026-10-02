@@ -1,11 +1,13 @@
 import { PdfInvalidError, PdfPasswordRequiredError } from "@anonly/pdf-engine";
 import {
   CancelledError,
+  ConflictReason,
   DetectionSource,
   EngineError,
   EngineErrorCode,
   EngineEvents,
   EngineId,
+  EntityType,
   EventChannel,
   InvalidInputError,
   PipelineStage,
@@ -13,8 +15,16 @@ import {
 } from "@anonly/shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+const pipelineMock = vi.hoisted(() => vi.fn());
+
+vi.mock("@huggingface/transformers", () => ({
+  pipeline: pipelineMock,
+  env: { allowRemoteModels: true, localModelPath: "/models/", backends: { onnx: { wasm: {} } } },
+}));
+
 import { exportBlobKey, previewBlobKey } from "../blob-tracker.js";
 import { LruCache } from "../cache.js";
+import { createCore } from "../index.js";
 import { selectLineWords } from "../line-words.js";
 import { PipelineOrchestrator } from "../orchestrator.js";
 import { WorkerPool } from "../worker-pool.js";
@@ -27,19 +37,88 @@ import {
   createFakeWorker,
   createImportInput,
   createMockEngines,
+  createInProcessNerPipelineMock,
   createMockLogger,
+  createOcrWorkerHarness,
   createPage,
   createPdfEngineOutput,
   createRealBus,
   createRenderPageOutput,
   createReplacement,
   createWord,
+  recordNerModelEvents,
+  runMessagesOf,
+  runNerPage,
+  runOcrPage,
   wireHappyPathSpies,
 } from "./fixtures/test-helpers.js";
 
 describe("Orchestrator — edge cases", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  // NER §13 caso 33, última frase (ADR-167 §4): la baja no toca un pool con trabajo.
+  it("an idle release blocked by an in-flight ner job unloads nothing", async () => {
+    let gate: Promise<void> = Promise.resolve();
+    let openGate: () => void = () => {};
+    pipelineMock.mockReset();
+    pipelineMock.mockImplementation(createInProcessNerPipelineMock(() => gate).implementation);
+    vi.useFakeTimers();
+    try {
+      const core = await createCore({ workerPool: { nerIdleDisposeMs: 500 } });
+      try {
+        const events = recordNerModelEvents(core);
+        await runNerPage(core, 0);
+
+        // Vence el temporizador a los 500 ms contados desde la página 0; una
+        // inferencia en vuelo lo tiene que encontrar sin nada que soltar.
+        await vi.advanceTimersByTimeAsync(400);
+        gate = new Promise<void>((resolve) => {
+          openGate = resolve;
+        });
+        const inFlight = runNerPage(core, 1);
+        await vi.advanceTimersByTimeAsync(0);
+        await vi.advanceTimersByTimeAsync(1000);
+        expect(core.engines.ner.isModelReady()).toBe(true);
+
+        openGate();
+        await inFlight;
+        await runNerPage(core, 2);
+
+        expect(pipelineMock).toHaveBeenCalledTimes(1);
+        expect(events).toEqual(["loading", "ready"]);
+      } finally {
+        await core.dispose();
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // T-5 / ADR-164 (Orchestrator §14).
+  it("two cores do not share OSD workers", async () => {
+    const harnessA = createOcrWorkerHarness(new Map([[0, 90]]));
+    const harnessB = createOcrWorkerHarness(new Map([[0, 180]]));
+    const coreA = await createCore(undefined, {
+      workers: { ocr: harnessA.pageFactory, "ocr-orientation": harnessA.orientationFactory },
+    });
+    const coreB = await createCore(undefined, {
+      workers: { ocr: harnessB.pageFactory, "ocr-orientation": harnessB.orientationFactory },
+    });
+    try {
+      await runOcrPage(coreA, 0);
+      expect(harnessA.orientationWorkers).toHaveLength(1);
+      expect(harnessB.orientationWorkers).toHaveLength(0);
+
+      await runOcrPage(coreB, 0);
+      expect(harnessB.orientationWorkers).toHaveLength(1);
+      expect(runMessagesOf(harnessA.orientationWorkers[0]!)).toHaveLength(1);
+      expect(runMessagesOf(harnessB.orientationWorkers[0]!)).toHaveLength(1);
+    } finally {
+      await coreA.dispose();
+      await coreB.dispose();
+    }
   });
 
   function makeOrchestrator(overrides?: { readonly nerEnabled?: boolean }): {
@@ -387,9 +466,9 @@ describe("Orchestrator — edge cases", () => {
       sourceKind: "scanned" as const,
     };
     (engines.pdf.process as ReturnType<typeof vi.fn>).mockResolvedValueOnce(pdfOutput);
-    // ocr.processPages resuelve con 0 outputs (la página falló internamente y
-    // OcrEngine ya la descartó con warning, sin lanzar — comportamiento real).
-    (engines.ocr.processPages as ReturnType<typeof vi.fn>).mockResolvedValueOnce([]);
+    // ocr.processSession resuelve con 0 outputs (la página falló internamente
+    // y OcrEngine ya la descartó con warning, sin lanzar — comportamiento real).
+    (engines.ocr.processSession as ReturnType<typeof vi.fn>).mockResolvedValueOnce([]);
 
     await orchestrator.importDocument(createImportInput());
 
@@ -424,14 +503,14 @@ describe("Orchestrator — edge cases", () => {
     // entera, acá la página YA tenía requiresOCR===false y texto nativo
     // desde la extracción; un fallo de región no debe tocar ninguno de los
     // dos.
-    (engines.ocr.processPages as ReturnType<typeof vi.fn>).mockImplementationOnce(
+    (engines.ocr.processSession as ReturnType<typeof vi.fn>).mockImplementationOnce(
       async (
-        inputs: ReadonlyArray<{ readonly documentId: string; readonly pageIndex: number }>,
+        requests: ReadonlyArray<{ readonly documentId: string; readonly pageIndex: number }>,
       ) => {
-        for (const input of inputs) {
+        for (const request of requests) {
           bus.emit(EventChannel.Ocr, EngineEvents.OCR_PAGE_FAILED, {
-            documentId: input.documentId,
-            pageIndex: input.pageIndex,
+            documentId: request.documentId,
+            pageIndex: request.pageIndex,
             error: {
               code: EngineErrorCode.OCR_PAGE_FAILED,
               engineId: EngineId.Ocr,
@@ -675,6 +754,96 @@ describe("Orchestrator — edge cases", () => {
 
     expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Failed);
     expect(engines.export.export).not.toHaveBeenCalled();
+  });
+
+  // Caso 46 (§13, ADR-176 §1): un conflicto sin resolver bloquea el export
+  // también en el Core -- la red de seguridad para cualquier llamador que no
+  // pase por la UI, que ya deja el botón deshabilitado.
+  it("export is refused while a conflict is unresolved", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    wireHappyPathSpies(engines, bus);
+    const logger = createMockLogger();
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger,
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+    await orchestrator.importDocument(createImportInput());
+    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+
+    (engines.grouping.getSnapshot as ReturnType<typeof vi.fn>).mockReturnValue({
+      documentId: "doc-1",
+      groups: [],
+      conflicts: [
+        {
+          id: "conflict-1",
+          groupId: "group-1",
+          reason: ConflictReason.Overlap,
+          candidates: [
+            {
+              source: DetectionSource.Regex,
+              entityType: EntityType.Email,
+              confidence: 1,
+              value: "x",
+            },
+            {
+              source: DetectionSource.Manual,
+              entityType: EntityType.Person,
+              confidence: 1,
+              value: "y",
+            },
+          ],
+          resolved: false,
+        },
+      ],
+      rules: [],
+    });
+
+    const stageChanges: unknown[] = [];
+    bus.on(EventChannel.Pipeline, EngineEvents.PIPELINE_STAGE_CHANGED, (p) => stageChanges.push(p));
+    const startedSpy = vi.fn();
+    bus.on(EventChannel.Export, EngineEvents.EXPORT_STARTED, startedSpy);
+    const failedSpy = vi.fn();
+    bus.on(EventChannel.Pipeline, EngineEvents.PIPELINE_FAILED, failedSpy);
+
+    const options = {
+      imageFormat: "jpeg" as const,
+      jpegQuality: 0.85,
+      dpi: 150,
+      includeOriginalMetadata: false as const,
+      includeMarkerLegend: false,
+      filename: "out.pdf",
+    };
+    bus.emit(EventChannel.UI, EngineEvents.EXPORT_REQUESTED, { documentId: "doc-1", options });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(engines.export.export).not.toHaveBeenCalled();
+    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+    expect(stageChanges).toEqual([]);
+    expect(startedSpy).not.toHaveBeenCalled();
+    expect(failedSpy).not.toHaveBeenCalled();
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        documentId: "doc-1",
+        code: EngineErrorCode.EXPORT_UNRESOLVED_CONFLICTS,
+        unresolvedConflicts: 1,
+      }),
+    );
+
+    // Resuelto el conflicto, el mismo pedido exporta.
+    (engines.grouping.getSnapshot as ReturnType<typeof vi.fn>).mockReturnValue({
+      documentId: "doc-1",
+      groups: [],
+      conflicts: [],
+      rules: [],
+    });
+    bus.emit(EventChannel.UI, EngineEvents.EXPORT_REQUESTED, { documentId: "doc-1", options });
+    await vi.waitFor(() => expect(engines.export.export).toHaveBeenCalled());
   });
 
   it("EXPORT_REQUESTED handler never produces unhandled rejection (caso 24, seatbelt .catch)", async () => {
@@ -1068,8 +1237,7 @@ describe("Orchestrator — edge cases", () => {
       await orchestrator.importDocument(createImportInput());
       expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
 
-      (engines.render.rasterizePage as ReturnType<typeof vi.fn>).mockClear();
-      (engines.ocr.processPages as ReturnType<typeof vi.fn>).mockClear();
+      (engines.ocr.processSession as ReturnType<typeof vi.fn>).mockClear();
       (engines.regex.process as ReturnType<typeof vi.fn>).mockClear();
       (engines.ner.processPages as ReturnType<typeof vi.fn>).mockClear();
 
@@ -1082,13 +1250,15 @@ describe("Orchestrator — edge cases", () => {
       expect(engines.grouping.dropOccurrences).toHaveBeenCalledWith("doc-1", {
         pageIndices: [0],
       });
-      expect(engines.render.rasterizePage).toHaveBeenCalledWith(
-        "doc-1",
-        0,
-        expect.any(Number),
+      // ADR-143 §1: rasterizePage ya no lo llama el Orchestrator directo —
+      // vive dentro del productor que le pasa a processSession, y corre
+      // recién cuando OcrEngine lo pide. Lo que el Orchestrator sí construye
+      // y se puede afirmar acá es el descriptor de la página re-OCR-eada.
+      expect(engines.ocr.processSession).toHaveBeenCalledWith(
+        [expect.objectContaining({ documentId: "doc-1", pageIndex: 0 })],
+        expect.any(Function),
         expect.anything(),
       );
-      expect(engines.ocr.processPages).toHaveBeenCalled();
       expect(engines.regex.process).toHaveBeenCalled();
       expect(engines.ner.processPages).toHaveBeenCalledWith(
         [expect.objectContaining({ documentId: "doc-1", pageIndex: 0 })],
@@ -1103,11 +1273,11 @@ describe("Orchestrator — edge cases", () => {
 
       const stageChangedSpy = vi.fn();
       bus.on(EventChannel.Pipeline, EngineEvents.PIPELINE_STAGE_CHANGED, stageChangedSpy);
-      (engines.ocr.processPages as ReturnType<typeof vi.fn>).mockClear();
+      (engines.ocr.processSession as ReturnType<typeof vi.fn>).mockClear();
 
       await orchestrator.reanalyze("doc-1", { ocr: { languages: ["eng"] } });
 
-      expect(engines.ocr.processPages).not.toHaveBeenCalled();
+      expect(engines.ocr.processSession).not.toHaveBeenCalled();
       expect(stageChangedSpy).not.toHaveBeenCalled();
       expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
     });
@@ -1143,23 +1313,21 @@ describe("Orchestrator — edge cases", () => {
         await orchestrator.importDocument(createImportInput());
         expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
 
-        (engines.render.rasterizePage as ReturnType<typeof vi.fn>).mockClear();
-        (engines.ocr.processPages as ReturnType<typeof vi.fn>).mockClear();
+        (engines.ocr.processSession as ReturnType<typeof vi.fn>).mockClear();
         (engines.regex.process as ReturnType<typeof vi.fn>).mockClear();
         (engines.grouping.dropOccurrences as ReturnType<typeof vi.fn>).mockClear();
 
         await orchestrator.reanalyze("doc-1", { ocr: { languages: ["eng"] } });
 
-        // La región SE re-escanea: rasterizePage recibe el bbox de la
-        // región (recorte, no página completa) y ocr.processPages corre.
-        expect(engines.render.rasterizePage).toHaveBeenCalledWith(
-          "doc-1",
-          0,
-          expect.any(Number),
+        // La región SE re-escanea: el descriptor que llega a processSession
+        // lleva `region: region.bbox` (recorte, no página completa) — la
+        // rasterización en sí la dispara el productor recién cuando OcrEngine
+        // la pide (ADR-143 §1), no el Orchestrator de entrada.
+        expect(engines.ocr.processSession).toHaveBeenCalledWith(
+          [expect.objectContaining({ documentId: "doc-1", pageIndex: 0, region: region.bbox })],
+          expect.any(Function),
           expect.anything(),
-          region.bbox,
         );
-        expect(engines.ocr.processPages).toHaveBeenCalled();
         expect(engines.grouping.dropOccurrences).toHaveBeenCalledWith("doc-1", {
           pageIndices: [0],
         });
@@ -1273,6 +1441,38 @@ describe("Orchestrator — edge cases", () => {
       await vi.waitFor(() =>
         expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Failed),
       );
+    });
+
+    // Caso 40 (§13, ADR-172 §1), item 30 (§15).
+    it("reanalyze discards edit checkpoints; checkpoints are refused during a detection pass", async () => {
+      // Parte 1: reanalyze descarta todos los checkpoints existentes ANTES
+      // de reabrir la sesión.
+      const first = makeOrchestrator();
+      await first.orchestrator.importDocument(createImportInput());
+      first.orchestrator.createEditCheckpoint("doc-1");
+      expect(first.engines.grouping.discardCheckpoints).not.toHaveBeenCalled();
+
+      await first.orchestrator.reanalyze("doc-1", { ner: { enabled: false } });
+      expect(first.engines.grouping.discardCheckpoints).toHaveBeenCalledWith("doc-1");
+
+      // Parte 2: durante una pasada de detección en curso (acá, `Extracting`
+      // a mitad de `importDocument` — una de las cinco etapas bloqueadas) el
+      // façade rechaza ANTES de llegar al motor.
+      const second = makeOrchestrator();
+      const deferred = createDeferred<never>();
+      (second.engines.pdf.process as ReturnType<typeof vi.fn>).mockReturnValue(deferred.promise);
+      const importPromise = second.orchestrator.importDocument(createImportInput());
+      await Promise.resolve();
+
+      expect(() => second.orchestrator.createEditCheckpoint("doc-1")).toThrow(InvalidInputError);
+      await expect(second.orchestrator.restoreEditCheckpoint("doc-1", "any-id")).rejects.toThrow(
+        InvalidInputError,
+      );
+      expect(second.engines.grouping.createCheckpoint).not.toHaveBeenCalled();
+      expect(second.engines.grouping.restoreCheckpoint).not.toHaveBeenCalled();
+
+      deferred.reject(new Error("cleanup"));
+      await importPromise.catch(() => undefined);
     });
 
     it("reanalyze with both ner and ocr in one patch is rejected without side effects", async () => {

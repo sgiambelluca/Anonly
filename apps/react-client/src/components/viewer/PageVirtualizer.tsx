@@ -41,9 +41,15 @@
  * buscador, que necesita el valor exacto.
  */
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { computeCurrentPageIndexFromScroll } from "./currentPageIndex.js";
+import {
+  anchorScrollTop,
+  isStripOnlyChange,
+  scrollTopForPage,
+  type PageSlots,
+} from "./pageSlots.js";
 import {
   computeMountRange,
   computeVisibleRangeFromIndices,
@@ -54,7 +60,13 @@ export interface PageVirtualizerProps {
   readonly pageCount: number;
   readonly renderItem: (pageIndex: number) => ReactNode;
   readonly visibleRange: VisibleRange;
-  readonly pageSize: number;
+  /**
+   * Geometría de las filas (`pageSlots.ts`): desplazamiento y alto de cada
+   * una. Reemplaza al `pageSize` uniforme de antes — una página marcada con
+   * `unreadableInk` reserva una franja de aviso (ADR-190 §4) y su fila es más
+   * alta que las demás.
+   */
+  readonly slots: PageSlots;
   /**
    * Ancho de página en CSS px (`PdfViewer.pageWidth`, `pageLayout.ts`), para
    * que el contenedor con scroll crezca cuando el zoom hace que la página
@@ -82,7 +94,7 @@ export function PageVirtualizer({
   pageCount,
   renderItem,
   visibleRange,
-  pageSize,
+  slots,
   pageWidth,
   onVisibleRangeChange,
   onCurrentPageIndexChange,
@@ -95,6 +107,67 @@ export function PageVirtualizer({
   const lastReportedRef = useRef<VisibleRange | undefined>(undefined);
   const lastReportedPageIndexRef = useRef<number | undefined>(undefined);
 
+  // Último `scrollTop` que el usuario (o un salto) dejó, por evento de scroll.
+  // El anclaje de abajo lo necesita **de antes** del cambio de `slots`: si el
+  // contenido se achica, el navegador recorta `scrollTop` en el mismo commit y
+  // leerlo del DOM daría el valor ya recortado (el evento de scroll de ese
+  // recorte llega después del efecto).
+  const lastScrollTopRef = useRef(0);
+  const previousSlotsRef = useRef(slots);
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    lastScrollTopRef.current = container.scrollTop;
+    function trackScroll(): void {
+      if (container) lastScrollTopRef.current = container.scrollTop;
+    }
+    container.addEventListener("scroll", trackScroll);
+    return () => container.removeEventListener("scroll", trackScroll);
+  }, []);
+
+  // Anclaje del scroll (ADR-190 §4, `ui/Components.md` §5.3): si `slots` cambia
+  // porque una página ganó o perdió su franja, se corrige `scrollTop` para que
+  // la fila visible de arriba quede donde estaba. Solo ese tipo de cambio
+  // (`isStripOnlyChange`): un cambio de zoom o de documento no se ancla. Es un
+  // efecto de layout —antes de pintar— para que no haya un cuadro con el
+  // contenido corrido; va **antes** del efecto del salto explícito, así que si
+  // en el mismo commit hay un salto, el salto tiene la última palabra.
+  useLayoutEffect(() => {
+    const previous = previousSlotsRef.current;
+    previousSlotsRef.current = slots;
+    const container = containerRef.current;
+    if (!container || previous === slots || !isStripOnlyChange(previous, slots)) return;
+    const anchored = anchorScrollTop(
+      previous,
+      slots,
+      lastScrollTopRef.current,
+      container.clientHeight,
+    );
+    if (anchored !== lastScrollTopRef.current) {
+      container.scrollTop = anchored;
+      lastScrollTopRef.current = anchored;
+    }
+    // Aunque no haga falta corregir `scrollTop` (no se dispara ningún evento de
+    // scroll), una franja que aparece o desaparece entre la fila de arriba y el
+    // centro de la vista puede cambiar qué página ocupa el centro: se recalcula
+    // la página actual acá. Solo para cambios de franja: el zoom conserva su
+    // comportamiento de siempre.
+    reportCurrentPage(container);
+  }, [slots]);
+
+  // Deriva la página actual por geometría (ADR-054 §5) y la reporta solo si
+  // cambió. Lo usan el listener de scroll y el anclaje de arriba.
+  function reportCurrentPage(container: HTMLDivElement): void {
+    const pageIndex = computeCurrentPageIndexFromScroll({
+      scrollTop: container.scrollTop,
+      clientHeight: container.clientHeight,
+      slots,
+    });
+    if (lastReportedPageIndexRef.current === pageIndex) return;
+    lastReportedPageIndexRef.current = pageIndex;
+    onCurrentPageIndexChange(pageIndex);
+  }
+
   // Listener nativo de scroll: deriva la página actual por geometría
   // (ADR-054 §5). Deliberadamente sin rAF: es aritmética barata sobre un solo número, y el
   // reporte a React ya está dedupeado por `lastReportedPageIndexRef` (solo
@@ -106,16 +179,7 @@ export function PageVirtualizer({
     if (!container) return;
 
     function handleScroll(): void {
-      if (!container) return;
-      const pageIndex = computeCurrentPageIndexFromScroll({
-        scrollTop: container.scrollTop,
-        clientHeight: container.clientHeight,
-        pageSize,
-        pageCount,
-      });
-      if (lastReportedPageIndexRef.current === pageIndex) return;
-      lastReportedPageIndexRef.current = pageIndex;
-      onCurrentPageIndexChange(pageIndex);
+      if (container) reportCurrentPage(container);
     }
 
     container.addEventListener("scroll", handleScroll);
@@ -124,7 +188,7 @@ export function PageVirtualizer({
     // criterio que `onVisibleRangeChange` más abajo: es un callback estable en
     // la práctica y no hay `eslint-plugin-react-hooks` en este repo que lo
     // exija.
-  }, [pageSize, pageCount]);
+  }, [slots]);
 
   // Salto explícito a una página (DocumentSearchBox, ui/Components.md §5.4c).
   // Sin `scroll-behavior: smooth`: no hace falta animarlo y la animación
@@ -133,12 +197,13 @@ export function PageVirtualizer({
     if (!scrollRequest) return;
     const container = containerRef.current;
     if (!container) return;
-    container.scrollTop = scrollRequest.pageIndex * pageSize;
-    // Deps acotadas a propósito a `nonce`: no a `pageSize` (evitar re-saltar
-    // en cada cambio de zoom) ni a `scrollRequest.pageIndex` solo (el `nonce`
-    // es lo que fuerza el salto cuando dos matches caen en la misma página);
-    // `pageSize` se lee fresco igual porque el cuerpo del efecto se recrea en
-    // cada render. Mismo criterio que el resto del componente: no hay
+    container.scrollTop = scrollTopForPage(slots, scrollRequest.pageIndex);
+    lastScrollTopRef.current = container.scrollTop;
+    // Deps acotadas a propósito a `nonce`: no a `slots` (evitar re-saltar en
+    // cada cambio de zoom o de franjas) ni a `scrollRequest.pageIndex` solo (el
+    // `nonce` es lo que fuerza el salto cuando dos matches caen en la misma
+    // página); `slots` se lee fresco igual porque el cuerpo del efecto se
+    // recrea en cada render. Mismo criterio que el resto del componente: no hay
     // `eslint-plugin-react-hooks` en este repo que exija la lista exhaustiva.
   }, [scrollRequest?.nonce]);
 
@@ -207,7 +272,11 @@ export function PageVirtualizer({
   );
 
   return (
-    <div ref={containerRef} className="relative h-full w-full overflow-auto">
+    <div
+      ref={containerRef}
+      data-testid="page-virtualizer-scroll"
+      className="relative h-full w-full overflow-auto"
+    >
       {/*
        * `width: max(pageWidth, 100%)` en vez de dejarlo en el 100% implícito
        * de un bloque: a zoom alto `pageWidth` supera el ancho del panel, y
@@ -229,13 +298,14 @@ export function PageVirtualizer({
        */}
       <div
         className="relative"
-        style={{ height: pageCount * pageSize, width: `max(${pageWidth}px, 100%)` }}
+        style={{ height: slots.totalHeight, width: `max(${pageWidth}px, 100%)` }}
       >
         {pageIndices.map((pageIndex) => (
           <PagePhantom
             key={pageIndex}
             pageIndex={pageIndex}
-            pageSize={pageSize}
+            top={slots.offsets[pageIndex] ?? 0}
+            height={slots.heights[pageIndex] ?? 0}
             observer={observer}
           >
             {pageIndex >= mountRange.start && pageIndex <= mountRange.end
@@ -250,12 +320,14 @@ export function PageVirtualizer({
 
 function PagePhantom({
   pageIndex,
-  pageSize,
+  top,
+  height,
   observer,
   children,
 }: {
   readonly pageIndex: number;
-  readonly pageSize: number;
+  readonly top: number;
+  readonly height: number;
   readonly observer: IntersectionObserver | null;
   readonly children: ReactNode;
 }) {
@@ -273,7 +345,7 @@ function PagePhantom({
     <div
       ref={ref}
       className="absolute inset-x-0 flex items-center justify-center bg-bg-tertiary"
-      style={{ top: pageIndex * pageSize, height: pageSize }}
+      style={{ top, height }}
     >
       {children}
     </div>

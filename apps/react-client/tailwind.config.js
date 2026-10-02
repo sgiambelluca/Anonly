@@ -16,6 +16,9 @@ export default {
           tertiary: "rgb(var(--color-bg-tertiary) / <alpha-value>)",
         },
         border: "rgb(var(--color-border) / <alpha-value>)",
+        // ADR-169 §11: bordes de la franja de tipo y aviso "espacio justo".
+        "border-strong": "rgb(var(--color-border-strong) / <alpha-value>)",
+        space: "rgb(var(--color-space) / <alpha-value>)",
         text: {
           primary: "rgb(var(--color-text-primary) / <alpha-value>)",
           secondary: "rgb(var(--color-text-secondary) / <alpha-value>)",

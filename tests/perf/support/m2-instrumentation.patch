@@ -1,0 +1,67 @@
+diff --git a/packages/anonymization-core/grouping-engine/src/grouping.engine.ts b/packages/anonymization-core/grouping-engine/src/grouping.engine.ts
+index 111c15d..17c592b 100644
+--- a/packages/anonymization-core/grouping-engine/src/grouping.engine.ts
++++ b/packages/anonymization-core/grouping-engine/src/grouping.engine.ts
+@@ -707,6 +707,12 @@ function inferGenderIfDue(group: InternalGroup): boolean {
+   return true;
+ }
+ 
++function m2Add(documentId: string, key: "entityHandlersMs" | "groupingNerHandlersMs" | "finishMs", deltaMs: number): void {
++  const root = globalThis as typeof globalThis & { __anonlyM2?: Record<string, Record<string, number>> };
++  const entry = (root.__anonlyM2 ??= {})[documentId] ??= {};
++  entry[key] = (entry[key] ?? 0) + deltaMs;
++}
++
+ export class GroupingEngine implements IEngine {
+   readonly id = EngineId.Grouping;
+ 
+@@ -726,7 +732,11 @@ export class GroupingEngine implements IEngine {
+       return;
+     }
+     if (this.ctx?.abortSignal.aborted) return;
++    const started = globalThis.performance?.now() ?? Date.now();
+     this.processOccurrence(session, payload.occurrence);
++    const elapsed = (globalThis.performance?.now() ?? Date.now()) - started;
++    m2Add(payload.documentId, "entityHandlersMs", elapsed);
++    if (payload.occurrence.source === "ner") m2Add(payload.documentId, "groupingNerHandlersMs", elapsed);
+   };
+ 
+   private readonly handleRegexFinished = (payload: RegexFinished): void => {
+@@ -851,8 +861,10 @@ export class GroupingEngine implements IEngine {
+     // canónica para que un género recién resuelto entre en la misma pasada
+     // que ya recalcula índices y placeholders (spec §13 caso 37, mismo
+     // criterio que el "no parpadeo" de ADR-028).
++    const finishStarted = globalThis.performance?.now() ?? Date.now();
+     this.inferGendersOnFinish(session);
+     this.renumberGroupsCanonically(session);
++    m2Add(documentId, "finishMs", (globalThis.performance?.now() ?? Date.now()) - finishStarted);
+ 
+     const durationMs = Date.now() - session.startedAt;
+     const groupCount = session.groups.size;
+diff --git a/packages/anonymization-core/ner-engine/src/ner.engine.ts b/packages/anonymization-core/ner-engine/src/ner.engine.ts
+index 0404c9f..e6852d8 100644
+--- a/packages/anonymization-core/ner-engine/src/ner.engine.ts
++++ b/packages/anonymization-core/ner-engine/src/ner.engine.ts
+@@ -512,6 +512,12 @@ function isNerKernelProgress(value: Serializable | undefined): value is NerKerne
+   );
+ }
+ 
++function m2Add(documentId: string, key: "inferenceMs", deltaMs: number): void {
++  const root = globalThis as typeof globalThis & { __anonlyM2?: Record<string, Record<string, number>> };
++  const entry = (root.__anonlyM2 ??= {})[documentId] ??= {};
++  entry[key] = (entry[key] ?? 0) + deltaMs;
++}
++
+ export class NerEngine implements IEngine {
+   readonly id = EngineId.Ner;
+ 
+@@ -607,7 +613,9 @@ export class NerEngine implements IEngine {
+       }
+ 
+       try {
++        const inferenceStarted = globalThis.performance?.now() ?? Date.now();
+         const spans = await this.runInferenceInBatches(input, batchSize, timeoutMs, ctx);
++        m2Add(input.documentId, "inferenceMs", (globalThis.performance?.now() ?? Date.now()) - inferenceStarted);
+         const occurrences = spans.map((span) =>
+           this.buildOccurrence(span, words, pageIndex, input.text),
+         );

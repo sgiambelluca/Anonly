@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import { computeCurrentPageIndexFromScroll } from "../components/viewer/currentPageIndex.js";
+import { computePageSlots } from "../components/viewer/pageSlots.js";
+
+/** Filas uniformes sin franja: el caso de antes de ADR-190 §4 (`índice × paso`). */
+function uniformSlots(pageCount: number, pageSize: number) {
+  return computePageSlots({ pageCount, baseHeight: pageSize, stripPages: new Set() });
+}
 
 describe("computeCurrentPageIndexFromScroll", () => {
   it("returns page 0 at the very top of the document", () => {
@@ -8,8 +14,7 @@ describe("computeCurrentPageIndexFromScroll", () => {
       computeCurrentPageIndexFromScroll({
         scrollTop: 0,
         clientHeight: 1000,
-        pageSize: 800,
-        pageCount: 20,
+        slots: uniformSlots(20, 800),
       }),
     ).toBe(0);
   });
@@ -22,8 +27,7 @@ describe("computeCurrentPageIndexFromScroll", () => {
       computeCurrentPageIndexFromScroll({
         scrollTop: 1600,
         clientHeight: 1000,
-        pageSize: 800,
-        pageCount: 20,
+        slots: uniformSlots(20, 800),
       }),
     ).toBe(2);
   });
@@ -34,8 +38,7 @@ describe("computeCurrentPageIndexFromScroll", () => {
       computeCurrentPageIndexFromScroll({
         scrollTop: 799,
         clientHeight: 0,
-        pageSize: 800,
-        pageCount: 20,
+        slots: uniformSlots(20, 800),
       }),
     ).toBe(0);
     // Centro en 800 exacto: ya página 1.
@@ -43,8 +46,7 @@ describe("computeCurrentPageIndexFromScroll", () => {
       computeCurrentPageIndexFromScroll({
         scrollTop: 800,
         clientHeight: 0,
-        pageSize: 800,
-        pageCount: 20,
+        slots: uniformSlots(20, 800),
       }),
     ).toBe(1);
   });
@@ -62,8 +64,7 @@ describe("computeCurrentPageIndexFromScroll", () => {
       computeCurrentPageIndexFromScroll({
         scrollTop: maxScrollTop,
         clientHeight,
-        pageSize,
-        pageCount,
+        slots: uniformSlots(pageCount, pageSize),
       }),
     ).toBe(pageCount - 1);
   });
@@ -89,8 +90,7 @@ describe("computeCurrentPageIndexFromScroll", () => {
       computeCurrentPageIndexFromScroll({
         scrollTop: maxScrollTop,
         clientHeight,
-        pageSize,
-        pageCount,
+        slots: uniformSlots(pageCount, pageSize),
       }),
     ).toBe(pageCount - 1); // 9: la fórmula por centro sí da la última página real.
   });
@@ -103,8 +103,7 @@ describe("computeCurrentPageIndexFromScroll", () => {
       computeCurrentPageIndexFromScroll({
         scrollTop: 100_000,
         clientHeight: 1000,
-        pageSize: 800,
-        pageCount: 10,
+        slots: uniformSlots(10, 800),
       }),
     ).toBe(9);
   });
@@ -114,8 +113,7 @@ describe("computeCurrentPageIndexFromScroll", () => {
       computeCurrentPageIndexFromScroll({
         scrollTop: -500,
         clientHeight: 1000,
-        pageSize: 800,
-        pageCount: 10,
+        slots: uniformSlots(10, 800),
       }),
     ).toBe(0);
   });
@@ -125,16 +123,14 @@ describe("computeCurrentPageIndexFromScroll", () => {
       computeCurrentPageIndexFromScroll({
         scrollTop: 4000,
         clientHeight: 1000,
-        pageSize: 800,
-        pageCount: 0,
+        slots: uniformSlots(0, 800),
       }),
     ).toBe(0);
     expect(
       computeCurrentPageIndexFromScroll({
         scrollTop: 4000,
         clientHeight: 1000,
-        pageSize: 800,
-        pageCount: -1,
+        slots: uniformSlots(-1, 800),
       }),
     ).toBe(0);
   });
@@ -144,8 +140,7 @@ describe("computeCurrentPageIndexFromScroll", () => {
       computeCurrentPageIndexFromScroll({
         scrollTop: 4000,
         clientHeight: 1000,
-        pageSize: 0,
-        pageCount: 10,
+        slots: uniformSlots(10, 0),
       }),
     ).toBe(0);
   });
@@ -155,8 +150,7 @@ describe("computeCurrentPageIndexFromScroll", () => {
       computeCurrentPageIndexFromScroll({
         scrollTop: 0,
         clientHeight: 800,
-        pageSize: 800,
-        pageCount: 1,
+        slots: uniformSlots(1, 800),
       }),
     ).toBe(0);
   });

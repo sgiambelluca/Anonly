@@ -93,3 +93,11 @@ export const AVG_GLYPH_ADVANCE_RATIO = 0.6;
  * con el render. Por eso el veredicto del preview vale para el PDF exportado.
  */
 export const DEGRADED_FONT_RATIO = 0.5;
+
+/**
+ * Puntos de restauración del estado de edición (sesión de Grouping + literales
+ * manuales retenidos) que el Core guarda por documento (ADR-172 §1). Al
+ * pasarse, se descarta el más viejo. No es un campo de ninguna config: es un
+ * límite fijo, como los demás de esta tabla.
+ */
+export const MAX_EDIT_CHECKPOINTS = 50;

@@ -32,15 +32,17 @@ import {
   type WorkerJobType,
 } from "@anonly/anonymization-core";
 
+import { resolveFailedAtStage } from "../components/screens/importFailure.js";
 import { useDegradedStore } from "../store/degraded.store.js";
 import type { useDocumentStore } from "../store/document.store.js";
 import type { useEntitiesStore } from "../store/entities.store.js";
 import type { usePipelineStore } from "../store/pipeline.store.js";
 import type { useRulesStore } from "../store/rules.store.js";
 import type { useSettingsStore } from "../store/settings.store.js";
+import type { useUnreadableInkStore } from "../store/unreadableInk.store.js";
 import type { useViewerStore } from "../store/viewer.store.js";
 
-/** Bundle de los 6 stores de Zustand (React_Client.md §3), inyectado para poder testear sin montar la app. */
+/** Bundle de los 7 stores de Zustand (React_Client.md §3), inyectado para poder testear sin montar la app. */
 export interface Stores {
   readonly document: typeof useDocumentStore;
   readonly entities: typeof useEntitiesStore;
@@ -48,6 +50,7 @@ export interface Stores {
   readonly pipeline: typeof usePipelineStore;
   readonly viewer: typeof useViewerStore;
   readonly settings: typeof useSettingsStore;
+  readonly unreadableInk: typeof useUnreadableInkStore;
 }
 
 /**
@@ -83,7 +86,9 @@ export function subscribe(bus: IEventBus, stores: Stores): Unsubscribe {
       // Documento nuevo, cuenta nueva: si no, el aviso de un análisis viejo
       // sobrevive al siguiente y acusa a un documento que no tuvo el problema.
       jobTypeById.clear();
-      stores.pipeline.setState({ failedJobs: {} });
+      // ADR-168 §4/§5: el mapa de pasos y la etapa del fallo son del
+      // documento que se abre, no del anterior.
+      stores.pipeline.setState({ failedJobs: {}, failedAtStage: null, visitedStages: new Set() });
     }),
   );
 
@@ -128,9 +133,58 @@ export function subscribe(bus: IEventBus, stores: Stores): Unsubscribe {
     }),
   );
 
+  // ADR-152 §3/§4: la pantalla de escaneo necesita saber por cuál página va
+  // el OCR para mostrar "página X de Y" — el dato lo trae el propio evento
+  // (`pageIndex`), sin instrumentar nada nuevo en el Core. Se limpia solo:
+  // `closeDocument` ya llama `usePipelineStore.getState().reset()`
+  // (`actions.ts`), y `lastOcrPageIndex` vuelve a `null` con el resto del
+  // estado por documento.
+  //
+  // ADR-152 §3: "el contador nunca retrocede dentro de una etapa". El OCR
+  // despacha en paralelo (`ocrPoolSize` páginas a la vez), así que
+  // `OCR_PAGE_FINISHED` no llega en orden de `pageIndex` — quedarse con el
+  // último que llegó, sin más, deja ver "página 2 de 20" y después "página 1
+  // de 20" bajo la misma etiqueta. `Math.max` conserva el mayor `pageIndex`
+  // visto hasta ahora en esta etapa; el reset a `null` de `closeDocument`
+  // (arriba) es lo que lo vuelve a poner en cero para el próximo documento,
+  // no un mínimo artificial acá.
+  //
+  // N-3 (revisión, ronda B): `ocr.engine.ts` (~607-613) emite
+  // `OCR_PAGE_FINISHED` sin chequear `abortSignal` — un evento tardío del
+  // documento A puede llegar después de que el usuario ya abrió B. Sin este
+  // filtro, `Math.max` lo dejaría pegado para TODA la etapa de OCR de B (un
+  // número alto de A nunca lo supera un B recién empezado). Mismo filtro por
+  // `documentId` que ya usa `PREVIEW_UPDATED` más abajo.
+  unsubs.push(
+    bus.on(EventChannel.Ocr, EngineEvents.OCR_PAGE_FINISHED, (payload) => {
+      if (payload.documentId !== stores.document.getState().id) return;
+      const previous = stores.pipeline.getState().lastOcrPageIndex;
+      stores.pipeline.setState({
+        lastOcrPageIndex: Math.max(previous ?? -1, payload.pageIndex),
+      });
+
+      // ADR-190 §4: el veredicto viaja por página en el mismo evento —
+      // "ausente ≡ false" (`unreadableInk?: true`, `Contracts.md`), así que
+      // `?? false` y no un early-return: una página que ahora se lee bien
+      // (un `reanalyze` de OCR la reprocesó) tiene que poder apagar la marca.
+      stores.unreadableInk
+        .getState()
+        .setPageVerdict(payload.pageIndex, payload.unreadableInk === true);
+    }),
+  );
+
   unsubs.push(
     bus.on(EventChannel.Pipeline, EngineEvents.PIPELINE_STAGE_CHANGED, (payload) => {
-      stores.pipeline.setState({ stage: payload.stage, progress: payload.progress });
+      // ADR-168 §5: `ScanSteps` necesita saber por qué etapas se pasó (el paso
+      // "Leer" se marca terminado sin OCR si el pipeline saltó a `Detecting`).
+      const visited = stores.pipeline.getState().visitedStages;
+      stores.pipeline.setState({
+        stage: payload.stage,
+        progress: payload.progress,
+        ...(visited.has(payload.stage)
+          ? {}
+          : { visitedStages: new Set([...visited, payload.stage]) }),
+      });
     }),
   );
 
@@ -159,13 +213,28 @@ export function subscribe(bus: IEventBus, stores: Stores): Unsubscribe {
        * hasta que la carga terminara sola — y recién ahí aparecía "Cancelado".
        * Al usuario le parecía que cancelar no había hecho nada.
        */
-      stores.pipeline.setState({ stage: PipelineStage.Cancelled, modelLoading: null });
+      // React_Client.md §2.2 regla 2: cancelar un reanálisis deja el documento
+      // en `Ready` (Orchestrator §13.22); solo la importación termina en
+      // `Cancelled`. `groupCount`/`conflictCount` se conservan.
+      const stage = stores.pipeline.getState().reanalyzeInFlight
+        ? PipelineStage.Ready
+        : PipelineStage.Cancelled;
+      stores.pipeline.setState({ stage, modelLoading: null });
     }),
   );
 
   unsubs.push(
     bus.on(EventChannel.Pipeline, EngineEvents.PIPELINE_FAILED, (payload) => {
-      stores.pipeline.setState({ stage: PipelineStage.Failed, error: payload.error });
+      // ADR-168 §4: el Orchestrator emite `PIPELINE_FAILED` sin un
+      // `PIPELINE_STAGE_CHANGED` a `Failed` antes, así que el `stage` del store
+      // en este momento es la última etapa observada. Se guarda para decidir
+      // si fue un fallo de importación (vuelve a ①) o no (banner en ②b).
+      const previous = stores.pipeline.getState();
+      stores.pipeline.setState({
+        stage: PipelineStage.Failed,
+        error: payload.error,
+        failedAtStage: resolveFailedAtStage(previous.stage, previous.failedAtStage),
+      });
     }),
   );
 
@@ -185,6 +254,9 @@ export function subscribe(bus: IEventBus, stores: Stores): Unsubscribe {
 
   unsubs.push(
     bus.on(EventChannel.Ner, EngineEvents.NER_MODEL_LOADING, (payload) => {
+      // ADR-134: NER puede avisar tarde tras PIPELINE_CANCELLED. El label de
+      // modelLoading tiene prioridad visual y no debe tapar "Cancelado".
+      if (stores.pipeline.getState().stage === PipelineStage.Cancelled) return;
       stores.pipeline.setState({
         modelLoading: { modelId: payload.modelId, progress: payload.progress },
       });

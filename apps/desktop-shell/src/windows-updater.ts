@@ -1,5 +1,6 @@
 import { autoUpdater } from "electron-updater";
 
+import { createWindowsUpdateCheckPolicy } from "./update-check-policy";
 import { toUpdateEventPayload, type UpdateEventPayload } from "./updater";
 import {
   decodeWindowsUpdateSignature,
@@ -47,7 +48,21 @@ function conVersion(info: unknown): { version?: string } {
   return typeof info.version === "string" ? { version: info.version } : {};
 }
 
-export function startWindowsUpdater(emit: Emit, log: (message: string) => void): void {
+/** Lo que `main.ts` necesita para aplicar la preferencia de ADR-188. */
+export interface WindowsUpdaterHandle {
+  /**
+   * Aplica la preferencia recibida por `updater:set-automatic-checks`. Un
+   * payload no booleano se ignora. Dispara como máximo una búsqueda
+   * automática por ejecución (`update-check-policy.ts`); la búsqueda manual
+   * (`updater:check`) no pasa por acá y funciona siempre.
+   */
+  setAutomaticChecks(payload: unknown): void;
+}
+
+export function startWindowsUpdater(
+  emit: Emit,
+  log: (message: string) => void,
+): WindowsUpdaterHandle {
   /*
    * Descarga sola, instala cuando el usuario lo decide. Es el reparto que
    * ADR-131 §3 fija para las dos plataformas: bajar es barato y silencioso,
@@ -121,7 +136,19 @@ export function startWindowsUpdater(emit: Emit, log: (message: string) => void):
     emit(toUpdateEventPayload({ type: "error" }));
   });
 
-  void autoUpdater.checkForUpdates();
+  /*
+   * ADR-188: ninguna consulta automática hasta que el renderer diga qué
+   * prefiere el usuario. La decisión de si ESTE mensaje dispara una búsqueda
+   * vive en `update-check-policy.ts`, puro y testeable sin Electron; acá solo
+   * se ejecuta lo que la política resuelve.
+   */
+  const policy = createWindowsUpdateCheckPolicy();
+
+  return {
+    setAutomaticChecks(payload: unknown): void {
+      if (policy.onPreference(payload)) void autoUpdater.checkForUpdates();
+    },
+  };
 }
 
 /** Aplica la actualización ya descargada y reinicia. */

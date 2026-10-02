@@ -1,3 +1,5 @@
+import { getEventListeners } from "node:events";
+
 import { PdfPasswordRequiredError, PdfTimeoutError } from "@anonly/pdf-engine";
 import { RenderEngine } from "@anonly/render-engine";
 import {
@@ -10,15 +12,25 @@ import {
   EntityType,
   EventChannel,
   InvalidInputError,
+  MAX_EDIT_CHECKPOINTS,
   PipelineStage,
   ReplacementMode,
+  WorkerCrashedError,
   type EngineContext,
 } from "@anonly/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { LruCache } from "../cache.js";
+const pipelineMock = vi.hoisted(() => vi.fn());
+
+vi.mock("@huggingface/transformers", () => ({
+  pipeline: pipelineMock,
+  env: { allowRemoteModels: true, localModelPath: "/models/", backends: { onnx: { wasm: {} } } },
+}));
+
+import { LruCache, type PrefixDeletableCache } from "../cache.js";
 import { buildDefaultEngineConfig } from "../config.js";
 import { OrchestratorDisposedError } from "../errors.js";
+import { createCore } from "../index.js";
 import { selectLineWords } from "../line-words.js";
 import { PipelineOrchestrator } from "../orchestrator.js";
 import { WorkerPool, WorkerPoolManager } from "../worker-pool.js";
@@ -30,19 +42,185 @@ import {
   createFakeWorker,
   createImportInput,
   createMockEngines,
+  createMockEnginesWithNerPool,
+  createInProcessNerPipelineMock,
   createMockLogger,
   createPage,
   createPdfEngineOutput,
+  createOcrWorkerHarness,
   createRealBus,
+  createRenderPageOutput,
   createReplacement,
   createWord,
   makeOrchestratorWithRealDetection,
+  recordNerModelEvents,
+  runMessagesOf,
+  runNerPage,
+  runOcrPage,
   wireHappyPathSpies,
 } from "./fixtures/test-helpers.js";
 
 describe("Orchestrator — unit tests", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  // Enmienda de ADR-167 / NER §13 caso 33: la cadena real, sin factory de `ner`.
+  it("createCore without a ner factory unloads the in-process model on idle release", async () => {
+    pipelineMock.mockReset();
+    pipelineMock.mockImplementation(createInProcessNerPipelineMock().implementation);
+    vi.useFakeTimers();
+    try {
+      const core = await createCore({ workerPool: { nerIdleDisposeMs: 500 } });
+      try {
+        const events = recordNerModelEvents(core);
+
+        await runNerPage(core, 0);
+        expect(core.engines.ner.isModelReady()).toBe(true);
+
+        await vi.advanceTimersByTimeAsync(500);
+        expect(core.engines.ner.isModelReady()).toBe(false);
+
+        await runNerPage(core, 1);
+
+        expect(core.engines.ner.isModelReady()).toBe(true);
+        expect(pipelineMock).toHaveBeenCalledTimes(2);
+        expect(events).toEqual(["loading", "ready", "loading", "ready"]);
+      } finally {
+        await core.dispose();
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // T-5 / ADR-164 (Orchestrator §14).
+  it("two oriented pages reach the ocr-page pool with their own angles", async () => {
+    const harness = createOcrWorkerHarness(
+      new Map([
+        [0, 90],
+        [1, 270],
+      ]),
+    );
+    const core = await createCore(undefined, {
+      workers: { ocr: harness.pageFactory, "ocr-orientation": harness.orientationFactory },
+    });
+    try {
+      await Promise.all([runOcrPage(core, 0), runOcrPage(core, 1)]);
+
+      // Una página girada se compara también contra 0° (ADR-190): cada página
+      // lleva su ángulo y nunca el de la otra.
+      const anglesByPage = new Map<number, Set<number | undefined>>();
+      for (const run of harness.pageWorkers.flatMap((w) => runMessagesOf(w))) {
+        const angles = anglesByPage.get(run.payload.pageIndex) ?? new Set();
+        angles.add(run.payload.orientation);
+        anglesByPage.set(run.payload.pageIndex, angles);
+      }
+      expect(anglesByPage.get(0)).toContain(90);
+      expect(anglesByPage.get(0)).not.toContain(270);
+      expect(anglesByPage.get(1)).toContain(270);
+      expect(anglesByPage.get(1)).not.toContain(90);
+    } finally {
+      await core.dispose();
+    }
+  });
+
+  it("the worker pool manager does not manage the ocr-orientation key", () => {
+    const manager = new WorkerPoolManager({
+      bus: createRealBus(),
+      logger: createMockLogger(),
+      getPoolSize: () => 1,
+      getMaxQueue: () => 10,
+      getMaxRetries: () => 0,
+      baseRetryDelayMs: 1,
+      maxRetryDelayMs: 1,
+      idleDisposeMs: 60_000,
+      // @ts-expect-error ManagedPoolKey excluye "ocr-orientation" (ADR-164)
+      workerFactories: { "ocr-orientation": () => createFakeWorker() },
+    });
+    const probe = (): void => {
+      // @ts-expect-error ManagedPoolKey excluye "ocr-orientation" (ADR-164)
+      manager.getPool("ocr-orientation");
+    };
+    void probe;
+    for (const key of ["pdf", "ocr", "ner", "render"] as const) manager.getPool(key);
+    expect([...(manager["pools"] as Map<string, unknown>).keys()].sort()).toEqual([
+      "ner",
+      "ocr",
+      "pdf",
+      "render",
+    ]);
+    manager.disposeAll();
+  });
+
+  // ADR-059 §5. Afirma las dos mitades que le tocan al façade: `export` recibe
+  // `options.includeMarkerLegend === false` y el Orchestrator no invoca la
+  // leyenda por su cuenta.
+  it("renderLegend is not invoked when includeMarkerLegend is false", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    wireHappyPathSpies(engines, bus);
+    const legendSpy = vi.spyOn(engines.render, "renderLegendPage");
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+    await orchestrator.importDocument(createImportInput());
+
+    bus.emit(EventChannel.UI, EngineEvents.EXPORT_REQUESTED, {
+      documentId: "doc-1",
+      options: {
+        imageFormat: "jpeg",
+        jpegQuality: 0.85,
+        dpi: 150,
+        includeOriginalMetadata: false,
+        includeMarkerLegend: false,
+        filename: "out.pdf",
+      },
+    });
+    await vi.waitFor(() => expect(engines.export.export).toHaveBeenCalled());
+
+    const exportInput = vi.mocked(engines.export.export).mock.calls[0]?.[0];
+    expect(exportInput?.options.includeMarkerLegend).toBe(false);
+    expect(legendSpy).not.toHaveBeenCalled();
+  });
+
+  // ADR-145 §5, Orchestrator §15.10. Control: falla contra 768e5d3.
+  it("closeDocument and dispose drop the document's ocr-words entries", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    wireHappyPathSpies(engines, bus);
+    const cache = new LruCache();
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache,
+      config: createEngineConfig(),
+      engines,
+    });
+    await orchestrator.importDocument(createImportInput());
+
+    cache.set("ocr-words:doc-1:0", [createWord()]);
+    cache.set("ocr-words:doc-1:1", [createWord()]);
+    cache.set("ocr-words:doc-10:0", [createWord()]);
+    cache.set("ocr-words:doc-2:0", [createWord()]);
+    cache.set("unrelated", "keep");
+
+    await orchestrator.closeDocument("doc-1");
+
+    expect(cache.get("ocr-words:doc-1:0")).toBeUndefined();
+    expect(cache.get("ocr-words:doc-1:1")).toBeUndefined();
+    expect(cache.get("ocr-words:doc-10:0")).toBeDefined();
+    expect(cache.get("ocr-words:doc-2:0")).toBeDefined();
+
+    await orchestrator.dispose();
+
+    expect(cache.get("ocr-words:doc-10:0")).toBeUndefined();
+    expect(cache.get("ocr-words:doc-2:0")).toBeUndefined();
+    expect(cache.get("unrelated")).toBe("keep");
   });
 
   // ─── ADR-034 §5: blob URLs ───
@@ -771,6 +949,114 @@ describe("Orchestrator — unit tests", () => {
     });
   });
 
+  // ─── Limpieza de listeners de abort (H-09C) ───
+  //
+  // `dispatch()` registra `onAbort` con `{ once: true }`, que solo lo retira
+  // cuando el signal aborta. Sin la limpieza explícita de H-09C, un job que
+  // asienta (éxito o fallo) sin que su signal aborte deja el listener
+  // colgado del signal para siempre — y si ese signal vive por documento
+  // (miles de jobs), el listener se acumula sin límite.
+  describe("WorkerPool — limpieza de listeners de abort (H-09C)", () => {
+    let bus: ReturnType<typeof createRealBus>;
+
+    beforeEach(() => {
+      bus = createRealBus();
+    });
+
+    function makePool(
+      overrides?: Partial<ConstructorParameters<typeof WorkerPool>[0]>,
+    ): WorkerPool {
+      return new WorkerPool({
+        poolKey: "render",
+        jobType: "render-page",
+        size: 4,
+        maxQueue: 500,
+        maxRetries: 0,
+        baseRetryDelayMs: 1,
+        maxRetryDelayMs: 1,
+        bus,
+        logger: createMockLogger(),
+        ...overrides,
+      });
+    }
+
+    it("un job que resuelve sin abortar su señal no deja el listener de abort registrado", async () => {
+      const pool = makePool({ size: 1 });
+      const controller = new AbortController();
+
+      await pool.dispatch({ run: () => Promise.resolve(1), signal: controller.signal });
+
+      expect(getEventListeners(controller.signal, "abort")).toHaveLength(0);
+    });
+
+    it("un job que rechaza sin abortar su señal tampoco deja el listener registrado", async () => {
+      const pool = makePool({ size: 1 });
+      const controller = new AbortController();
+
+      await expect(
+        pool.dispatch({ run: () => Promise.reject(new Error("boom")), signal: controller.signal }),
+      ).rejects.toThrow("boom");
+
+      expect(getEventListeners(controller.signal, "abort")).toHaveLength(0);
+    });
+
+    it("cientos de jobs sobre la misma señal, sin abortarla, no acumulan listeners", async () => {
+      const pool = makePool();
+      const controller = new AbortController();
+
+      const jobs = Array.from({ length: 300 }, (_, i) =>
+        pool.dispatch({ run: () => Promise.resolve(i), signal: controller.signal }),
+      );
+      await Promise.all(jobs);
+
+      expect(getEventListeners(controller.signal, "abort")).toHaveLength(0);
+    });
+
+    it("dispose() rechaza los jobs que quedaron en cola y retira sus listeners de abort", async () => {
+      const pool = makePool({ size: 1 });
+
+      // Ocupa el único slot para que los siguientes queden en cola, sin
+      // abortarlo ni esperar su resolución (nunca llega).
+      const blocker = pool.dispatch({
+        run: () => new Promise(() => undefined),
+        signal: new AbortController().signal,
+      });
+      void blocker.catch(() => undefined);
+
+      const controllers = [new AbortController(), new AbortController(), new AbortController()];
+      const queued = controllers.map((c) =>
+        pool
+          .dispatch({ run: () => Promise.resolve("nunca corre"), signal: c.signal })
+          .catch((err: unknown) => err),
+      );
+      expect(pool.queueLength).toBe(3);
+
+      pool.dispose();
+
+      const results = await Promise.all(queued);
+      for (const result of results) {
+        expect(result).toBeInstanceOf(CancelledError);
+      }
+      for (const controller of controllers) {
+        expect(getEventListeners(controller.signal, "abort")).toHaveLength(0);
+      }
+    });
+
+    it("abortar un job después de que ya resolvió no lo rechaza retroactivamente", async () => {
+      const pool = makePool({ size: 1 });
+      const controller = new AbortController();
+
+      await expect(
+        pool.dispatch({ run: () => Promise.resolve("listo"), signal: controller.signal }),
+      ).resolves.toBe("listo");
+
+      // El listener ya se retiró al resolver: abortar después no debe
+      // lanzar ni afectar a nadie (no queda nada escuchando este signal).
+      expect(() => controller.abort()).not.toThrow();
+      expect(getEventListeners(controller.signal, "abort")).toHaveLength(0);
+    });
+  });
+
   // ─── Transporte por postMessage (Hito 10, ADR-036 §2/§3) ───
 
   describe("WorkerPool — transporte postMessage", () => {
@@ -1388,6 +1674,174 @@ describe("Orchestrator — unit tests", () => {
       }
     });
 
+    // ─── onWorkersReleased (ADR-167 §3) ───
+
+    it("onWorkersReleased se notifica cuando el temporizador de inactividad libera", async () => {
+      vi.useFakeTimers();
+      try {
+        const worker = createFakeWorker();
+        const pool = new WorkerPool({
+          poolKey: "ner",
+          jobType: "ner-page",
+          size: 1,
+          maxQueue: 10,
+          maxRetries: 0,
+          baseRetryDelayMs: 1,
+          maxRetryDelayMs: 1,
+          bus,
+          logger: createMockLogger(),
+          workerFactory: () => worker,
+          idleDisposeMs: 1000,
+        });
+        const listener = vi.fn();
+        pool.onWorkersReleased(listener);
+
+        const dispatched = pool.dispatch({
+          run: vi.fn(),
+          payload: {},
+          signal: new AbortController().signal,
+        });
+        await vi.waitFor(() => expect(worker.postMessage).toHaveBeenCalled());
+        const jobId = (worker.postMessage.mock.calls[0]?.[0] as { readonly jobId: string }).jobId;
+        worker.emitMessage({ type: "COMPLETED", jobId, result: "ok" });
+        await expect(dispatched).resolves.toBe("ok");
+        expect(listener).not.toHaveBeenCalled();
+
+        vi.advanceTimersByTime(1000);
+
+        expect(worker.terminate).toHaveBeenCalledTimes(1);
+        expect(listener).toHaveBeenCalledTimes(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("onWorkersReleased se notifica en una llamada explícita a releaseIdleWorkers()", async () => {
+      const worker = createFakeWorker();
+      const pool = new WorkerPool({
+        poolKey: "ner",
+        jobType: "ner-page",
+        size: 1,
+        maxQueue: 10,
+        maxRetries: 0,
+        baseRetryDelayMs: 1,
+        maxRetryDelayMs: 1,
+        bus,
+        logger: createMockLogger(),
+        workerFactory: () => worker,
+      });
+      const listener = vi.fn();
+      pool.onWorkersReleased(listener);
+
+      const dispatched = pool.dispatch({
+        run: vi.fn(),
+        payload: {},
+        signal: new AbortController().signal,
+      });
+      await vi.waitFor(() => expect(worker.postMessage).toHaveBeenCalled());
+      const jobId = (worker.postMessage.mock.calls[0]?.[0] as { readonly jobId: string }).jobId;
+      worker.emitMessage({ type: "COMPLETED", jobId, result: "ok" });
+      await expect(dispatched).resolves.toBe("ok");
+
+      expect(pool.releaseIdleWorkers()).toBe(true);
+
+      expect(listener).toHaveBeenCalledTimes(1);
+    });
+
+    it("onWorkersReleased NO se notifica cuando releaseIdleWorkers() devuelve false — el pool no está ocioso (ADR-167 §5.4)", async () => {
+      const worker = createFakeWorker();
+      const pool = new WorkerPool({
+        poolKey: "ner",
+        jobType: "ner-page",
+        size: 1,
+        maxQueue: 10,
+        maxRetries: 0,
+        baseRetryDelayMs: 1,
+        maxRetryDelayMs: 1,
+        bus,
+        logger: createMockLogger(),
+        workerFactory: () => worker,
+      });
+      const listener = vi.fn();
+      pool.onWorkersReleased(listener);
+
+      const dispatched = pool.dispatch({
+        run: vi.fn(),
+        payload: {},
+        signal: new AbortController().signal,
+      });
+      await vi.waitFor(() => expect(worker.postMessage).toHaveBeenCalled());
+
+      // Job todavía en vuelo: la guarda de releaseIdleWorkers() (ADR-080) lo frena.
+      expect(pool.releaseIdleWorkers()).toBe(false);
+      expect(listener).not.toHaveBeenCalled();
+      expect(worker.terminate).not.toHaveBeenCalled();
+
+      const jobId = (worker.postMessage.mock.calls[0]?.[0] as { readonly jobId: string }).jobId;
+      worker.emitMessage({ type: "COMPLETED", jobId, result: "ok" });
+      await expect(dispatched).resolves.toBe("ok");
+    });
+
+    it("la desuscripción de onWorkersReleased detiene las notificaciones", async () => {
+      const worker = createFakeWorker();
+      const pool = new WorkerPool({
+        poolKey: "ner",
+        jobType: "ner-page",
+        size: 1,
+        maxQueue: 10,
+        maxRetries: 0,
+        baseRetryDelayMs: 1,
+        maxRetryDelayMs: 1,
+        bus,
+        logger: createMockLogger(),
+        workerFactory: () => worker,
+      });
+      const listener = vi.fn();
+      const unsubscribe = pool.onWorkersReleased(listener);
+      unsubscribe();
+
+      const dispatched = pool.dispatch({
+        run: vi.fn(),
+        payload: {},
+        signal: new AbortController().signal,
+      });
+      await vi.waitFor(() => expect(worker.postMessage).toHaveBeenCalled());
+      const jobId = (worker.postMessage.mock.calls[0]?.[0] as { readonly jobId: string }).jobId;
+      worker.emitMessage({ type: "COMPLETED", jobId, result: "ok" });
+      await expect(dispatched).resolves.toBe("ok");
+
+      expect(pool.releaseIdleWorkers()).toBe(true);
+
+      expect(listener).not.toHaveBeenCalled();
+    });
+
+    it("dispose() limpia los listeners de onWorkersReleased", () => {
+      const worker = createFakeWorker();
+      const pool = new WorkerPool({
+        poolKey: "ner",
+        jobType: "ner-page",
+        size: 1,
+        maxQueue: 10,
+        maxRetries: 0,
+        baseRetryDelayMs: 1,
+        maxRetryDelayMs: 1,
+        bus,
+        logger: createMockLogger(),
+        workerFactory: () => worker,
+      });
+      const listener = vi.fn();
+      pool.onWorkersReleased(listener);
+
+      pool.dispose();
+
+      // Tras dispose() el pool queda trivialmente ocioso (sin workers vivos
+      // ni jobs pendientes), así que releaseIdleWorkers() sigue devolviendo
+      // `true` — lo que prueba que dispose() vació releaseListeners es que
+      // ese `true` ya no llega a nadie.
+      expect(pool.releaseIdleWorkers()).toBe(true);
+      expect(listener).not.toHaveBeenCalled();
+    });
+
     // ─── broadcast() + onWorkerCreated (ADR-043 §4/§5, PR13) ───
 
     it("broadcast() envía el mismo payload a cada worker vivo y agrega los COMPLETED", async () => {
@@ -1626,6 +2080,102 @@ describe("Orchestrator — unit tests", () => {
       worker.emitMessage({ type: "COMPLETED", jobId: dispatchJobId, result: "rendered" });
       await expect(dispatchPromise).resolves.toBe("rendered");
     });
+
+    // ─── Limpieza de listeners de abort en el transporte remoto (H-09C) ───
+    //
+    // `dispatchRemote` registra `sendCancel` con el mismo `{ once: true }`
+    // problemático que `dispatch()`: solo se retira si el signal aborta. Los
+    // tres caminos por los que un job remoto asienta sin abortar (COMPLETED,
+    // crash de worker, dispose()) deben retirarlo igual.
+    describe("limpieza de listeners de abort (H-09C)", () => {
+      it("un job remoto que completa sin abortar su señal retira el listener sendCancel", async () => {
+        const worker = createFakeWorker();
+        const pool = new WorkerPool({
+          poolKey: "pdf",
+          jobType: "pdf-parse",
+          size: 1,
+          maxQueue: 10,
+          maxRetries: 0,
+          baseRetryDelayMs: 1,
+          maxRetryDelayMs: 1,
+          bus,
+          logger: createMockLogger(),
+          workerFactory: () => worker,
+        });
+        const controller = new AbortController();
+
+        const dispatchPromise = pool.dispatch({
+          run: vi.fn(),
+          payload: {},
+          signal: controller.signal,
+        });
+        await vi.waitFor(() => expect(worker.postMessage).toHaveBeenCalled());
+        const jobId = (worker.postMessage.mock.calls[0]?.[0] as { readonly jobId: string }).jobId;
+
+        worker.emitMessage({ type: "COMPLETED", jobId, result: "ok" });
+        await expect(dispatchPromise).resolves.toBe("ok");
+
+        expect(getEventListeners(controller.signal, "abort")).toHaveLength(0);
+      });
+
+      it("un worker que crashea retira el listener sendCancel del job en curso", async () => {
+        const worker = createFakeWorker();
+        const pool = new WorkerPool({
+          poolKey: "pdf",
+          jobType: "pdf-parse",
+          size: 1,
+          maxQueue: 10,
+          maxRetries: 0,
+          baseRetryDelayMs: 1,
+          maxRetryDelayMs: 1,
+          bus,
+          logger: createMockLogger(),
+          workerFactory: () => worker,
+        });
+        const controller = new AbortController();
+
+        const dispatchPromise = pool.dispatch({
+          run: vi.fn(),
+          payload: {},
+          signal: controller.signal,
+        });
+        await vi.waitFor(() => expect(worker.postMessage).toHaveBeenCalled());
+
+        worker.emitError();
+
+        await expect(dispatchPromise).rejects.toThrow(WorkerCrashedError);
+        expect(getEventListeners(controller.signal, "abort")).toHaveLength(0);
+      });
+
+      it("dispose() con un job remoto en vuelo lo rechaza y retira su listener sendCancel", async () => {
+        const worker = createFakeWorker();
+        const pool = new WorkerPool({
+          poolKey: "pdf",
+          jobType: "pdf-parse",
+          size: 1,
+          maxQueue: 10,
+          maxRetries: 0,
+          baseRetryDelayMs: 1,
+          maxRetryDelayMs: 1,
+          bus,
+          logger: createMockLogger(),
+          workerFactory: () => worker,
+        });
+        const controller = new AbortController();
+
+        const dispatchPromise = pool.dispatch({
+          run: vi.fn(),
+          payload: {},
+          signal: controller.signal,
+        });
+        await vi.waitFor(() => expect(worker.postMessage).toHaveBeenCalled());
+
+        pool.dispose();
+
+        await expect(dispatchPromise).rejects.toThrow(CancelledError);
+        expect(getEventListeners(controller.signal, "abort")).toHaveLength(0);
+      });
+    });
   });
 
   // ─── RenderEngine + RenderPool real (ADR-043, PR13): wiring façade↔motor,
@@ -1683,18 +2233,19 @@ describe("Orchestrator — unit tests", () => {
       const r2 = engine.rasterizePage("doc-a", 1, 1, ctx);
       await vi.waitFor(() => expect(workerB.postMessage).toHaveBeenCalledTimes(1));
 
-      const fakeImageData = {
-        data: new Uint8ClampedArray(4),
-        width: 1,
-        height: 1,
-        colorSpace: "srgb",
+      // ADR-158 §1: rasterizePage devuelve EncodedPageImage (PNG), no ImageData crudo.
+      const fakeEncodedImage = {
+        bytes: new ArrayBuffer(0),
+        format: "png",
+        widthPx: 1,
+        heightPx: 1,
       };
       const rasterJobIdA = (workerA.postMessage.mock.calls[0]?.[0] as { readonly jobId: string })
         .jobId;
       const rasterJobIdB = (workerB.postMessage.mock.calls[0]?.[0] as { readonly jobId: string })
         .jobId;
-      workerA.emitMessage({ type: "COMPLETED", jobId: rasterJobIdA, result: fakeImageData });
-      workerB.emitMessage({ type: "COMPLETED", jobId: rasterJobIdB, result: fakeImageData });
+      workerA.emitMessage({ type: "COMPLETED", jobId: rasterJobIdA, result: fakeEncodedImage });
+      workerB.emitMessage({ type: "COMPLETED", jobId: rasterJobIdB, result: fakeEncodedImage });
       await Promise.all([r1, r2]);
 
       // Ahora sí: unloadDocument (lo que closeDocument()/DOCUMENT_CLOSED
@@ -1803,14 +2354,19 @@ describe("Orchestrator — unit tests", () => {
         expect.objectContaining({ documentId: "doc-a", pageIndex: 0 }),
       );
 
-      const fakeImageData = {
-        data: new Uint8ClampedArray(4),
-        width: 1,
-        height: 1,
-        colorSpace: "srgb",
+      // ADR-158 §1: rasterizePage devuelve EncodedPageImage (PNG), no ImageData crudo.
+      const fakeEncodedImage = {
+        bytes: new ArrayBuffer(0),
+        format: "png",
+        widthPx: 1,
+        heightPx: 1,
       };
-      workerB.emitMessage({ type: "COMPLETED", jobId: secondMsgToB.jobId, result: fakeImageData });
-      await expect(rasterizePromise).resolves.toEqual(fakeImageData);
+      workerB.emitMessage({
+        type: "COMPLETED",
+        jobId: secondMsgToB.jobId,
+        result: fakeEncodedImage,
+      });
+      await expect(rasterizePromise).resolves.toEqual(fakeEncodedImage);
     });
   });
 
@@ -1893,14 +2449,17 @@ describe("Orchestrator — unit tests", () => {
       // Llamada directa con un job en vuelo: no debe matar el worker. Si lo
       // matara, la promesa quedaría colgada (terminate() no dispara `error`,
       // así que nadie rechaza los pendientes).
-      pool.releaseIdleWorkers();
+      // ADR-166 §1bis: devuelve `false` — un caller (NerEngine) necesita
+      // distinguir "no hice nada" de "liberé de verdad" para no reiniciar
+      // estado propio (`modelWarm`) con un worker que sigue vivo.
+      expect(pool.releaseIdleWorkers()).toBe(false);
       expect(worker.terminate).not.toHaveBeenCalled();
 
       const jobId = (worker.postMessage.mock.calls[0]?.[0] as { readonly jobId: string }).jobId;
       worker.emitMessage({ type: "COMPLETED", jobId, result: "ok" });
       await expect(dispatched).resolves.toBe("ok");
 
-      pool.releaseIdleWorkers();
+      expect(pool.releaseIdleWorkers()).toBe(true);
       expect(worker.terminate).toHaveBeenCalledTimes(1);
     });
 
@@ -2024,7 +2583,7 @@ describe("Orchestrator — unit tests", () => {
       value: "Jose Perez",
       entityType: EntityType.Person,
     });
-    expect(result).toEqual({ occurrenceCount: 0 });
+    expect(result).toEqual({ occurrenceCount: 0, heldConflictIds: [], groupIds: [] });
 
     (engines.regex.findLiteral as ReturnType<typeof vi.fn>).mockClear();
     // Simula que el idioma de OCR nuevo sí lee el nombre.
@@ -2083,6 +2642,488 @@ describe("Orchestrator — unit tests", () => {
     await orchestrator.reanalyze("doc-1", { ocr: { languages: ["eng"] } });
 
     expect(engines.regex.findLiteral).not.toHaveBeenCalled();
+  });
+
+  // Item 28 (§15, ADR-170 §2).
+  it("previewEdit delegates to grouping.previewEdit and does not alter the snapshot", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    wireHappyPathSpies(engines, bus);
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+    await orchestrator.importDocument(createImportInput());
+
+    const expectedPreview = {
+      groups: [
+        {
+          groupId: "g1",
+          type: EntityType.DNI,
+          indexInType: 1,
+          canonicalValue: "34.567.891",
+          memberCount: 1,
+          replacementMode: ReplacementMode.Placeholder,
+          replacementValue: "[DNI 01]",
+        },
+      ],
+    };
+    (engines.grouping.previewEdit as ReturnType<typeof vi.fn>).mockReturnValue(expectedPreview);
+    (engines.grouping.getSnapshot as ReturnType<typeof vi.fn>).mockClear();
+
+    const request = { kind: "type" as const, groupId: "g1", type: EntityType.CUIT };
+    const result = orchestrator.previewEdit("doc-1", request);
+
+    expect(engines.grouping.previewEdit).toHaveBeenCalledWith("doc-1", request);
+    expect(result).toBe(expectedPreview);
+    // Sin estado propio: la delegación es pura, no toca el snapshot.
+    expect(engines.grouping.getSnapshot).not.toHaveBeenCalled();
+  });
+
+  // Caso 38 (§13, ADR-171 §4), item 29 (§15).
+  it("addManualEntity lifts a previous removal; the reanalyze re-application does not", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    const pdfOutput = createPdfEngineOutput({
+      document: createDocument({
+        pageCount: 1,
+        pages: [createPage({ index: 0, requiresOCR: true })],
+      }),
+      textlessPages: [0],
+    });
+    wireHappyPathSpies(engines, bus, { pdfOutput });
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+    await orchestrator.importDocument(createImportInput());
+
+    await orchestrator.addManualEntity("doc-1", {
+      value: "Jose Perez",
+      entityType: EntityType.Person,
+    });
+    expect(engines.grouping.liftRemoval).toHaveBeenCalledWith("doc-1", "Jose Perez");
+
+    (engines.grouping.liftRemoval as ReturnType<typeof vi.fn>).mockClear();
+
+    // La re-aplicación automática de literales retenidos tras un reanalyze
+    // de OCR (ADR-061 §5) NO llama a liftRemoval — si el usuario había
+    // eliminado el valor, esta re-aplicación no tiene que revivirlo.
+    await orchestrator.reanalyze("doc-1", { ocr: { languages: ["eng"] } });
+    expect(engines.grouping.liftRemoval).not.toHaveBeenCalled();
+  });
+
+  // Caso 39 (§13, ADR-172 §1), item 30 (§15). Con el `GroupingEngine` real,
+  // no simulado (errata de `Grouping_Engine.md` §13 caso 53): el
+  // `wireHappyPathSpies` de arriba mockea `reopenSession`/`createCheckpoint`/
+  // `restoreCheckpoint` como no-ops, así que un test sobre ese setup nunca
+  // ejercita el bug real — pasaba aunque `reopenSession` descartara los
+  // puntos, porque nunca llamaba a la implementación real.
+  it("restoring a checkpoint also restores the retained manual literals", async () => {
+    const document = createDocument({
+      pageCount: 1,
+      pages: [
+        createPage({
+          index: 0,
+          text: "Jose Perez y Ana Gomez",
+          requiresOCR: true,
+          words: [
+            createWord({ text: "Jose", bbox: { x: 0, y: 0, width: 30, height: 12 } }),
+            createWord({ text: "Perez", bbox: { x: 35, y: 0, width: 35, height: 12 } }),
+            createWord({ text: "y", bbox: { x: 75, y: 0, width: 10, height: 12 } }),
+            createWord({ text: "Ana", bbox: { x: 90, y: 0, width: 25, height: 12 } }),
+            createWord({ text: "Gomez", bbox: { x: 120, y: 0, width: 40, height: 12 } }),
+          ],
+        }),
+      ],
+    });
+    const { orchestrator, engines } = await makeOrchestratorWithRealDetection(
+      createPdfEngineOutput({ document, textlessPages: [0] }),
+    );
+    await orchestrator.importDocument(createImportInput());
+    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+    // Sin grupos todavía: "Jose Perez"/"Ana Gomez" no matchean ningún patrón
+    // de Regex, y NER está desactivado (config de la fixture).
+    expect(engines.grouping.getSnapshot("doc-1").groups).toHaveLength(0);
+
+    await orchestrator.addManualEntity("doc-1", {
+      value: "Jose Perez",
+      entityType: EntityType.Person,
+    });
+    const checkpointId = orchestrator.createEditCheckpoint("doc-1");
+    await orchestrator.addManualEntity("doc-1", {
+      value: "Ana Gomez",
+      entityType: EntityType.Person,
+    });
+    expect(engines.grouping.getSnapshot("doc-1").groups.map((g) => g.canonicalValue)).toEqual(
+      expect.arrayContaining(["Jose Perez", "Ana Gomez"]),
+    );
+
+    await orchestrator.restoreEditCheckpoint("doc-1", checkpointId);
+
+    // El grupo de "Ana Gomez" ya no está: restaurar el punto también
+    // restauró la sesión de Grouping (no solo la copia de literales).
+    const afterRestore = engines.grouping.getSnapshot("doc-1").groups;
+    expect(afterRestore.map((g) => g.canonicalValue)).toEqual(["Jose Perez"]);
+
+    // reanalyze (flujo OCR, el único que re-aplica literales retenidos,
+    // ADR-061 §5) no recrea "Ana Gomez": la lista de literales retenidos
+    // también volvió a como estaba en el punto.
+    await orchestrator.reanalyze("doc-1", { ocr: { languages: ["eng"] } });
+    const afterReanalyze = engines.grouping.getSnapshot("doc-1").groups;
+    expect(afterReanalyze.map((g) => g.canonicalValue)).toEqual(["Jose Perez"]);
+  });
+
+  // Caso 41 (§13, ADR-174 §2). Con el `GroupingEngine` y el `RegexEngine`
+  // reales: un mock canned no puede reproducir el conflicto de superposición
+  // sin reimplementarlo.
+  it("addManualEntity reports held conflicts when the manual value loses an overlap", async () => {
+    const document = createDocument({
+      pageCount: 1,
+      pages: [
+        createPage({
+          index: 0,
+          text: "34567891",
+          words: [createWord({ text: "34567891", bbox: { x: 0, y: 0, width: 60, height: 12 } })],
+        }),
+      ],
+    });
+    const { orchestrator, engines } = await makeOrchestratorWithRealDetection(
+      createPdfEngineOutput({ document }),
+    );
+    await orchestrator.importDocument(createImportInput());
+    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+    // Regex ya detectó el DNI real sobre el mismo texto.
+    expect(
+      engines.grouping.getSnapshot("doc-1").groups.some((g) => g.type === EntityType.DNI),
+    ).toBe(true);
+
+    // El mismo literal, forzado a OTRO tipo: se superpone exactamente con el
+    // DNI ya detectado (mismo bbox, misma palabra) y pierde el conflicto
+    // (empate de confidence 1.0 contra Regex).
+    const result = await orchestrator.addManualEntity("doc-1", {
+      value: "34567891",
+      entityType: EntityType.Phone,
+    });
+
+    expect(result.occurrenceCount).toBeGreaterThan(0);
+    expect(result.heldConflictIds).toHaveLength(1);
+
+    const snapshot = engines.grouping.getSnapshot("doc-1");
+    const conflict = snapshot.conflicts.find((c) => c.id === result.heldConflictIds[0]);
+    expect(conflict?.heldManual).toBe(true);
+    expect(conflict?.resolved).toBe(false);
+    // La ocurrencia manual quedó retenida, no agrupada.
+    expect(snapshot.groups.some((g) => g.type === EntityType.Phone)).toBe(false);
+  });
+
+  // Caso 41 (§13, ADR-174 §2) — el otro extremo: sin choque, heldConflictIds
+  // vacío, como cualquier agregado exitoso de siempre.
+  it("addManualEntity without an overlap returns an empty heldConflictIds", async () => {
+    const { orchestrator } = await makeOrchestratorWithRealDetection(
+      createPdfEngineOutput({
+        document: createDocument({
+          pageCount: 1,
+          pages: [
+            createPage({
+              index: 0,
+              text: "Jose Perez",
+              words: [
+                createWord({ text: "Jose", bbox: { x: 0, y: 0, width: 30, height: 12 } }),
+                createWord({ text: "Perez", bbox: { x: 35, y: 0, width: 35, height: 12 } }),
+              ],
+            }),
+          ],
+        }),
+      }),
+    );
+    await orchestrator.importDocument(createImportInput());
+
+    const result = await orchestrator.addManualEntity("doc-1", {
+      value: "Jose Perez",
+      entityType: EntityType.Person,
+    });
+
+    expect(result.occurrenceCount).toBeGreaterThan(0);
+    expect(result.heldConflictIds).toEqual([]);
+  });
+
+  // Caso 43 (§13, ADR-175 §3). Con el `GroupingEngine` y el `RegexEngine`
+  // reales: el documento trae la palabra con un punto pegado al lado
+  // ("34567891."), y `addManualEntity` se pide sin él. La comparación exacta
+  // de ADR-174 §2 dejaba esto afuera; `normalizeEntityValue` de los dos
+  // lados lo encuentra.
+  it("addManualEntity finds the held conflict despite attached punctuation", async () => {
+    const document = createDocument({
+      pageCount: 1,
+      pages: [
+        createPage({
+          index: 0,
+          text: "34567891.",
+          words: [createWord({ text: "34567891.", bbox: { x: 0, y: 0, width: 60, height: 12 } })],
+        }),
+      ],
+    });
+    const { orchestrator, engines } = await makeOrchestratorWithRealDetection(
+      createPdfEngineOutput({ document }),
+    );
+    await orchestrator.importDocument(createImportInput());
+    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+    // Regex ya detectó el DNI real sobre "34567891." (ADR-115: la
+    // puntuación pegada no entra al normalizedValue).
+    expect(
+      engines.grouping.getSnapshot("doc-1").groups.some((g) => g.type === EntityType.DNI),
+    ).toBe(true);
+
+    const result = await orchestrator.addManualEntity("doc-1", {
+      value: "34567891",
+      entityType: EntityType.Phone,
+    });
+
+    expect(result.heldConflictIds).toHaveLength(1);
+    expect(result.groupIds).toEqual([]);
+
+    const snapshot = engines.grouping.getSnapshot("doc-1");
+    const conflict = snapshot.conflicts.find((c) => c.id === result.heldConflictIds[0]);
+    expect(conflict?.heldManual).toBe(true);
+    expect(conflict?.resolved).toBe(false);
+    // Re-agregar el mismo valor con el choque todavía pendiente devuelve el
+    // mismo id (dedup por identidad; Orchestrator.md §13 caso 43).
+    const again = await orchestrator.addManualEntity("doc-1", {
+      value: "34567891",
+      entityType: EntityType.Phone,
+    });
+    expect(again.heldConflictIds).toEqual(result.heldConflictIds);
+  });
+
+  // Caso 44 (§13, ADR-175 §3): groupIds en los tres desenlaces posibles de
+  // addManualEntity.
+  it("addManualEntity reports the groupIds its occurrences landed in", async () => {
+    const document = createDocument({
+      pageCount: 1,
+      pages: [
+        createPage({
+          index: 0,
+          text: "Jose Perez",
+          words: [
+            createWord({ text: "Jose", bbox: { x: 0, y: 0, width: 30, height: 12 } }),
+            createWord({ text: "Perez", bbox: { x: 35, y: 0, width: 35, height: 12 } }),
+          ],
+        }),
+      ],
+    });
+    const { orchestrator, engines } = await makeOrchestratorWithRealDetection(
+      createPdfEngineOutput({ document }),
+    );
+    await orchestrator.importDocument(createImportInput());
+
+    // Sin choque: groupIds con el grupo donde quedó.
+    const first = await orchestrator.addManualEntity("doc-1", {
+      value: "Jose Perez",
+      entityType: EntityType.Person,
+    });
+    expect(first.occurrenceCount).toBeGreaterThan(0);
+    expect(first.heldConflictIds).toEqual([]);
+    expect(first.groupIds).toHaveLength(1);
+    const groupId = engines.grouping
+      .getSnapshot("doc-1")
+      .groups.find((g) => g.canonicalValue === "Jose Perez")?.id;
+    expect(first.groupIds).toEqual([groupId]);
+
+    // Ya estaba en un grupo (dedup): groupIds con ESE mismo grupo.
+    const dedup = await orchestrator.addManualEntity("doc-1", {
+      value: "Jose Perez",
+      entityType: EntityType.Person,
+    });
+    expect(dedup.groupIds).toEqual([groupId]);
+
+    // Valor ausente del documento: occurrenceCount 0 y las dos listas
+    // vacías (invariante: occurrenceCount > 0 => heldConflictIds o
+    // groupIds no vacío -- acá occurrenceCount es 0, así que las dos
+    // pueden estarlo).
+    const absent = await orchestrator.addManualEntity("doc-1", {
+      value: "Nadie Existe",
+      entityType: EntityType.Person,
+    });
+    expect(absent.occurrenceCount).toBe(0);
+    expect(absent.heldConflictIds).toEqual([]);
+    expect(absent.groupIds).toEqual([]);
+  });
+
+  // Caso 44, rama (a) (ADR-175 §3, errata 2026-09-24): la ocurrencia de este
+  // agregado se absorbe en un grupo YA reclasificado a otro tipo
+  // (`absorbedTypes`, ADR-085 §1(a)) -- la rama (b) (group.type ===
+  // entityType pedido) no lo encontraría, porque el grupo quedó con OTRO
+  // tipo. Solo la rama (a) (occurrenceId del member) lo cubre.
+  it("addManualEntity reports a group found via absorbedTypes after a type correction (branch a)", async () => {
+    const document = createDocument({
+      pageCount: 1,
+      pages: [
+        createPage({
+          index: 0,
+          text: "Diego Ramos",
+          words: [
+            createWord({ text: "Diego", bbox: { x: 0, y: 0, width: 30, height: 12 } }),
+            createWord({ text: "Ramos", bbox: { x: 35, y: 0, width: 35, height: 12 } }),
+          ],
+        }),
+      ],
+    });
+    const { orchestrator, engines, bus } = await makeOrchestratorWithRealDetection(
+      createPdfEngineOutput({ document }),
+    );
+    await orchestrator.importDocument(createImportInput());
+
+    // Detección automática previa de "Diego Ramos" como Person, en una
+    // página que la búsqueda literal de más abajo no toca -- para que la
+    // ocurrencia MANUAL de este agregado sea una identidad nueva, no un
+    // duplicado de ésta.
+    bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: {
+        id: "ner-occ-diego-ramos",
+        value: "Diego Ramos",
+        normalizedValue: "diego ramos",
+        bbox: { x: 0, y: 0, width: 70, height: 12 },
+        pageIndex: 1,
+        source: DetectionSource.NER,
+        confidence: 0.9,
+        entityType: EntityType.Person,
+      },
+    });
+    const detectedGroup = engines.grouping
+      .getSnapshot("doc-1")
+      .groups.find((g) => g.canonicalValue === "Diego Ramos");
+    if (!detectedGroup) throw new Error("expected the auto-detected group");
+
+    // El usuario corrige el tipo del grupo detectado (ADR-082/ADR-085): el
+    // grupo queda con OTRO tipo, pero sigue aceptando Person vía
+    // absorbedTypes.
+    await engines.grouping.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: detectedGroup.id,
+      patch: { type: EntityType.Organization },
+    });
+    expect(
+      engines.grouping.getSnapshot("doc-1").groups.find((g) => g.id === detectedGroup.id)?.type,
+    ).toBe(EntityType.Organization);
+
+    // El agregado manual encuentra la MISMA frase en el documento real
+    // (página 0, identidad nueva) y se absorbe en el grupo ya reclasificado.
+    const result = await orchestrator.addManualEntity("doc-1", {
+      value: "Diego Ramos",
+      entityType: EntityType.Person,
+    });
+    expect(result.occurrenceCount).toBeGreaterThan(0);
+    expect(result.heldConflictIds).toEqual([]);
+    expect(result.groupIds).toEqual([detectedGroup.id]);
+
+    const finalGroup = engines.grouping
+      .getSnapshot("doc-1")
+      .groups.find((g) => g.id === detectedGroup.id);
+    // La rama (b) sola NO habría encontrado este grupo: sigue siendo
+    // Organization, no Person (el tipo pedido).
+    expect(finalGroup?.type).toBe(EntityType.Organization);
+    expect(finalGroup?.members).toHaveLength(2);
+  });
+
+  // Caso 45 (§13, ADR-176 §3). Con el `GroupingEngine` y el `RegexEngine`
+  // reales: agregar un valor que queda CONTENIDO (ADR-117) dentro de una
+  // detección automática del mismo tipo reporta el grupo contenedor -- antes
+  // de manualOutcome, ni el criterio por normalizedValue/tipo (ADR-175 §3)
+  // ni el de occurrenceId (ADR-176 §3 rama a, sin manualOutcome) lo
+  // encontraban, porque una ocurrencia contenida no se registra (ADR-117) y
+  // el Orchestrator no tenía forma de reconstruir esa decisión desde afuera.
+  it("addManualEntity reports the container group of a contained occurrence", async () => {
+    const words = ["Tel:", "11", "4567-8901"];
+    let x = 0;
+    const ws = words.map((t) => {
+      const w = createWord({ text: t, bbox: { x, y: 0, width: t.length * 6, height: 12 } });
+      x += t.length * 6 + 4;
+      return w;
+    });
+    const document = createDocument({
+      pageCount: 1,
+      pages: [createPage({ index: 0, text: words.join(" "), words: ws })],
+    });
+    const { orchestrator, engines } = await makeOrchestratorWithRealDetection(
+      createPdfEngineOutput({ document }),
+    );
+    await orchestrator.importDocument(createImportInput());
+    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+    const containerGroup = engines.grouping
+      .getSnapshot("doc-1")
+      .groups.find((g) => g.type === EntityType.Phone);
+    if (!containerGroup) throw new Error("expected the automatically detected Phone group");
+
+    const result = await orchestrator.addManualEntity("doc-1", {
+      value: "4567-8901",
+      entityType: EntityType.Phone,
+    });
+
+    expect(result.occurrenceCount).toBe(1);
+    expect(result.heldConflictIds).toEqual([]);
+    expect(result.groupIds).toEqual([containerGroup.id]);
+    // No creó un grupo Phone paralelo: la contenida no se registró (ADR-117).
+    expect(
+      engines.grouping.getSnapshot("doc-1").groups.filter((g) => g.type === EntityType.Phone),
+    ).toHaveLength(1);
+  });
+
+  // Caso 42 (§13, ADR-172 §1, hallazgo N-4 del revisor).
+  it("evicting the oldest checkpoint also drops its retained-literals copy", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    const pdfOutput = createPdfEngineOutput({
+      document: createDocument({
+        pageCount: 1,
+        pages: [createPage({ index: 0, requiresOCR: true })],
+      }),
+      textlessPages: [0],
+    });
+    wireHappyPathSpies(engines, bus, { pdfOutput });
+    let checkpointSeq = 0;
+    (engines.grouping.createCheckpoint as ReturnType<typeof vi.fn>).mockImplementation(
+      () => `cp-${++checkpointSeq}`,
+    );
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+    await orchestrator.importDocument(createImportInput());
+
+    // Un literal retenido real, para que la copia que se pierde no esté vacía.
+    await orchestrator.addManualEntity("doc-1", {
+      value: "Jose Perez",
+      entityType: EntityType.Person,
+    });
+
+    const ids: string[] = [];
+    for (let i = 0; i < MAX_EDIT_CHECKPOINTS; i++) {
+      ids.push(orchestrator.createEditCheckpoint("doc-1"));
+    }
+    const byDocument = orchestrator["checkpointedLiteralsByDocument"].get("doc-1");
+    expect(byDocument?.size).toBe(MAX_EDIT_CHECKPOINTS);
+    expect(byDocument?.has(ids[0]!)).toBe(true);
+    expect(byDocument?.get(ids[0]!)).toEqual([
+      { value: "Jose Perez", entityType: EntityType.Person },
+    ]);
+
+    // El punto MAX_EDIT_CHECKPOINTS + 1: Grouping desaloja `ids[0]`, y el
+    // Orchestrator tiene que desalojar su copia de literales bajo el mismo id.
+    const oneMore = orchestrator.createEditCheckpoint("doc-1");
+    expect(byDocument?.size).toBe(MAX_EDIT_CHECKPOINTS);
+    expect(byDocument?.has(ids[0]!)).toBe(false);
+    expect(byDocument?.has(oneMore)).toBe(true);
   });
 });
 
@@ -2159,18 +3200,18 @@ describe("PIPELINE_PROGRESS (Orchestrator.md §8, ADR-034 §4)", () => {
       textlessPages: [0, 1],
     });
     wireHappyPathSpies(engines, bus, { pdfOutput });
-    vi.spyOn(engines.ocr, "processPages").mockImplementation(async (inputs) => {
+    vi.spyOn(engines.ocr, "processSession").mockImplementation(async (requests) => {
       const outputs = [];
-      for (const input of inputs) {
+      for (const request of requests) {
         bus.emit(EventChannel.Ocr, EngineEvents.OCR_PAGE_FINISHED, {
-          documentId: input.documentId,
-          pageIndex: input.pageIndex,
+          documentId: request.documentId,
+          pageIndex: request.pageIndex,
           wordCount: 0,
           confidence: 0.9,
         });
         outputs.push({
-          documentId: input.documentId,
-          pageIndex: input.pageIndex,
+          documentId: request.documentId,
+          pageIndex: request.pageIndex,
           words: [],
           confidence: 0.9,
           durationMs: 1,
@@ -2199,6 +3240,237 @@ describe("PIPELINE_PROGRESS (Orchestrator.md §8, ADR-034 §4)", () => {
     expect(ocrEvents.every((e) => e.documentId === "doc-1")).toBe(true);
   });
 
+  /*
+   * ADR-145 §1/§2: con la protección de LruCache, este `warn` es
+   * inalcanzable por construcción en el camino real del handoff (depósito y
+   * consumo ocurren en el mismo turno síncrono, ADR-041 §3) — pero sigue
+   * siendo el guard defensivo que evita la peor fuga posible: la página
+   * sigue hasta Ready sin palabras, sin texto y sin ningún error visible. Se
+   * fuerza inyectando una caché mínima cuyo `get()` siempre devuelve
+   * `undefined`, simulando "el depósito no está" sin depender de ningún
+   * detalle interno de `LruCache`.
+   */
+  it("handleOcrPageFinished loguea warn y no revienta si el depósito de palabras no está (ADR-145 §1/§2)", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    const pdfOutput = createPdfEngineOutput({
+      document: createDocument({
+        pageCount: 1,
+        pages: [createPage({ index: 0, requiresOCR: true })],
+      }),
+      textlessPages: [0],
+    });
+    wireHappyPathSpies(engines, bus, { pdfOutput });
+    vi.spyOn(engines.ocr, "processSession").mockImplementation(async (requests) => {
+      const outputs = [];
+      for (const request of requests) {
+        bus.emit(EventChannel.Ocr, EngineEvents.OCR_PAGE_FINISHED, {
+          documentId: request.documentId,
+          pageIndex: request.pageIndex,
+          wordCount: 3,
+          confidence: 0.9,
+        });
+        outputs.push({
+          documentId: request.documentId,
+          pageIndex: request.pageIndex,
+          words: [],
+          confidence: 0.9,
+          durationMs: 1,
+        });
+      }
+      return outputs;
+    });
+
+    // Caché mínima (ADR-145 §1): `get()` nunca encuentra nada, `set()` no
+    // hace nada — fuerza la rama que la protección de LruCache vuelve
+    // inalcanzable en el handoff real, sin tocar su implementación.
+    const emptyCache: PrefixDeletableCache = {
+      get: () => undefined,
+      deleteByPrefix: () => undefined,
+      set: () => undefined,
+      delete: () => undefined,
+      clear: () => undefined,
+      size: 0,
+      bytes: 0,
+    };
+    const logger = createMockLogger();
+
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger,
+      cache: emptyCache,
+      config: createEngineConfig(),
+      engines,
+    });
+
+    await expect(orchestrator.importDocument(createImportInput())).resolves.not.toThrow();
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      "OCR_PAGE_FINISHED sin ocr-words en cache; se ignora la fusión.",
+      expect.objectContaining({ documentId: "doc-1", pageIndex: 0 }),
+    );
+  });
+
+  // ─── ADR-157: el pool de OCR se da de baja al terminar runOcrStage ───
+
+  it("ADR-157: releases the OCR pool's idle workers after a successful OCR stage", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    const pdfOutput = createPdfEngineOutput({
+      document: createDocument({
+        pageCount: 1,
+        pages: [createPage({ index: 0, requiresOCR: true })],
+      }),
+      textlessPages: [0],
+    });
+    wireHappyPathSpies(engines, bus, { pdfOutput });
+    vi.spyOn(engines.ocr, "processSession").mockImplementation(async (requests) =>
+      requests.map((request) => ({
+        documentId: request.documentId,
+        pageIndex: request.pageIndex,
+        words: [],
+        confidence: 0.9,
+        durationMs: 1,
+      })),
+    );
+    const releaseSpy = vi.spyOn(engines.ocr, "releaseIdleWorkers");
+
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+
+    await orchestrator.importDocument(createImportInput());
+
+    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+    // El finally de runOcrStage corre una vez que processSession resolvió —
+    // el camino feliz, donde el pool está ocioso para cuando esto se llama.
+    expect(releaseSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("ADR-157 §1ter: cancelling mid-OCR still reaches PIPELINE_CANCELLED — the finally doesn't break cancellation (not an assertion that the pool was actually freed)", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    const pdfOutput = createPdfEngineOutput({
+      document: createDocument({
+        pageCount: 1,
+        pages: [createPage({ index: 0, requiresOCR: true })],
+      }),
+      textlessPages: [0],
+    });
+    wireHappyPathSpies(engines, bus, { pdfOutput });
+
+    // Mismo patrón que "case 22" (cancelación durante reanalyze, más abajo
+    // en este archivo): `orchestrator.cancel()` es lo único que fija
+    // stage=Cancelled y emite PIPELINE_CANCELLED — sin llamarlo, el reject
+    // de abajo no reproduciría una cancelación real, solo un fallo. Tras
+    // cancelar, se rechaza con CancelledError, tal como lo haría un job en
+    // vuelo cuyo signal abortó. No se afirma que releaseIdleWorkers() haya
+    // liberado nada — con un job todavía en vuelo, su propia guarda
+    // (WorkerPool, ADR-080) lo vuelve un no-op por diseño (ADR-157 §1ter);
+    // eso ya lo cubren los tests de WorkerPool y de OcrEngine.releaseIdleWorkers.
+    // Lo que este test verifica es que el `finally` de runOcrStage no rompe
+    // el camino de cancelación existente.
+    vi.spyOn(engines.ocr, "processSession").mockImplementation(async () => {
+      await orchestrator.cancel("doc-1");
+      throw new CancelledError("doc-1");
+    });
+    const releaseSpy = vi.spyOn(engines.ocr, "releaseIdleWorkers");
+
+    const cancelledSpy = vi.fn();
+    bus.on(EventChannel.Pipeline, EngineEvents.PIPELINE_CANCELLED, cancelledSpy);
+
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+
+    await expect(orchestrator.importDocument(createImportInput())).resolves.not.toThrow();
+
+    // Nada se rompe: el pipeline llega a su estado terminal de siempre para
+    // una cancelación en vuelo, sin una excepción sin manejar.
+    expect(cancelledSpy).toHaveBeenCalledWith(expect.objectContaining({ documentId: "doc-1" }));
+    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Cancelled);
+    // El finally sigue corriendo (se llama), sin importar si adentro terminó
+    // siendo un no-op.
+    expect(releaseSpy).toHaveBeenCalledTimes(1);
+  });
+
+  // ─── ADR-167: runDetectionStage ya NO da de baja el pool de NER ───
+  // Reemplaza los tres tests de ADR-166 (Orchestrator.md §13 caso 37): el
+  // pool de NER se libera solo, por su propio temporizador
+  // (`nerIdleDisposeMs`, vive en `WorkerPool`) — el Orchestrator no hace
+  // nada con él al cerrar la detección, a diferencia de OCR (ADR-157, que no
+  // cambia). El discriminante es un `NerEngine` con un `WorkerPool` real
+  // detrás (workerFactory de un `FakeWorker`) para poder observar si su
+  // worker sigue vivo después de la etapa.
+
+  it("ADR-167 caso 37: runDetectionStage no da de baja el pool de NER — el worker falso sigue vivo", async () => {
+    const bus = createRealBus();
+    const worker = createFakeWorker();
+    const nerPool = new WorkerPool({
+      poolKey: "ner",
+      jobType: "ner-page",
+      size: 1,
+      maxQueue: 10,
+      maxRetries: 0,
+      baseRetryDelayMs: 1,
+      maxRetryDelayMs: 1,
+      bus,
+      logger: createMockLogger(),
+      workerFactory: () => worker,
+      // Sin idleDisposeMs: nada de temporizador propio en este test — lo
+      // único que se afirma es que el Orchestrator no llama a una baja
+      // explícita (ver el test de WorkerPool.onWorkersReleased para el
+      // camino del temporizador).
+    });
+    const engines = createMockEnginesWithNerPool(nerPool);
+    const pdfOutput = createPdfEngineOutput({
+      document: createDocument({
+        pageCount: 1,
+        pages: [createPage({ index: 0, text: "Juan", words: [createWord({ text: "Juan" })] })],
+      }),
+    });
+    wireHappyPathSpies(engines, bus, { pdfOutput });
+    // `wireHappyPathSpies` mockea `engines.ner.processPages` (no toca ningún
+    // pool): acá hace falta la implementación REAL para que el despacho
+    // llegue al `WorkerPool` y cree el worker falso.
+    vi.spyOn(engines.ner, "processPages").mockRestore();
+    await engines.ner.init({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      abortSignal: new AbortController().signal,
+      config: createEngineConfig(),
+    });
+
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+
+    const importPromise = orchestrator.importDocument(createImportInput());
+    await vi.waitFor(() => expect(worker.postMessage).toHaveBeenCalled());
+    const jobId = (worker.postMessage.mock.calls[0]?.[0] as { readonly jobId: string }).jobId;
+    worker.emitMessage({ type: "COMPLETED", jobId, result: { spans: [] } });
+    await importPromise;
+
+    // El worker falso llegó a despacharse de verdad (el dispatch cruzó al
+    // pool real) y, a diferencia de ADR-166, nadie lo terminó al cerrar la
+    // detección.
+    expect(worker.postMessage).toHaveBeenCalled();
+    expect(worker.terminate).not.toHaveBeenCalled();
+  });
+
   // ─── ADR-065 §2: total = textlessPages.length + ocrRegions.length ───
 
   it("OCR: total counts textlessPages.length + ocrRegions.length (ADR-065 §2)", async () => {
@@ -2217,18 +3489,18 @@ describe("PIPELINE_PROGRESS (Orchestrator.md §8, ADR-034 §4)", () => {
       ocrRegions: [region],
     });
     wireHappyPathSpies(engines, bus, { pdfOutput });
-    vi.spyOn(engines.ocr, "processPages").mockImplementation(async (inputs) => {
+    vi.spyOn(engines.ocr, "processSession").mockImplementation(async (requests) => {
       const outputs = [];
-      for (const input of inputs) {
+      for (const request of requests) {
         bus.emit(EventChannel.Ocr, EngineEvents.OCR_PAGE_FINISHED, {
-          documentId: input.documentId,
-          pageIndex: input.pageIndex,
+          documentId: request.documentId,
+          pageIndex: request.pageIndex,
           wordCount: 0,
           confidence: 0.9,
         });
         outputs.push({
-          documentId: input.documentId,
-          pageIndex: input.pageIndex,
+          documentId: request.documentId,
+          pageIndex: request.pageIndex,
           words: [],
           confidence: 0.9,
           durationMs: 1,
@@ -2323,20 +3595,20 @@ describe("PIPELINE_PROGRESS (Orchestrator.md §8, ADR-034 §4)", () => {
       textlessPages: [0],
     });
     wireHappyPathSpies(engines, bus, { pdfOutput });
-    vi.spyOn(engines.ocr, "processPages").mockImplementation(async (inputs) => {
+    vi.spyOn(engines.ocr, "processSession").mockImplementation(async (requests) => {
       // Emite OCR_PAGE_FINISHED dos veces para la misma (única) página
       // tracked, simulando una entrega duplicada del bus.
       for (let i = 0; i < 2; i += 1) {
         bus.emit(EventChannel.Ocr, EngineEvents.OCR_PAGE_FINISHED, {
-          documentId: inputs[0]?.documentId ?? "",
+          documentId: requests[0]?.documentId ?? "",
           pageIndex: 0,
           wordCount: 0,
           confidence: 0.9,
         });
       }
-      return inputs.map((input) => ({
-        documentId: input.documentId,
-        pageIndex: input.pageIndex,
+      return requests.map((request) => ({
+        documentId: request.documentId,
+        pageIndex: request.pageIndex,
         words: [],
         confidence: 0.9,
         durationMs: 1,
@@ -2418,6 +3690,70 @@ describe("LruCache", () => {
     expect(cache.get("a")).toBe(1);
     expect(cache.get("c")).toBe(3);
   });
+
+  // ADR-145 §1: nunca expulsa la entrada que acaba de insertarse.
+  describe("nunca expulsa la entrada recién insertada (ADR-145 §1)", () => {
+    it("una única entrada que excede maxBytes por sí sola se conserva igual", () => {
+      const cache = new LruCache({ maxItems: 100, maxBytes: 10 });
+
+      cache.set("huge", "palabras-de-la-pagina", 1000);
+
+      expect(cache.get("huge")).toBe("palabras-de-la-pagina");
+      expect(cache.size).toBe(1);
+      // La caché queda por encima de su presupuesto por esta única entrada
+      // — el exceso acotado que el ADR prefiere sobre perder la entrada.
+      expect(cache.bytes).toBe(1000);
+    });
+
+    it("expulsa todo lo demás antes de tocar la entrada recién insertada", () => {
+      const cache = new LruCache({ maxItems: 100, maxBytes: 100 });
+
+      cache.set("a", "vieja-1", 30);
+      cache.set("b", "vieja-2", 30);
+      cache.set("huge", "pagina-densa", 500); // sola ya excede maxBytes
+
+      expect(cache.get("a")).toBeUndefined();
+      expect(cache.get("b")).toBeUndefined();
+      expect(cache.get("huge")).toBe("pagina-densa");
+      expect(cache.size).toBe(1);
+    });
+
+    it("una entrada que SÍ entra en el presupuesto sigue expulsando la más vieja como siempre", () => {
+      // No regresión: la protección solo aplica cuando expulsar la más
+      // vieja no alcanzaría — con maxItems=1 y una entrada nueva que entra
+      // sola en el presupuesto, la vieja se expulsa igual.
+      const cache = new LruCache({ maxItems: 1, maxBytes: 1_000_000 });
+
+      cache.set("a", 1);
+      cache.set("b", 2);
+
+      expect(cache.get("a")).toBeUndefined();
+      expect(cache.get("b")).toBe(2);
+      expect(cache.size).toBe(1);
+    });
+  });
+
+  // ADR-145 §3: bytes finito y no negativo, o error tipado — nunca
+  // normalizado en silencio a 0 (el bug que dejaba el límite sin efecto).
+  describe("valida bytes en set() (ADR-145 §3)", () => {
+    it.each([-1, NaN, Infinity, -Infinity])("rechaza bytes=%p con InvalidInputError", (bytes) => {
+      const cache = new LruCache();
+      expect(() => cache.set("k", "v", bytes)).toThrow(InvalidInputError);
+      expect(cache.size).toBe(0);
+    });
+
+    it("bytes ausente sigue siendo válido y cuenta como 0 (sin cambio de contrato)", () => {
+      const cache = new LruCache();
+      expect(() => cache.set("k", "v")).not.toThrow();
+      expect(cache.bytes).toBe(0);
+    });
+
+    it("bytes=0 explícito es válido", () => {
+      const cache = new LruCache();
+      expect(() => cache.set("k", "v", 0)).not.toThrow();
+      expect(cache.bytes).toBe(0);
+    });
+  });
 });
 
 describe("Orchestrator — disposed guard", () => {
@@ -2441,6 +3777,148 @@ describe("Orchestrator — disposed guard", () => {
     await expect(orchestrator.retryWithPassword("doc-1", "x")).rejects.toThrow(
       OrchestratorDisposedError,
     );
+  });
+});
+
+describe("Precalentado de la página 1 al llegar a Ready (ADR-151)", () => {
+  it("renderiza la página 1, lado original, en preview, en el mismo turno en que se alcanza Ready", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    wireHappyPathSpies(engines, bus);
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+
+    await orchestrator.importDocument(createImportInput());
+
+    // Único render en el happy path (wireHappyPathSpies deja getSnapshot con
+    // groups: [] por default, así que el seed anonimizado de ADR-044 no
+    // dispara ninguno): es el precalentado, no un side-effect de otra cosa.
+    expect(engines.render.renderPage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        documentId: "doc-1",
+        pageIndex: 0,
+        kind: "original",
+        mode: "preview",
+      }),
+      expect.anything(),
+    );
+    // Sin `scale`: cae al previewScale default (ADR-151 §1).
+    const call = (engines.render.renderPage as ReturnType<typeof vi.fn>).mock.calls.find(
+      (c) => (c[0] as { kind: string }).kind === "original",
+    );
+    expect((call?.[0] as { scale?: number }).scale).toBeUndefined();
+  });
+
+  it("no precalienta un documento que terminó Cancelled (ADR-151 §1: solo Ready/Done)", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    wireHappyPathSpies(engines, bus);
+    // Fuerza el camino de reanalyze-cancelado (handleGroupingFinished retorna
+    // antes de Ready cuando cancelRequested ya está seteado) simulando la
+    // cancelación de un reanalyze en curso.
+    vi.spyOn(engines.ner, "processPages").mockImplementation(async (inputs) => {
+      bus.emit(EventChannel.Ner, EngineEvents.NER_FINISHED, {
+        documentId: "doc-1",
+        occurrenceCount: 0,
+        durationMs: 1,
+      });
+      await orchestrator.cancel("doc-1");
+      await engines.grouping.finishSession("doc-1");
+      return inputs.map((input) => ({
+        documentId: input.documentId,
+        pageIndex: input.pageIndex,
+        occurrences: [],
+        durationMs: 1,
+      }));
+    });
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+
+    await orchestrator.importDocument(createImportInput());
+
+    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Cancelled);
+    expect(engines.render.renderPage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "original", mode: "preview" }),
+      expect.anything(),
+    );
+  });
+
+  it("un fallo del precalentado no escala a PIPELINE_FAILED (best-effort, ADR-151 §1)", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    wireHappyPathSpies(engines, bus);
+    vi.spyOn(engines.render, "renderPage").mockImplementation((input) => {
+      if (input.kind === "original" && input.mode === "preview") {
+        return Promise.reject(new Error("precalentado explotó"));
+      }
+      return Promise.resolve(
+        createRenderPageOutput({
+          documentId: input.documentId,
+          pageIndex: input.pageIndex,
+          kind: input.kind,
+        }),
+      );
+    });
+    const failedSpy = vi.fn();
+    bus.on(EventChannel.Pipeline, EngineEvents.PIPELINE_FAILED, failedSpy);
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+
+    await orchestrator.importDocument(createImportInput());
+    // El catch de prewarmFirstPagePreview es fire-and-forget: da un tick para
+    // que corra antes de afirmar que no escaló a nada.
+    await Promise.resolve();
+
+    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+    expect(failedSpy).not.toHaveBeenCalled();
+  });
+
+  it("first page is prewarmed only on the first Ready of a document", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    wireHappyPathSpies(engines, bus);
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+
+    function prewarmCallCount(): number {
+      return (engines.render.renderPage as ReturnType<typeof vi.fn>).mock.calls.filter((c) => {
+        const input = c[0] as { readonly kind: string; readonly mode: string };
+        return input.kind === "original" && input.mode === "preview";
+      }).length;
+    }
+
+    await orchestrator.importDocument(createImportInput());
+    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+    expect(prewarmCallCount()).toBe(1); // el primer Ready SÍ precalienta.
+
+    // Un segundo `Ready` del mismo documento — agregado manual, ADR-085 —
+    // no vuelve a llamar a `renderPage` para el precalentado (ADR-189 §3).
+    await orchestrator.addManualEntity("doc-1", {
+      value: "Jose Perez",
+      entityType: EntityType.Person,
+    });
+    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+    expect(prewarmCallCount()).toBe(1); // sigue en 1, no en 2.
   });
 });
 

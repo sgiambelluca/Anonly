@@ -7,6 +7,7 @@ import {
   EngineNotInitializedError,
   EventChannel,
   InvalidInputError,
+  MAX_RENDER_SCALE,
   ReplacementMode,
   type EngineContext,
   REPLACEMENT_FONT_HEIGHT_RATIO,
@@ -428,13 +429,22 @@ describe("RenderEngine — edge cases", () => {
     await engine.init(ctx);
     await engine.loadDocument(docId, createValidBuffer());
 
+    // mode: "full" (no "preview") + scale: 1 explícito: desde ADR-156,
+    // `output.imageData` ya no existe en ningún modo, y `encoded` (el único
+    // campo público con dimensiones) solo se expone en mode "full".
     const output = await engine.renderPage(
-      createRenderPageInput({ documentId: docId, pageIndex: 0, kind: "original", mode: "preview" }),
+      createRenderPageInput({
+        documentId: docId,
+        pageIndex: 0,
+        kind: "original",
+        mode: "full",
+        scale: 1,
+      }),
       ctx,
     );
 
-    expect(output.imageData.width).toBe(842);
-    expect(output.imageData.height).toBe(595);
+    expect(output.encoded?.widthPx).toBe(842);
+    expect(output.encoded?.heightPx).toBe(595);
   });
 
   it("throws InvalidInputError when document not loaded", async () => {
@@ -480,6 +490,103 @@ describe("RenderEngine — edge cases", () => {
       expect.stringContaining("doc-unloaded"),
       expect.objectContaining({ documentId: "doc-unloaded" }),
     );
+  });
+
+  it("invalid RENDER_REQUESTED scale leaves the current scale untouched", async () => {
+    const docId = "doc-current-scale-invalid";
+    vi.mocked(getDocument).mockReturnValue(
+      mockGetDocumentResult(createMockPdfDocument({ pageCount: 1 })),
+    );
+    const realCtx = createEngineContextWithRealBus();
+    await engine.init(realCtx);
+    await engine.loadDocument(docId, createValidBuffer());
+
+    let renderFinished = false;
+    realCtx.bus.on(EventChannel.Render, EngineEvents.RENDER_FINISHED, () => {
+      renderFinished = true;
+    });
+    realCtx.bus.emit(EventChannel.UI, EngineEvents.RENDER_REQUESTED, {
+      documentId: docId,
+      pageIndices: [0],
+      mode: "preview",
+      kind: "anonymized",
+      scale: 1.5,
+    });
+    await vi.waitFor(() => expect(renderFinished).toBe(true));
+    // Acceso de caja blanca al Map privado — mismo criterio que
+    // `engine["documents"]` más abajo en este archivo (`loadDocument twice
+    // replaces previous proxy`). `currentScaleKey` no se exporta (helper de
+    // módulo, no público): se reconstruye a mano con el mismo formato
+    // (`${documentId}:${kind}`, ver su comentario en `render.engine.ts`).
+    const currentScale = engine["currentPreviewScale"] as Map<string, number>;
+    expect(currentScale.get(`${docId}:anonymized`)).toBe(1.5);
+
+    const warnSpy = vi.spyOn(realCtx.logger, "warn");
+    realCtx.bus.emit(EventChannel.UI, EngineEvents.RENDER_REQUESTED, {
+      documentId: docId,
+      pageIndices: [0],
+      mode: "preview",
+      kind: "anonymized",
+      scale: MAX_RENDER_SCALE + 1, // fuera de rango — ADR-037 §2.
+    });
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("scale fuera de rango"),
+      expect.objectContaining({ documentId: docId }),
+    );
+    // La vigente sigue en 1.5 — el pedido inválido no la tocó.
+    expect(currentScale.get(`${docId}:anonymized`)).toBe(1.5);
+  });
+
+  it("current scale is cleared on unload and reload", async () => {
+    const docId = "doc-current-scale-cleared";
+    vi.mocked(getDocument).mockReturnValue(
+      mockGetDocumentResult(createMockPdfDocument({ pageCount: 1 })),
+    );
+    const realCtx = createEngineContextWithRealBus();
+    await engine.init(realCtx);
+    await engine.loadDocument(docId, createValidBuffer());
+
+    let renderFinished = false;
+    realCtx.bus.on(EventChannel.Render, EngineEvents.RENDER_FINISHED, () => {
+      renderFinished = true;
+    });
+    realCtx.bus.emit(EventChannel.UI, EngineEvents.RENDER_REQUESTED, {
+      documentId: docId,
+      pageIndices: [0],
+      mode: "preview",
+      kind: "anonymized",
+      scale: 1.5,
+    });
+    await vi.waitFor(() => expect(renderFinished).toBe(true));
+    const currentScale = engine["currentPreviewScale"] as Map<string, number>;
+    expect(currentScale.get(`${docId}:anonymized`)).toBe(1.5);
+
+    await engine.unloadDocument(docId);
+    expect(currentScale.has(`${docId}:anonymized`)).toBe(false);
+
+    // Recarga: vuelve a fijar la vigente, y una SEGUNDA recarga la borra de
+    // nuevo (loadDocument también pasa por `clearDocumentState`).
+    renderFinished = false;
+    vi.mocked(getDocument).mockReturnValue(
+      mockGetDocumentResult(createMockPdfDocument({ pageCount: 1 })),
+    );
+    await engine.loadDocument(docId, createValidBuffer());
+    realCtx.bus.emit(EventChannel.UI, EngineEvents.RENDER_REQUESTED, {
+      documentId: docId,
+      pageIndices: [0],
+      mode: "preview",
+      kind: "anonymized",
+      scale: 1.5,
+    });
+    await vi.waitFor(() => expect(renderFinished).toBe(true));
+    expect(currentScale.get(`${docId}:anonymized`)).toBe(1.5);
+
+    vi.mocked(getDocument).mockReturnValue(
+      mockGetDocumentResult(createMockPdfDocument({ pageCount: 1 })),
+    );
+    await engine.loadDocument(docId, createValidBuffer());
+    expect(currentScale.has(`${docId}:anonymized`)).toBe(false);
   });
 
   it("loadDocument twice replaces previous proxy", async () => {
@@ -791,10 +898,12 @@ describe("RenderEngine — edge cases", () => {
     // Página 100x100pt, scale 1: [80,80]-[130,130] excede el borde
     // derecho/inferior y se clampea a [80,80]-[100,100] -> 20x20.
     const region = { x: 80, y: 80, width: 50, height: 50 };
-    const imageData = await engine.rasterizePage(docId, 0, 1, ctx, region);
+    // ADR-158 §1: EncodedPageImage, no ImageData — `widthPx`/`heightPx` en
+    // vez de `width`/`height`.
+    const encoded = await engine.rasterizePage(docId, 0, 1, ctx, region);
 
-    expect(imageData.width).toBe(20);
-    expect(imageData.height).toBe(20);
+    expect(encoded.widthPx).toBe(20);
+    expect(encoded.heightPx).toBe(20);
   });
 
   it("rasterizePage throws InvalidInputError on an empty region", async () => {
@@ -1429,11 +1538,11 @@ describe("RenderEngine — edge cases", () => {
       }
     });
 
-    it("rasterizePage throws even when the malformed shape would NOT crash a blind destructure (ImageData without height, ADR-055 §3)", async () => {
+    it("rasterizePage throws even when the malformed shape would NOT crash a blind destructure (EncodedPageImage without heightPx, ADR-055 §3)", async () => {
       const pool = createResolvedRenderDispatchPool({
-        data: new Uint8ClampedArray(4),
-        width: 2,
-        colorSpace: "srgb",
+        bytes: new ArrayBuffer(4),
+        format: "png",
+        widthPx: 2,
       });
       const pooledEngine = new RenderEngine(pool);
       await pooledEngine.init(ctx);
@@ -1846,5 +1955,183 @@ describe("RenderEngine — edge cases", () => {
       (c) => c.op === "strokeRect" && c.strokeStyle === "#f59e0b",
     );
     expect(degradedStrokes).toHaveLength(1);
+  });
+
+  // ─── PreviewRenderScheduler — casos límite (ADR-144, H-09B) ───
+  //
+  // Coalescencia/prioridad/bypass de "full"/concurrencia bajo flood viven en
+  // `unit.test.ts`; la clase en aislamiento (semáforo, generación, limpieza)
+  // vive en `preview-scheduler.test.ts`. Acá: generación vieja descartada
+  // (Render_Engine.md §13 caso 36) y limpieza en unloadDocument/dispose
+  // (caso 35).
+  describe("PreviewRenderScheduler — casos límite (ADR-144)", () => {
+    function fakeImageData(): ImageData {
+      return {
+        data: new Uint8ClampedArray(4),
+        width: 1,
+        height: 1,
+        colorSpace: "srgb",
+      } as ImageData;
+    }
+
+    function fakeEncoded(): {
+      bytes: ArrayBuffer;
+      format: string;
+      widthPx: number;
+      heightPx: number;
+    } {
+      return { bytes: new Uint8Array([1]).buffer, format: "png", widthPx: 1, heightPx: 1 };
+    }
+
+    function fakeKernelRenderResult(): unknown {
+      return { imageData: fakeImageData(), encoded: fakeEncoded(), degraded: [] };
+    }
+
+    it("a stale generation result is discarded without caching nor emitting PREVIEW_UPDATED; only the redispatch (fresh input) does — caso 36", async () => {
+      const docId = "doc-stale-gen";
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(createMockPdfDocument({ pageCount: 1 })),
+      );
+
+      let dispatchCall = 0;
+      let releaseFirst: ((value: unknown) => void) | undefined;
+      const pool = {
+        dispatch: (): Promise<unknown> => {
+          dispatchCall += 1;
+          if (dispatchCall === 1) {
+            return new Promise((resolve) => {
+              releaseFirst = resolve;
+            });
+          }
+          return Promise.resolve(fakeKernelRenderResult());
+        },
+        broadcast: async <T>(
+          _payload: unknown,
+          run: () => Promise<T>,
+        ): Promise<ReadonlyArray<T>> => [await run()],
+      };
+      const pooledEngine = new RenderEngine(pool);
+      const realCtx = createEngineContextWithRealBus();
+      await pooledEngine.init(realCtx);
+      await pooledEngine.loadDocument(docId, createValidBuffer());
+
+      const previewUpdates: unknown[] = [];
+      realCtx.bus.on(EventChannel.Render, EngineEvents.PREVIEW_UPDATED, (payload) => {
+        previewUpdates.push(payload);
+      });
+
+      const first = pooledEngine.renderPage(
+        createRenderPageInput({
+          documentId: docId,
+          pageIndex: 0,
+          kind: "anonymized",
+          mode: "preview",
+          replacements: [makeReplacement({ groupId: "g-old" })],
+        }),
+        realCtx,
+      );
+      await vi.waitFor(() => expect(dispatchCall).toBe(1));
+
+      // Segunda solicitud, MISMA clave, llega ANTES de que la primera
+      // termine — coalesce sobre la entrada existente y bumpea su generación.
+      const second = pooledEngine.renderPage(
+        createRenderPageInput({
+          documentId: docId,
+          pageIndex: 0,
+          kind: "anonymized",
+          mode: "preview",
+          replacements: [makeReplacement({ groupId: "g-new" })],
+        }),
+        realCtx,
+      );
+
+      // "Termina" el primer despacho: su resultado quedó viejo (ADR-144 §5).
+      releaseFirst?.(fakeKernelRenderResult());
+
+      const [output1, output2] = await Promise.all([first, second]);
+      expect(output1).toBe(output2); // misma promesa compartida para las dos.
+
+      expect(dispatchCall).toBe(2); // el primero se descartó; hubo un redespacho.
+      expect(previewUpdates).toHaveLength(1); // solo el redespacho emitió PREVIEW_UPDATED.
+
+      await pooledEngine.dispose();
+    });
+
+    it("unloadDocument rejects a pending/in-flight preview scheduler entry with CancelledError and leaves no entry for that document — caso 35", async () => {
+      const docId = "doc-cleanup-unload";
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(createMockPdfDocument({ pageCount: 1 })),
+      );
+      const pool = {
+        // Nunca resuelve: el kernel queda "en vuelo" para siempre — es
+        // deliberado (ADR-144 §8, "no hay forma de cancelar a mitad de
+        // camino un pool.dispatch ya en curso").
+        dispatch: (): Promise<unknown> => new Promise(() => {}),
+        broadcast: async <T>(
+          _payload: unknown,
+          run: () => Promise<T>,
+        ): Promise<ReadonlyArray<T>> => [await run()],
+      };
+      const pooledEngine = new RenderEngine(pool);
+      await pooledEngine.init(ctx);
+      await pooledEngine.loadDocument(docId, createValidBuffer());
+
+      const pending = pooledEngine.renderPage(
+        createRenderPageInput({
+          documentId: docId,
+          pageIndex: 0,
+          kind: "original",
+          mode: "preview",
+        }),
+        ctx,
+      );
+      // Deja que el scheduler efectivamente reserve el slot y arranque runJob.
+      await new Promise((resolve) => setTimeout(resolve, 20));
+
+      await pooledEngine.unloadDocument(docId);
+
+      await expect(pending).rejects.toThrow(CancelledError);
+
+      // Invariante verificable ("un descriptor que sobreviva a un
+      // closeDocument es una fuga", ADR-144 §8 Consecuencias): ningún
+      // descriptor con el prefijo de este documentId sigue en el Map interno.
+      const scheduler = pooledEngine["previewScheduler"];
+      const remaining = scheduler === null ? [] : [...scheduler["entries"].keys()];
+      expect(remaining.every((key) => !key.startsWith(`${docId}|`))).toBe(true);
+
+      await pooledEngine.dispose();
+    });
+
+    it("dispose rejects a pending/in-flight preview scheduler entry across all documents, unconditionally — caso 35", async () => {
+      const docId = "doc-cleanup-dispose";
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(createMockPdfDocument({ pageCount: 1 })),
+      );
+      const pool = {
+        dispatch: (): Promise<unknown> => new Promise(() => {}),
+        broadcast: async <T>(
+          _payload: unknown,
+          run: () => Promise<T>,
+        ): Promise<ReadonlyArray<T>> => [await run()],
+      };
+      const pooledEngine = new RenderEngine(pool);
+      await pooledEngine.init(ctx);
+      await pooledEngine.loadDocument(docId, createValidBuffer());
+
+      const pending = pooledEngine.renderPage(
+        createRenderPageInput({
+          documentId: docId,
+          pageIndex: 0,
+          kind: "original",
+          mode: "preview",
+        }),
+        ctx,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 20));
+
+      await pooledEngine.dispose();
+
+      await expect(pending).rejects.toThrow(CancelledError);
+    });
   });
 });

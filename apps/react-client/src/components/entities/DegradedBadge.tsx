@@ -23,16 +23,17 @@
  */
 
 import { ReplacementMode, type EntityGroup } from "@anonly/anonymization-core";
-import { AlertCircleIcon } from "lucide-react";
 import { useState } from "react";
 
-import { actions } from "../../core-adapter/actions.js";
 import { selectDegradedPages, useDegradedStore } from "../../store/degraded.store.js";
 import { Button } from "../common/Button.js";
 import { Dialog } from "../common/Dialog.js";
 import { Tooltip } from "../common/Tooltip.js";
 
+import { applyGroupMode, applyLeaveVisible } from "./applyEdits.js";
 import { describePages } from "./degradedMessage.js";
+import { WARNING_TOOLTIP } from "./needsReviewBadgeCopy.js";
+import { TIGHT_SPACE_BADGE_CLASS, TightSpaceSymbol, WarningTooltipText } from "./warningSymbols.js";
 
 export interface DegradedBadgeProps {
   readonly group: EntityGroup;
@@ -56,14 +57,14 @@ export function DegradedBadge({ group, onEditReplacement }: DegradedBadgeProps) 
 
   return (
     <>
-      <Tooltip content="El texto de reemplazo quedó muy chico">
+      <Tooltip content={<WarningTooltipText {...WARNING_TOOLTIP.tightSpace} />}>
         <button
           type="button"
           aria-label={`El reemplazo de ${group.canonicalValue} puede no leerse`}
           onClick={() => setOpen(true)}
-          className="rounded-md p-0.5 text-warning hover:bg-bg-tertiary"
+          className={TIGHT_SPACE_BADGE_CLASS}
         >
-          <AlertCircleIcon className="h-4 w-4" aria-hidden />
+          <TightSpaceSymbol />
         </button>
       </Tooltip>
 
@@ -93,7 +94,7 @@ export function DegradedBadge({ group, onEditReplacement }: DegradedBadgeProps) 
               <Button
                 variant="secondary"
                 onClick={() => {
-                  actions.updateGroup(group.id, { replacementMode: ReplacementMode.Redact });
+                  applyGroupMode(group, ReplacementMode.Redact);
                   setOpen(false);
                 }}
               >
@@ -103,7 +104,7 @@ export function DegradedBadge({ group, onEditReplacement }: DegradedBadgeProps) 
             <Button
               variant="secondary"
               onClick={() => {
-                actions.updateGroup(group.id, { enabled: false });
+                applyLeaveVisible(group);
                 setOpen(false);
               }}
             >

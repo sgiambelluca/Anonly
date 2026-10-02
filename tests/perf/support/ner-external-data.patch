@@ -1,0 +1,10 @@
+diff --git a/packages/anonymization-core/ner-engine/src/worker/kernel.ts b/packages/anonymization-core/ner-engine/src/worker/kernel.ts
+index 51ca08b..51ca08b 100644
+--- a/packages/anonymization-core/ner-engine/src/worker/kernel.ts
++++ b/packages/anonymization-core/ner-engine/src/worker/kernel.ts
+@@ -664,4 +664,5 @@
+       classifier = await pipeline("token-classification", modelId, {
+         dtype,
++        use_external_data_format: 1,
+         progress_callback: progressHandler,
+       });

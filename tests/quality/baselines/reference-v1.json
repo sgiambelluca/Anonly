@@ -1,0 +1,767 @@
+{
+  "schemaVersion": 1,
+  "identity": {
+    "corpusHash": "ffd411cfdede393e15dd3fcd42a64abeafccc1c36becbabf5449b35fcbf16a53",
+    "runtime": "chromium-wasm",
+    "modelId": "ner-model@263e82c06569c8c2ac46238a7ae5107598934234",
+    "modelHash": "4e83fc01de454a3aee413e84842bb6ab7c0841aca21880ec6017d7aaf5a2cfcb",
+    "effectiveConfig": {
+      "performancePreset": "auto",
+      "ner": {
+        "enabled": true
+      },
+      "ocr": {
+        "languages": ["spa", "eng"]
+      }
+    },
+    "commit": "3aac21fa609fe7cdb4dcdf35eea6e1d78ffc51ea"
+  },
+  "documents": [
+    {
+      "documentId": "doc-001",
+      "ok": true,
+      "expectedEntityCount": 6,
+      "falsePositiveCount": 1,
+      "entities": [
+        {
+          "id": "doc-001:0:PERSON:ricardo castro#0",
+          "entityType": "PERSON",
+          "pageIndex": 0,
+          "covered": true,
+          "typedCovered": true
+        },
+        {
+          "id": "doc-001:0:ADDRESS:maipu 1434#0",
+          "entityType": "ADDRESS",
+          "pageIndex": 0,
+          "covered": false,
+          "typedCovered": false
+        },
+        {
+          "id": "doc-001:0:DNI:46.578.630#0",
+          "entityType": "DNI",
+          "pageIndex": 0,
+          "covered": true,
+          "typedCovered": true
+        },
+        {
+          "id": "doc-001:1:CUIT:20-26139703-0#0",
+          "entityType": "CUIT",
+          "pageIndex": 1,
+          "covered": true,
+          "typedCovered": true
+        },
+        {
+          "id": "doc-001:1:PHONE:+54 11 7210-3598#0",
+          "entityType": "PHONE",
+          "pageIndex": 1,
+          "covered": true,
+          "typedCovered": true
+        },
+        {
+          "id": "doc-001:1:EMAIL:user68929@example.org#0",
+          "entityType": "EMAIL",
+          "pageIndex": 1,
+          "covered": true,
+          "typedCovered": true
+        }
+      ]
+    },
+    {
+      "documentId": "doc-002",
+      "ok": true,
+      "expectedEntityCount": 6,
+      "falsePositiveCount": 2,
+      "entities": [
+        {
+          "id": "doc-002:0:ORGANIZATION:grupo norte s.r.l.#0",
+          "entityType": "ORGANIZATION",
+          "pageIndex": 0,
+          "covered": true,
+          "typedCovered": true
+        },
+        {
+          "id": "doc-002:0:DNI:99.548.702#0",
+          "entityType": "DNI",
+          "pageIndex": 0,
+          "covered": true,
+          "typedCovered": true
+        },
+        {
+          "id": "doc-002:0:IBAN:es0570689876964462519569#0",
+          "entityType": "IBAN",
+          "pageIndex": 0,
+          "covered": true,
+          "typedCovered": true
+        },
+        {
+          "id": "doc-002:1:CREDIT_CARD:5547 5962 5727 9766#0",
+          "entityType": "CREDIT_CARD",
+          "pageIndex": 1,
+          "covered": true,
+          "typedCovered": true
+        },
+        {
+          "id": "doc-002:1:DATE:26/04/2011#0",
+          "entityType": "DATE",
+          "pageIndex": 1,
+          "covered": true,
+          "typedCovered": true
+        },
+        {
+          "id": "doc-002:1:LICENSE:mp-40097#0",
+          "entityType": "LICENSE",
+          "pageIndex": 1,
+          "covered": true,
+          "typedCovered": true
+        }
+      ]
+    },
+    {
+      "documentId": "doc-003",
+      "ok": true,
+      "expectedEntityCount": 6,
+      "falsePositiveCount": 0,
+      "entities": [
+        {
+          "id": "doc-003:0:PERSON:claudia medina#0",
+          "entityType": "PERSON",
+          "pageIndex": 0,
+          "covered": true,
+          "typedCovered": true
+        },
+        {
+          "id": "doc-003:0:ORGANIZATION:consultora rio#0",
+          "entityType": "ORGANIZATION",
+          "pageIndex": 0,
+          "covered": true,
+          "typedCovered": true
+        },
+        {
+          "id": "doc-003:0:ADDRESS:belgrano 5983#0",
+          "entityType": "ADDRESS",
+          "pageIndex": 0,
+          "covered": false,
+          "typedCovered": false
+        },
+        {
+          "id": "doc-003:1:PLATE:da 004 dd#0",
+          "entityType": "PLATE",
+          "pageIndex": 1,
+          "covered": true,
+          "typedCovered": true
+        },
+        {
+          "id": "doc-003:1:PHONE:+54 11 9144-4799#0",
+          "entityType": "PHONE",
+          "pageIndex": 1,
+          "covered": true,
+          "typedCovered": true
+        },
+        {
+          "id": "doc-003:1:EMAIL:user71926@test.net#0",
+          "entityType": "EMAIL",
+          "pageIndex": 1,
+          "covered": true,
+          "typedCovered": true
+        }
+      ]
+    },
+    {
+      "documentId": "doc-004",
+      "ok": true,
+      "expectedEntityCount": 6,
+      "falsePositiveCount": 1,
+      "entities": [
+        {
+          "id": "doc-004:0:PERSON:diaz, ana#0",
+          "entityType": "PERSON",
+          "pageIndex": 0,
+          "covered": true,
+          "typedCovered": true
+        },
+        {
+          "id": "doc-004:0:DNI:15.445.309#0",
+          "entityType": "DNI",
+          "pageIndex": 0,
+          "covered": true,
+          "typedCovered": true
+        },
+        {
+          "id": "doc-004:0:CUIT:20-49009444-0#0",
+          "entityType": "CUIT",
+          "pageIndex": 0,
+          "covered": true,
+          "typedCovered": true
+        },
+        {
+          "id": "doc-004:1:PERSON:ana diaz#0",
+          "entityType": "PERSON",
+          "pageIndex": 1,
+          "covered": true,
+          "typedCovered": true
+        },
+        {
+          "id": "doc-004:1:DATE:19/10/2001#0",
+          "entityType": "DATE",
+          "pageIndex": 1,
+          "covered": true,
+          "typedCovered": true
+        },
+        {
+          "id": "doc-004:1:ORGANIZATION:consultora rio#0",
+          "entityType": "ORGANIZATION",
+          "pageIndex": 1,
+          "covered": true,
+          "typedCovered": true
+        }
+      ]
+    },
+    {
+      "documentId": "doc-005",
+      "ok": true,
+      "expectedEntityCount": 9,
+      "falsePositiveCount": 0,
+      "entities": [
+        {
+          "id": "doc-005:0:DNI:77.663.636#0",
+          "entityType": "DNI",
+          "pageIndex": 0,
+          "covered": true,
+          "typedCovered": true
+        },
+        {
+          "id": "doc-005:0:CUIT:23-09082125-3#0",
+          "entityType": "CUIT",
+          "pageIndex": 0,
+          "covered": true,
+          "typedCovered": true
+        },
+        {
+          "id": "doc-005:0:PHONE:+54 11 2637-6255#0",
+          "entityType": "PHONE",
+          "pageIndex": 0,
+          "covered": true,
+          "typedCovered": true
+        },
+        {
+          "id": "doc-005:0:EMAIL:user91393@example.com#0",
+          "entityType": "EMAIL",
+          "pageIndex": 0,
+          "covered": true,
+          "typedCovered": true
+        },
+        {
+          "id": "doc-005:1:IBAN:fr3814688949288634612306#0",
+          "entityType": "IBAN",
+          "pageIndex": 1,
+          "covered": true,
+          "typedCovered": true
+        },
+        {
+          "id": "doc-005:1:CREDIT_CARD:5509 5752 0054 0728#0",
+          "entityType": "CREDIT_CARD",
+          "pageIndex": 1,
+          "covered": true,
+          "typedCovered": true
+        },
+        {
+          "id": "doc-005:1:DATE:08/11/2016#0",
+          "entityType": "DATE",
+          "pageIndex": 1,
+          "covered": true,
+          "typedCovered": true
+        },
+        {
+          "id": "doc-005:1:LICENSE:mp-45398#0",
+          "entityType": "LICENSE",
+          "pageIndex": 1,
+          "covered": true,
+          "typedCovered": true
+        },
+        {
+          "id": "doc-005:1:PLATE:vh 765 fc#0",
+          "entityType": "PLATE",
+          "pageIndex": 1,
+          "covered": true,
+          "typedCovered": true
+        }
+      ]
+    },
+    {
+      "documentId": "doc-006",
+      "ok": true,
+      "expectedEntityCount": 6,
+      "falsePositiveCount": 2,
+      "entities": [
+        {
+          "id": "doc-006:0:PERSON:claudia perez#0",
+          "entityType": "PERSON",
+          "pageIndex": 0,
+          "covered": true,
+          "typedCovered": true
+        },
+        {
+          "id": "doc-006:0:PERSON:perez, claudia#0",
+          "entityType": "PERSON",
+          "pageIndex": 0,
+          "covered": true,
+          "typedCovered": true
+        },
+        {
+          "id": "doc-006:0:ORGANIZATION:inversiones sur#0",
+          "entityType": "ORGANIZATION",
+          "pageIndex": 0,
+          "covered": true,
+          "typedCovered": true
+        },
+        {
+          "id": "doc-006:1:ADDRESS:pueyrredon 9741#0",
+          "entityType": "ADDRESS",
+          "pageIndex": 1,
+          "covered": false,
+          "typedCovered": false
+        },
+        {
+          "id": "doc-006:1:DNI:50.905.893#0",
+          "entityType": "DNI",
+          "pageIndex": 1,
+          "covered": true,
+          "typedCovered": true
+        },
+        {
+          "id": "doc-006:1:PHONE:+54 11 5932-3010#0",
+          "entityType": "PHONE",
+          "pageIndex": 1,
+          "covered": true,
+          "typedCovered": true
+        }
+      ]
+    },
+    {
+      "documentId": "doc-007",
+      "ok": true,
+      "expectedEntityCount": 1,
+      "falsePositiveCount": 0,
+      "entities": [
+        {
+          "id": "doc-007:0:DNI:89.107.681#0",
+          "entityType": "DNI",
+          "pageIndex": 0,
+          "covered": true,
+          "typedCovered": true
+        }
+      ]
+    },
+    {
+      "documentId": "doc-008",
+      "ok": true,
+      "expectedEntityCount": 1,
+      "falsePositiveCount": 0,
+      "entities": [
+        {
+          "id": "doc-008:0:PERSON:andres vega#0",
+          "entityType": "PERSON",
+          "pageIndex": 0,
+          "covered": true,
+          "typedCovered": true
+        }
+      ]
+    },
+    {
+      "documentId": "doc-009",
+      "ok": true,
+      "expectedEntityCount": 2,
+      "falsePositiveCount": 1,
+      "entities": [
+        {
+          "id": "doc-009:0:EMAIL:user31272@test.net#0",
+          "entityType": "EMAIL",
+          "pageIndex": 0,
+          "covered": true,
+          "typedCovered": true
+        },
+        {
+          "id": "doc-009:0:PHONE:+54 11 4454-3477#0",
+          "entityType": "PHONE",
+          "pageIndex": 0,
+          "covered": true,
+          "typedCovered": true
+        }
+      ]
+    },
+    {
+      "documentId": "doc-010",
+      "ok": true,
+      "expectedEntityCount": 1,
+      "falsePositiveCount": 0,
+      "entities": [
+        {
+          "id": "doc-010:0:ORGANIZATION:grupo norte s.r.l.#0",
+          "entityType": "ORGANIZATION",
+          "pageIndex": 0,
+          "covered": true,
+          "typedCovered": true
+        }
+      ]
+    },
+    {
+      "documentId": "doc-011",
+      "ok": true,
+      "expectedEntityCount": 2,
+      "falsePositiveCount": 0,
+      "entities": [
+        {
+          "id": "doc-011:0:ADDRESS:pueyrredon 2584#0",
+          "entityType": "ADDRESS",
+          "pageIndex": 0,
+          "covered": false,
+          "typedCovered": false
+        },
+        {
+          "id": "doc-011:0:DATE:09/09/2018#0",
+          "entityType": "DATE",
+          "pageIndex": 0,
+          "covered": true,
+          "typedCovered": true
+        }
+      ]
+    },
+    {
+      "documentId": "doc-012",
+      "ok": true,
+      "expectedEntityCount": 1,
+      "falsePositiveCount": 0,
+      "entities": [
+        {
+          "id": "doc-012:0:PERSON:fernandez, elena#0",
+          "entityType": "PERSON",
+          "pageIndex": 0,
+          "covered": true,
+          "typedCovered": true
+        }
+      ]
+    },
+    {
+      "documentId": "doc-013",
+      "ok": true,
+      "expectedEntityCount": 0,
+      "falsePositiveCount": 2,
+      "entities": []
+    },
+    {
+      "documentId": "doc-014",
+      "ok": true,
+      "expectedEntityCount": 0,
+      "falsePositiveCount": 2,
+      "entities": []
+    },
+    {
+      "documentId": "doc-015",
+      "ok": true,
+      "expectedEntityCount": 0,
+      "falsePositiveCount": 0,
+      "entities": []
+    },
+    {
+      "documentId": "doc-016",
+      "ok": true,
+      "expectedEntityCount": 0,
+      "falsePositiveCount": 1,
+      "entities": []
+    },
+    {
+      "documentId": "doc-017",
+      "ok": true,
+      "expectedEntityCount": 0,
+      "falsePositiveCount": 2,
+      "entities": []
+    },
+    {
+      "documentId": "doc-018",
+      "ok": true,
+      "expectedEntityCount": 0,
+      "falsePositiveCount": 0,
+      "entities": []
+    },
+    {
+      "documentId": "doc-019",
+      "ok": true,
+      "expectedEntityCount": 0,
+      "falsePositiveCount": 0,
+      "entities": []
+    },
+    {
+      "documentId": "doc-020",
+      "ok": true,
+      "expectedEntityCount": 0,
+      "falsePositiveCount": 0,
+      "entities": []
+    },
+    {
+      "documentId": "doc-021",
+      "ok": true,
+      "expectedEntityCount": 7,
+      "falsePositiveCount": 4,
+      "entities": [
+        {
+          "id": "doc-021:0:PHONE:+54 11 4567-8900#0",
+          "entityType": "PHONE",
+          "pageIndex": 0,
+          "covered": true,
+          "typedCovered": true
+        },
+        {
+          "id": "doc-021:0:PHONE:+54 221 456-7890#0",
+          "entityType": "PHONE",
+          "pageIndex": 0,
+          "covered": true,
+          "typedCovered": true
+        },
+        {
+          "id": "doc-021:0:PHONE:+54 341 456-7890#0",
+          "entityType": "PHONE",
+          "pageIndex": 0,
+          "covered": true,
+          "typedCovered": true
+        },
+        {
+          "id": "doc-021:0:PHONE:+54 2954 12-3456#0",
+          "entityType": "PHONE",
+          "pageIndex": 0,
+          "covered": true,
+          "typedCovered": true
+        },
+        {
+          "id": "doc-021:0:PHONE:+54 9 11 4567-8901#0",
+          "entityType": "PHONE",
+          "pageIndex": 0,
+          "covered": true,
+          "typedCovered": true
+        },
+        {
+          "id": "doc-021:0:PHONE:011 4567-8902#0",
+          "entityType": "PHONE",
+          "pageIndex": 0,
+          "covered": true,
+          "typedCovered": true
+        },
+        {
+          "id": "doc-021:0:PHONE:11 4567 8903#0",
+          "entityType": "PHONE",
+          "pageIndex": 0,
+          "covered": true,
+          "typedCovered": true
+        }
+      ]
+    },
+    {
+      "documentId": "doc-022",
+      "ok": true,
+      "expectedEntityCount": 2,
+      "falsePositiveCount": 0,
+      "entities": [
+        {
+          "id": "doc-022:0:IBAN:es05 7068 9876 9644 6251 9569#0",
+          "entityType": "IBAN",
+          "pageIndex": 0,
+          "covered": true,
+          "typedCovered": true
+        },
+        {
+          "id": "doc-022:0:IBAN:es9121000418450200051332#0",
+          "entityType": "IBAN",
+          "pageIndex": 0,
+          "covered": true,
+          "typedCovered": true
+        }
+      ]
+    },
+    {
+      "documentId": "doc-023",
+      "ok": true,
+      "expectedEntityCount": 6,
+      "falsePositiveCount": 0,
+      "entities": [
+        {
+          "id": "doc-023:0:PLATE:abc 123#0",
+          "entityType": "PLATE",
+          "pageIndex": 0,
+          "covered": true,
+          "typedCovered": true
+        },
+        {
+          "id": "doc-023:0:PLATE:abc-123#0",
+          "entityType": "PLATE",
+          "pageIndex": 0,
+          "covered": true,
+          "typedCovered": true
+        },
+        {
+          "id": "doc-023:0:PLATE:ab 123 cd#0",
+          "entityType": "PLATE",
+          "pageIndex": 0,
+          "covered": true,
+          "typedCovered": true
+        },
+        {
+          "id": "doc-023:0:PLATE:ab-123-cd#0",
+          "entityType": "PLATE",
+          "pageIndex": 0,
+          "covered": true,
+          "typedCovered": true
+        },
+        {
+          "id": "doc-023:0:PLATE:a 123 bcd#0",
+          "entityType": "PLATE",
+          "pageIndex": 0,
+          "covered": true,
+          "typedCovered": true
+        },
+        {
+          "id": "doc-023:0:PLATE:a456efg#0",
+          "entityType": "PLATE",
+          "pageIndex": 0,
+          "covered": true,
+          "typedCovered": true
+        }
+      ]
+    },
+    {
+      "documentId": "doc-024",
+      "ok": true,
+      "expectedEntityCount": 8,
+      "falsePositiveCount": 0,
+      "entities": [
+        {
+          "id": "doc-024:0:LICENSE:mn 12345#0",
+          "entityType": "LICENSE",
+          "pageIndex": 0,
+          "covered": true,
+          "typedCovered": true
+        },
+        {
+          "id": "doc-024:0:LICENSE:mp 23456#0",
+          "entityType": "LICENSE",
+          "pageIndex": 0,
+          "covered": true,
+          "typedCovered": true
+        },
+        {
+          "id": "doc-024:0:LICENSE:mn 45.318#0",
+          "entityType": "LICENSE",
+          "pageIndex": 0,
+          "covered": true,
+          "typedCovered": true
+        },
+        {
+          "id": "doc-024:0:LICENSE:mp 9.328#0",
+          "entityType": "LICENSE",
+          "pageIndex": 0,
+          "covered": true,
+          "typedCovered": true
+        },
+        {
+          "id": "doc-024:0:LICENSE:m.p. 34567#0",
+          "entityType": "LICENSE",
+          "pageIndex": 0,
+          "covered": true,
+          "typedCovered": true
+        },
+        {
+          "id": "doc-024:0:LICENSE:m.n. 56789#0",
+          "entityType": "LICENSE",
+          "pageIndex": 0,
+          "covered": true,
+          "typedCovered": true
+        },
+        {
+          "id": "doc-024:1:LICENSE:40097#0",
+          "entityType": "LICENSE",
+          "pageIndex": 1,
+          "covered": true,
+          "typedCovered": true
+        },
+        {
+          "id": "doc-024:1:LICENSE:mp 61852#0",
+          "entityType": "LICENSE",
+          "pageIndex": 1,
+          "covered": true,
+          "typedCovered": true
+        }
+      ]
+    },
+    {
+      "documentId": "doc-025",
+      "ok": true,
+      "expectedEntityCount": 5,
+      "falsePositiveCount": 0,
+      "entities": [
+        {
+          "id": "doc-025:0:DNI:34.567.891#0",
+          "entityType": "DNI",
+          "pageIndex": 0,
+          "covered": true,
+          "typedCovered": true
+        },
+        {
+          "id": "doc-025:0:DNI:18445212#0",
+          "entityType": "DNI",
+          "pageIndex": 0,
+          "covered": true,
+          "typedCovered": true
+        },
+        {
+          "id": "doc-025:0:DATE:07/07/2026#0",
+          "entityType": "DATE",
+          "pageIndex": 0,
+          "covered": true,
+          "typedCovered": true
+        },
+        {
+          "id": "doc-025:0:DATE:8-7-2026#0",
+          "entityType": "DATE",
+          "pageIndex": 0,
+          "covered": true,
+          "typedCovered": true
+        },
+        {
+          "id": "doc-025:0:DATE:09 de julio de 2026#0",
+          "entityType": "DATE",
+          "pageIndex": 0,
+          "covered": true,
+          "typedCovered": true
+        }
+      ]
+    },
+    {
+      "documentId": "doc-026",
+      "ok": true,
+      "expectedEntityCount": 3,
+      "falsePositiveCount": 0,
+      "entities": [
+        {
+          "id": "doc-026:0:PERSON:marcelo duarte#0",
+          "entityType": "PERSON",
+          "pageIndex": 0,
+          "covered": true,
+          "typedCovered": true
+        },
+        {
+          "id": "doc-026:0:PERSON:rosana ferreyra#0",
+          "entityType": "PERSON",
+          "pageIndex": 0,
+          "covered": true,
+          "typedCovered": true
+        },
+        {
+          "id": "doc-026:0:PERSON:damian sosa#0",
+          "entityType": "PERSON",
+          "pageIndex": 0,
+          "covered": true,
+          "typedCovered": true
+        }
+      ]
+    }
+  ]
+}

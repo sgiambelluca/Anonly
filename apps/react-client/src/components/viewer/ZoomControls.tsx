@@ -1,22 +1,25 @@
 /**
- * `ZoomControls` (`ui/Components.md` §5.5, reescrito por ADR-037 §5).
+ * `ZoomControls` (`ui/Components.md` §5.5, reescrito por ADR-037 §5; sin botón
+ * de restablecer por ADR-169 §9).
  *
  * Solo llama `viewer.store.setZoom(newZoom)` (clampeado 0.5..3 por el propio
- * store, `viewer.store.ts`). El escalado CSS inmediato y el re-render real
- * debounced son responsabilidad de `PdfViewer` (§5.2) — este componente no
- * dispara `actions.requestRender` directamente.
+ * store). El escalado CSS inmediato y el re-render real debounced son
+ * responsabilidad de `PdfViewer` (§5.2) — este componente no dispara
+ * `actions.requestRender` directamente. El pellizco del trackpad y `Ctrl +
+ * rueda` también los atiende `PdfViewer` (listener `{ passive: false }`).
  *
- * `ZOOM_STEP` (incremento por click/atajo) no es una constante del spec (no
- * hay un valor documentado en `Components.md`/`ADR-037`, a diferencia de
- * `ZOOM_RERENDER_DEBOUNCE_MS`); 0.1 (10%) es un incremento convencional de
- * visores PDF, sin impacto de contrato.
+ * Quedan `−`, el porcentaje (ancho fijo, UX-10) y `+`. **Sin botón de
+ * restablecer**: sobraba (pruebas de usuario de la 0.9.2). El atajo
+ * `Ctrl/Cmd + 0` se conserva.
+ *
+ * `ZOOM_STEP` no es una constante del spec; 0.1 (10 %) es el incremento
+ * convencional de visores PDF, sin impacto de contrato.
  */
 
-import { RotateCcwIcon, ZoomInIcon, ZoomOutIcon } from "lucide-react";
+import { MinusIcon, PlusIcon } from "lucide-react";
 import { useEffect } from "react";
 
 import { MAX_ZOOM, MIN_ZOOM, useViewerStore } from "../../store/viewer.store.js";
-import { Button } from "../common/Button.js";
 
 const ZOOM_STEP = 0.1;
 const DEFAULT_ZOOM = 1;
@@ -57,31 +60,35 @@ export function ZoomControls() {
   }, []);
 
   return (
-    <div className="flex items-center gap-1" role="group" aria-label="Zoom del visor">
-      <Button
-        variant="ghost"
-        size="sm"
+    <div
+      role="group"
+      aria-label="Zoom del visor"
+      className="inline-flex items-center overflow-hidden rounded-lg border border-border"
+    >
+      <button
+        type="button"
         aria-label="Alejar"
         disabled={zoom <= MIN_ZOOM}
         onClick={zoomOut}
+        className="flex h-8 w-8 items-center justify-center text-text-secondary hover:bg-bg-tertiary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent disabled:opacity-40"
       >
-        <ZoomOutIcon className="h-4 w-4" aria-hidden />
-      </Button>
-      <span className="min-w-[3.5ch] text-center text-sm text-text-secondary" aria-live="polite">
+        <MinusIcon className="h-4 w-4" aria-hidden />
+      </button>
+      <span
+        aria-live="polite"
+        className="w-[3.25rem] border-x border-border text-center text-sm leading-8 tabular-nums text-text-primary"
+      >
         {Math.round(zoom * 100)}%
       </span>
-      <Button
-        variant="ghost"
-        size="sm"
+      <button
+        type="button"
         aria-label="Acercar"
         disabled={zoom >= MAX_ZOOM}
         onClick={zoomIn}
+        className="flex h-8 w-8 items-center justify-center text-text-secondary hover:bg-bg-tertiary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent disabled:opacity-40"
       >
-        <ZoomInIcon className="h-4 w-4" aria-hidden />
-      </Button>
-      <Button variant="ghost" size="sm" aria-label="Restablecer zoom" onClick={resetZoom}>
-        <RotateCcwIcon className="h-4 w-4" aria-hidden />
-      </Button>
+        <PlusIcon className="h-4 w-4" aria-hidden />
+      </button>
     </div>
   );
 }

@@ -3,7 +3,9 @@
  * al OcrWorker (espejo de `render-engine/src/worker/kernel.ts`, ADR-043).
  * Contiene TODO lo que toca `tesseract.js`: setup first-party (ADR-018),
  * reconocimiento con timeout/abort racing, extracción defensiva de
- * palabras/confidence, conversión `ImageData` → `OffscreenCanvas`.
+ * palabras/confidence, decodificación parcial de `EncodedPageImage` con
+ * `createImageBitmap` (franjas de margen recortadas; el camino común con
+ * orientación 0 no decodifica página completa, ADR-160).
  *
  * Este archivo lo importan DOS consumidores (mismo código, dos fronteras):
  * - `ocr.engine.ts` (host, in-process fallback): lo invoca directo desde el
@@ -28,10 +30,25 @@
  * instancia — cubre `reanalyze` con `ocr.languages` (ADR-038 §5.3) sin
  * mensaje de control nuevo.
  */
-import { CancelledError, type BoundingBox, type OcrPagePayload, type Word } from "@anonly/shared";
-import { createWorker, OEM, PSM } from "tesseract.js";
+import {
+  CancelledError,
+  InvalidInputError,
+  type BoundingBox,
+  type EncodedPageImage,
+  type OcrPagePayload,
+  type Word,
+} from "@anonly/shared";
+import { createWorker, PSM } from "tesseract.js";
 
 import { OcrModelMissingError, OcrPageFailedError, OcrTimeoutError } from "../ocr.errors.js";
+
+import { isPixelPresent } from "./ink-predicate.js";
+import {
+  resolveTesseractPath,
+  TESSERACT_CORE_PATH,
+  TESSERACT_LANG_PATH,
+  TESSERACT_WORKER_PATH,
+} from "./tesseract-paths.js";
 
 type TesseractWorker = Awaited<ReturnType<typeof createWorker>>;
 
@@ -49,9 +66,7 @@ type TesseractWorker = Awaited<ReturnType<typeof createWorker>>;
  * (errata corregida en ADR-018 §2 / OCR_Engine.md v1.2.1 §15.22, PR 17.6
  * parte a).
  */
-const TESSERACT_LANG_PATH = "/models/tesseract/";
-const TESSERACT_CORE_PATH = "/wasm/tesseract/";
-const TESSERACT_WORKER_PATH = "/wasm/tesseract/worker.min.js";
+// Las rutas y su resolución viven en `tesseract-paths.ts`, compartidas con OSD.
 
 /*
  * ADR-018 §2 (precisión 2026-07-30) / OCR_Engine.md v1.2.2, §15.22 parte b:
@@ -96,24 +111,7 @@ const TESSERACT_WORKER_PATH = "/wasm/tesseract/worker.min.js";
  * correspondería agregar `workerBlobURL: false` con su propio comentario
  * justificativo.
  */
-function resolveTesseractPath(path: string): string {
-  if (typeof self === "undefined") return path;
-  const origin = self.location?.origin;
-  if (origin === undefined) return path;
-  return new URL(path, origin).href;
-}
-
-/** ADR-090 §1: el modelo de orientación, cargado siempre junto a los idiomas. */
-const OSD_LANGUAGE = "osd";
-
-/*
- * ADR-090 §3: piso de `orientation_confidence` para hacerle caso a OSD. La
- * escala de Tesseract no es 0-100 y no tiene un máximo definido; medido sobre
- * una A4 a 300 DPI con texto denso da 17,1 (derecha) y 17,6 (rotada 90°), un
- * orden de magnitud sobre este piso. Debajo del piso —o si `detect` falla, o
- * devuelve `null`— no se rota nada y el camino es el de antes del ADR.
- */
-const MIN_ORIENTATION_CONFIDENCE = 1;
+// La orientación se detecta en `orientation-kernel.ts`, una instancia por Core.
 
 /*
  * ADR-112 §1: modo de segmentación de página, fijo.
@@ -140,31 +138,9 @@ const MIN_ORIENTATION_CONFIDENCE = 1;
  */
 const PAGE_SEG_MODE = PSM.SPARSE_TEXT;
 
-/*
- * ADR-119 §2: la detección de orientación corre sobre el raster a MEDIA
- * escala. No es una optimización oportunista — es lo que hace que arreglar
- * OSD no cueste tiempo: 290 ms por página contra los 690 a escala completa, y
- * contra los 506 que hoy se pagan por una detección que no funciona.
- *
- * El barrido dice también por qué no bajar más. A 0,35 sigue acertando pero la
- * confianza cae a 1-2, pegada al piso; a 0,25 **acierta cero veces y sigue
- * devolviendo 1-2**, o sea por encima del piso. El modo de falla de un OSD mal
- * alimentado no es "no contesta", es "contesta mal con confianza suficiente",
- * y contra eso el piso no protege: protege el margen.
- */
-const OSD_SCALE = 0.5;
-
 /** Instancia de tesseract cargada, y el set de idiomas con el que se cargó. */
 let worker: TesseractWorker | null = null;
 let loadedLanguages: ReadonlySet<string> = new Set();
-/**
- * ADR-119 §1: worker dedicado a OSD. `detect()` no alcanza con el core legacy
- * (`legacyCore: true`, que es lo que ADR-090 §1 dedujo): necesita además que
- * el **OEM** sea legacy. Y el OEM no se puede mezclar — con `oem: 0` los
- * idiomas de reconocimiento no cargan, porque el `traineddata` pineado es
- * `tessdata_best`, que es solo LSTM. Un worker detecta o reconoce, no las dos.
- */
-let osdWorker: TesseractWorker | null = null;
 /** ADR-090 §2: último `user_defined_dpi` aplicado a la instancia vigente. */
 let appliedDpi: number | null = null;
 /** ADR-112 §1: si la instancia vigente ya tiene aplicado `PAGE_SEG_MODE`. */
@@ -207,7 +183,8 @@ async function ensureWorkerLoaded(languages: ReadonlyArray<string>): Promise<voi
      * `orientation_degrees: 0, orientation_confidence: 0` **siempre** —
      * medido sobre dos documentos y cuatro orientaciones cada uno—, y el piso
      * de confianza lo descarta. Para que conteste hace falta que el OEM sea
-     * legacy, y eso es incompatible con reconocer: ver `ensureOsdWorkerLoaded`.
+     * legacy, y eso es incompatible con reconocer: ver `createOrientationKernel`
+     * en `orientation-kernel.ts`, donde vive ese worker aparte (ADR-119 §1).
      */
     nextWorker = await createWorker([...languages], undefined, {
       langPath: resolveTesseractPath(TESSERACT_LANG_PATH),
@@ -251,9 +228,10 @@ async function ensurePageSegModeApplied(): Promise<void> {
  * (node_modules/tesseract.js/src/index.d.ts) es
  * `string | HTMLImageElement | HTMLCanvasElement | HTMLVideoElement |
  * CanvasRenderingContext2D | File | Blob | Buffer | OffscreenCanvas` — sin
- * `ImageData`. `OcrPageInput.imageData: ImageData` es el contrato fijo de
- * OCR_Engine.md §6/§9 (no se puede romper, R-2), así que la conversión vive
- * acá, en la frontera con tesseract.js.
+ * `ImageData`. El reconocimiento principal, el enderezado de ADR-120 y las
+ * franjas de margen de ADR-121 operan todos sobre `ImageData` (rotar/recortar
+ * son operaciones de píxeles), así que la conversión de vuelta a un
+ * `OffscreenCanvas` que tesseract.js sí acepta vive acá, en cada pasada.
  */
 function toTesseractImage(
   imageData: ImageData,
@@ -282,14 +260,136 @@ function toTesseractImage(
   const canvas = new OffscreenCanvas(imageData.width, imageData.height);
   const context = canvas.getContext("2d");
   if (context === null) {
+    releaseCanvasBackingStore(canvas);
     throw new OcrPageFailedError(
       documentId,
       pageIndex,
       "No se pudo obtener un contexto 2D de OffscreenCanvas para convertir imageData.",
     );
   }
-  context.putImageData(imageData, 0, 0);
+  try {
+    context.putImageData(imageData, 0, 0);
+  } catch (error: unknown) {
+    releaseCanvasBackingStore(canvas);
+    throw error;
+  }
   return canvas;
+}
+
+/** Libera explícitamente el backing store del canvas cuando ningún consumidor lo usa. */
+function releaseCanvasBackingStore(canvas: OffscreenCanvas): void {
+  canvas.width = 0;
+  canvas.height = 0;
+}
+
+/*
+ * ADR-158 §2/§3 + ADR-160: `OcrPagePayload.image` llega CODIFICADA (PNG).
+ * Esta función la decodifica COMPLETA con `createImageBitmap`, pero desde
+ * ADR-160 ya no es el camino común de `kernelRecognize`: solo la llama
+ * `kernelRecognizeRotated` (orientación ≠ 0, el ~1 % de las páginas, ver más
+ * abajo), donde el enderezado de ADR-120 necesita la página entera en
+ * píxeles. El camino con orientación 0 (`kernelRecognizeUpright`) nunca pasa
+ * por acá: el reconocimiento principal usa el `Blob` directo y las franjas de
+ * margen decodifican solo su recorte (`decodeStrip`) — cero superficies de
+ * página completa.
+ */
+async function decodeEncodedImage(
+  image: EncodedPageImage,
+  documentId: string,
+  pageIndex: number,
+): Promise<ImageData> {
+  if (typeof OffscreenCanvas === "undefined") {
+    throw new OcrPageFailedError(
+      documentId,
+      pageIndex,
+      "OffscreenCanvas no disponible en este entorno.",
+    );
+  }
+
+  let bitmap: ImageBitmap;
+  try {
+    bitmap = await createImageBitmap(new Blob([image.bytes], { type: `image/${image.format}` }));
+  } catch (err: unknown) {
+    throw new OcrPageFailedError(
+      documentId,
+      pageIndex,
+      `No se pudo decodificar la imagen de la página ${pageIndex} (${image.format}): ` +
+        `${err instanceof Error ? err.message : String(err)}.`,
+    );
+  }
+
+  // `image.widthPx`/`heightPx` (no `bitmap.width`/`height`): son las
+  // dimensiones AUTORITATIVAS que ya declaraba el productor (Render), las
+  // mismas que `maxLiveImageBytes`/`estimatedBytes` usaron para presupuestar
+  // (ADR-158 §4) — no hace falta releerlas del bitmap decodificado.
+  const canvas = new OffscreenCanvas(image.widthPx, image.heightPx);
+  try {
+    const context = canvas.getContext("2d");
+    if (context === null) {
+      throw new OcrPageFailedError(
+        documentId,
+        pageIndex,
+        "No se pudo obtener un contexto 2D de OffscreenCanvas para decodificar la imagen.",
+      );
+    }
+    context.drawImage(bitmap, 0, 0);
+    return context.getImageData(0, 0, image.widthPx, image.heightPx);
+  } finally {
+    bitmap.close();
+    releaseCanvasBackingStore(canvas);
+  }
+}
+
+/**
+ * ADR-190 §2 paso 4 / §5: agranda un `ImageData` ya decodificado (y,
+ * eventualmente, ya enderezado) por `factor`, antes de reconocer. Redibuja
+ * sobre un `OffscreenCanvas` del tamaño destino con `drawImage` — que SÍ
+ * escala, a diferencia de `putImageData` (colocación exacta sin escalado)
+ * que usan `toTesseractImage`/`decodeEncodedImage`.
+ */
+function upscaleImageData(
+  source: ImageData,
+  factor: number,
+  documentId: string,
+  pageIndex: number,
+): ImageData {
+  if (typeof OffscreenCanvas === "undefined") {
+    throw new OcrPageFailedError(
+      documentId,
+      pageIndex,
+      "OffscreenCanvas no disponible en este entorno.",
+    );
+  }
+  const sourceCanvas = new OffscreenCanvas(source.width, source.height);
+  let targetCanvas: OffscreenCanvas | undefined;
+  try {
+    const sourceContext = sourceCanvas.getContext("2d");
+    if (sourceContext === null) {
+      throw new OcrPageFailedError(
+        documentId,
+        pageIndex,
+        "No se pudo obtener un contexto 2D de OffscreenCanvas para agrandar la imagen.",
+      );
+    }
+    sourceContext.putImageData(source, 0, 0);
+
+    const targetWidth = Math.max(1, Math.round(source.width * factor));
+    const targetHeight = Math.max(1, Math.round(source.height * factor));
+    targetCanvas = new OffscreenCanvas(targetWidth, targetHeight);
+    const targetContext = targetCanvas.getContext("2d");
+    if (targetContext === null) {
+      throw new OcrPageFailedError(
+        documentId,
+        pageIndex,
+        "No se pudo obtener un contexto 2D de OffscreenCanvas para agrandar la imagen.",
+      );
+    }
+    targetContext.drawImage(sourceCanvas, 0, 0, targetWidth, targetHeight);
+    return targetContext.getImageData(0, 0, targetWidth, targetHeight);
+  } finally {
+    releaseCanvasBackingStore(sourceCanvas);
+    if (targetCanvas !== undefined) releaseCanvasBackingStore(targetCanvas);
+  }
 }
 
 function clampConfidence(value: number): number {
@@ -324,8 +424,18 @@ async function ensureDpiApplied(dpi: number): Promise<void> {
  */
 export type Rotation = 0 | 90 | 180 | 270;
 
-function isRotation(value: unknown): value is Rotation {
-  return value === 0 || value === 90 || value === 180 || value === 270;
+/** Conserva la forma estructural de los tests Node y crea un ImageData nativo
+ * en browser, que es necesario para `OffscreenCanvas.putImageData`. */
+function createImageDataResult(
+  data: Uint8ClampedArray,
+  width: number,
+  height: number,
+  colorSpace: PredefinedColorSpace,
+): ImageData {
+  const stableData = new Uint8ClampedArray(data.length);
+  stableData.set(data);
+  if (typeof ImageData !== "undefined") return new ImageData(stableData, width, height);
+  return { data: stableData, width, height, colorSpace };
 }
 
 /*
@@ -373,7 +483,7 @@ export function rotateImageData(source: ImageData, degrees: Rotation): ImageData
     }
   }
 
-  return { data: out, width: outWidth, height: outHeight, colorSpace: source.colorSpace };
+  return createImageDataResult(out, outWidth, outHeight, source.colorSpace);
 }
 
 /*
@@ -412,90 +522,6 @@ export function unrotateBbox(
     width: bbox.height,
     height: bbox.width,
   };
-}
-
-interface DetectOrientationResult {
-  readonly orientation_degrees?: number | null;
-  readonly orientation_confidence?: number | null;
-}
-
-function readOrientation(data: unknown): Rotation {
-  if (typeof data !== "object" || data === null) return 0;
-  const { orientation_degrees: degrees, orientation_confidence: confidence } =
-    data as DetectOrientationResult;
-  if (typeof confidence !== "number" || confidence < MIN_ORIENTATION_CONFIDENCE) return 0;
-  return isRotation(degrees) ? degrees : 0;
-}
-
-/**
- * ADR-119 §1: worker dedicado a la detección de orientación.
- *
- * `oem: 0` (legacy) es el punto entero de que exista aparte. Con el OEM por
- * default —LSTM— `detect()` no tira pero devuelve `0 / 0` siempre; con legacy
- * contesta las cuatro orientaciones con confianza 13-16. Y el OEM legacy no se
- * puede usar en el worker de reconocimiento porque `tessdata_best` no trae
- * componentes legacy para `spa`/`eng`.
- *
- * A diferencia del resto de las fallas de este camino, **no crear el worker no
- * degrada a `0`** (ADR-119 §3): que la detección no esté disponible no es lo
- * mismo que "todas las páginas están derechas", y esa confusión es
- * exactamente la que dejó a ADR-090 sin funcionar sin que nadie se enterara.
- */
-async function ensureOsdWorkerLoaded(languages: ReadonlyArray<string>): Promise<TesseractWorker> {
-  if (osdWorker !== null) return osdWorker;
-  try {
-    osdWorker = await createWorker([OSD_LANGUAGE], OEM.TESSERACT_ONLY, {
-      langPath: resolveTesseractPath(TESSERACT_LANG_PATH),
-      corePath: resolveTesseractPath(TESSERACT_CORE_PATH),
-      workerPath: resolveTesseractPath(TESSERACT_WORKER_PATH),
-      legacyCore: true,
-    });
-  } catch (err: unknown) {
-    const reason = err instanceof Error ? err.message : String(err);
-    throw new OcrModelMissingError([...languages, OSD_LANGUAGE], reason);
-  }
-  return osdWorker;
-}
-
-/*
- * ADR-119 §2: la detección corre sobre una copia a `OSD_SCALE`. OSD solo elige
- * entre cuatro orientaciones, no lee: a media escala acierta las cuatro con
- * confianza 12-16 y tarda 290 ms en vez de 690.
- *
- * Si el canvas reducido no se puede armar, se detecta sobre el original: es
- * más lento, no incorrecto.
- */
-function scaleForOsd(image: OffscreenCanvas): OffscreenCanvas {
-  const width = Math.max(1, Math.round(image.width * OSD_SCALE));
-  const height = Math.max(1, Math.round(image.height * OSD_SCALE));
-  const scaled = new OffscreenCanvas(width, height);
-  const context = scaled.getContext("2d");
-  if (context === null) return image;
-  context.drawImage(image, 0, 0, width, height);
-  return scaled;
-}
-
-/*
- * ADR-090 §3, paso 1-2. Una falla de `detect` —que `DetectOS` no concluya, que
- * la página tenga muy poco texto— cae a `0`, que es exactamente el
- * comportamiento previo al ADR. El kernel no tiene logger (ADR-045 §2), así
- * que la degradación es silenciosa por construcción.
- *
- * ADR-119 §3 le pone un límite a esa degradación: **no** cubre que el worker
- * de OSD no se pueda crear. Eso sale por `ensureOsdWorkerLoaded` como
- * `OcrModelMissingError`.
- */
-async function detectOrientation(
-  image: OffscreenCanvas,
-  languages: ReadonlyArray<string>,
-): Promise<Rotation> {
-  const osd = await ensureOsdWorkerLoaded(languages);
-  try {
-    const { data } = await osd.detect(scaleForOsd(image));
-    return readOrientation(data);
-  } catch {
-    return 0;
-  }
 }
 
 /*
@@ -717,7 +743,7 @@ export function cropImageData(source: ImageData, x0: number, width: number): Ima
     const from = (y * sourceWidth + startX) * 4;
     out.set(data.subarray(from, from + cropWidth * 4), y * cropWidth * 4);
   }
-  return { data: out, width: cropWidth, height, colorSpace: source.colorSpace };
+  return createImageDataResult(out, cropWidth, height, source.colorSpace);
 }
 
 /** Fracción del área del rectángulo MÁS CHICO que comparten dos cajas. */
@@ -731,8 +757,152 @@ function intersectionRatio(a: BoundingBox, b: BoundingBox): number {
   return smaller <= 0 ? 0 : ((x2 - x1) * (y2 - y1)) / smaller;
 }
 
+/*
+ * ADR-165 §2.2: la única tolerancia de esta regla, y la mínima que funciona.
+ * El barrido de la ADR (112 franjas, d = 0..8) toma la MISMA decisión para
+ * cualquier d entre 1 y 8 — no hay un óptimo que calibrar, así que se elige
+ * el mínimo, que es también el que menos expone al riesgo de §6 del ADR.
+ */
+const EXPLAINED_INK_DILATION_PX = 1;
+
+/** Inversa de `toPagePoints`: puntos de página → píxeles del raster. */
+function fromPagePoints(bbox: BoundingBox, dpi: number): BoundingBox {
+  const factor = dpi / POINTS_PER_INCH;
+  return {
+    x: bbox.x * factor,
+    y: bbox.y * factor,
+    width: bbox.width * factor,
+    height: bbox.height * factor,
+  };
+}
+
+/** Expande una caja `amount` px hacia los cuatro lados. */
+function dilateBox(box: BoundingBox, amount: number): BoundingBox {
+  return {
+    x: box.x - amount,
+    y: box.y - amount,
+    width: box.width + amount * 2,
+    height: box.height + amount * 2,
+  };
+}
+
+function isFiniteBox(box: BoundingBox): boolean {
+  return (
+    Number.isFinite(box.x) &&
+    Number.isFinite(box.y) &&
+    Number.isFinite(box.width) &&
+    Number.isFinite(box.height)
+  );
+}
+
+/**
+ * ADR-165 §2 / handoff §1.1: proyecta la caja de una palabra de la pasada
+ * derecha —en puntos, espacio del raster ORIGINAL, que es donde sale
+ * `Word.bbox`— al espacio de píxeles de la franja (el ENDEREZADO, con el
+ * `x0` de la franja ya restado), dilatada `EXPLAINED_INK_DILATION_PX`.
+ *
+ * Es el mapeo INVERSO del que hace `toWords`: ahí `unrotateBbox` lleva una
+ * caja del enderezado al original con el ángulo de la página. Acá se va al
+ * revés —original a enderezado— así que el ángulo que corresponde es el
+ * COMPLEMENTARIO (`(360 - orientation) % 360`), con las dimensiones del
+ * espacio AL QUE la caja va (el enderezado) — la misma regla que fija
+ * v1.16.1, aplicada en el sentido contrario. `null` ante una caja no finita:
+ * el caller decide qué hacer con eso (fail-open, nunca en silencio).
+ */
+export function projectWordBoxToStrip(
+  wordBboxPoints: BoundingBox,
+  dpi: number,
+  orientation: Rotation,
+  uprightWidth: number,
+  uprightHeight: number,
+  stripX0: number,
+): BoundingBox | null {
+  const pixelsInOriginal = fromPagePoints(wordBboxPoints, dpi);
+  const complementary = ((360 - orientation) % 360) as Rotation;
+  const pixelsInUpright = unrotateBbox(
+    pixelsInOriginal,
+    complementary,
+    uprightWidth,
+    uprightHeight,
+  );
+  const local = dilateBox(
+    { ...pixelsInUpright, x: pixelsInUpright.x - stripX0 },
+    EXPLAINED_INK_DILATION_PX,
+  );
+  return isFiniteBox(local) ? local : null;
+}
+
+/**
+ * Proyecta TODAS las palabras de la pasada derecha al espacio de la franja.
+ * `null` si alguna cae en una caja no finita: una sola proyección incoherente
+ * basta para no confiar en el resto (ADR-165 §2.5, fail-open).
+ */
+function collectExplainedBoxes(
+  words: ReadonlyArray<Word>,
+  dpi: number,
+  orientation: Rotation,
+  uprightWidth: number,
+  uprightHeight: number,
+  stripX0: number,
+): ReadonlyArray<BoundingBox> | null {
+  const boxes: BoundingBox[] = [];
+  for (const word of words) {
+    const box = projectWordBoxToStrip(
+      word.bbox,
+      dpi,
+      orientation,
+      uprightWidth,
+      uprightHeight,
+      stripX0,
+    );
+    if (box === null) return null;
+    boxes.push(box);
+  }
+  return boxes;
+}
+
+function isPointInsideBox(x: number, y: number, box: BoundingBox): boolean {
+  return x >= box.x && x < box.x + box.width && y >= box.y && y < box.y + box.height;
+}
+
+/**
+ * ADR-165: `true` si NINGÚN píxel presente de la franja cae fuera de
+ * `explainedBoxes` — la franja no puede aportar nada que `intersectionRatio`
+ * no fuera a descartar de todos modos. Corta apenas encuentra uno afuera
+ * (handoff §1.4): no hace falta contar el resto, y ese corte es lo que
+ * mantiene barato el caso que sí se saltea. Geometría incoherente del propio
+ * buffer (mismo guard que `isVisuallyWhiteStrip`): `false` — que acá también
+ * significa "no está explicada", o sea que corren las pasadas.
+ */
+function isStripInkFullyExplained(
+  strip: ImageData,
+  explainedBoxes: ReadonlyArray<BoundingBox>,
+): boolean {
+  const { data, width, height } = strip;
+  if (width <= 0 || height <= 0 || data.length === 0 || data.length !== width * height * 4) {
+    return false;
+  }
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const index = (y * width + x) * 4;
+      if (!isPixelPresent(data[index], data[index + 1], data[index + 2], data[index + 3])) {
+        continue;
+      }
+      if (!explainedBoxes.some((box) => isPointInsideBox(x, y, box))) return false;
+    }
+  }
+  return true;
+}
+
+/*
+ * ADR-160 §1: `image` acepta también `Blob` — el camino común (orientación 0)
+ * le pasa a `recognize()` el blob codificado directo, sin canvas de por
+ * medio. El camino lento (orientación ≠ 0) y las franjas de margen siguen
+ * pasando un `OffscreenCanvas` (`toTesseractImage`), porque necesitan la
+ * rotación de píxeles que solo corre sobre `ImageData`.
+ */
 async function recognizeWithTimeout(
-  image: OffscreenCanvas,
+  image: OffscreenCanvas | Blob,
   documentId: string,
   pageIndex: number,
   timeoutMs: number,
@@ -766,15 +936,67 @@ async function recognizeWithTimeout(
     // de cancelación por-job, así que el mecanismo real de "dejar de esperar"
     // es este Promise.race contra el AbortSignal — la computación WASM en
     // curso no se interrumpe, el caller simplemente deja de esperarla.
-    const result = await Promise.race([
-      activeWorker.recognize(image, {}, { blocks: true }),
-      timeoutPromise,
-      abortPromise,
-    ]);
+    const job = Promise.resolve().then(() => activeWorker.recognize(image, {}, { blocks: true }));
+    // Un timeout/cancel solo deja de esperar; Tesseract no expone cancelación
+    // por job y todavía puede estar leyendo el canvas. Liberarlo al terminar
+    // el job real evita invalidar su input en ese caso.
+    if (typeof OffscreenCanvas !== "undefined" && image instanceof OffscreenCanvas) {
+      void job.then(
+        () => releaseCanvasBackingStore(image),
+        () => releaseCanvasBackingStore(image),
+      );
+    }
+    const result = await Promise.race([job, timeoutPromise, abortPromise]);
     return result.data;
   } finally {
     if (timeoutId !== undefined) clearTimeout(timeoutId);
     if (onAbort !== undefined) abortSignal.removeEventListener("abort", onAbort);
+  }
+}
+
+/*
+ * ADR-160 §3: decodifica SOLO la franja, con el recorte en la propia
+ * decodificación (`createImageBitmap(blob, sx, sy, sw, sh)`) — nunca
+ * decodifica la página para recortarla después. `sy`/`sh` son `0`/`heightPx`
+ * siempre: las franjas de ADR-121 son de alto completo, igual que
+ * `cropImageData` (que nunca tocaba el alto, solo el ancho).
+ *
+ * Un fallo acá (`createImageBitmap` ausente o que rechaza, sin contexto 2D)
+ * se propaga tal cual — el caller (`recognizeRotatedMargins`) ya tiene el
+ * guard que lo saltea sin voltear la página (caso 16/22 de §13); no hace
+ * falta duplicar ese criterio acá.
+ */
+async function decodeStrip(
+  blob: Blob,
+  x0: number,
+  width: number,
+  heightPx: number,
+  documentId: string,
+  pageIndex: number,
+): Promise<ImageData> {
+  if (typeof OffscreenCanvas === "undefined") {
+    throw new OcrPageFailedError(
+      documentId,
+      pageIndex,
+      "OffscreenCanvas no disponible en este entorno.",
+    );
+  }
+  const bitmap = await createImageBitmap(blob, x0, 0, width, heightPx);
+  const canvas = new OffscreenCanvas(width, heightPx);
+  try {
+    const context = canvas.getContext("2d");
+    if (context === null) {
+      throw new OcrPageFailedError(
+        documentId,
+        pageIndex,
+        "No se pudo obtener un contexto 2D de OffscreenCanvas para la franja.",
+      );
+    }
+    context.drawImage(bitmap, 0, 0);
+    return context.getImageData(0, 0, width, heightPx);
+  } finally {
+    bitmap.close();
+    releaseCanvasBackingStore(canvas);
   }
 }
 
@@ -798,9 +1020,33 @@ async function recognizeWithTimeout(
  * devuelve lo que se haya podido leer. El texto derecho ya está reconocido y
  * perderlo por un extra sería peor que no tener el extra. La cancelación sí se
  * respeta, chequeando entre pasadas.
+ *
+ * ADR-160 §3: de dónde sale `cropped` es lo único que cambia entre el camino
+ * común y el lento — la regla de fusión de acá para abajo (umbral de
+ * solape, `ROTATED_MIN_CONFIDENCE`, el guard por franja) es la MISMA función,
+ * sin bifurcar. `getStrip` la resuelve: `kernelRecognizeUpright` decodifica
+ * la franja directo del blob (`decodeStrip`); `kernelRecognizeRotated` sigue
+ * recortando el `ImageData` de página ya decodificado (`cropImageData`, sin
+ * cambios). `uprightWidth` reemplaza a `upright.width` porque el camino
+ * común no tiene ningún `ImageData` de página del que leerlo.
+ *
+ * v1.16.1: `uprightWidth` es del raster ENDEREZADO — de ahí sale la
+ * geometría de la franja (`stripWidth`, el `x0` de cada lado, el recorte),
+ * que es de donde se recorta de verdad; el alto no hace falta acá porque
+ * cada franja es de alto completo y `getStrip` ya lo captura por closure.
+ * Pero el ÚLTIMO paso del mapeo de cada caja —franja rotada → franja →
+ * enderezado → raster ORIGINAL— tiene que deshacer la rotación de PÁGINA con
+ * las dimensiones del raster ORIGINAL (`originalWidth`/`originalHeight`),
+ * como pide la firma de `unrotateBbox`. En 90/270 el enderezado tiene el
+ * ancho y el alto intercambiados respecto del original, así que reusar
+ * `uprightWidth` ahí saca la caja de su lugar real. Son dos espacios
+ * distintos a propósito; no se unifican.
  */
 async function recognizeRotatedMargins(params: {
-  readonly upright: ImageData;
+  readonly getStrip: (x0: number, width: number) => Promise<ImageData>;
+  readonly uprightWidth: number;
+  readonly originalWidth: number;
+  readonly originalHeight: number;
   readonly words: ReadonlyArray<Word>;
   readonly orientation: Rotation;
   readonly documentId: string;
@@ -808,13 +1054,24 @@ async function recognizeRotatedMargins(params: {
   readonly dpi: number;
   readonly opts: KernelRecognizeOptions;
 }): Promise<Word[]> {
-  const { upright, words, orientation, documentId, pageIndex, dpi, opts } = params;
-  const stripWidth = Math.round(upright.width * MARGIN_STRIP_RATIO);
+  const {
+    getStrip,
+    uprightWidth,
+    originalWidth,
+    originalHeight,
+    words,
+    orientation,
+    documentId,
+    pageIndex,
+    dpi,
+    opts,
+  } = params;
+  const stripWidth = Math.round(uprightWidth * MARGIN_STRIP_RATIO);
   if (stripWidth <= 0) return [];
 
   const strips: ReadonlyArray<{ readonly x0: number }> = [
     { x0: 0 },
-    { x0: upright.width - stripWidth },
+    { x0: uprightWidth - stripWidth },
   ];
   const rotations: ReadonlyArray<Rotation> = [90, 270];
   const found: Word[] = [];
@@ -825,10 +1082,49 @@ async function recognizeRotatedMargins(params: {
     // derecho que ya está leído.
     let cropped: ImageData;
     try {
-      cropped = cropImageData(upright, strip.x0, stripWidth);
+      cropped = await getStrip(strip.x0, stripWidth);
     } catch {
       continue;
     }
+
+    /*
+     * ADR-162 §13 caso 23: la compuerta es deliberadamente exacta. Una franja
+     * solo se considera visualmente blanca cuando cada píxel es transparente
+     * o tiene sus tres canales RGB en 255. La decisión se toma una sola vez,
+     * antes de las dos rotaciones; una excepción abre la compuerta (el texto
+     * visible nunca debe perderse por una inspección defensiva).
+     */
+    let visuallyWhite = false;
+    try {
+      visuallyWhite = isVisuallyWhiteStrip(cropped);
+    } catch {
+      visuallyWhite = false;
+    }
+    if (visuallyWhite) continue;
+
+    /*
+     * ADR-165: si toda la tinta que queda cae dentro de una caja de la
+     * pasada derecha (dilatada), esta franja no puede aportar nada nuevo —
+     * `intersectionRatio` descartaría cualquier candidata de todos modos,
+     * después de haber pagado el reconocimiento. Fail-open, mismo criterio
+     * que la compuerta de arriba: cualquier excepción o proyección
+     * incoherente dejan `fullyExplained` en `false`.
+     */
+    let fullyExplained = false;
+    try {
+      const explainedBoxes = collectExplainedBoxes(
+        words,
+        dpi,
+        orientation,
+        uprightWidth,
+        cropped.height,
+        strip.x0,
+      );
+      fullyExplained = explainedBoxes !== null && isStripInkFullyExplained(cropped, explainedBoxes);
+    } catch {
+      fullyExplained = false;
+    }
+    if (fullyExplained) continue;
 
     for (const rotation of rotations) {
       if (opts.abortSignal.aborted) throw new CancelledError(documentId);
@@ -864,8 +1160,11 @@ async function recognizeRotatedMargins(params: {
           cropped.height,
         );
         const inUpright = { ...inStrip, x: inStrip.x + strip.x0 };
+        // v1.16.1: dimensiones del raster ORIGINAL, no las del enderezado —
+        // es la inversa de la rotación de PÁGINA, y unrotateBbox pide el
+        // tamaño de a dónde vuelve, no de dónde sale.
         const bbox = toPagePoints(
-          unrotateBbox(inUpright, orientation, upright.width, upright.height),
+          unrotateBbox(inUpright, orientation, originalWidth, originalHeight),
           dpi,
         );
 
@@ -891,6 +1190,25 @@ async function recognizeRotatedMargins(params: {
   return found;
 }
 
+/** ADR-162: predicado exacto de blanco/transparencia, sin umbrales implícitos. */
+function isVisuallyWhiteStrip(image: ImageData): boolean {
+  const { data } = image;
+  if (
+    image.width <= 0 ||
+    image.height <= 0 ||
+    data.length === 0 ||
+    data.length !== image.width * image.height * 4
+  ) {
+    return false;
+  }
+  for (let index = 0; index < data.length; index += 4) {
+    if (isPixelPresent(data[index], data[index + 1], data[index + 2], data[index + 3])) {
+      return false;
+    }
+  }
+  return true;
+}
+
 export interface KernelRecognizeOptions {
   readonly timeoutMs: number;
   readonly abortSignal: AbortSignal;
@@ -900,6 +1218,122 @@ export interface KernelOcrResult {
   readonly words: ReadonlyArray<Word>;
   readonly confidence: number;
 }
+
+/*
+ * ADR-160 §1/§3: camino común — orientación 0, ~99 % de las páginas. Nunca
+ * decodifica la página: `recognize()` recibe el blob codificado directo
+ * (los píxeles que llegan al core son bit a bit los mismos que produce hoy
+ * `convertToBlob()`, porque PNG es sin pérdida) y las franjas de margen
+ * decodifican solo su recorte (`decodeStrip`). Cero `OffscreenCanvas` de
+ * página completa.
+ */
+async function kernelRecognizeUpright(
+  blob: Blob,
+  image: EncodedPageImage,
+  dpi: number,
+  documentId: string,
+  pageIndex: number,
+  opts: KernelRecognizeOptions,
+): Promise<KernelOcrResult> {
+  const data = await recognizeWithTimeout(
+    blob,
+    documentId,
+    pageIndex,
+    opts.timeoutMs,
+    opts.abortSignal,
+  );
+  // ADR-160 §1: dimensiones AUTORITATIVAS del payload (ADR-158 §4) — no hay
+  // ningún `ImageData` decodificado del que leerlas en este camino.
+  const words = toWords(data, pageIndex, dpi, 0, image.widthPx, image.heightPx);
+  const confidence = clampConfidence(extractPageConfidence(data) / 100);
+
+  const rotated = await recognizeRotatedMargins({
+    getStrip: (x0, width) => decodeStrip(blob, x0, width, image.heightPx, documentId, pageIndex),
+    uprightWidth: image.widthPx,
+    // Orientación 0: enderezado y original son el mismo raster.
+    originalWidth: image.widthPx,
+    originalHeight: image.heightPx,
+    words,
+    orientation: 0,
+    documentId,
+    pageIndex,
+    dpi,
+    opts,
+  });
+
+  return { words: [...words, ...rotated], confidence };
+}
+
+/*
+ * ADR-160 §4: camino lento, declarado — orientación ≠ 0 necesita la página
+ * entera en píxeles para el enderezado de ADR-120 (§4 del Contexto: el
+ * `angle` de `SetImageFile` no sirve para esto). Decodifica completo, igual
+ * que antes de ADR-160; es el ~1 % de las páginas.
+ *
+ * ADR-190 §2 paso 4 / §5: también es el camino de `upscale` — agrandar la
+ * imagen decodificada exige tenerla en píxeles, así que una página con
+ * `upscale > 1` pasa por acá aunque su orientación sea 0 (`kernelRecognize`
+ * la despacha para acá). El agrandado ocurre DESPUÉS de enderezar: las
+ * coordenadas que Tesseract devuelve están en el espacio ENDEREZADO Y
+ * AGRANDADO, así que `sourceWidth`/`sourceHeight` para `unrotateBbox` y el
+ * `dpi` para `toPagePoints` viajan multiplicados por `upscale` — es
+ * exactamente la conversión `dpi × upscale` que exige el contrato.
+ */
+async function kernelRecognizeRotated(
+  image: EncodedPageImage,
+  orientation: Rotation,
+  dpi: number,
+  documentId: string,
+  pageIndex: number,
+  opts: KernelRecognizeOptions,
+  upscale = 1,
+): Promise<KernelOcrResult> {
+  const imageData = await decodeEncodedImage(image, documentId, pageIndex);
+
+  if (opts.abortSignal.aborted) throw new CancelledError(documentId);
+
+  const upright = rotateImageData(imageData, orientation);
+  const scaled = upscale > 1 ? upscaleImageData(upright, upscale, documentId, pageIndex) : upright;
+
+  if (opts.abortSignal.aborted) throw new CancelledError(documentId);
+
+  const data = await recognizeWithTimeout(
+    toTesseractImage(scaled, documentId, pageIndex),
+    documentId,
+    pageIndex,
+    opts.timeoutMs,
+    opts.abortSignal,
+  );
+  const effectiveDpi = dpi * upscale;
+  const scaledWidth = image.widthPx * upscale;
+  const scaledHeight = image.heightPx * upscale;
+  const words = toWords(data, pageIndex, effectiveDpi, orientation, scaledWidth, scaledHeight);
+  const confidence = clampConfidence(extractPageConfidence(data) / 100);
+
+  const rotated = await recognizeRotatedMargins({
+    getStrip: (x0, width) => Promise.resolve(cropImageData(scaled, x0, width)),
+    uprightWidth: scaled.width,
+    // v1.16.1: el raster ORIGINAL es `image` (acá, ya agrandado) — en 90/270
+    // `upright`/`scaled` tienen el ancho y el alto intercambiados respecto
+    // de él.
+    originalWidth: scaledWidth,
+    originalHeight: scaledHeight,
+    words,
+    orientation,
+    documentId,
+    pageIndex,
+    dpi: effectiveDpi,
+    opts,
+  });
+
+  return { words: [...words, ...rotated], confidence };
+}
+
+/**
+ * Tolerancia del tope `upscale ≤ 300/dpi` (Contracts.md §7.1): cubre solo el
+ * redondeo del cociente calculado en el host.
+ */
+const UPSCALE_RANGE_TOLERANCE = 1e-9;
 
 /**
  * Reconocimiento de una página (ADR-045 §2/§3): garantiza el idioma cargado
@@ -912,48 +1346,60 @@ export async function kernelRecognize(
   payload: OcrPagePayload,
   opts: KernelRecognizeOptions,
 ): Promise<KernelOcrResult> {
-  const { documentId, pageIndex, imageData, languages, dpi } = payload;
+  const { documentId, pageIndex, image, languages, dpi, orientation } = payload;
+  // ADR-190 §2 paso 4 / §5: factor con el que se agranda la imagen antes de
+  // reconocer. Default 1 (sin cambios de comportamiento previos al ADR).
+  const upscale = payload.upscale ?? 1;
+
+  if (orientation !== 0 && orientation !== 90 && orientation !== 180 && orientation !== 270) {
+    throw new InvalidInputError("orientation inválida en OcrPagePayload.", {
+      engineId: "ocr",
+      orientation,
+    });
+  }
+
+  // Contracts.md §7.1 (`OcrPagePayload.upscale`): rango 1 ≤ upscale ≤ 300/dpi.
+  // El payload cruza un puerto (ADR-055 §2): un NaN o un factor fuera de rango
+  // llegaría a `ensureDpiApplied` y a `upscaleImageData` sin control.
+  // Sin agrandar (upscale = 1) es válido con cualquier dpi, incluso > 300.
+  if (
+    !Number.isFinite(upscale) ||
+    upscale < 1 ||
+    (upscale > 1 && upscale > (300 / dpi) * (1 + UPSCALE_RANGE_TOLERANCE))
+  ) {
+    throw new InvalidInputError("upscale fuera de rango en OcrPagePayload.", {
+      engineId: "ocr",
+      upscale,
+      dpi,
+    });
+  }
 
   if (opts.abortSignal.aborted) throw new CancelledError(documentId);
 
   await ensureWorkerLoaded(languages);
-  await ensureDpiApplied(dpi);
+  // ADR-090 §2: se le informa a Tesseract el dpi EFECTIVO de la imagen que va
+  // a leer — el de la imagen ya agrandada, no el original.
+  await ensureDpiApplied(dpi * upscale);
   await ensurePageSegModeApplied();
 
   if (opts.abortSignal.aborted) throw new CancelledError(documentId);
 
-  // ADR-090 §3: detectar antes de reconocer. Con orientación 0 —el 99 % de las
-  // páginas, y también cualquier falla de `detect`— `rotateImageData` devuelve
-  // el mismo objeto y de acá para abajo el camino es el previo al ADR.
-  const orientation = await detectOrientation(
-    toTesseractImage(imageData, documentId, pageIndex),
-    languages,
-  );
+  // ADR-190 §2 paso 4: agrandar exige decodificar la imagen completa (no hay
+  // agrandado sobre el `Blob` sin decodificar), así que una página con
+  // `upscale > 1` pasa por el camino lento aunque su orientación sea 0.
+  if (upscale > 1) {
+    return kernelRecognizeRotated(image, orientation, dpi, documentId, pageIndex, opts, upscale);
+  }
+
+  // ADR-160 §1: el blob codificado (ADR-158 §2) es la única forma de imagen
+  // que existe hasta que el camino lento decide que hace falta más.
+  const blob = new Blob([image.bytes], { type: `image/${image.format}` });
 
   if (opts.abortSignal.aborted) throw new CancelledError(documentId);
 
-  const upright = rotateImageData(imageData, orientation);
-  const data = await recognizeWithTimeout(
-    toTesseractImage(upright, documentId, pageIndex),
-    documentId,
-    pageIndex,
-    opts.timeoutMs,
-    opts.abortSignal,
-  );
-  const words = toWords(data, pageIndex, dpi, orientation, imageData.width, imageData.height);
-  const confidence = clampConfidence(extractPageConfidence(data) / 100);
-
-  const rotated = await recognizeRotatedMargins({
-    upright,
-    words,
-    orientation,
-    documentId,
-    pageIndex,
-    dpi,
-    opts,
-  });
-
-  return { words: [...words, ...rotated], confidence };
+  return orientation === 0
+    ? kernelRecognizeUpright(blob, image, dpi, documentId, pageIndex, opts)
+    : kernelRecognizeRotated(image, orientation, dpi, documentId, pageIndex, opts);
 }
 
 /**
@@ -965,7 +1411,13 @@ export async function kernelRecognize(
  * protocolo, manejado en `worker/entry.ts`. Resiliente a que `terminate()`
  * rechace (best-effort, mismo criterio que `ocr.engine.ts` mantenía).
  */
-export async function kernelDispose(): Promise<void> {
+// O-6: devuelve si HABÍA una instancia viva para liberar — `kernelModule`
+// (el import cacheado a nivel de módulo en ocr.engine.ts) se queda definido
+// para siempre una vez cargado, así que no sirve como señal de "se liberó
+// algo esta vez"; esto sí, porque lee `worker` (el estado real) antes de
+// nulearlo.
+export async function kernelDispose(): Promise<boolean> {
+  const hadWorker = worker !== null;
   if (worker !== null) {
     const current = worker;
     worker = null;
@@ -975,19 +1427,8 @@ export async function kernelDispose(): Promise<void> {
       // best-effort: liberar igual el estado interno aunque terminate() falle.
     }
   }
-  // ADR-119 §1: son dos instancias de tesseract y hay que liberar las dos. El
-  // `try` es independiente a propósito: que el principal falle al terminar no
-  // puede dejar vivo al de OSD, que son ~99 MB.
-  if (osdWorker !== null) {
-    const currentOsd = osdWorker;
-    osdWorker = null;
-    try {
-      await currentOsd.terminate();
-    } catch {
-      // best-effort, mismo criterio que el worker principal.
-    }
-  }
   loadedLanguages = new Set();
   appliedDpi = null;
   pageSegModeApplied = false;
+  return hadWorker;
 }

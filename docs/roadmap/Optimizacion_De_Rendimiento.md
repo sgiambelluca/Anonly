@@ -1,10 +1,21 @@
-<!-- CONTEXT: scope=roadmap | dependencias=architecture/07_Performance_Strategy.md,core/NER_Engine.md,core/OCR_Engine.md,core/Grouping_Engine.md,roadmap/Duplicacion_De_Logica.md | audiencia=humanos+IA | fase=por-planificar -->
+<!-- CONTEXT: scope=roadmap | dependencias=architecture/07_Performance_Strategy.md,core/NER_Engine.md,core/OCR_Engine.md,core/Grouping_Engine.md,roadmap/Duplicacion_De_Logica.md,roadmap/Optimizacion_De_Memoria_Plan.md,roadmap/mediciones/transversal/Ciclos_Y_Documentos_Reales_Medicion.md,roadmap/mediciones/transversal/Banco_Windows_Comparativa_Medicion.md,ui/React_Client.md | audiencia=humanos+IA | fase=11 (campaña macOS medida el 2026-09-24; Windows nativo 2026-09-25 para los puntos 1–4, previo a ADR-184) -->
 
 # Optimización de rendimiento — hallazgos y plan
 
 > **Procedencia**: relevamiento del 2026-08-27 con cuatro agentes de investigación (carga/arranque, OCR por página, NER por página, duplicación+UI). **Cada número de este documento fue verificado a mano** contra el código o remedido; lo que no se pudo medir está marcado como tal.
 
-**Estado**: relevado, plan acordado, **nada implementado**.
+**Estado actual (2026-09-17)**: este relevamiento conserva las mediciones originales. El multihilo interno de ONNX Runtime para NER quedó habilitado en el producto (ADR-100/130/132); la segunda instancia de worker NER se midió y se revirtió. D1 y el OCR paralelo también se implementaron. Ver el estado por intervención en «Plan acordado».
+
+**Próximos objetivos acordados (2026-09-20)**: medir más hilos dentro del único
+worker NER, más reconocedores OCR, varios fragmentos por inferencia NER y los
+peores casos de Regex/Grouping. Después de las dos primeras mediciones, revisar
+los perfiles de rendimiento y la selección automática según recursos del equipo.
+El plan vigente está al final de este documento; las secciones previas conservan
+el relevamiento histórico y sus descartes. Los cinco puntos ya tienen resultados
+en macOS; el lote NER quedó en factibilidad sin adopción, y Regex/Grouping
+recibieron cambios internos medidos. No se cambiaron defaults, presets ni
+contratos. La repetición en Windows nativo y la decisión de perfiles están
+pendientes.
 
 ## Los dos focos
 
@@ -39,11 +50,11 @@ Es el tipo de documento al que apunta el producto.
 
 ## Velocidad — ordenado por ganancia sobre riesgo
 
-### A. El WASM corre en un solo hilo — **MEDIDO el 2026-08-27; falta decidir el despliegue**
+### A. Multihilo WASM de ONNX Runtime para NER — **IMPLEMENTADO**
 
-`crossOriginIsolated` es `false` y no hay `SharedArrayBuffer`, así que `onnxruntime-web` fuerza `numThreads = 1`. El motor nunca toca `numThreads` (`ner-engine/src/worker/kernel.ts`, `configureTransformersEnv`): queda en el default de la librería.
+**Baseline histórico del 2026-08-27**: en la web sin aislamiento, `crossOriginIsolated` era `false` y no había `SharedArrayBuffer`, por lo que `onnxruntime-web` forzaba `numThreads = 1`. El motor no configura `numThreads` (`ner-engine/src/worker/kernel.ts`, `configureTransformersEnv`): usa el valor automático de la librería.
 
-El propio repo ya lo admite — `07_Performance_Strategy.md` línea 232: *"`performance.measureUserAgentSpecificMemory()` exige `crossOriginIsolated` (COOP/COEP), **headers que la app de producción no lleva**"*.
+**Producto actual**: ADR-100 declaró los headers para la variante web y ADR-130/132 fijaron el aislamiento en el contenedor de escritorio. El spike de ADR-132 («Verificado en el spike») comprobó `crossOriginIsolated === true` en renderer y workers, `SharedArrayBuffer` dentro del worker NER y la carga de `ort-wasm-simd-threaded.asyncify`. ONNX Runtime decide automáticamente cuántos hilos usa según el entorno; esa cifra efectiva no se registró en este relevamiento. Esos hilos ejecutan una inferencia **dentro de un worker NER**; `nerPoolSize` controla cuántos workers NER podrían existir y es un mecanismo distinto.
 
 #### Medido: la inferencia baja a la mitad
 
@@ -63,20 +74,13 @@ Sobre el documento denso (`doc-026`): **2986 ms → 1085 ms, −63,7 %**. La car
 
 **La calidad no cambió en nada**: recall de Regex 61/61, recall de NER 12/17, precisión 84/97 — idénticos a la corrida previa. Era lo esperado (esto no toca tokenización, agregación BIO ni umbral) pero se corrió igual, no se asumió.
 
-**El prototipo se revirtió**: el cambio de headers no está commiteado, porque la decisión no es del repo (ver abajo).
+**El prototipo de medición se revirtió entonces**; los headers para la variante web se declararon después mediante ADR-100 y el aislamiento del producto de escritorio se implementó con ADR-130/132. La reversión del prototipo no describe el estado actual.
 
-#### Lo que falta decidir, y por qué no es del repo
+#### Decisión de despliegue — resuelta
 
-La app es un **SPA estático**: no puede mandarse headers a sí misma. Ponerlos en el dev server hace que **dev y producción difieran en algo que se nota** —threading sí / threading no—, así que cualquier medición local dejaría de describir el producto. Las opciones:
+En el relevamiento original, la app era un **SPA estático** y faltaba decidir quién enviaría COOP/COEP en producción. Habilitarlos solo en el servidor de desarrollo habría hecho que las mediciones locales describieran otra configuración. ADR-100 dejó los headers declarados para un hosting web compatible; ADR-130/132 trasladaron el producto al contenedor de escritorio, que sirve el origen aislado.
 
-1. **Comprometer el hosting** a mandar los dos headers, y recién ahí ponerlos también en dev. Es lo único que hace real la ganancia.
-2. Ponerlos solo en dev. **Desaconsejado**: mide una app que no existe.
-3. No hacer nada y quedarse con un hilo.
-
-Hay que auditar además que `COEP: require-corp` no rompa ninguna carga cross-origin. En dev no rompió nada (el pipeline completo corrió y la calidad no se movió), y la app es 100 % first-party por diseño, pero el hosting real puede traer recursos que el dev server no tiene.
-
-- **Riesgo de calidad**: **ninguno, verificado.** No toca tokenización, agregación BIO ni umbral, y la corrida lo confirma.
-- **Costo**: chico en código (cinco líneas más un ADR); la parte cara es el compromiso de despliegue.
+La medición original no mostró pérdida de calidad: no cambió tokenización, agregación BIO ni umbral. La validación posterior del shell en ADR-132 comprobó que la variante multihilo carga y que el pipeline completo funciona bajo `app://`.
 
 ### B. OCR procesa de a una página aunque el pool tiene dos
 
@@ -160,7 +164,10 @@ Tres cambios chicos, **un motor cada uno** — encajan con R-1 sin fricción. Ri
 
 ---
 
-## Robustez: dos O(n²) reales, fuera del plan por ahora
+## Robustez: dos O(n²) reales — incorporados al siguiente plan el 2026-09-20
+
+Las mediciones siguientes son las del relevamiento original. El objetivo 4 del
+plan nuevo empieza por reproducirlas contra el código vigente.
 
 - **`email`** (`default-ar.ts:284`) se cuadra sobre texto sin `@` denso en dígitos y guiones (OCR corrupto, tabla mal separada). **Remedido a mano**: 7,4 ms (2 K chars) → 161 (10 K) → 639 (20 K) → **2539 (40 K)**. A 160 KB son decenas de segundos de hilo principal bloqueado, sin cancelación (Regex corre síncrono). Los patrones default **no** tienen el timeout que `Regex_Engine.md` §12 sí prevé para los custom.
 - **El pase difuso de Grouping** (`grouping.engine.ts:1895`): 2000 entidades distintas → 2,1 s. Es el peor caso adversarial; en un documento real la mayoría repite y resuelve por match exacto antes de llegar. **El caso típico no está medido.**
@@ -175,6 +182,17 @@ Tres cambios chicos, **un motor cada uno** — encajan con R-1 sin fricción. Ri
 - **Las 14 patrones de Regex sobre texto normal**: 3,5 ms por página densa. Irrelevante frente a NER.
 - **Worker de Tesseract y modelo NER**: se cachean entre páginas, no se recrean. Correcto.
 - **Blob URLs, `PDFDocumentProxy`, LRU de render**: sin fugas evidentes.
+- **Adelantar la carga del modelo NER para solaparla con el OCR** (2026-09-17): tres
+  rondas intercaladas `A1→B1→B2→A2` sobre P2, un solo build instrumentado. Ni el
+  disparo al empezar el OCR ni el del 75 % dieron una mejora estable de
+  `import→Ready`; el primero subió el pico de RSS 144–422 MB en las tres rondas.
+  Lo que cierra el tema: la oportunidad entera eran **0,94 s** de `modelLoadMs`
+  frío, y la deriva del banco entre dos controles idénticos de una misma ronda
+  fue de **0,06, 1,83 y 2,54 s** — el premio es más chico que el error de
+  medición. Cargar el modelo al abrir la aplicación está descartado aparte, sin
+  medir, por `idleDisposeMs` de 60 s y memoria ocupada sin documento. Ver
+  [`Precalentamiento_NER_Durante_OCR_Medicion.md`](mediciones/ner/Precalentamiento_NER_Durante_OCR_Medicion.md)
+  §7 y ADR-154 §2 lever 3.
 
 ---
 
@@ -198,6 +216,11 @@ Las cinco que se pierden son **emails e IBAN** — cadenas alfanuméricas largas
 
 ## El agujero de fondo: no hay dónde apoyar el "antes y después"
 
+**Diagnóstico histórico del 2026-08-27.** Desde entonces existen `tests/perf/`,
+`tests/cancel/` y las campañas T-9..T-13; los instrumentos de memoria no equivalen
+todavía a gates de presupuesto. El texto siguiente explica el punto de partida,
+no el estado actual de la infraestructura.
+
 `package.json` define `test:perf`, `test:stress`, `test:leak` y `test:cancel` (líneas 31-34) y **los cuatro directorios no existen**. Ninguna métrica contractual de `07_Performance_Strategy.md` §1 tiene medición automatizada.
 
 Y `test:quality` corre **con NER apagado** (ADR-095 §5), así que hoy no hay forma de medir si un cambio en NER baja el recall. Cinco de los seis cambios de este plan tocan cosas cuya calidad no sabemos medir.
@@ -211,9 +234,222 @@ Y `test:quality` corre **con NER apagado** (ADR-095 §5), así que hoy no hay fo
 | ~~**0**~~ | ~~montar la medición que falta~~ — **hecho**: `pnpm test:measure` (`tests/measure/`), con recall de NER medible por primera vez | sin esto, "no bajó la calidad" es una opinión |
 | ~~**1**~~ | ~~truncamiento silencioso~~ — **hecho**: ADR-098 | el único que ya estaba costando calidad |
 | ~~**2**~~ | ~~**D1**~~ — **hecho**: ADR-099, chunk inicial de 549 a 208 KB gz (−62 %) | foco declarado nº 1, riesgo cero, tres cambios chicos |
-| **3** | **A** (COOP/COEP) — **medido: −53,6 % de inferencia, calidad intacta**; falta decidir el despliegue | la ganancia más grande; medir antes de comprometerse |
+| ~~**3**~~ | ~~**A** (aislamiento para ONNX Runtime)~~ — **hecho**: ADR-100/130/132; medición inicial: −53,6 % de inferencia, calidad intacta | la ganancia más grande; verificación posterior en el shell |
 | ~~**4**~~ | ~~**B** (OCR en paralelo)~~ — **hecho**: ADR-101, −22 % a −27 % en documentos de dos páginas | limpio, sin riesgo de calidad |
 | ~~**5**~~ | ~~**C**~~ — **medido y REVERTIDO**: no aporta nada sobre A | tres cortes; revertir si A ya se llevó la ganancia |
-| — | **D2**, los dos O(n²) | **diferidos**, a rediscutir al cerrar lo anterior |
+| — | **D2** | **diferido** |
+| — | **Los dos O(n²)** | incorporados al objetivo 4 del plan del 2026-09-20 |
 
 La duplicación de lógica se apartó a [`Duplicacion_De_Logica.md`](./Duplicacion_De_Logica.md): no hace la herramienta más rápida y es una campaña propia.
+
+---
+
+## Próximos objetivos — tiempo, consumo y perfiles (2026-09-20)
+
+**Estado: los cinco puntos tienen resultados en macOS. Windows nativo se midió el 2026-09-25 para los puntos 1–4 y el 2026-09-26 para ADR-184 y los brazos de Bajo del punto 5: las cinco curvas están en las dos plataformas.** Decisión del humano: explorar el beneficio
+de hilos/workers y su costo de memoria, conservando la calidad. Un mayor consumo
+puede justificar una mejora de velocidad; el resultado debe permitir elegir ese
+compromiso por perfil. No se cambian presupuestos ni defaults con este plan.
+
+**Protocolo de ejecución (2026-09-23):**
+[`Rendimiento_Experimentos_Plan.md`](Rendimiento_Experimentos_Plan.md) fija brazos,
+controles, corpus, métricas y condiciones de avance. Las curvas principales
+ya tienen repetición Windows nativa; sus límites y complementos pendientes
+se detallan en cada informe. WSL no sustituye esa validación y el resultado
+de Mac no se extrapola a Windows.
+
+Base: `Ciclos_Y_Documentos_Reales_Medicion.md` §9 y
+`Banco_Windows_Comparativa_Medicion.md`. NER domina el documento nativo real;
+en R2 los dos reconocedores OCR estuvieron ocupados ~98 % de su etapa, frente al
+18–19 % del OSD compartido. La campaña de recursos conserva su orden propio
+**2 → revisión del plan → 1 → 3** (`Optimizacion_De_Memoria_Plan.md` §2ter).
+
+### 1. Aprovechar más hilos dentro del único worker NER
+
+**Curva principal macOS medida (2026-09-23/24):** control automático efectivo de
+4 hilos; 4 solicitado indistinguible, 6 y 8 más lentos sobre R1/R2 reales, con
+calidad idéntica y cancelación ejercitada. Ver
+[`Hilos_NER_Medicion.md`](mediciones/ner/Hilos_NER_Medicion.md) para pares y límites. No se
+adoptó configuración nueva. **Windows nativo (2026-09-25):** dirección
+contraria, 6 y 8 hilos aceleran NER hasta −24 % en R1, con calidad idéntica;
+el efecto depende del hardware. **Ampliación macOS (2026-09-26):** 48
+importaciones válidas separaron carga observable (0,80–1,03 s), panel DOM
+(0,17–0,64 s después de Ready) y secuencia R1→R1→R2→R2. Se observó
+reutilización en la segunda R1 y recarga en ambas R2; 6/8 siguieron más
+lentos con calidad exacta. El complemento equivalente en Windows (mismo día)
+dio carga de 1,04–1,38 s, el mismo patrón de reutilización y recarga, y 6/8
+más rápidos que A en los 48 pares. Memoria atribuible a la carga y estrés de
+horas siguen pendientes. La tanda local de
+cuatro documentos no cierra esos alcances.
+
+- Comparar el control efectivo actual con **4, 6 y 8 hilos de ONNX**, donde el
+  hardware permita esas configuraciones. Registrar la cantidad efectiva, no solo
+  el valor solicitado; mantener un único worker/modelo NER.
+- Medir carga, inferencia, tiempo hasta `Ready` y panel visible, memoria y
+  comportamiento bajo carga sostenida en macOS y Windows nativo.
+- Verificar igualdad de detecciones; más hilos no se presupone más rápido.
+  Entregar la curva tiempo/consumo y el punto donde agregar hilos deja de compensar.
+
+### 2. Aprovechar más workers de reconocimiento OCR
+
+**Curva macOS medida (2026-09-24):** R2 real llegó a `Ready` en medianas de
+48,0 / 41,4 / 37,9 s con 2/3/4 reconocedores, con salida idéntica y ocupación
+efectiva. P2 sintético respondió de otra manera; el informe
+[`Reconocedores_OCR_Medicion.md`](mediciones/ocr/Reconocedores_OCR_Medicion.md) registra la densidad
+de caracteres, memoria, una tanda excluida por suspensión y los límites del
+banco. No se adoptó configuración nueva. **Windows nativo (2026-09-25):**
+misma dirección, más ganancia; R2 `Ready` 43,2 / 37,2 / 32,0 s con 2/3/4 y
+RSS durante OCR creciente con el tamaño del pool. **Atribución macOS cerrada el
+2026-09-26:** 36 corridas válidas y 54 snapshots completos. Las medianas WASM
+LSTM crecen en pasos de 141,125 MiB en P2 y 85,8125 MiB en R2; RSS total sin
+crecimiento lineal. Ver el cierre de memoria en el mismo informe.
+
+- Comparar **2, 3 y 4 reconocedores LSTM**, conservando el OSD compartido,
+  la configuración de 300 DPI y las reglas actuales de calidad.
+- Medir ocupación efectiva, preparación/cola y tiempo total. Los 90–148 MB de
+  WASM por reconocedor observados son una referencia, no su costo total ni un
+  valor garantizado para todo documento.
+- Mantener el presupuesto de imágenes vivas y registrar si limita la concurrencia.
+  Si impide ocupar los workers adicionales, documentar y evaluar por separado ese
+  cambio; no alterar a escondidas dos variables en la misma comparación.
+- Entregar tiempo ganado frente a memoria adicional, calidad y capacidad de
+  cancelación. La selección final será por perfil y capacidad del equipo.
+
+### 3. Varios fragmentos independientes por inferencia NER
+
+**Factibilidad macOS cerrada, adopción bloqueada:**
+[`Lotes_NER_Factibilidad.md`](Lotes_NER_Factibilidad.md) registra la prueba
+en Chromium/WASM y las muestras de R1/R2. Hubo diferencias de entidades y
+cruces del umbral de confianza frente a inferencias individuales; los lotes
+de cuatro no mejoraron la mediana de ninguna muestra real. No se cambió el
+producto. Se investigaría primero la equivalencia de salida y después el
+costo de una importación completa, si este enfoque se retomara. **Windows
+nativo (2026-09-25):** mismo bloqueo, con mismatches de etiqueta, geometría y
+umbral 0,7 en R1 y R2.
+
+Evaluar soporte y costo de procesar varias entradas en un mismo lote, agrupando
+longitudes similares. Preservar los límites de tokens y el contexto independiente
+de cada fragmento; no concatenar páginas como una sola secuencia. Medir memoria
+temporal, tiempo por lote y total, huella de detección y orden de entrega a Grouping.
+Los cambios de protocolo o contrato requieren ADR y specs previos a la implementación.
+No hay ganancia cuantificada todavía.
+
+### 4. Acotar los peores casos de Regex y Grouping
+
+**Regex, línea base cerrada en macOS:**
+[`Patron_Email_Regex_Medicion.md`](mediciones/regex/Patron_Email_Regex_Medicion.md) registra la
+curva cuadrática de email hasta 160 KiB y el control rápido de R1/R2 reales.
+El arreglo lineal quedó decidido en ADR-181 y `Regex_Engine.md` v1.14.0;
+se implementó y repitió la curva adversa y R1/R2 sin cambios de detección.
+**Windows nativo (2026-09-25):** curva adversa y R1/R2 confirmados, sin
+bloqueo cuadrático (163.840 caracteres en 13–31 ms).
+
+**Grouping, línea base cerrada en macOS:**
+[`Agrupacion_Difusa_Medicion.md`](mediciones/grouping/Agrupacion_Difusa_Medicion.md) registra la
+curva de 250–2000 valores distintos, el control repetido y R1/R2 reales.
+El primer arreglo quedó especificado en ADR-182 y `Grouping_Engine.md`
+v1.11.0, se implementó y conservó huellas y orden en 30 controles. El peor
+caso de 2.000 valores distintos bajó de 14,53 a 3,26 s, aunque entonces
+persistía un bloqueo de varios segundos.
+Un filtro exacto por trigramas se descartó tras una sonda: no eliminó ninguna
+de las 1.999.000 comparaciones del adverso y añadió costo. El informe registra
+esa prueba y su alcance.
+Una segunda fase de recorte exacto de afijos comunes se especificó en
+ADR-183 y `Grouping_Engine.md` v1.12.0. Ya implementada y medida en motor y
+R1/R2, bajó el peor caso de 3,26 a 1,50 s con huellas idénticas. El bloqueo
+residual motivó ADR-184: el índice interno de candidatos bajó el adverso de
+2.000 valores de 1.610,85 a 263,64 ms en comparación pareada macOS, con
+huellas idénticas en el banco sintético y en seis corridas R1/R2. El control
+repetido y los tiempos de proceso reales no mostraron regresión material. El
+índice retuvo unos 4,59 MiB adicionales en 2.000 alias; la curva puede seguir
+siendo cuadrática en corpus sin poda. Evidencia en
+`Agrupacion_Difusa_Medicion.md`. **Windows nativo (2026-09-26):** el A/B de
+ADR-184 bajó el adverso de 2.000 de 2.660 a 382 ms (7,0×) con huellas
+idénticas y sin regresión en el control ni en R1/R2. El 1,6× que parecía
+separar Windows de la Mac era del motor JavaScript con que corre el banco
+sintético (Node 22 en Windows, Node 26 en la Mac): con el V8 de Electron, el
+del producto, Windows baja a 202 ms, por debajo de la Mac.
+
+Retomar los dos casos cuadráticos del relevamiento: patrón de email sobre texto
+adverso y búsqueda difusa con muchas entidades distintas. Primero reproducirlos
+sobre el código vigente y un rango de tamaños; luego planificar cada módulo por
+separado. Comprobar tanto el caso patológico como documentos normales, preservar
+detecciones/agrupaciones y medir bloqueo del hilo principal y cancelación.
+Es un objetivo de robustez temporal; no se atribuye a estos casos el costo de R1/R2.
+
+### 5. Revisar perfiles con las curvas de hilos y workers ya medidas
+
+**Revisión documental macOS disponible:**
+[`Perfiles_Rendimiento_Revision.md`](Perfiles_Rendimiento_Revision.md) organiza la
+matriz candidata, señales, migración y condiciones pendientes. La política no
+está validada para Windows ni cambió los settings del producto. La tanda local
+adicional OCR1/2/3/4 y NER Automático/1/2 cerró el 2026-09-25 con calidad y
+cancelación conservadas. Los tiempos, el RSS observado y las limitaciones de
+atribución WASM están en ese informe. Las curvas Windows de NER A/4/6/8 y
+OCR 2/3/4 ya están incorporadas a la revisión, y los brazos de Bajo se
+midieron en Windows el 2026-09-26 (misma conclusión que en la Mac: reducir
+hilos NER no conviene; Automático usa 4 hilos efectivos en las dos). **El
+punto queda pendiente de la atribución de memoria en Windows y de la decisión
+humana**. La curva WASM por reconocedor en macOS cerró el 2026-09-26;
+no se adoptaron perfiles ni defaults nuevos.
+
+**Depende de los objetivos 1 y 2 y de revisar sus resultados.** Es el siguiente
+paso después de esas mediciones; no necesita esperar a que terminen 3 y 4. Si
+esos objetivos cambian después el costo, se vuelve a validar la matriz de perfiles.
+
+El producto actual tiene `auto`, `low` y `high`
+(`apps/react-client/src/core-adapter/settingsToEngineConfig.ts`): Bajo fija todos
+los pools en 1; Alto fija PDF/Render en 4 y OCR/NER en 2; Automático no envía
+override y utiliza `buildDefaultEngineConfig`. Estos valores configuran capacidad
+de pools, **no los hilos internos de ONNX**. El recorrido secuencial de NER usa
+un solo worker aunque el pool admita dos. El perfil futuro debe expresar el
+trabajo efectivo que se midió, no equiparar plazas configuradas con workers vivos.
+
+**Propuesta a concretar con los resultados:** Bajo, Intermedio, Alto y Automático.
+Automático selecciona uno de los tres niveles según los recursos detectados del
+equipo y una política derivada de las mediciones. Debe mostrar el nivel resuelto;
+ejemplo de comportamiento solicitado por el humano:
+
+> Selecciono Automático → aparece «Modo automático — consumo/rendimiento medio».
+
+«Medio» corresponde al nivel Intermedio. Es un ejemplo de presentación futura,
+no un texto ni un cuarto valor ya implementados en el producto.
+
+Entregables de esta revisión:
+
+- **Matriz por nivel:** hilos de ONNX, workers OCR y capacidad del resto de los
+  pools, con tiempo y memoria medidos. El nivel Alto podrá consumir más memoria
+  cuando la aceleración lo justifique; no se fijan cantidades ni umbrales antes
+  de medir, ni se relajan automáticamente los presupuestos de ADR-146.
+- **Política automática verificable:** considerar CPU/concurrencia y RAM con las
+  señales realmente disponibles en cada plataforma. Evaluar si hace falta memoria
+  disponible/presión del sistema además de capacidad instalada. Declarar reservas
+  para el SO, límites y comportamiento conservador ante información ausente.
+  Consultar hardware no demuestra por sí solo un «óptimo»: la asignación debe estar
+  respaldada por la curva medida. Si necesita datos del shell, especificar el
+  contrato seguro; el Core no consulta el SO directamente.
+- **Preferencia y resultado separados:** persistir que el usuario eligió Automático
+  y resolver su nivel para ese equipo; mostrar cuál está activo y conservar la
+  elección manual. Definir cuándo se recalcula y cuándo entra en vigor un cambio,
+  respetando el documento abierto y sus ediciones. No se presupone redimensionar
+  pools en caliente.
+- **Implementación posterior con ADR/specs:** cerrar nombres, tipos, migración de
+  settings existentes, configuración de hilos y mapeo UI/Core antes de tocar
+  código. Validar selección automática en equipos de distintas capacidades y
+  comprobar que el nivel mostrado corresponde a la configuración efectiva.
+
+### Método y alcance de la siguiente etapa
+
+Para cada experimento: control y variante intercalados, misma sesión/corpus/build
+identificable, una variable por vez y medición fría/caliente declarada. Usar
+fixtures y documentos reales con el protocolo de confidencialidad de T-10.
+Comparar cada plataforma contra su propio control y medir Windows nativo, no WSL.
+Registrar ruido, presión del sistema o su falta de observación, tiempo total,
+memoria por fase, M1/M2/pico posterior a `Ready`, calidad y cancelación.
+
+No aceptar una ganancia por un porcentaje aislado ni por la cantidad nominal de
+hilos/workers: entregar la curva de costo/beneficio y sus límites. Las corridas
+de tiempo deben controlar el efecto de los instrumentos de memoria. La revisión
+de perfiles usa esos resultados; no promete mejoras ni configura niveles nuevos
+antes de conocerlos. **Los experimentos ya descartados permanecen fuera de este
+plan**; sus registros anteriores se conservan como historial.

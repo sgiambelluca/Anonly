@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import react from "@vitejs/plugin-react";
@@ -38,8 +39,29 @@ function polyfillWorkers(): Plugin {
   };
 }
 
+/**
+ * La versión de la app, leída del `package.json` de este paquete (ADR-168 §1:
+ * el pie de la pantalla de carga y `AboutDialog` muestran "versión y
+ * licencia"). Se inyecta como constante de build (`__ANONLY_VERSION__`,
+ * declarada en `src/vite-env.d.ts`) para no importar JSON desde el código de
+ * la app ni tipear la versión dos veces.
+ */
+function readAppVersion(): string {
+  const parsed: unknown = JSON.parse(
+    readFileSync(fileURLToPath(new URL("./package.json", import.meta.url)), "utf8"),
+  );
+  if (typeof parsed === "object" && parsed !== null && "version" in parsed) {
+    const { version } = parsed;
+    if (typeof version === "string") return version;
+  }
+  return "";
+}
+
 export default defineConfig({
   plugins: [polyfillWorkers(), react()],
+  define: {
+    __ANONLY_VERSION__: JSON.stringify(readAppVersion()),
+  },
   server: {
     port: 5173,
     /*
@@ -73,6 +95,23 @@ export default defineConfig({
      * esto, el dev server dejaría la app en un hilo y cualquier medición
      * local describiría una app distinta de la que se publica.
      */
+    headers: {
+      "Cross-Origin-Opener-Policy": "same-origin",
+      "Cross-Origin-Embedder-Policy": "require-corp",
+    },
+  },
+  /*
+   * `vite preview` NO hereda `server.headers` — son bloques separados. El
+   * gate de tiempos (H-07) ya NO corre contra `vite preview` (ADR-153: medido
+   * ~5 s más lento que el producto real, causa sin identificar, así que deja
+   * de usarse para medir cualquier cosa) — este bloque no es su arreglo.
+   * Existe para quien corra `pnpm preview` a mano: sin esto, esa sesión
+   * pierde `SharedArrayBuffer` y `onnxruntime-web` cae a un hilo (ADR-130
+   * §3), y saca conclusiones equivocadas sobre qué tan rápido es el producto.
+   */
+  preview: {
+    port: 4173,
+    strictPort: true,
     headers: {
       "Cross-Origin-Opener-Policy": "same-origin",
       "Cross-Origin-Embedder-Policy": "require-corp",

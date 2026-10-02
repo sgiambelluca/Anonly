@@ -18,7 +18,7 @@
  * dependientes del orden en que corren.
  */
 
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -30,40 +30,65 @@ import {
   type Page,
 } from "@playwright/test";
 
+import { installSettingsOverride, isMeasurementSuite } from "./settingsOverride.js";
+
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const SHELL_DIR = resolve(ROOT, "apps/desktop-shell");
 const ELECTRON_BIN = resolve(SHELL_DIR, "node_modules/.bin/electron");
 
 export interface ElectronFixtures {
   readonly electronApp: ElectronApplication;
+  /**
+   * El `--user-data-dir` de esta instancia. Separado de `electronApp` como
+   * fixture propia porque `tests/perf/support/cdpHeap.ts` (ADR-159 §2) lo
+   * necesita para descubrir el puerto de CDP (`DevToolsActivePort` se
+   * escribe ahí) sin tener que reconstruirlo a mano ni acoplar ese archivo a
+   * los detalles internos de este fixture.
+   */
+  readonly electronUserDataDir: string;
 }
 
 export const test = base.extend<ElectronFixtures>({
+  /*
+   * **Un directorio de datos por test.** Sin esto todas las instancias
+   * comparten el perfil por defecto de la app, y con él el `localStorage`:
+   * los settings que un spec escribe sobreviven al siguiente.
+   *
+   * No es teórico. `scenario-8` apaga la detección de nombres con
+   * `settingsOverride`, y eso se filtraba a `scenario-5`, que necesita que
+   * NER corra: el pipeline pasaba de "Leyendo el texto…" a "Listo" sin
+   * detectar nada, y el spec fallaba **solo cuando corría después** de
+   * scenario-8 — pasaba perfecto si se lo corría solo.
+   *
+   * Contra el navegador esto no existía: cada test de Playwright arranca con
+   * almacenamiento limpio. Es aislamiento que el target de escritorio no
+   * regala y hay que construir.
+   */
   // eslint-disable-next-line no-empty-pattern -- la firma de fixture de Playwright exige el patrón, no hay dependencias que desestructurar
-  electronApp: async ({}, use) => {
-    /*
-     * **Un directorio de datos por test.** Sin esto todas las instancias
-     * comparten el perfil por defecto de la app, y con él el `localStorage`:
-     * los settings que un spec escribe sobreviven al siguiente.
-     *
-     * No es teórico. `scenario-8` apaga la detección de nombres con
-     * `settingsOverride`, y eso se filtraba a `scenario-5`, que necesita que
-     * NER corra: el pipeline pasaba de "Leyendo el texto…" a "Listo" sin
-     * detectar nada, y el spec fallaba **solo cuando corría después** de
-     * scenario-8 — pasaba perfecto si se lo corría solo.
-     *
-     * Contra el navegador esto no existía: cada test de Playwright arranca con
-     * almacenamiento limpio. Es aislamiento que el target de escritorio no
-     * regala y hay que construir.
-     */
+  electronUserDataDir: async ({}, use) => {
     const userDataDir = await mkdtemp(join(tmpdir(), "anonly-e2e-"));
+    await use(userDataDir);
+    await rm(userDataDir, { recursive: true, force: true });
+  },
+
+  electronApp: async ({ electronUserDataDir }, use) => {
     const app = await electron.launch({
-      args: [SHELL_DIR, `--user-data-dir=${userDataDir}`],
+      args: [
+        SHELL_DIR,
+        `--user-data-dir=${electronUserDataDir}`,
+        // Puerto efímero (`0` = que lo elija el SO) de Chrome DevTools
+        // Protocol — flag propio de Chromium, no algo que este repo agregue
+        // a la app. Electron escribe el puerto elegido en
+        // `<userDataDir>/DevToolsActivePort`, que es cómo lo descubre
+        // `tests/perf/support/cdpHeap.ts` (ADR-159 §2: la retención se lee
+        // del heap por target vía CDP, no del RSS). No cambia nada de la app
+        // empaquetada ni de los specs E2E que no lo usan.
+        "--remote-debugging-port=0",
+      ],
       executablePath: ELECTRON_BIN,
     });
     await use(app);
     await app.close();
-    await rm(userDataDir, { recursive: true, force: true });
   },
 
   /*
@@ -71,9 +96,13 @@ export const test = base.extend<ElectronFixtures>({
    * que los specs no cambien: siguen recibiendo `page` y no necesitan saber
    * que del otro lado hay un proceso de Electron y no un navegador.
    */
-  page: async ({ electronApp }, use) => {
+  page: async ({ electronApp }, use, testInfo) => {
     const window: Page = await electronApp.firstWindow();
     await window.waitForLoadState("domcontentloaded");
+    // ADR-194 §8: un punto común para que ninguna suite de medición dependa
+    // del nivel que Automático resuelva en el equipo. `openApp` recarga y el
+    // init script corre antes del bootstrap. Los E2E funcionales no entran.
+    if (isMeasurementSuite(testInfo.file)) await installSettingsOverride(window, {}, testInfo.file);
     await use(window);
   },
 });
@@ -160,6 +189,33 @@ export async function expectDownloadFilename(
   );
   await trigger();
   return await filename;
+}
+
+/** Captura el PDF producido por el proceso main para verificaciones de
+ * contenido fuera del flujo visual. */
+export async function captureDownload(
+  electronApp: ElectronApplication,
+  trigger: () => Promise<void>,
+  savePath: string,
+  timeoutMs = 300_000,
+): Promise<Buffer> {
+  const done = electronApp.evaluate(
+    async ({ session }, args) =>
+      await new Promise<string>((resolve, reject) => {
+        session.defaultSession.once("will-download", (_event, item) => {
+          item.setSavePath(args.savePath);
+          item.once("done", (_downloadEvent, state) => {
+            if (state === "completed") resolve(args.savePath);
+            else reject(new Error(`descarga no completada: ${state}`));
+          });
+        });
+        setTimeout(() => reject(new Error("timeout esperando la exportación")), args.timeoutMs);
+      }),
+    { savePath, timeoutMs },
+  );
+  await trigger();
+  const completedPath = await done;
+  return readFile(completedPath);
 }
 
 export { expect } from "@playwright/test";

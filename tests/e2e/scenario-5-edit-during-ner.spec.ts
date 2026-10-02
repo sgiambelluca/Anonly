@@ -89,14 +89,13 @@ test("editar un grupo mientras NER sigue corriendo no pierde la edición", async
    *
    * Lo que este escenario necesita no es ver esa etiqueta: es que el pipeline
    * esté **en carrera** cuando se edita el grupo, unas líneas más abajo.
-   * "Buscando datos sensibles…" (`PipelineStage.Detecting`) es exactamente esa
+   * "Escaneando el documento…" (`PipelineStage.Detecting`) es exactamente esa
    * fase, y a diferencia de la otra no depende de ganarle a una carga de
    * archivo.
    */
-  await expect(status).toContainText(
-    /Preparando el detector de nombres…|Buscando datos sensibles…/,
-    { timeout: 30_000 },
-  );
+  await expect(status).toContainText(/Preparando el detector…|Escaneando el documento…/, {
+    timeout: 30_000,
+  });
 
   // El grupo del DNI (Regex) aparece incrementalmente, antes de Ready.
   const dniGroup = page.getByRole("treeitem", { name: "34.567.891" });

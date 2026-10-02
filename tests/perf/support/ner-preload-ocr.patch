@@ -1,0 +1,110 @@
+diff --git a/packages/anonymization-core/ner-engine/src/ner.engine.ts b/packages/anonymization-core/ner-engine/src/ner.engine.ts
+index 0404c9f..404deff 100644
+--- a/packages/anonymization-core/ner-engine/src/ner.engine.ts
++++ b/packages/anonymization-core/ner-engine/src/ner.engine.ts
+@@ -558,6 +558,35 @@ export class NerEngine implements IEngine {
+     return this.modelWarm;
+   }
+ 
++  /** Medición temporal: calienta el mismo slot/pool con un payload vacío. */
++  async preloadModel(ctx: EngineContext): Promise<void> {
++    if (!ctx.config.ner.enabled || ctx.abortSignal.aborted) return;
++    const payload: NerPagePayload = {
++      documentId: "__ner-preload__",
++      pageIndex: 0,
++      text: "",
++      modelId: ctx.config.ner.modelId,
++      quantization: ctx.config.ner.quantization,
++      ...(ctx.config.ner.wasmPaths !== undefined ? { wasmPaths: ctx.config.ner.wasmPaths } : {}),
++    };
++    await this.pool.dispatch({
++      run: async () => {
++        await (await loadNerKernel()).kernelClassify(payload, {
++          timeoutMs: ctx.config.workerPool.timeouts["ner-page"] ?? DEFAULT_TIMEOUT_MS,
++          abortSignal: ctx.abortSignal,
++          onProgress: () => undefined,
++        });
++        return [];
++      },
++      signal: ctx.abortSignal,
++      priority: DISPATCH_PRIORITY,
++      payload,
++      maxRetriesOverride: 0,
++      onProgress: () => undefined,
++    });
++    this.modelWarm = true;
++  }
++
+   getModelId(): string {
+     return this.modelId ?? DEFAULT_MODEL_ID;
+   }
+diff --git a/packages/anonymization-core/src/orchestrator.ts b/packages/anonymization-core/src/orchestrator.ts
+index a0a0e9d..9859b78 100644
+--- a/packages/anonymization-core/src/orchestrator.ts
++++ b/packages/anonymization-core/src/orchestrator.ts
+@@ -1046,6 +1046,8 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
+     ocrRegions: ReadonlyArray<OcrRegion>,
+     ctx: EngineContext,
+   ): Promise<void> {
++    let preloadPromise: Promise<void> | undefined;
++    let removePreloadTrigger: (() => void) | undefined;
+     try {
+       // Progreso granular OCR (spec Orchestrator.md §8, ADR-065 §2): total fijo
+       // para toda la etapa (textlessPages.length + ocrRegions.length, ambos
+@@ -1126,7 +1128,47 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
+       // `OcrPool` (inyectada por el façade en `create-core.ts`) y reserva el
+       // presupuesto de imágenes vivas (`ocr.maxLiveImageBytes`) antes de pedirle
+       // cada imagen a `produce`.
+-      await this.engines.ocr.processSession(requests, produce, ctx);
++      const root = globalThis as typeof globalThis & {
++        __anonlyNerPreloadMode?: "baseline" | "b1" | "b2";
++        __anonlyNerPreloadProbe?: {
++          mode: string;
++          trigger?: string;
++          startedAt?: number;
++          finishedAt?: number;
++          error?: string;
++        };
++      };
++      const mode = root.__anonlyNerPreloadMode;
++      const startPreload = (trigger: string): void => {
++        if (preloadPromise !== undefined || mode === undefined || mode === "baseline") return;
++        const probe = (root.__anonlyNerPreloadProbe ??= { mode });
++        probe.trigger = trigger;
++        probe.startedAt = Date.now();
++        preloadPromise = this.engines.ner
++          .preloadModel(ctx)
++          .then(() => {
++            probe.finishedAt = Date.now();
++          })
++          .catch((error: unknown) => {
++            probe.error = error instanceof Error ? error.message : String(error);
++            throw error;
++          });
++      };
++      let finishedPages = 0;
++      if (mode === "b2") {
++        const threshold = Math.max(1, Math.ceil(requests.length * 0.75));
++        removePreloadTrigger = this.bus.on(EventChannel.Ocr, EngineEvents.OCR_PAGE_FINISHED, () => {
++          finishedPages += 1;
++          if (finishedPages >= threshold) startPreload("ocr-75-percent");
++        });
++      }
++      const ocrPromise = this.engines.ocr.processSession(requests, produce, ctx);
++      if (mode === "b1") startPreload("ocr-started");
++      await ocrPromise;
++      // El OCR ya terminó: liberar su pool antes de esperar una precarga
++      // pendiente evita sumar su residencia al tiempo de espera diagnóstico.
++      this.engines.ocr.releaseIdleWorkers();
++      if (preloadPromise !== undefined) await preloadPromise;
+ 
+       // ADR-041 §3: la fusión (ADR-014) la dispara `handleOcrPageFinished` de
+       // forma síncrona por cada `OCR_PAGE_FINISHED` (IEventBus.emit despacha en
+@@ -1136,6 +1175,7 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
+       // pendientes (waitForPendingFusions se eliminó junto con el bookkeeping
+       // asíncrono que ya no existe).
+     } finally {
++      removePreloadTrigger?.();
+       // ADR-157 §1/§3/§1bis: baja determinística, no por temporizador —
+       // corre en los tres caminos terminales (éxito, cancelación, fallo).
+       // `OcrEngine.releaseIdleWorkers()` trae su propia guarda (ADR-080,

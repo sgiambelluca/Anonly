@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap-future | dependencias=roadmap/Version_2.0.md,00_Project_Vision.md | audiencia=humanos | fase=5 (§5.6-§5.9 en fase 10.9: los residuos anotados por ADR-076 §5, ADR-075 §1/§4 y ADR-074 §3) -->
+<!-- CONTEXT: scope=roadmap-future | dependencias=roadmap/Version_2.0.md,00_Project_Vision.md,roadmap/T5_OSD_Investigacion_Scheduling.md | audiencia=humanos | fase=5 (§5.6-§5.9 en fase 10.9; §2.5 intención posterior al hardening registrada el 2026-09-14) -->
 
 # Anonly — Future Ideas
 
@@ -85,6 +85,109 @@ Servicio server-side para batch masivo (millones de documentos), dirigido a empr
 ### 2.4 VS Code extension
 
 Procesar PDFs abiertos en VS Code sin salir del editor.
+
+### 2.5 Migración Electron → Tauri después del hardening
+
+**Intención del humano registrada el 2026-09-14:** migrar el contenedor de
+escritorio a Tauri una vez terminada la campaña actual de hardening, buscando
+reducir el costo base de memoria y distribución. Se conserva Electron durante
+la campaña y las mediciones de T5. No se asigna fecha ni se inicia la migración
+con esta anotación.
+
+Tauri utiliza el WebView del sistema, lo que evita distribuir un runtime web
+propio y favorece un paquete pequeño ([arquitectura oficial de Tauri](https://v2.tauri.app/concept/architecture/)).
+Eso no cuantifica el ahorro RSS de Anonly: el procesamiento con Tesseract,
+PDF.js, ONNX/WASM, imágenes y GPU seguirá consumiendo recursos, y su costo
+deberá medirse en los WebViews/plataformas objetivo. No equiparar tamaño del
+instalador con memoria durante OCR ni prometer resolver el pico del Core al
+cambiar solamente el contenedor.
+
+Al retomarlo: ADR propio, inventario de integraciones del shell (archivos,
+assets offline, actualización/instalación y permisos), compatibilidad de
+workers anidados, OffscreenCanvas y WASM, y comparación Electron/Tauri sobre
+el mismo corpus, configuración y calidad. Medir arranque/idle y pipeline por
+separado; conservar baseline y garantías locales de seguridad. El caso OSD
+de una página de adelanto queda independiente de esa migración.
+
+#### Cuánto puede ahorrar, con el desglose por proceso que ya medimos
+
+**Analizado el 2026-09-17**, sobre las 12 celdas de control de P2 de
+`Precalentamiento_NER_Durante_OCR_Medicion.md` (`processPeakRssBytes` de cada
+corrida, 50 páginas escaneadas, frío y caliente). Mediana del pico por proceso:
+
+| Proceso | Pico mediano | % | Qué pasa con Tauri |
+|---|---:|---:|---|
+| **Tab** (renderer) | 981,0 MB | 65,2 % | **No cambia.** Tesseract WASM, ONNX, canvas y pdf.js viven acá |
+| **GPU** | 293,1 MB | 19,5 % | Sale de nuestro árbol de procesos; el trabajo sigue existiendo en la máquina |
+| **Browser** (main) | 189,0 MB | 12,6 % | Se reemplaza por un binario Rust, que no es gratis |
+| **Utility** | 41,3 MB | 2,7 % | Parcialmente |
+
+El techo optimista del ahorro de contenedor son los **~230 MB** de Browser más
+Utility, y menos que eso en el pico real: esos máximos no son simultáneos con el
+de Tab, y por eso el pico de la **suma** (1312 MB en la primera celda) es menor
+que la suma de los **picos** (1499 MB).
+
+**Los dos tercios que importan no se mueven.** El exceso que la campaña de
+memoria persigue se genera dentro de la ventana de OCR, en el proceso del
+renderer, y son los mismos bytes de WASM y los mismos rásters en cualquier motor
+web. Cambiar el contenedor cambia quién hospeda el motor, no qué corre adentro.
+
+Sobre «Rust es más eficiente»: Rust reemplaza el **proceso host**, ese 12,6 %. El
+código de Anonly sigue siendo JS y WASM dentro de un WebView —WKWebView en
+macOS, WebView2 en Windows—, que es un motor de navegador completo igual. Lo que
+sí cambiaría el orden de magnitud es mover OCR y NER a **Rust nativo** (Tesseract
+nativo, ONNX Runtime en Rust), pero eso no es migrar el contenedor: es reescribir
+el Core y renunciar a la variante web. Es una decisión de producto distinta y no
+está propuesta acá.
+
+#### Lo que T-11 midió adentro del renderer (2026-09-19)
+
+Con la memoria de WASM ya medida por worker
+(`roadmap/mediciones/transversal/Ciclos_Y_Documentos_Reales_Medicion.md` §5 y §6), el proceso del renderer
+se parte así después de cargar NER, en lecturas completas:
+
+| | tamaño | qué pasa con Tauri |
+|---|---:|---|
+| WASM del modelo de NER | 487 MB | **no cambia**: es la memoria lineal que pide ONNX, en cualquier motor |
+| WASM de Tesseract, durante el OCR | 90-148 MB por worker | **no cambia**, por la misma razón |
+| heap de JS de todos los targets | 138-178 MB | cambia de motor (JavaScriptCore en macOS), no desaparece |
+| **sin atribuir: ni WASM ni JS** | **443-626 MB** | **se mueve con la app**, no se elimina |
+
+Los 443-626 MB sin atribuir son memoria nativa del motor web **corriendo nuestro
+código**: el código WASM compilado (el binario de ONNX solo pesa 23,6 MB, y compilado
+ocupa varias veces eso), los lienzos donde se rasterizan las páginas, el DOM y las
+estructuras internas del motor, más los ~135 MB de un renderer recién abierto.
+**Tauri no los elimina**: ese trabajo pasa a hacerse en el proceso de contenido de
+WKWebView en macOS, que necesita memoria equivalente para lo mismo, más o menos según
+el motor. Cuánto, no se sabe sin medirlo ahí. En Windows, WebView2 es Chromium:
+casi lo mismo que hoy.
+
+Lo que Tauri sí elimina sigue siendo el costo fijo de Electron, los ~230 MB de arriba.
+
+#### El riesgo que ya tenemos cuantificado
+
+El multihilo de ONNX Runtime depende de `crossOriginIsolated` y
+`SharedArrayBuffer`, verificados sobre el shell de Electron en ADR-132. En Tauri,
+con su protocolo propio, esas condiciones hay que reconstruirlas y **comprobarlas
+antes de comparar nada**. Si no se logran, la inferencia vuelve a un hilo: la
+medición propia de `Optimizacion_De_Rendimiento.md` §A dio **−53,6 %** al
+activarlos, así que perderlos llevaría la clasificación de P2 de ~3,4 s a unos
+7 s. Sería pagar una regresión de tiempo medida a cambio de un ahorro de memoria
+que no cierra la brecha.
+
+Hay además un costo de instrumento: `app.getAppMetrics()` es de Electron y es la
+fuente de M1/M2 (ADR-146) y de esta misma tabla por proceso. Migrar implica
+reconstruir la instrumentación de memoria antes de poder afirmar si la migración
+mejoró algo.
+
+#### Qué queda en pie, y qué no
+
+La migración conserva sus motivos legítimos —tamaño del instalador, costo de
+distribución, arranque— y ninguno de ellos se apoya en el pico de memoria del
+pipeline. **Lo que este análisis descarta es usarla como vía para el presupuesto
+de memoria de `00_Project_Vision.md` §7.** Si se retoma, el ADR debería declarar
+de entrada cuál de los dos objetivos persigue, porque el desglose de arriba dice
+que no persigue los dos.
 
 ---
 
@@ -206,6 +309,27 @@ Cargar solo las capas del modelo NER que se necesitan (cuando Transformers.js lo
 ### 5.3 Indexación de documentos enormes
 
 Para PDFs de > 10.000 páginas, indexar por `pageIndex → textHash` para re-procesamiento delta tras edición sin re-escanear todo.
+
+### Recuperación de OCR cuando el OSD no da veredicto
+
+**Posible trabajo posterior al cierre de la ronda B (ADR-190).** Conservar el
+techo de DPI del ráster fuente (ADR-163) y el OSD a 1754 px. La recuperación
+actual ejecuta lecturas adicionales solo en páginas con tinta cuyo OSD no dio
+un veredicto válido; en los 16 PDF sintéticos escasos del sondeo final sumó una
+mediana de **2.237 ms** y **209,10 MiB** al pico de suma de working sets frente
+al baseline sin recuperación. El humano aceptó ese costo residual para avanzar
+con la revisión de la branch; el sondeo no demuestra cumplimiento del
+presupuesto M2 de ADR-146, que ya estaba excedido históricamente en Windows.
+**ADR-192 (2026-09-30)** reemplazó ese presupuesto por techos medidos (P1 2,0 GB,
+P2 3,0 GB, equipo mínimo de 8 GB) y dejó como meta de la v1.0 bajarlos para
+soportar equipos más chicos: esta rama es una de las palancas.
+
+Si se retoma, buscar menos trabajo o menos memoria en esa rama sin volver a
+perder el DNI de los 16/16 PDF escasos ni convertir las cuatro páginas de
+figuras en lecturas fiables falsas. Comparar con el mismo corpus y build,
+incluyendo los controles que no entran en recuperación. Cualquier cambio del
+criterio de fiabilidad o del contrato de OCR requiere su propia decisión y
+revisión; no se programó una nueva campaña ahora.
 
 ---
 

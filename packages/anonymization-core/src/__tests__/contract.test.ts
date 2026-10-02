@@ -2,6 +2,7 @@ import { ExportEngine } from "@anonly/export-engine";
 import type { RenderPageProvider } from "@anonly/export-engine";
 import { GroupingEngine } from "@anonly/grouping-engine";
 import { NerEngine } from "@anonly/ner-engine";
+import type { NerPageInput } from "@anonly/ner-engine";
 import { OcrEngine } from "@anonly/ocr-engine";
 import { PdfEngine } from "@anonly/pdf-engine";
 import { RegexEngine } from "@anonly/regex-engine";
@@ -18,6 +19,7 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { LruCache } from "../cache.js";
+import { mergeEngineConfig } from "../config.js";
 import { createCore } from "../index.js";
 import { PipelineOrchestrator } from "../orchestrator.js";
 
@@ -25,13 +27,17 @@ import {
   createDocument,
   createEngineConfig,
   createEntityGroup,
+  createFakeWorker,
   createImportInput,
   createMockEngines,
   createMockLogger,
   createPage,
   createPdfEngineOutput,
+  createOcrWorkerHarness,
   createRealBus,
   createWord,
+  runMessagesOf,
+  runOcrPage,
   makeOrchestratorWithRealDetection,
   wireHappyPathSpies,
 } from "./fixtures/test-helpers.js";
@@ -86,6 +92,91 @@ describe("Orchestrator — contract tests", () => {
       expect(core.orchestrator).toBeInstanceOf(PipelineOrchestrator);
     } finally {
       await core.dispose();
+    }
+  });
+
+  // Discriminante (ADR-149 §2, ADR-167 §5.2): si create-core.ts wireara el
+  // pool de NER con `idleDisposeMs` (default 60 s) en vez de
+  // `nerIdleDisposeMs`, el worker falso seguiría vivo a los 500 ms de acá.
+  it("createCore wirea el pool de NER con workerPool.nerIdleDisposeMs, no idleDisposeMs (ADR-167 §5.2)", async () => {
+    vi.useFakeTimers();
+    try {
+      const worker = createFakeWorker();
+      const core = await createCore(
+        { workerPool: { nerIdleDisposeMs: 500 } },
+        { workers: { ner: () => worker } },
+      );
+      try {
+        const ctx: EngineContext = {
+          bus: core.bus,
+          logger: createMockLogger(),
+          cache: new LruCache(),
+          abortSignal: new AbortController().signal,
+          config: mergeEngineConfig({ workerPool: { nerIdleDisposeMs: 500 } }),
+        };
+        const input: NerPageInput = {
+          documentId: "doc-1",
+          pageIndex: 0,
+          text: "Juan",
+          words: [createWord({ text: "Juan" })],
+        };
+        const pending = core.engines.ner.processPage(input, ctx);
+        await vi.waitFor(() => expect(worker.postMessage).toHaveBeenCalled());
+        const jobId = (worker.postMessage.mock.calls[0]?.[0] as { readonly jobId: string }).jobId;
+        worker.emitMessage({ type: "COMPLETED", jobId, result: { spans: [] } });
+        await pending;
+
+        await vi.advanceTimersByTimeAsync(500);
+
+        expect(worker.terminate).toHaveBeenCalledTimes(1);
+      } finally {
+        await core.dispose();
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // T-5 / ADR-164 (Orchestrator §14).
+  it("createCore wires the ocr-orientation factory to ocr-orient jobs", async () => {
+    const harness = createOcrWorkerHarness(new Map([[0, 90]]));
+    const core = await createCore(undefined, {
+      workers: { ocr: harness.pageFactory, "ocr-orientation": harness.orientationFactory },
+    });
+    try {
+      await runOcrPage(core, 0);
+
+      expect(harness.orientationWorkers).toHaveLength(1);
+      const [orientRun] = runMessagesOf(harness.orientationWorkers[0]!);
+      expect(orientRun).toMatchObject({
+        type: "RUN",
+        jobType: "ocr-orient",
+        payload: { documentId: "doc-1", pageIndex: 0, timeoutMs: 60000 },
+      });
+      // La factory de ocr-page nunca recibe el job de orientación.
+      const pageJobTypes = harness.pageWorkers
+        .flatMap((w) => runMessagesOf(w))
+        .map((m) => m.jobType);
+      expect(pageJobTypes.length).toBeGreaterThan(0);
+      expect(pageJobTypes.every((type) => type === "ocr-page")).toBe(true);
+    } finally {
+      await core.dispose();
+    }
+  });
+
+  it("dispose releases the ocr-page and ocr-orientation pools", async () => {
+    const harness = createOcrWorkerHarness(new Map([[0, 0]]));
+    const core = await createCore(undefined, {
+      workers: { ocr: harness.pageFactory, "ocr-orientation": harness.orientationFactory },
+    });
+    await runOcrPage(core, 0);
+    expect(harness.orientationWorkers.length).toBeGreaterThan(0);
+    expect(harness.pageWorkers.length).toBeGreaterThan(0);
+
+    await core.dispose();
+
+    for (const worker of [...harness.orientationWorkers, ...harness.pageWorkers]) {
+      expect(worker.terminate).toHaveBeenCalled();
     }
   });
 
@@ -170,13 +261,125 @@ describe("Orchestrator — contract tests", () => {
       expect.any(ArrayBuffer),
       undefined,
     );
-    expect(engines.render.rasterizePage).toHaveBeenCalledWith(
-      "doc-1",
-      0,
-      expect.any(Number),
+    // ADR-143 §1: rasterizePage ya no lo llama el Orchestrator directo — vive
+    // dentro del productor que le pasa a processSession, y corre recién
+    // cuando OcrEngine lo pide (§3). Lo que el Orchestrator construye y se
+    // puede afirmar acá es el descriptor de la página.
+    expect(engines.ocr.processSession).toHaveBeenCalledWith(
+      [expect.objectContaining({ documentId: "doc-1", pageIndex: 0 })],
+      expect.any(Function),
       expect.anything(),
     );
-    expect(engines.ocr.processPages).toHaveBeenCalled();
+  });
+
+  it("uses the page cap for dpi, reservation, and raster scale (ADR-163)", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    const pdfOutput = createPdfEngineOutput({
+      document: createDocument({
+        pages: [
+          createPage({ index: 0, width: 600, height: 800, requiresOCR: true, ocrDpiCap: 200 }),
+        ],
+      }),
+      textlessPages: [0],
+    });
+    wireHappyPathSpies(engines, bus, { pdfOutput });
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+
+    await orchestrator.importDocument(createImportInput());
+
+    const request = (engines.ocr.processSession as ReturnType<typeof vi.fn>).mock
+      .calls[0]?.[0]?.[0] as { readonly dpi: number; readonly estimatedBytes: number } | undefined;
+    expect(request?.dpi).toBe(200);
+    expect(request?.estimatedBytes).toBe(
+      Math.ceil(600 * (200 / 72)) * Math.ceil(800 * (200 / 72)) * 4,
+    );
+  });
+
+  it("falls back to configured DPI for absent, high, invalid caps and regions (ADR-163)", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    const region = { pageIndex: 3, bbox: { x: 1, y: 2, width: 20, height: 30 } };
+    const pdfOutput = createPdfEngineOutput({
+      document: createDocument({
+        pageCount: 4,
+        pages: [
+          createPage({ index: 0, requiresOCR: true }),
+          createPage({ index: 1, requiresOCR: true, ocrDpiCap: 400 }),
+          createPage({ index: 2, requiresOCR: true, ocrDpiCap: Number.NaN }),
+          createPage({ index: 3, ocrDpiCap: 200 }),
+        ],
+      }),
+      textlessPages: [0, 1, 2],
+      ocrRegions: [region],
+    });
+    wireHappyPathSpies(engines, bus, { pdfOutput });
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+    await orchestrator.importDocument(createImportInput());
+    const requests = (engines.ocr.processSession as ReturnType<typeof vi.fn>).mock
+      .calls[0]?.[0] as Array<{ readonly dpi: number; readonly region?: unknown }>;
+    expect(requests.map((request) => request.dpi)).toEqual([300, 300, 300, 300]);
+    expect(requests[3]?.region).toEqual(region.bbox);
+  });
+
+  it("derives producer scales independently from each request DPI (ADR-163)", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    const pdfOutput = createPdfEngineOutput({
+      document: createDocument({
+        pages: [
+          createPage({ index: 0, requiresOCR: true, ocrDpiCap: 200 }),
+          createPage({ index: 1, requiresOCR: true, ocrDpiCap: 100 }),
+        ],
+      }),
+      textlessPages: [0, 1],
+    });
+    wireHappyPathSpies(engines, bus, { pdfOutput });
+    const scales: number[] = [];
+    vi.spyOn(engines.ocr, "processSession").mockImplementation(async (requests, produce) => {
+      for (const request of requests) {
+        await produce(request, new AbortController().signal);
+        scales.push(request.dpi / 72);
+      }
+      return [];
+    });
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+    await orchestrator.importDocument(createImportInput());
+    expect(scales).toEqual([200 / 72, 100 / 72]);
+    expect(engines.render.rasterizePage).toHaveBeenNthCalledWith(
+      1,
+      "doc-1",
+      0,
+      200 / 72,
+      expect.anything(),
+      undefined,
+    );
+    expect(engines.render.rasterizePage).toHaveBeenNthCalledWith(
+      2,
+      "doc-1",
+      1,
+      100 / 72,
+      expect.anything(),
+      undefined,
+    );
   });
 
   it("no textless pages skip OCR stage", async () => {
@@ -193,7 +396,7 @@ describe("Orchestrator — contract tests", () => {
 
     await orchestrator.importDocument(createImportInput());
 
-    expect(engines.ocr.processPages).not.toHaveBeenCalled();
+    expect(engines.ocr.processSession).not.toHaveBeenCalled();
     expect(engines.render.rasterizePage).not.toHaveBeenCalled();
   });
 
@@ -223,16 +426,15 @@ describe("Orchestrator — contract tests", () => {
 
     await orchestrator.importDocument(createImportInput());
 
-    // ADR-065 §5: rasterizePage recibe el bbox de la región como quinto
-    // argumento — es el recorte, no la página completa, lo que se manda a OCR.
-    expect(engines.render.rasterizePage).toHaveBeenCalledWith(
-      "doc-1",
-      0,
-      expect.any(Number),
+    // ADR-065 §5/ADR-143 §1: el descriptor que llega a processSession lleva
+    // `region: region.bbox` — es el recorte, no la página completa, lo que se
+    // manda a OCR. La rasterización en sí la dispara el productor recién
+    // cuando OcrEngine la pide, no el Orchestrator de entrada.
+    expect(engines.ocr.processSession).toHaveBeenCalledWith(
+      [expect.objectContaining({ documentId: "doc-1", pageIndex: 0, region: region.bbox })],
+      expect.any(Function),
       expect.anything(),
-      region.bbox,
     );
-    expect(engines.ocr.processPages).toHaveBeenCalled();
     expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
   });
 
@@ -257,17 +459,17 @@ describe("Orchestrator — contract tests", () => {
         source: "ocr" as const,
       },
     ];
-    vi.spyOn(engines.ocr, "processPages").mockImplementation(async (inputs) => {
-      cache.set(`ocr-words:${inputs[0]?.documentId}:${inputs[0]?.pageIndex}`, words);
+    vi.spyOn(engines.ocr, "processSession").mockImplementation(async (requests) => {
+      cache.set(`ocr-words:${requests[0]?.documentId}:${requests[0]?.pageIndex}`, words);
       bus.emit(EventChannel.Ocr, EngineEvents.OCR_PAGE_FINISHED, {
-        documentId: inputs[0]?.documentId ?? "",
-        pageIndex: inputs[0]?.pageIndex ?? 0,
+        documentId: requests[0]?.documentId ?? "",
+        pageIndex: requests[0]?.pageIndex ?? 0,
         wordCount: words.length,
         confidence: 0.9,
       });
-      return inputs.map((i) => ({
-        documentId: i.documentId,
-        pageIndex: i.pageIndex,
+      return requests.map((r) => ({
+        documentId: r.documentId,
+        pageIndex: r.pageIndex,
         words,
         confidence: 0.9,
         durationMs: 1,
@@ -339,17 +541,17 @@ describe("Orchestrator — contract tests", () => {
       source: "ocr",
       confidence: 0.85,
     });
-    vi.spyOn(engines.ocr, "processPages").mockImplementation(async (inputs) => {
-      cache.set(`ocr-words:${inputs[0]?.documentId}:${inputs[0]?.pageIndex}`, [ocrWord]);
+    vi.spyOn(engines.ocr, "processSession").mockImplementation(async (requests) => {
+      cache.set(`ocr-words:${requests[0]?.documentId}:${requests[0]?.pageIndex}`, [ocrWord]);
       bus.emit(EventChannel.Ocr, EngineEvents.OCR_PAGE_FINISHED, {
-        documentId: inputs[0]?.documentId ?? "",
-        pageIndex: inputs[0]?.pageIndex ?? 0,
+        documentId: requests[0]?.documentId ?? "",
+        pageIndex: requests[0]?.pageIndex ?? 0,
         wordCount: 1,
         confidence: 0.85,
       });
-      return inputs.map((i) => ({
-        documentId: i.documentId,
-        pageIndex: i.pageIndex,
+      return requests.map((r) => ({
+        documentId: r.documentId,
+        pageIndex: r.pageIndex,
         words: [ocrWord],
         confidence: 0.85,
         durationMs: 1,
@@ -562,7 +764,7 @@ describe("Orchestrator — contract tests", () => {
     expect(callOrder).toEqual(["startSession", "regex.process"]);
   });
 
-  it("textless pages rasterized via RenderEngine before OCR dispatch", async () => {
+  it("OCR dispatch passes a producer that rasterizes via RenderEngine on demand (ADR-143 §1)", async () => {
     const bus = createRealBus();
     const engines = createMockEngines();
     const pdfOutput = createPdfEngineOutput({
@@ -575,12 +777,26 @@ describe("Orchestrator — contract tests", () => {
       callOrder.push("rasterizePage");
       return { data: new Uint8ClampedArray(4), width: 1, height: 1, colorSpace: "srgb" as const };
     });
-    (engines.ocr.processPages as ReturnType<typeof vi.fn>).mockImplementation(
-      async (inputs: ReadonlyArray<{ documentId: string; pageIndex: number }>) => {
-        callOrder.push("ocr.processPages");
-        return inputs.map((i) => ({
-          documentId: i.documentId,
-          pageIndex: i.pageIndex,
+    // ADR-143 §1: la rasterización ya no la dispara el Orchestrator por
+    // adelantado — vive en el productor que recibe processSession, y este
+    // motor (mockeado) es quien decide cuándo invocarlo. Un OcrEngine real
+    // lo llama uno por consumidor, bajo demanda (§3); acá alcanza con
+    // invocarlo para probar que el productor efectivamente rasteriza.
+    (engines.ocr.processSession as ReturnType<typeof vi.fn>).mockImplementation(
+      async (requests, produce: (request: unknown, signal: AbortSignal) => Promise<unknown>) => {
+        callOrder.push("ocr.processSession");
+        const controller = new AbortController();
+        for (const request of requests as ReadonlyArray<{
+          readonly documentId: string;
+          readonly pageIndex: number;
+        }>) {
+          await produce(request, controller.signal);
+        }
+        return (
+          requests as ReadonlyArray<{ readonly documentId: string; readonly pageIndex: number }>
+        ).map((r) => ({
+          documentId: r.documentId,
+          pageIndex: r.pageIndex,
           words: [],
           confidence: 1,
           durationMs: 1,
@@ -598,7 +814,10 @@ describe("Orchestrator — contract tests", () => {
 
     await orchestrator.importDocument(createImportInput());
 
-    expect(callOrder).toEqual(["rasterizePage", "ocr.processPages"]);
+    // processSession arranca antes de que se rasterice nada: es el productor
+    // que recibe quien dispara rasterizePage, bajo demanda — al revés del
+    // orden que regía antes de ADR-143.
+    expect(callOrder).toEqual(["ocr.processSession", "rasterizePage"]);
     expect(engines.render.loadDocument).toHaveBeenCalledBefore(
       engines.render.rasterizePage as ReturnType<typeof vi.fn>,
     );
@@ -1091,7 +1310,7 @@ describe("Orchestrator — contract tests", () => {
       entityType: EntityType.Person,
     });
 
-    expect(result).toEqual({ occurrenceCount: 0 });
+    expect(result).toEqual({ occurrenceCount: 0, heldConflictIds: [], groupIds: [] });
     expect(engines.grouping.getSnapshot("doc-1").groups).toHaveLength(0);
   });
 
@@ -1152,11 +1371,15 @@ describe("Orchestrator — contract tests", () => {
       value: "Jose Perez",
       entityType: EntityType.Person,
     });
-    expect(first).toEqual({ occurrenceCount: 3 });
 
     const before = engines.grouping.getSnapshot("doc-1");
     expect(before.groups).toHaveLength(1);
     expect(before.groups[0]?.members).toHaveLength(3);
+    expect(first).toEqual({
+      occurrenceCount: 3,
+      heldConflictIds: [],
+      groupIds: [before.groups[0]!.id],
+    });
 
     // Repetir el mismo agregado: findLiteral vuelve a encontrar las 3
     // apariciones (occurrenceCount 3), pero el dedup por identidad de
@@ -1166,7 +1389,11 @@ describe("Orchestrator — contract tests", () => {
       value: "Jose Perez",
       entityType: EntityType.Person,
     });
-    expect(second).toEqual({ occurrenceCount: 3 });
+    expect(second).toEqual({
+      occurrenceCount: 3,
+      heldConflictIds: [],
+      groupIds: [before.groups[0]!.id],
+    });
 
     const after = engines.grouping.getSnapshot("doc-1");
     expect(after).toEqual(before);

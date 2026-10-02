@@ -97,6 +97,7 @@ function buildLocalDefaultConfig(): EngineConfig {
       timeouts: {
         "pdf-parse": 30_000,
         "ocr-page": 60_000,
+        "ocr-orient": 60_000,
         "ner-page": 20_000,
         "render-page": 10_000,
         "export-page": 30_000,
@@ -104,6 +105,7 @@ function buildLocalDefaultConfig(): EngineConfig {
       maxRetries: {
         "pdf-parse": 1,
         "ocr-page": 2,
+        "ocr-orient": 0,
         "ner-page": 1,
         "render-page": 1,
         "export-page": 1,
@@ -112,6 +114,7 @@ function buildLocalDefaultConfig(): EngineConfig {
       maxRetryDelayMs: 2000,
       cancelSlaMs: 200,
       idleDisposeMs: 60_000,
+      nerIdleDisposeMs: 15_000,
     },
     pdf: { maxPageCount: 10_000 },
     ner: {
@@ -121,7 +124,7 @@ function buildLocalDefaultConfig(): EngineConfig {
       batchSize: 256,
       enabled: true,
     },
-    ocr: { languages: ["spa", "eng"], dpi: 300 },
+    ocr: { languages: ["spa", "eng"], dpi: 300, maxLiveImageBytes: 128 * 1024 * 1024 },
     grouping: { similarityThreshold: 0.88, minAliasFrequency: 1 },
     render: { previewScale: 1, fullScale: 2.08, jpegQuality: 0.85, cachePages: 16 },
     export: { defaultDpi: 150, defaultImageFormat: "jpeg", defaultJpegQuality: 0.85 },

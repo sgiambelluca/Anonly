@@ -3,7 +3,7 @@
  *
  * **Acá vive la política de actualización, y es a propósito.** El shell no
  * decide: reporta lo que Sparkle informa y ejecuta lo que se le pide
- * (ADR-131 §3). La preferencia del usuario —`autoUpdate`— se persiste con el
+ * (ADR-131 §3). La preferencia del usuario —`updateMode`, ADR-195— se persiste con el
  * resto de los settings, así que el único lugar donde están juntas la
  * preferencia y el evento es el renderer.
  *
@@ -18,7 +18,7 @@
 
 import { useEffect, useState } from "react";
 
-import { useSettingsStore } from "../../store/settings.store.js";
+import { installsWithoutAsking, useSettingsStore } from "../../store/settings.store.js";
 import { getShellUpdater, type ShellUpdater } from "../../updater/index.js";
 
 import { Banner } from "./Banner.js";
@@ -28,7 +28,7 @@ import { Button } from "./Button.js";
 const READY = "update-downloaded";
 
 export function UpdateNotice() {
-  const autoUpdate = useSettingsStore((state) => state.autoUpdate);
+  const autoUpdate = useSettingsStore((state) => installsWithoutAsking(state.updateMode));
   const [updater] = useState<ShellUpdater | null>(() => getShellUpdater());
   const [readyVersion, setReadyVersion] = useState<string | null>(null);
   const [dismissed, setDismissed] = useState(false);

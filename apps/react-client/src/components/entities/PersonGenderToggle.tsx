@@ -26,9 +26,9 @@
 
 import type { PersonGender } from "@anonly/anonymization-core";
 
-import { actions } from "../../core-adapter/actions.js";
 import { Tooltip } from "../common/Tooltip.js";
 
+import { applyPersonGender } from "./applyEdits.js";
 import {
   nextPersonGenderChoice,
   PERSON_GENDER_LABEL,
@@ -38,10 +38,12 @@ import { PERSON_GENDER_SYMBOL } from "./personGenderSymbols.js";
 
 export interface PersonGenderToggleProps {
   readonly groupId: string;
+  /** El nombre de la entidad, para la pila de deshacer (ADR-172 §2). */
+  readonly label: string;
   readonly currentGender: PersonGender | undefined;
 }
 
-export function PersonGenderToggle({ groupId, currentGender }: PersonGenderToggleProps) {
+export function PersonGenderToggle({ groupId, label, currentGender }: PersonGenderToggleProps) {
   const current = toPersonGenderChoice(currentGender);
   const next = nextPersonGenderChoice(current);
   const Symbol = PERSON_GENDER_SYMBOL[current];
@@ -56,11 +58,15 @@ export function PersonGenderToggle({ groupId, currentGender }: PersonGenderToggl
         aria-label={`Género: ${PERSON_GENDER_LABEL[current].toLowerCase()}. Cambiar a ${PERSON_GENDER_LABEL[
           next
         ].toLowerCase()}.`}
-        onClick={() => actions.updateGroup(groupId, { personGender: next })}
-        className={`rounded-md p-0.5 hover:bg-bg-tertiary ${
-          // El neutro va atenuado: es el estado "sin fijar", y ese contraste
-          // es lo que lo hace legible como marca de dato faltante.
-          current === "neutral" ? "text-text-secondary" : "text-text-primary"
+        onClick={() => applyPersonGender({ groupId, label, next })}
+        // ADR-169 §4: con borde para que se lea como botón — punteado en el
+        // neutro, que va atenuado: es el estado "sin fijar", y ese contraste
+        // es lo que lo hace legible como marca de dato faltante. La
+        // visibilidad sigue siendo la de ADR-071; la ranura la reserva la fila.
+        className={`flex h-[26px] w-[26px] items-center justify-center rounded-md border bg-bg-primary hover:bg-bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+          current === "neutral"
+            ? "border-dashed border-text-secondary text-text-secondary"
+            : "border-border text-text-primary hover:border-text-secondary"
         }`}
       >
         <Symbol />

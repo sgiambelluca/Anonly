@@ -108,6 +108,9 @@ export interface WorkerPoolConfig {
   readonly maxRetryDelayMs: number;
   readonly cancelSlaMs: number;
   readonly idleDisposeMs: number;
+  // Como `idleDisposeMs`, pero solo para el pool de NER (ADR-167 §2).
+  // Default 15000.
+  readonly nerIdleDisposeMs: number;
 }
 
 // Rutas del runtime WASM de onnxruntime-web, inyectadas por el host (la app,
@@ -134,6 +137,10 @@ export interface OcrConfig {
   readonly dpi: number;
   // Timeout y retries por página: fuente única workerPool.timeouts["ocr-page"] y
   // maxRetries["ocr-page"] (ADR-021 §2, precedente ADR-013).
+  // ADR-143 §3: máximo de bytes RGBA estimados en vivo entre las imágenes que
+  // OcrEngine.processSession produce a la vez. Un descriptor que lo supera
+  // por sí solo falla la página, no se encoge en silencio (ADR-143 §4).
+  readonly maxLiveImageBytes: number; // OCR_MAX_LIVE_IMAGE_BYTES, default 128 MiB
 }
 
 /**
@@ -193,7 +200,7 @@ export interface WorkerLike {
 export type WorkerFactory = () => WorkerLike;
 
 // "export" refiere al ExportWorker único (sin pool propio, ADR-036 §1).
-export type WorkerEntryKind = "pdf" | "ocr" | "ner" | "render" | "export";
+export type WorkerEntryKind = "pdf" | "ocr" | "ocr-orientation" | "ner" | "render" | "export";
 
 export interface CoreRuntimeOptions {
   readonly workers?: Partial<Readonly<Record<WorkerEntryKind, WorkerFactory>>>;

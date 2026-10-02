@@ -34,9 +34,15 @@ import { REPLACEMENT_MODE_LABEL, REPLACEMENT_MODE_SHORT_LABEL } from "./replacem
 export interface TypeModeSelectProps {
   readonly type: EntityType;
   readonly groups: ReadonlyArray<EntityGroup>;
+  /**
+   * La franja es `sticky` (un contexto de apilamiento propio): mientras el
+   * menú está abierto tiene que subir por encima de las franjas siguientes, o
+   * el menú queda debajo de ellas.
+   */
+  readonly onOpenChange?: (open: boolean) => void;
 }
 
-export function TypeModeSelect({ type, groups }: TypeModeSelectProps) {
+export function TypeModeSelect({ type, groups, onOpenChange }: TypeModeSelectProps) {
   const rules = useRulesStore((state) => state.rules);
   const [pendingMode, setPendingMode] = useState<ReplacementMode | null>(null);
 
@@ -60,6 +66,7 @@ export function TypeModeSelect({ type, groups }: TypeModeSelectProps) {
       scope: "type",
       mode,
       entityType: type,
+      historyLabel: `${ENTITY_TYPE_LABEL[type]} → ${REPLACEMENT_MODE_LABEL[mode]}`,
       toastText: `${ENTITY_TYPE_LABEL[type]} → ${REPLACEMENT_MODE_LABEL[mode]}`,
     });
   }
@@ -78,17 +85,15 @@ export function TypeModeSelect({ type, groups }: TypeModeSelectProps) {
     <>
       <ModeSelectMenu
         current={current}
-        example={{
-          sample: sampleGroup?.canonicalValue ?? ENTITY_TYPE_LABEL[type],
-          ...(sampleGroup !== undefined
-            ? {
-                currentMode: sampleGroup.replacementMode,
-                currentValue: sampleGroup.replacementValue,
-              }
-            : {}),
-        }}
+        previews={sampleGroup?.replacementPreviews ?? null}
         onSelect={handleSelect}
+        subject={ENTITY_TYPE_LABEL[type]}
+        {...(onOpenChange !== undefined ? { onOpenChange } : {})}
         align="right"
+        // Ancho fijo (UX-10: "Varios" y "Ocultar parcial" miden distinto) y
+        // alineado con la columna Reemplazo de las filas: la franja deja libre
+        // lo que ocupa el ⋯ de abajo.
+        className="mr-8 w-[6.75rem] shrink-0"
       >
         {({ open, toggle }) => (
           <button
@@ -110,7 +115,7 @@ export function TypeModeSelect({ type, groups }: TypeModeSelectProps) {
             // vistazo; tres bordes finos, no — que es el error que este
             // tratamiento existe para evitar.
             style={{ borderLeftColor: ENTITY_TYPE_COLOR[type] }}
-            className="flex items-center gap-1 rounded border-l-[3px] bg-bg-tertiary px-2 py-1 text-sm font-medium text-text-primary hover:bg-border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            className="flex h-7 w-full items-center justify-between gap-1 rounded border border-l-[3px] border-border bg-bg-tertiary px-2 text-sm font-medium text-text-primary hover:bg-border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
           >
             <span className="truncate">{label}</span>
             <ChevronDownIcon className="h-3.5 w-3.5 shrink-0 text-text-secondary" aria-hidden />

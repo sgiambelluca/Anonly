@@ -102,6 +102,12 @@ export function makeEntityGroup(overrides?: Partial<EntityGroup>): EntityGroup {
     enabled: true,
     aliases: ["Julia Gomez"],
     replacementValueUserSet: false,
+    replacementPreviews: {
+      placeholder: "",
+      mask: "",
+      synthetic: "",
+      placeholderLadder: [""],
+    },
     createdAt: now,
     updatedAt: now,
     ...overrides,
@@ -153,7 +159,7 @@ export function createMockConfig(overrides?: Partial<EngineConfig>): EngineConfi
       batchSize: 256,
       enabled: true,
     },
-    ocr: { languages: ["spa", "eng"], dpi: 300 },
+    ocr: { languages: ["spa", "eng"], dpi: 300, maxLiveImageBytes: 128 * 1024 * 1024 },
     ...overrides,
   });
 }

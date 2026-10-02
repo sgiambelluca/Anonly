@@ -12,6 +12,7 @@
  */
 
 import { PipelineStage } from "@anonly/anonymization-core";
+import { XIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { actions } from "../../core-adapter/actions.js";
@@ -39,7 +40,15 @@ const HIDDEN_STAGES: ReadonlySet<PipelineStage> = new Set([
   PipelineStage.Cancelled,
 ]);
 
-export function CancelButton() {
+export interface CancelButtonProps {
+  /**
+   * ADR-168 §6: en la pantalla de escaneo el atajo (`Ctrl+.`) se muestra
+   * escrito debajo del botón. En la toolbar no, por espacio.
+   */
+  readonly showShortcut?: boolean;
+}
+
+export function CancelButton({ showShortcut = false }: CancelButtonProps = {}) {
   const stage = usePipelineStore((state) => state.stage);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const visible = !HIDDEN_STAGES.has(stage);
@@ -60,9 +69,22 @@ export function CancelButton() {
 
   return (
     <>
-      <Button variant="secondary" onClick={() => setConfirmOpen(true)}>
-        Cancelar
-      </Button>
+      {showShortcut ? (
+        <div className="flex shrink-0 flex-col items-center gap-1">
+          <Button variant="secondary" className="min-h-11" onClick={() => setConfirmOpen(true)}>
+            <XIcon className="h-4 w-4" aria-hidden />
+            Cancelar
+          </Button>
+          <span className="text-sm text-text-secondary" aria-hidden>
+            <kbd className="rounded border border-border px-1 font-sans">Ctrl</kbd> +{" "}
+            <kbd className="rounded border border-border px-1 font-sans">.</kbd>
+          </span>
+        </div>
+      ) : (
+        <Button variant="secondary" onClick={() => setConfirmOpen(true)}>
+          Cancelar
+        </Button>
+      )}
       <ConfirmDialog
         open={confirmOpen}
         title="Cancelar procesamiento"

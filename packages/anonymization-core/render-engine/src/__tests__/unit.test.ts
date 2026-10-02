@@ -50,6 +50,7 @@ import {
   mockGetDocumentResult,
   readProtectedPdfFixtureBuffer,
   resetCreatedCanvases,
+  setConvertToBlobByteLength,
   type DrawCall,
   type ResolvedRenderPool,
 } from "./fixtures/test-helpers.js";
@@ -470,11 +471,16 @@ describe("RenderEngine — unit tests", () => {
 
   it("cache evicts by PREVIEW_CACHE_MAX_BYTES in addition to cachePages", async () => {
     const docId = "doc-cache-bytes";
-    const bigDimension = 5000; // 5000*5000*4 bytes = 100.000.000 bytes (~95.4 MiB) por página.
-    const mockDoc = createMockPdfDocument({
-      pageCount: 3,
-      pageFactory: () => createMockPage({ width: bigDimension, height: bigDimension }),
-    });
+    // ADR-156: `estimateEntryBytes` cuenta `encoded.bytes.byteLength`, no
+    // `imageData` (que la entrada interna ya no retiene) — el PNG de
+    // juguete de `StubOffscreenCanvas#convertToBlob` es de 6 bytes fijos
+    // sin importar el tamaño del canvas, así que el dominio del tamaño de
+    // página no alcanza para ejercitar la eviction por bytes. Se fija el
+    // tamaño codificado directo: 100.000.000 bytes (~95.4 MiB) por página,
+    // mismos números que antes de ADR-156 (cuando los dominaba el
+    // `ImageData` crudo de una página de 5000×5000).
+    setConvertToBlobByteLength(100_000_000);
+    const mockDoc = createMockPdfDocument({ pageCount: 3 });
     vi.mocked(getDocument).mockReturnValue(mockGetDocumentResult(mockDoc));
     // cachePages generoso: el único límite que debe disparar la eviction acá
     // es PREVIEW_CACHE_MAX_BYTES (200 MiB), no el límite por items.
@@ -518,7 +524,7 @@ describe("RenderEngine — unit tests", () => {
 
   // ─── ADR-065 §5 (Hito 10.8, PR6): rasterizePage con región ───
 
-  it("rasterizePage with a region returns only the cropped ImageData", async () => {
+  it("rasterizePage with a region returns only the cropped image, encoded", async () => {
     const docId = "doc-rasterize-region";
     vi.mocked(getDocument).mockReturnValue(
       mockGetDocumentResult(
@@ -532,12 +538,17 @@ describe("RenderEngine — unit tests", () => {
     await engine.loadDocument(docId, createValidBuffer());
 
     const region = { x: 20, y: 30, width: 50, height: 40 };
-    const imageData = await engine.rasterizePage(docId, 0, 2, ctx, region);
+    // ADR-158 §1: EncodedPageImage — `widthPx`/`heightPx` en vez de `width`/`height`.
+    const encoded = await engine.rasterizePage(docId, 0, 2, ctx, region);
 
     // tamaño = region × scale (Render_Engine.md §13 caso 30).
-    expect(imageData.width).toBe(100); // 50 * scale(2)
-    expect(imageData.height).toBe(80); // 40 * scale(2)
+    expect(encoded.format).toBe("png");
+    expect(encoded.widthPx).toBe(100); // 50 * scale(2)
+    expect(encoded.heightPx).toBe(80); // 40 * scale(2)
 
+    // El primer canvas creado sigue siendo el de la página completa (el
+    // recorte se extrae de ahí con getImageData antes de codificarse aparte
+    // en un segundo canvas, ADR-158 §1).
     const [canvas] = getCreatedCanvases();
     const getImageDataCall = canvas?.calls.find((call) => call.op === "getImageData");
     expect(getImageDataCall?.args).toEqual([40, 60, 100, 80]); // region.x/y/width/height * scale
@@ -558,14 +569,19 @@ describe("RenderEngine — unit tests", () => {
 
     // Garantía de no regresión (ADR-065 §5): sin `region`, el flujo OCR de
     // páginas textless que ya usa `rasterizePage` no se toca.
-    const imageData = await engine.rasterizePage(docId, 0, 2, ctx);
+    const encoded = await engine.rasterizePage(docId, 0, 2, ctx);
 
-    expect(imageData.width).toBe(400); // 200 * scale(2), página entera
-    expect(imageData.height).toBe(600);
+    expect(encoded.format).toBe("png");
+    expect(encoded.widthPx).toBe(400); // 200 * scale(2), página entera
+    expect(encoded.heightPx).toBe(600);
 
+    // ADR-158 §1: sin `region`, el kernel codifica el canvas directo
+    // (`convertToBlob`) — nunca pasa por `getImageData`/`putImageData`, así
+    // que sigue habiendo un único canvas, del tamaño de la página completa.
     const [canvas] = getCreatedCanvases();
-    const getImageDataCall = canvas?.calls.find((call) => call.op === "getImageData");
-    expect(getImageDataCall?.args).toEqual([0, 0, 400, 600]); // sin recorte
+    expect(canvas?.width).toBe(400);
+    expect(canvas?.height).toBe(600);
+    expect(canvas?.calls.some((call) => call.op === "getImageData")).toBe(false);
   });
 
   // ─── ADR-050 §2 + ADR-043 §5 (Hito 10, PR17.4): re-priming con password ───
@@ -661,7 +677,11 @@ describe("RenderEngine — unit tests", () => {
         ctx,
       );
 
-      expect(output.imageData).toBe(remoteImageData);
+      // ADR-156: el decoder acepta `imageData` presente (forma legítima en
+      // mode "full", ver `remoteImageData` arriba), pero el host lo descarta
+      // al construir la entrada interna — el output público nunca lo expone,
+      // en ningún `mode`.
+      expect(output.imageData).toBeUndefined();
       expect(output.encoded).toBe(remoteEncoded);
 
       await pooledEngine.dispose();
@@ -707,54 +727,52 @@ describe("RenderEngine — unit tests", () => {
         ctx,
       );
 
-      expect(output.imageData).toBe(inProcessImageData);
+      // ADR-156: mismo criterio que el test de arriba — el decoder acepta
+      // `imageData` (forma legítima en mode "full"), pero el output público
+      // nunca lo expone.
+      expect(output.imageData).toBeUndefined();
       expect(output.encoded).toBe(inProcessEncoded);
 
       await pooledEngine.dispose();
     });
 
-    it("rasterizePage decodes the bare COMPLETED.result posted by worker/entry.ts for rasterize (ImageData pelado, ADR-055 §2)", async () => {
-      const remoteImageData = {
-        data: new Uint8ClampedArray(8),
-        width: 2,
-        height: 1,
-        colorSpace: "srgb",
+    it("rasterizePage decodes the bare COMPLETED.result posted by worker/entry.ts for rasterize (EncodedPageImage pelado, ADR-158 §1/ADR-055 §2)", async () => {
+      const remoteEncodedImage = {
+        bytes: new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]).buffer,
+        format: "png",
+        widthPx: 2,
+        heightPx: 1,
       };
-      const pool = createResolvedRenderDispatchPool(remoteImageData);
+      const pool = createResolvedRenderDispatchPool(remoteEncodedImage);
       const pooledEngine = new RenderEngine(pool);
       await pooledEngine.init(ctx);
       await pooledEngine.loadDocument("doc-envelope-rasterize", createValidBuffer());
 
-      const imageData = await pooledEngine.rasterizePage("doc-envelope-rasterize", 0, 1, ctx);
+      const encoded = await pooledEngine.rasterizePage("doc-envelope-rasterize", 0, 1, ctx);
 
-      expect(imageData).toBe(remoteImageData);
+      expect(encoded).toBe(remoteEncodedImage);
 
       await pooledEngine.dispose();
     });
 
     it("rasterizePage decodes the identical in-process shape (parity, ADR-055 §2)", async () => {
       // Mismo razonamiento que el par de tests de renderPage arriba:
-      // kernelRasterizePage produce la misma forma ImageData pelada en
-      // ambos caminos.
-      const inProcessImageData = {
-        data: new Uint8ClampedArray(8),
-        width: 2,
-        height: 1,
-        colorSpace: "srgb",
+      // kernelRasterizePage produce la misma forma EncodedPageImage pelada
+      // (ADR-158 §1) en ambos caminos.
+      const inProcessEncodedImage = {
+        bytes: new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]).buffer,
+        format: "png",
+        widthPx: 2,
+        heightPx: 1,
       };
-      const pool = createResolvedRenderDispatchPool(inProcessImageData);
+      const pool = createResolvedRenderDispatchPool(inProcessEncodedImage);
       const pooledEngine = new RenderEngine(pool);
       await pooledEngine.init(ctx);
       await pooledEngine.loadDocument("doc-envelope-parity-rasterize", createValidBuffer());
 
-      const imageData = await pooledEngine.rasterizePage(
-        "doc-envelope-parity-rasterize",
-        0,
-        1,
-        ctx,
-      );
+      const encoded = await pooledEngine.rasterizePage("doc-envelope-parity-rasterize", 0, 1, ctx);
 
-      expect(imageData).toBe(inProcessImageData);
+      expect(encoded).toBe(inProcessEncodedImage);
 
       await pooledEngine.dispose();
     });
@@ -2631,10 +2649,16 @@ describe("RenderEngine — unit tests", () => {
         payload: renderPayload,
       });
       await vi.waitFor(() => expect(outboundOfType(fakeSelf, "COMPLETED")).toBeDefined());
+      // ADR-156: `mode: "preview"` ya no trae `imageData` en el resultado —
+      // `encoded` es el único campo con dimensiones que sobrevive en los dos
+      // modos, y es lo que confirma que esto se ruteó a render (kernelRenderPage)
+      // y no a alguno de los otros cuatro payloads.
       const renderResult = outboundOfType(fakeSelf, "COMPLETED")?.result as {
-        readonly imageData: ImageData;
+        readonly imageData?: ImageData;
+        readonly encoded: { readonly widthPx: number };
       };
-      expect(renderResult.imageData.width).toBe(50);
+      expect(renderResult.imageData).toBeUndefined();
+      expect(renderResult.encoded.widthPx).toBe(50);
       fakeSelf.postMessage.mockClear();
 
       // 4) "pageIndex" (sin "buffer"/"rows"/"kind") -> rasterize.
@@ -2651,8 +2675,13 @@ describe("RenderEngine — unit tests", () => {
         payload: rasterizePayload,
       });
       await vi.waitFor(() => expect(outboundOfType(fakeSelf, "COMPLETED")).toBeDefined());
-      const rasterizeResult = outboundOfType(fakeSelf, "COMPLETED")?.result as ImageData;
-      expect(rasterizeResult.width).toBe(50);
+      // ADR-158 §1: kernelRasterizePage devuelve EncodedPageImage, no ImageData.
+      const rasterizeResult = outboundOfType(fakeSelf, "COMPLETED")?.result as {
+        readonly widthPx: number;
+        readonly format: string;
+      };
+      expect(rasterizeResult.widthPx).toBe(50);
+      expect(rasterizeResult.format).toBe("png");
       fakeSelf.postMessage.mockClear();
 
       // 5) sin ninguno de los 4 campos -> unload (fallback, único de los 5
@@ -2666,6 +2695,872 @@ describe("RenderEngine — unit tests", () => {
       });
       await vi.waitFor(() => expect(outboundOfType(fakeSelf, "COMPLETED")).toBeDefined());
       expect(outboundOfType(fakeSelf, "COMPLETED")?.result).toBeUndefined();
+    });
+  });
+
+  // ─── PreviewRenderScheduler — wiring en RenderEngine (ADR-144, H-09B) ───
+  //
+  // Los tests de la clase en aislamiento (semáforo, coalescencia, generación,
+  // limpieza) viven en `preview-scheduler.test.ts`. Acá se verifica el
+  // comportamiento observable a través de la API pública de `RenderEngine`:
+  // Render_Engine.md §13 casos 35-36, §14. Los pools acá son estructurales
+  // (mismo patrón que `spyPool` más arriba en este archivo): el tipo interno
+  // `RenderJobPool` no se exporta desde este paquete.
+  describe("PreviewRenderScheduler wiring (ADR-144)", () => {
+    function fakeImageData(): ImageData {
+      return {
+        data: new Uint8ClampedArray(4),
+        width: 1,
+        height: 1,
+        colorSpace: "srgb",
+      } as ImageData;
+    }
+
+    function fakeEncoded(): {
+      bytes: ArrayBuffer;
+      format: string;
+      widthPx: number;
+      heightPx: number;
+    } {
+      return { bytes: new Uint8Array([1]).buffer, format: "png", widthPx: 1, heightPx: 1 };
+    }
+
+    function fakeKernelRenderResult(): unknown {
+      return { imageData: fakeImageData(), encoded: fakeEncoded(), degraded: [] };
+    }
+
+    beforeEach(() => {
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(createMockPdfDocument({ pageCount: 5 })),
+      );
+    });
+
+    it("coalesces N rapid renderPage calls for the same preview key into a single dispatch to the pool, and every caller resolves with the same output", async () => {
+      const dispatchCalls: Array<number | undefined> = [];
+      let releaseDispatch: ((value: unknown) => void) | undefined;
+      const pool = {
+        dispatch: (params: { readonly priority?: number }): Promise<unknown> => {
+          dispatchCalls.push(params.priority);
+          return new Promise((resolve) => {
+            releaseDispatch = resolve;
+          });
+        },
+        broadcast: async <T>(
+          _payload: unknown,
+          run: () => Promise<T>,
+        ): Promise<ReadonlyArray<T>> => [await run()],
+      };
+      const pooledEngine = new RenderEngine(pool);
+      const docId = "doc-coalesce";
+      await pooledEngine.init(ctx);
+      await pooledEngine.loadDocument(docId, createValidBuffer());
+
+      // Tres llamadas rápidas a la MISMA clave (documentId/pageIndex/kind/
+      // mode/scale/imageFormat), con `replacements` DISTINTOS — justo lo que
+      // ADR-144 §3 excluye de la clave de coalescencia.
+      const p1 = pooledEngine.renderPage(
+        createRenderPageInput({
+          documentId: docId,
+          pageIndex: 0,
+          kind: "anonymized",
+          mode: "preview",
+          replacements: [makeReplacement({ groupId: "g1" })],
+        }),
+        ctx,
+      );
+      const p2 = pooledEngine.renderPage(
+        createRenderPageInput({
+          documentId: docId,
+          pageIndex: 0,
+          kind: "anonymized",
+          mode: "preview",
+          replacements: [makeReplacement({ groupId: "g2" })],
+        }),
+        ctx,
+      );
+      const p3 = pooledEngine.renderPage(
+        createRenderPageInput({
+          documentId: docId,
+          pageIndex: 0,
+          kind: "anonymized",
+          mode: "preview",
+          replacements: [makeReplacement({ groupId: "g3" })],
+        }),
+        ctx,
+      );
+
+      await vi.waitFor(() => expect(dispatchCalls).toHaveLength(1));
+      // Confirma que NO hay un segundo dispatch en camino antes de liberar.
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(dispatchCalls).toHaveLength(1);
+
+      releaseDispatch?.(fakeKernelRenderResult());
+
+      const [o1, o2, o3] = await Promise.all([p1, p2, p3]);
+      expect(o1).toBe(o2);
+      expect(o2).toBe(o3);
+
+      await pooledEngine.dispose();
+    });
+
+    it("bounds concurrent preview dispatches to renderPoolSize under a flood of distinct pages — the case that motivated ADR-144", async () => {
+      const totalPages = 30;
+      const renderPoolSize = 3;
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(createMockPdfDocument({ pageCount: totalPages })),
+      );
+
+      const floodCtx = createEngineContext({
+        config: createMockConfig({
+          workerPool: { ...createMockConfig().workerPool, renderPoolSize },
+        }),
+      });
+
+      let liveDispatches = 0;
+      let maxLiveDispatches = 0;
+      const pendingResolvers: Array<(value: unknown) => void> = [];
+      const pool = {
+        dispatch: (): Promise<unknown> => {
+          liveDispatches += 1;
+          maxLiveDispatches = Math.max(maxLiveDispatches, liveDispatches);
+          return new Promise((resolve) => {
+            pendingResolvers.push((value: unknown) => {
+              liveDispatches -= 1;
+              resolve(value);
+            });
+          });
+        },
+        broadcast: async <T>(
+          _payload: unknown,
+          run: () => Promise<T>,
+        ): Promise<ReadonlyArray<T>> => [await run()],
+      };
+      const pooledEngine = new RenderEngine(pool);
+      const docId = "doc-flood";
+      await pooledEngine.init(floodCtx);
+      await pooledEngine.loadDocument(docId, createValidBuffer());
+
+      // El seed dispara TODAS las páginas sin esperar (ADR-144, Contexto §1:
+      // `Orchestrator.seedAnonymizedPreview` en un expediente de 200 páginas).
+      const outputPromises = Array.from({ length: totalPages }, (_, pageIndex) =>
+        pooledEngine.renderPage(
+          createRenderPageInput({
+            documentId: docId,
+            pageIndex,
+            kind: "original",
+            mode: "preview",
+          }),
+          floodCtx,
+        ),
+      );
+
+      await vi.waitFor(() => expect(pendingResolvers).toHaveLength(renderPoolSize));
+      expect(maxLiveDispatches).toBe(renderPoolSize);
+
+      let resolvedCount = 0;
+      while (resolvedCount < totalPages) {
+        await vi.waitFor(() => expect(pendingResolvers.length).toBeGreaterThan(0));
+        const resolve = pendingResolvers.shift();
+        resolve?.(fakeKernelRenderResult());
+        resolvedCount += 1;
+      }
+
+      await Promise.all(outputPromises);
+      // La aserción que representa la garantía de ADR-144 §4: el pico de
+      // despachos EN VUELO nunca superó renderPoolSize, ni con 30 páginas
+      // distintas lanzadas en el mismo turno.
+      expect(maxLiveDispatches).toBeLessThanOrEqual(renderPoolSize);
+    });
+
+    it("dispatches with priority 70 via RENDER_REQUESTED (visible) and 20 via a direct call (seed/flush mediado) — ADR-144 §7", async () => {
+      const docId = "doc-priority";
+      const dispatchPriorities: Array<number | undefined> = [];
+      const pool = {
+        dispatch: (params: { readonly priority?: number }): Promise<unknown> => {
+          dispatchPriorities.push(params.priority);
+          return Promise.resolve(fakeKernelRenderResult());
+        },
+        broadcast: async <T>(
+          _payload: unknown,
+          run: () => Promise<T>,
+        ): Promise<ReadonlyArray<T>> => [await run()],
+      };
+      const pooledEngine = new RenderEngine(pool);
+      const realCtx = createEngineContextWithRealBus();
+      await pooledEngine.init(realCtx);
+      await pooledEngine.loadDocument(docId, createValidBuffer());
+
+      // Llamada directa (seed/flush mediado del Orchestrator): prioridad 20.
+      await pooledEngine.renderPage(
+        createRenderPageInput({
+          documentId: docId,
+          pageIndex: 0,
+          kind: "original",
+          mode: "preview",
+        }),
+        realCtx,
+      );
+
+      // RENDER_REQUESTED (el visor pidiendo lo que mira): prioridad 70.
+      let renderFinished = false;
+      realCtx.bus.on(EventChannel.Render, EngineEvents.RENDER_FINISHED, () => {
+        renderFinished = true;
+      });
+      realCtx.bus.emit(EventChannel.UI, EngineEvents.RENDER_REQUESTED, {
+        documentId: docId,
+        pageIndices: [1],
+        mode: "preview",
+        kind: "original",
+        scale: 1,
+      });
+      await vi.waitFor(() => expect(renderFinished).toBe(true));
+
+      expect(dispatchPriorities).toEqual([20, 70]);
+      await pooledEngine.dispose();
+    });
+
+    /**
+     * Lee `pageIndex` de un `payload` de dispatch sin `any`/cast a ciegas:
+     * narrowing runtime (`typeof`/`in`) antes del único `as`, documentado
+     * (`ai/Code_Standards.md` §2, "`as` solo para narrowing seguro
+     * documentado" — el payload real es `RenderPagePayloadWire`, no exportado
+     * desde este paquete, así que el test no puede tipar contra él).
+     */
+    function readDispatchedPageIndex(payload: unknown): number {
+      if (typeof payload !== "object" || payload === null || !("pageIndex" in payload)) return -1;
+      const value = (payload as { readonly pageIndex?: unknown }).pageIndex;
+      return typeof value === "number" ? value : -1;
+    }
+
+    /** `RENDER_FINISHED.pageIndices` (`04_Event_System.md` §… ): un array, no un escalar. */
+    function payloadIncludesPageIndex(payload: unknown, pageIndex: number): boolean {
+      if (typeof payload !== "object" || payload === null || !("pageIndices" in payload)) {
+        return false;
+      }
+      const value = (payload as { readonly pageIndices?: unknown }).pageIndices;
+      return Array.isArray(value) && value.includes(pageIndex);
+    }
+
+    it("visible RENDER_REQUESTED preempts queued mediated previews", async () => {
+      const docId = "doc-priority-order";
+      const renderPoolSize = 1;
+
+      const dispatchOrder: number[] = [];
+      const pendingResolvers: Array<() => void> = [];
+      const pool = {
+        dispatch: (params: { readonly payload?: unknown }): Promise<unknown> => {
+          dispatchOrder.push(readDispatchedPageIndex(params.payload));
+          return new Promise((resolve) => {
+            pendingResolvers.push(() => resolve(fakeKernelRenderResult()));
+          });
+        },
+        broadcast: async <T>(
+          _payload: unknown,
+          run: () => Promise<T>,
+        ): Promise<ReadonlyArray<T>> => [await run()],
+      };
+      const pooledEngine = new RenderEngine(pool);
+      const realCtx = createEngineContextWithRealBus({
+        config: createMockConfig({
+          workerPool: { ...createMockConfig().workerPool, renderPoolSize },
+        }),
+      });
+      await pooledEngine.init(realCtx);
+      await pooledEngine.loadDocument(docId, createValidBuffer());
+
+      // Tres llamadas directas (seed/flush mediado): prioridad 20. Con
+      // renderPoolSize=1, la primera (página 0) toma el único slot; las
+      // páginas 1 y 2 quedan esperando turno, SIN haber despachado todavía.
+      const p0 = pooledEngine.renderPage(
+        createRenderPageInput({ documentId: docId, pageIndex: 0, mode: "preview" }),
+        realCtx,
+      );
+      await vi.waitFor(() => expect(dispatchOrder).toEqual([0]));
+
+      const p1 = pooledEngine.renderPage(
+        createRenderPageInput({ documentId: docId, pageIndex: 1, mode: "preview" }),
+        realCtx,
+      );
+      const p2 = pooledEngine.renderPage(
+        createRenderPageInput({ documentId: docId, pageIndex: 2, mode: "preview" }),
+        realCtx,
+      );
+      // Confirma que páginas 1 y 2 están genuinamente en cola, no despachadas.
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(dispatchOrder).toEqual([0]);
+
+      // El visor abre la página 3 (RENDER_REQUESTED, prioridad 70) DESPUÉS de
+      // que 1 y 2 ya estaban esperando turno.
+      let renderFinished3 = false;
+      realCtx.bus.on(EventChannel.Render, EngineEvents.RENDER_FINISHED, (payload: unknown) => {
+        if (payloadIncludesPageIndex(payload, 3)) renderFinished3 = true;
+      });
+      realCtx.bus.emit(EventChannel.UI, EngineEvents.RENDER_REQUESTED, {
+        documentId: docId,
+        pageIndices: [3],
+        mode: "preview",
+        kind: "original",
+        scale: 1,
+      });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      // Todavía en cola: el único slot sigue ocupado por la página 0.
+      expect(dispatchOrder).toEqual([0]);
+
+      // Libera el slot de la página 0: a quien le toca el turno es la página
+      // 3 (prioridad 70), NO la página 1 (prioridad 20, aunque encoló antes).
+      // Esto solo otorga el slot y dispara SU dispatch — todavía no lo resuelve.
+      expect(pendingResolvers).toHaveLength(1);
+      pendingResolvers[0]?.();
+      await vi.waitFor(() => expect(dispatchOrder).toEqual([0, 3]));
+      // Nadie liberó el slot de la página 3 todavía: sigue ocupado por ella.
+      expect(renderFinished3).toBe(false);
+
+      // Libera el dispatch de la página 3 — recién ACÁ termina de verdad (se
+      // asienta, emite RENDER_FINISHED) y libera su slot. Entre los dos que
+      // quedan (1 y 2, misma prioridad), le toca a quien encoló primero — FIFO.
+      expect(pendingResolvers).toHaveLength(2);
+      pendingResolvers[1]?.();
+      await vi.waitFor(() => expect(renderFinished3).toBe(true));
+      await vi.waitFor(() => expect(dispatchOrder).toEqual([0, 3, 1]));
+
+      expect(pendingResolvers).toHaveLength(3);
+      pendingResolvers[2]?.();
+      await vi.waitFor(() => expect(dispatchOrder).toEqual([0, 3, 1, 2]));
+
+      // Libera la última (página 2) para poder cerrar las cuatro promesas.
+      expect(pendingResolvers).toHaveLength(4);
+      pendingResolvers[3]?.();
+
+      await Promise.all([p0, p1, p2]);
+      await pooledEngine.dispose();
+    });
+
+    it("mode: 'full' bypasses the scheduler entirely — two simultaneous full renders of the same page produce two independent dispatches, not one coalesced (no regresión)", async () => {
+      const docId = "doc-full-bypass";
+      let dispatchCount = 0;
+      const dispatchPriorities: Array<number | undefined> = [];
+      const pool = {
+        dispatch: (params: { readonly priority?: number }): Promise<unknown> => {
+          dispatchCount += 1;
+          dispatchPriorities.push(params.priority);
+          return Promise.resolve(fakeKernelRenderResult());
+        },
+        broadcast: async <T>(
+          _payload: unknown,
+          run: () => Promise<T>,
+        ): Promise<ReadonlyArray<T>> => [await run()],
+      };
+      const pooledEngine = new RenderEngine(pool);
+      await pooledEngine.init(ctx);
+      await pooledEngine.loadDocument(docId, createValidBuffer());
+
+      const input = createRenderPageInput({
+        documentId: docId,
+        pageIndex: 0,
+        kind: "anonymized",
+        mode: "full",
+        replacements: [makeReplacement({ groupId: "g1" })],
+      });
+      const [o1, o2] = await Promise.all([
+        pooledEngine.renderPage(input, ctx),
+        pooledEngine.renderPage(input, ctx),
+      ]);
+
+      expect(dispatchCount).toBe(2); // NUNCA se coalesce "full" — ADR-144 §2, Decisión.
+      expect(dispatchPriorities).toEqual([1000, 1000]);
+      expect(o1).not.toBe(o2); // dos ejecuciones independientes, no una promesa compartida.
+
+      await pooledEngine.dispose();
+    });
+  });
+
+  // ─── Escala vigente del preview mediado (ADR-189) ───
+  describe("current preview scale (ADR-189)", () => {
+    function fakeKernelRenderResult(): unknown {
+      return {
+        imageData: { data: new Uint8ClampedArray(4), width: 1, height: 1, colorSpace: "srgb" },
+        encoded: { bytes: new Uint8Array([1]).buffer, format: "png", widthPx: 1, heightPx: 1 },
+        degraded: [],
+      };
+    }
+
+    function readDispatchedScale(payload: unknown): number | undefined {
+      if (typeof payload !== "object" || payload === null || !("scale" in payload)) {
+        return undefined;
+      }
+      const value = (payload as { readonly scale?: unknown }).scale;
+      return typeof value === "number" ? value : undefined;
+    }
+
+    beforeEach(() => {
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(createMockPdfDocument({ pageCount: 5 })),
+      );
+    });
+
+    it("mediated preview follows the current scale of its kind", async () => {
+      const docId = "doc-current-scale-follow";
+      const dispatchedScales: Array<number | undefined> = [];
+      const pool = {
+        dispatch: (params: { readonly payload?: unknown }): Promise<unknown> => {
+          dispatchedScales.push(readDispatchedScale(params.payload));
+          return Promise.resolve(fakeKernelRenderResult());
+        },
+        broadcast: async <T>(
+          _payload: unknown,
+          run: () => Promise<T>,
+        ): Promise<ReadonlyArray<T>> => [await run()],
+      };
+      const pooledEngine = new RenderEngine(pool);
+      const realCtx = createEngineContextWithRealBus();
+      await pooledEngine.init(realCtx);
+      await pooledEngine.loadDocument(docId, createValidBuffer());
+
+      let renderFinished = false;
+      realCtx.bus.on(EventChannel.Render, EngineEvents.RENDER_FINISHED, () => {
+        renderFinished = true;
+      });
+      realCtx.bus.emit(EventChannel.UI, EngineEvents.RENDER_REQUESTED, {
+        documentId: docId,
+        pageIndices: [0],
+        mode: "preview",
+        kind: "anonymized",
+        scale: 1.5,
+      });
+      await vi.waitFor(() => expect(renderFinished).toBe(true));
+      // `dispatchedScales` ya tiene el dispatch del RENDER_REQUESTED
+      // (escala 1.5, explícita) — se limpia para que la aserción de abajo
+      // sea sobre el dispatch del render MEDIADO exclusivamente.
+      dispatchedScales.length = 0;
+
+      // Render mediado (invocación directa, sin `scale`): sigue la vigente
+      // de "anonymized" (1.5), fijada por el RENDER_REQUESTED de arriba.
+      // `replacements` distintos de los del RENDER_REQUESTED (vacíos, sin
+      // `lastAnonymizedInputs` previo) para que la clave de CACHE no
+      // coincida — si coincidiera, el acierto de caché (correcto también,
+      // ADR-189 §2) no volvería a llamar a `pool.dispatch`, y este test
+      // necesita observar la escala del dispatch, no solo el resultado.
+      await pooledEngine.renderPage(
+        createRenderPageInput({
+          documentId: docId,
+          pageIndex: 0,
+          kind: "anonymized",
+          mode: "preview",
+          replacements: [makeReplacement({ groupId: "g-mediated" })],
+        }),
+        realCtx,
+      );
+
+      expect(dispatchedScales).toEqual([1.5]);
+      await pooledEngine.dispose();
+    });
+
+    it("current scale is tracked per kind", async () => {
+      const docId = "doc-current-scale-per-kind";
+      const dispatchedScales: Array<number | undefined> = [];
+      const pool = {
+        dispatch: (params: { readonly payload?: unknown }): Promise<unknown> => {
+          dispatchedScales.push(readDispatchedScale(params.payload));
+          return Promise.resolve(fakeKernelRenderResult());
+        },
+        broadcast: async <T>(
+          _payload: unknown,
+          run: () => Promise<T>,
+        ): Promise<ReadonlyArray<T>> => [await run()],
+      };
+      const pooledEngine = new RenderEngine(pool);
+      const realCtx = createEngineContextWithRealBus();
+      await pooledEngine.init(realCtx);
+      await pooledEngine.loadDocument(docId, createValidBuffer());
+
+      let renderFinished = false;
+      realCtx.bus.on(EventChannel.Render, EngineEvents.RENDER_FINISHED, () => {
+        renderFinished = true;
+      });
+      // Solo el lado "anonymized" recibe un RENDER_REQUESTED con escala 1.5.
+      realCtx.bus.emit(EventChannel.UI, EngineEvents.RENDER_REQUESTED, {
+        documentId: docId,
+        pageIndices: [0],
+        mode: "preview",
+        kind: "anonymized",
+        scale: 1.5,
+      });
+      await vi.waitFor(() => expect(renderFinished).toBe(true));
+      dispatchedScales.length = 0; // limpia el dispatch del RENDER_REQUESTED de arriba.
+
+      // El lado "original" nunca recibió un RENDER_REQUESTED propio: sigue
+      // en `previewScale` (default de `createMockConfig`, 1), no 1.5.
+      await pooledEngine.renderPage(
+        createRenderPageInput({
+          documentId: docId,
+          pageIndex: 0,
+          kind: "original",
+          mode: "preview",
+        }),
+        realCtx,
+      );
+      // El lado "anonymized" sigue en 1.5. `replacements` distintos de los
+      // que usó el RENDER_REQUESTED (vacíos) para evitar un acierto de
+      // caché que no vuelva a llamar a `pool.dispatch` (ver comentario del
+      // test anterior).
+      await pooledEngine.renderPage(
+        createRenderPageInput({
+          documentId: docId,
+          pageIndex: 0,
+          kind: "anonymized",
+          mode: "preview",
+          replacements: [makeReplacement({ groupId: "g-mediated" })],
+        }),
+        realCtx,
+      );
+
+      expect(dispatchedScales).toEqual([1, 1.5]);
+      await pooledEngine.dispose();
+    });
+
+    it("mediated preview never emits an obsolete scale", async () => {
+      const docId = "doc-current-scale-obsolete";
+      // Cada resultado del kernel lleva un "marcador" propio en
+      // `encoded.bytes` — el único dato que sobrevive intacto hasta el Blob
+      // que `emitPreviewUpdated` construye (`render.engine.ts`, "reusando
+      // entry.encoded"). `PREVIEW_UPDATED` no lleva `scale` (ADR-189: sin
+      // cambio de contrato) y `canvasBlobUrl` es un `URL.createObjectURL`
+      // NUEVO en cada emisión —incluso en un acierto de cache—, así que ni
+      // el evento ni la URL alcanzan por sí solos para distinguir "se
+      // emitió el render de la escala 1" de "el de la escala 2"; leer el
+      // Blob real que se le pasó a `URL.createObjectURL` sí alcanza.
+      function fakeKernelRenderResultWithMarker(marker: number): unknown {
+        return {
+          imageData: { data: new Uint8ClampedArray(4), width: 1, height: 1, colorSpace: "srgb" },
+          encoded: {
+            bytes: new Uint8Array([marker]).buffer,
+            format: "png",
+            widthPx: 1,
+            heightPx: 1,
+          },
+          degraded: [],
+        };
+      }
+
+      const dispatchedScales: Array<number | undefined> = [];
+      const pendingResolvers: Array<() => void> = [];
+      const pool = {
+        dispatch: (params: { readonly payload?: unknown }): Promise<unknown> => {
+          const dispatchedScale = readDispatchedScale(params.payload);
+          dispatchedScales.push(dispatchedScale);
+          // Marcador = escala × 10 (entero, cabe en un byte para este test).
+          const marker = Math.round((dispatchedScale ?? 0) * 10);
+          return new Promise((resolve) => {
+            pendingResolvers.push(() => resolve(fakeKernelRenderResultWithMarker(marker)));
+          });
+        },
+        broadcast: async <T>(
+          _payload: unknown,
+          run: () => Promise<T>,
+        ): Promise<ReadonlyArray<T>> => [await run()],
+      };
+      const pooledEngine = new RenderEngine(pool);
+      const realCtx = createEngineContextWithRealBus();
+      await pooledEngine.init(realCtx);
+      await pooledEngine.loadDocument(docId, createValidBuffer());
+
+      const capturedBlobs: Blob[] = [];
+      const realCreateObjectURL = URL.createObjectURL.bind(URL);
+      const createObjectURLSpy = vi
+        .spyOn(URL, "createObjectURL")
+        .mockImplementation((obj: Blob | MediaSource) => {
+          // `emitPreviewUpdated` (render.engine.ts) siempre pasa un `Blob`
+          // propio — el tipo de la firma real de `URL.createObjectURL`
+          // (`Blob | MediaSource`) es más ancho que lo que este motor usa.
+          if (obj instanceof Blob) capturedBlobs.push(obj);
+          return realCreateObjectURL(obj);
+        });
+
+      try {
+        // 1) RENDER_REQUESTED a escala 1: fija la vigente y despacha (#1, marcador 10).
+        realCtx.bus.emit(EventChannel.UI, EngineEvents.RENDER_REQUESTED, {
+          documentId: docId,
+          pageIndices: [0],
+          mode: "preview",
+          kind: "anonymized",
+          scale: 1,
+        });
+        await vi.waitFor(() => expect(dispatchedScales).toEqual([1]));
+        pendingResolvers[0]?.();
+        await vi.waitFor(() => expect(capturedBlobs).toHaveLength(1));
+
+        // 2) Render mediado sin `scale`: sigue la vigente (1) — despacha
+        // (#2, marcador 10), en vuelo (no se libera todavía). `replacements`
+        // propios para que la clave de cache no coincida con la del
+        // RENDER_REQUESTED (vacíos) — el objetivo es observar EL DISPATCH,
+        // no un acierto de cache (que también sería correcto, ADR-189 §2,
+        // pero no probaría nada acá).
+        const mediatedPromise = pooledEngine.renderPage(
+          createRenderPageInput({
+            documentId: docId,
+            pageIndex: 0,
+            kind: "anonymized",
+            mode: "preview",
+            replacements: [makeReplacement({ groupId: "g-mediated" })],
+          }),
+          realCtx,
+        );
+        await vi.waitFor(() => expect(dispatchedScales).toEqual([1, 1]));
+
+        // 3) Mientras el mediado sigue en vuelo, la vigente cambia a 2 —
+        // despacha (#3, marcador 20) y se libera de inmediato: asienta ANTES
+        // de tocar el mediado, para no coalescer sobre una entrada todavía
+        // en vuelo del scheduler (que bumpearía su generación y confundiría
+        // el mecanismo de generación vieja de ADR-144 con el de acá).
+        realCtx.bus.emit(EventChannel.UI, EngineEvents.RENDER_REQUESTED, {
+          documentId: docId,
+          pageIndices: [0],
+          mode: "preview",
+          kind: "anonymized",
+          scale: 2,
+        });
+        await vi.waitFor(() => expect(dispatchedScales).toEqual([1, 1, 2]));
+        pendingResolvers[2]?.();
+        await vi.waitFor(() => expect(capturedBlobs).toHaveLength(2));
+
+        // 4) Libera el mediado (#2, escala 1) — ya obsoleta: la vigente es 2
+        // desde el paso 3. No se cachea ni se emite con esa escala vieja; se
+        // redespacha a la vigente leyendo el input vigente (mismo criterio
+        // que la generación vieja de ADR-144).
+        pendingResolvers[1]?.();
+        await vi.waitFor(() => expect(capturedBlobs).toHaveLength(3));
+        expect(dispatchedScales).toEqual([1, 1, 2]); // nunca un cuarto dispatch.
+
+        const markers = await Promise.all(
+          capturedBlobs.map(async (blob) => new Uint8Array(await blob.arrayBuffer())[0]),
+        );
+        // La tercera emisión lleva el marcador de la escala 2 (20), NUNCA el
+        // de la escala 1 (10) que quedó obsoleta — exactamente "no se emite
+        // el resultado viejo y sí se emite uno a la escala nueva" (ADR-189 §2).
+        expect(markers).toEqual([10, 20, 20]);
+        await expect(mediatedPromise).resolves.toBeDefined();
+      } finally {
+        createObjectURLSpy.mockRestore();
+      }
+
+      await pooledEngine.dispose();
+    });
+
+    // N-5 (ADR-189 §2, revisión ronda B): "la promesa de la invocación
+    // resuelve con el render final" tiene que valer para TODO llamador
+    // coalescido, no solo para el que creó la entrada del scheduler.
+    // `PreviewRenderScheduler` (ADR-144 §3) solo invoca `runJob`/`onSettle`
+    // para la solicitud que crea la entrada — una segunda solicitud sobre la
+    // MISMA clave devuelve la promesa compartida sin volver a ejecutarlos.
+    // Antes de este fix, la revalidación de escala vivía DENTRO de
+    // `onSettle`, así que un segundo llamador coalescido nunca la corría y
+    // resolvía con el resultado obsoleto directo.
+    it("two callers coalesced on the same key both end up with the final render, not the obsolete one", async () => {
+      const docId = "doc-current-scale-coalesced-callers";
+      interface PendingJob {
+        readonly scale: number | undefined;
+        readonly resolve: () => void;
+        released: boolean;
+      }
+      const jobs: PendingJob[] = [];
+      const pool = {
+        dispatch: (params: { readonly payload?: unknown }): Promise<unknown> => {
+          const scale = readDispatchedScale(params.payload);
+          return new Promise((resolve) => {
+            jobs.push({ scale, resolve: () => resolve(fakeKernelRenderResult()), released: false });
+          });
+        },
+        broadcast: async <T>(
+          _payload: unknown,
+          run: () => Promise<T>,
+        ): Promise<ReadonlyArray<T>> => [await run()],
+      };
+      const pooledEngine = new RenderEngine(pool);
+      const realCtx = createEngineContextWithRealBus();
+      await pooledEngine.init(realCtx);
+      await pooledEngine.loadDocument(docId, createValidBuffer());
+
+      // Libera TODOS los jobs pendientes de `scale` que no se hayan liberado
+      // todavía, en rondas — drena también las regeneraciones que el propio
+      // coalescing de ADR-144 dispara por su cuenta: un segundo llamador que
+      // se suma a una entrada EN VUELO bumpea su generación, así que el
+      // despacho que ya estaba corriendo, al resolver, se ve a sí mismo con
+      // una generación vieja y se redespacha una vez más — comportamiento
+      // preexistente de ADR-144 (ver `runDispatchLoop`, "generación vieja"),
+      // no lo que este test mide. Sin drenar en rondas, esas regeneraciones
+      // dejarían jobs sin liberar y los llamadores nunca asentarían.
+      async function releaseAllAtScale(scale: number, rounds = 10): Promise<void> {
+        for (let round = 0; round < rounds; round += 1) {
+          const pending = jobs.filter((j) => !j.released && j.scale === scale);
+          for (const job of pending) {
+            job.released = true;
+            job.resolve();
+          }
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+      }
+
+      // 1) RENDER_REQUESTED a escala 1: fija la vigente y despacha. Se
+      // espera a que asiente DEL TODO (RENDER_FINISHED) antes de seguir —
+      // si no, su segundo checkpoint (post-dispatch, `throwIfSuperseded`)
+      // puede correr DESPUÉS de que el paso 3 registre la escala 2 como
+      // pendiente para esta página, y se cancela a sí mismo por una carrera
+      // ajena a lo que este test mide.
+      let renderFinished1 = false;
+      realCtx.bus.on(EventChannel.Render, EngineEvents.RENDER_FINISHED, () => {
+        renderFinished1 = true;
+      });
+      realCtx.bus.emit(EventChannel.UI, EngineEvents.RENDER_REQUESTED, {
+        documentId: docId,
+        pageIndices: [0],
+        mode: "preview",
+        kind: "anonymized",
+        scale: 1,
+      });
+      await vi.waitFor(() => expect(jobs.filter((j) => j.scale === 1)).toHaveLength(1));
+      await releaseAllAtScale(1);
+      await vi.waitFor(() => expect(renderFinished1).toBe(true));
+
+      // 2) Dos llamadores mediados, sin `scale`, SIN esperar entre sí: los
+      // dos leen la vigente (1) y coalescen sobre la MISMA entrada del
+      // scheduler (misma clave: documentId/pageIndex/kind/mode/1/imageFormat
+      // — la clave no incluye `replacements`, ADR-144 §3).
+      // `replacements` propios, distintos de los que usó el RENDER_REQUESTED
+      // de arriba (vacíos, sin `lastAnonymizedInputs` previo) — si coincidieran,
+      // caller1 acertaría la cache que ya pobló el paso 1 y nunca dispararía
+      // un dispatch real (un acierto de cache es correcto per ADR-189 §2,
+      // pero no ejercitaría el coalescing de dos llamadores que este test
+      // necesita).
+      const mediatedInput = createRenderPageInput({
+        documentId: docId,
+        pageIndex: 0,
+        kind: "anonymized",
+        mode: "preview",
+        replacements: [makeReplacement({ groupId: "g-coalesced" })],
+      });
+      const caller1Promise = pooledEngine.renderPage(mediatedInput, realCtx);
+      const caller2Promise = pooledEngine.renderPage(mediatedInput, realCtx);
+      await vi.waitFor(() =>
+        expect(jobs.filter((j) => j.scale === 1 && !j.released)).toHaveLength(1),
+      );
+
+      let caller1Settled = false;
+      let caller2Settled = false;
+      void caller1Promise.then(() => {
+        caller1Settled = true;
+      });
+      void caller2Promise.then(() => {
+        caller2Settled = true;
+      });
+
+      // 3) Mientras los dos siguen en vuelo, la vigente cambia a 2 — despacha
+      // en vuelo también.
+      realCtx.bus.emit(EventChannel.UI, EngineEvents.RENDER_REQUESTED, {
+        documentId: docId,
+        pageIndices: [0],
+        mode: "preview",
+        kind: "anonymized",
+        scale: 2,
+      });
+      await vi.waitFor(() => expect(jobs.filter((j) => j.scale === 2)).toHaveLength(1));
+
+      // 4) Libera TODO lo pendiente en escala 1 (ya obsoleta: la vigente es
+      // 2) — incluidas las regeneraciones por coalescing. Los DOS llamadores
+      // reciben el mismo resultado obsoleto de `entry.resolve`; cada uno
+      // tiene que revalidar la escala POR SU CUENTA y redespachar, no solo
+      // el que creó la entrada (N-5) — ninguno de los dos se asienta con
+      // esto solo.
+      await releaseAllAtScale(1);
+      expect(caller1Settled).toBe(false);
+      expect(caller2Settled).toBe(false);
+
+      // 5) Libera TODO lo pendiente en escala 2 (la vigente): asienta a los
+      // DOS de una — comparten la misma entrada del scheduler.
+      await releaseAllAtScale(2);
+      const [caller1Result, caller2Result] = await Promise.all([caller1Promise, caller2Promise]);
+      // La prueba central de N-5: los dos resuelven con el MISMO objeto — el
+      // render final, a la escala vigente — no uno de los dos con el
+      // obsoleto por no haber revalidado su propia escala.
+      expect(caller2Result).toBe(caller1Result);
+
+      await pooledEngine.dispose();
+    });
+
+    it("explicit scale bypasses the current scale", async () => {
+      const docId = "doc-current-scale-explicit-bypass";
+      const dispatchedScales: Array<number | undefined> = [];
+      const pool = {
+        dispatch: (params: { readonly payload?: unknown }): Promise<unknown> => {
+          dispatchedScales.push(readDispatchedScale(params.payload));
+          return Promise.resolve(fakeKernelRenderResult());
+        },
+        broadcast: async <T>(
+          _payload: unknown,
+          run: () => Promise<T>,
+        ): Promise<ReadonlyArray<T>> => [await run()],
+      };
+      const pooledEngine = new RenderEngine(pool);
+      const realCtx = createEngineContextWithRealBus();
+      await pooledEngine.init(realCtx);
+      await pooledEngine.loadDocument(docId, createValidBuffer());
+
+      // Fija la vigente en 1.5 para el lado "anonymized".
+      let renderFinished = false;
+      realCtx.bus.on(EventChannel.Render, EngineEvents.RENDER_FINISHED, () => {
+        renderFinished = true;
+      });
+      realCtx.bus.emit(EventChannel.UI, EngineEvents.RENDER_REQUESTED, {
+        documentId: docId,
+        pageIndices: [0],
+        mode: "preview",
+        kind: "anonymized",
+        scale: 1.5,
+      });
+      await vi.waitFor(() => expect(renderFinished).toBe(true));
+      dispatchedScales.length = 0;
+
+      // Invocación directa CON `scale` explícita: se dibuja a ESA escala
+      // (3), no a la vigente (1.5).
+      await pooledEngine.renderPage(
+        createRenderPageInput({
+          documentId: docId,
+          pageIndex: 0,
+          kind: "anonymized",
+          mode: "preview",
+          scale: 3,
+        }),
+        realCtx,
+      );
+      // `mode: "full"` (export): siempre su propia escala, nunca la vigente.
+      await pooledEngine.renderPage(
+        createRenderPageInput({
+          documentId: docId,
+          pageIndex: 1,
+          kind: "anonymized",
+          mode: "full",
+          scale: 2.08,
+        }),
+        realCtx,
+      );
+
+      // N-2: el camino REAL del export (`Orchestrator.makeRenderPageProvider.
+      // renderFull`) nunca manda `scale` — cae a `ctx.config.render.fullScale`
+      // (2.08 en `createMockConfig`), no a la vigente del preview (1.5),
+      // aunque esta invocación también sea `mode: "full"` sin escala
+      // explícita como el caso del preview mediado. `pageIndex` propio para
+      // no chocar con el cache del dispatch anterior (misma escala/replacements).
+      await pooledEngine.renderPage(
+        createRenderPageInput({
+          documentId: docId,
+          pageIndex: 2,
+          kind: "anonymized",
+          mode: "full",
+        }),
+        realCtx,
+      );
+
+      expect(dispatchedScales).toEqual([3, 2.08, 2.08]);
+      await pooledEngine.dispose();
     });
   });
 });

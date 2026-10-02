@@ -28,8 +28,10 @@ import { OcrEngine } from "../ocr.engine.js";
 
 import {
   createEngineContext,
+  createImageProducer,
   createTrackingOcrPool,
   createValidOcrPageInput,
+  createValidOcrPageRequest,
   mockEmptyRecognizeData,
   mockRecognizeData,
   mockTesseractWorker,
@@ -188,7 +190,12 @@ describe("OcrEngine — contract tests", () => {
     const cacheSetSpy = vi.spyOn(ctx.cache, "set");
     const output = await engine.processPage(createValidOcrPageInput("doc-cache", 3), ctx);
 
-    expect(cacheSetSpy).toHaveBeenCalledWith("ocr-words:doc-cache:3", output.words);
+    // ADR-145 §2/§4: tercer argumento — la estimación de bytes del depósito.
+    expect(cacheSetSpy).toHaveBeenCalledWith(
+      "ocr-words:doc-cache:3",
+      output.words,
+      expect.any(Number),
+    );
   });
 
   it("engine never subscribes to the bus (ADR-014)", async () => {
@@ -250,7 +257,14 @@ describe("OcrEngine — contract tests", () => {
   // ─── ADR-045 §2/§4/§5 — puerto interno OcrJobPool ───
 
   it("dispatch uses maxRetriesOverride 0 (pool never retries ocr-page)", async () => {
-    vi.mocked(createWorker).mockResolvedValue(mockTesseractWorker(mockEmptyRecognizeData()));
+    // ADR-190 §2: una palabra fiable evita que la cadena de verificación
+    // despache reconocimientos adicionales — este test mide UN despacho, no
+    // la cadena completa (que tiene sus propios tests dedicados).
+    vi.mocked(createWorker).mockResolvedValue(
+      mockTesseractWorker(
+        mockRecognizeData([{ text: "x", confidence: 95, bbox: { x0: 0, y0: 0, x1: 5, y1: 5 } }]),
+      ),
+    );
 
     const pool = createTrackingOcrPool();
     const pooledEngine = new OcrEngine(pool);
@@ -308,6 +322,123 @@ describe("OcrEngine — contract tests", () => {
     const eventsB = busEmitSpyB.mock.calls.map((call) => call[1]);
 
     expect(eventsB).toEqual(eventsA);
+    await pooledEngine.dispose();
+  });
+
+  // ─── ADR-143 — processSession ───
+
+  it("processSession() before init() throws EngineNotInitializedError", async () => {
+    const requests = [createValidOcrPageRequest("doc-1", 0)];
+    await expect(engine.processSession(requests, createImageProducer(), ctx)).rejects.toThrow(
+      EngineNotInitializedError,
+    );
+  });
+
+  it("emits OCR_STARTED once and OCR_FINISHED once for the whole session, not per descriptor (ADR-143 §2)", async () => {
+    vi.mocked(createWorker).mockResolvedValue(mockTesseractWorker(mockEmptyRecognizeData()));
+
+    await engine.init(ctx);
+    const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+    const requests = [
+      createValidOcrPageRequest("doc-session-started", 0),
+      createValidOcrPageRequest("doc-session-started", 1),
+      createValidOcrPageRequest("doc-session-started", 2),
+    ];
+    await engine.processSession(requests, createImageProducer(), ctx);
+
+    const startedCalls = busEmitSpy.mock.calls.filter(
+      (call) => call[1] === EngineEvents.OCR_STARTED,
+    );
+    const finishedCalls = busEmitSpy.mock.calls.filter(
+      (call) => call[1] === EngineEvents.OCR_FINISHED,
+    );
+    expect(startedCalls.length).toBe(1);
+    expect(finishedCalls.length).toBe(1);
+    expect(startedCalls[0]?.[2]).toMatchObject({
+      documentId: "doc-session-started",
+      pagesToProcess: [0, 1, 2],
+    });
+  });
+
+  it("processSession returns outputs in the same order as requests", async () => {
+    vi.mocked(createWorker).mockResolvedValue(mockTesseractWorker(mockEmptyRecognizeData()));
+
+    await engine.init(ctx);
+    const requests = [
+      createValidOcrPageRequest("doc-session-order", 2),
+      createValidOcrPageRequest("doc-session-order", 0),
+      createValidOcrPageRequest("doc-session-order", 1),
+    ];
+    const outputs = await engine.processSession(requests, createImageProducer(), ctx);
+
+    expect(outputs.map((o) => o.pageIndex)).toEqual([2, 0, 1]);
+  });
+
+  it("processSession invokes produce() with the exact request object and ctx.abortSignal (ADR-143 §1)", async () => {
+    vi.mocked(createWorker).mockResolvedValue(mockTesseractWorker(mockEmptyRecognizeData()));
+
+    await engine.init(ctx);
+    const requests = [createValidOcrPageRequest("doc-session-produce-args", 0)];
+    const produce = vi.fn(createImageProducer());
+    await engine.processSession(requests, produce, ctx);
+
+    expect(produce).toHaveBeenCalledTimes(1);
+    expect(produce).toHaveBeenCalledWith(requests[0], ctx.abortSignal);
+  });
+
+  it("processPages routes through processSession with estimatedBytes: 0, so the byte budget never gates an already-materialized image (ADR-143 §1)", async () => {
+    vi.mocked(createWorker).mockResolvedValue(mockTesseractWorker(mockEmptyRecognizeData()));
+
+    // Presupuesto absurdamente chico: si processPages reservara con el
+    // tamaño real de la imagen, esta llamada se colgaría esperando turno
+    // (nunca hay ninguna otra reserva que lo libere). Con estimatedBytes: 0
+    // no hay nada que reservar, así que resuelve igual.
+    const tightCtx = createEngineContext({
+      config: { ...ctx.config, ocr: { ...ctx.config.ocr, maxLiveImageBytes: 1 } },
+    });
+    await engine.init(tightCtx);
+    const inputs = [createValidOcrPageInput("doc-pages-tight-budget", 0)];
+
+    const outputs = await engine.processPages(inputs, tightCtx);
+
+    expect(outputs.length).toBe(1);
+  });
+
+  // Caso 46 (§13), ADR-190 §4-§5: una página ENTERA con tinta que termina la
+  // cadena de verificación sin lectura fiable lleva `unreadableInk: true`, no
+  // emite `OCR_PAGE_FAILED`, y entrega la mejor lectura obtenida (aunque sean
+  // cero palabras). `orientationPool` inyectado a mano para que `inkRatio` no
+  // comparta el stub de píxeles con las franjas de margen (mismo criterio que
+  // "cadena de verificación (ADR-190 §2)" en unit.test.ts).
+  it("an unreadable page with ink finishes with unreadableInk", async () => {
+    vi.mocked(createWorker).mockResolvedValue(mockTesseractWorker(mockEmptyRecognizeData()));
+    const fakeOrientationPool = {
+      dispatch: (): Promise<unknown> =>
+        Promise.resolve({ orientation: 0, inkRatio: 1, osdHadVerdict: true }),
+      releaseIdleWorkers: (): boolean => false,
+    };
+    const pooledEngine = new OcrEngine(undefined, fakeOrientationPool);
+    await pooledEngine.init(ctx);
+    const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+
+    const output = await pooledEngine.processPage(
+      createValidOcrPageInput("doc-190-unreadable", 0),
+      ctx,
+    );
+
+    expect(output.words).toEqual([]); // la mejor lectura obtenida: cero palabras
+    const failed = busEmitSpy.mock.calls.some(
+      ([channel, event]) => channel === EventChannel.Ocr && event === EngineEvents.OCR_PAGE_FAILED,
+    );
+    expect(failed).toBe(false);
+    const finished = busEmitSpy.mock.calls.find(
+      ([channel, event]) =>
+        channel === EventChannel.Ocr && event === EngineEvents.OCR_PAGE_FINISHED,
+    );
+    expect(finished).toBeDefined();
+    expect((finished?.[2] as { readonly unreadableInk?: true } | undefined)?.unreadableInk).toBe(
+      true,
+    );
     await pooledEngine.dispose();
   });
 });

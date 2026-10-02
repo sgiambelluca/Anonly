@@ -35,6 +35,7 @@ import {
   createValidInput,
   mockGetDocumentResult,
   rotatedTextItem,
+  viewportTransformFor,
   type MockAnnotationInnerOp,
   type MockAnnotationSpec,
   type MockGlyph,
@@ -940,7 +941,11 @@ describe("PdfEngine — unit tests", () => {
       vi.mocked(getDocument).mockReturnValue(
         mockGetDocumentResult(
           createMockPdfDocument(1, () => ({
-            getViewport: vi.fn(() => ({ width: 595, height: 842 })),
+            getViewport: vi.fn(() => ({
+              width: 595,
+              height: 842,
+              transform: [1, 0, 0, -1, 0, 842],
+            })),
             getTextContent: vi.fn(() => Promise.resolve({ items: [] })),
             getOperatorList: vi.fn(() => Promise.resolve({ fnArray: [], argsArray: [] })),
           })),
@@ -954,6 +959,137 @@ describe("PdfEngine — unit tests", () => {
       expect(output.document.pages[0]!.requiresOCR).toBe(true);
       expect(output.document.pages[0]!.words.length).toBe(0);
       expect(output.textlessPages).toEqual([0]);
+    });
+
+    it("derives the conservative DPI cap from the unique raster (ADR-163)", async () => {
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
+          createMockPdfDocument(1, () =>
+            createMockPage(
+              0,
+              [],
+              [{ x: 0, y: 0, width: 600, height: 800, nativeWidth: 1200, nativeHeight: 1600 }],
+              { width: 600, height: 800 },
+            ),
+          ),
+        ),
+      );
+
+      await engine.init(ctx);
+      const output = await engine.process(createValidInput("doc-dpi-cap"), ctx);
+
+      expect(output.document.pages[0]!.ocrDpiCap).toBe(144);
+    });
+
+    it("leaves the cap absent when raster dimensions are unknown", async () => {
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
+          createMockPdfDocument(1, () =>
+            createMockPage(
+              0,
+              [],
+              [{ x: 0, y: 0, width: 600, height: 800, nativeWidth: Number.NaN }],
+              { width: 600, height: 800 },
+            ),
+          ),
+        ),
+      );
+
+      await engine.init(ctx);
+      const output = await engine.process(createValidInput("doc-dpi-unknown"), ctx);
+
+      expect(output.document.pages[0]!.ocrDpiCap).toBeUndefined();
+    });
+
+    it("allows dependency operators before the unique XObject", async () => {
+      const page = createMockPage(
+        0,
+        [],
+        [{ x: 0, y: 0, width: 600, height: 800, nativeWidth: 1200, nativeHeight: 1600 }],
+      );
+      page.getOperatorList = vi.fn(() =>
+        Promise.resolve({
+          fnArray: [OPS.dependency, OPS.save, OPS.transform, OPS.paintImageXObject, OPS.restore],
+          argsArray: [[], [], [600, 0, 0, 800, 0, 0], ["img", 1200, 1600], []],
+        }),
+      );
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(createMockPdfDocument(1, () => page)),
+      );
+
+      await engine.init(ctx);
+      const output = await engine.process(createValidInput("doc-dpi-dependency"), ctx);
+
+      expect(output.document.pages[0]!.ocrDpiCap).toBe(144);
+    });
+
+    it("reads native dimensions from an inline image object", async () => {
+      const page = createMockPage(0);
+      page.getTextContent = vi.fn(() => Promise.resolve({ items: [] }));
+      page.getOperatorList = vi.fn(() =>
+        Promise.resolve({
+          fnArray: [OPS.save, OPS.transform, OPS.paintInlineImageXObject, OPS.restore],
+          argsArray: [[], [600, 0, 0, 800, 0, 0], [{ width: 1200, height: 1600 }], []],
+        }),
+      );
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(createMockPdfDocument(1, () => page)),
+      );
+
+      await engine.init(ctx);
+      const output = await engine.process(createValidInput("doc-dpi-inline"), ctx);
+
+      expect(output.document.pages[0]!.ocrDpiCap).toBe(144);
+    });
+
+    it.each([
+      [
+        "rotated CTM",
+        [OPS.save, OPS.transform, OPS.paintImageXObject, OPS.restore],
+        [[], [0, 600, 800, 0, 0, 0], ["img", 1200, 1600], []],
+      ],
+      [
+        "two images",
+        [OPS.paintImageXObject, OPS.paintImageXObject],
+        [
+          ["a", 1200, 1600],
+          ["b", 1200, 1600],
+        ],
+      ],
+      ["mask", [OPS.paintImageMaskXObject], [["mask", 1200, 1600]]],
+      ["extra painting", [OPS.paintImageXObject, OPS.fill], [["img", 1200, 1600], []]],
+      [
+        "degenerate CTM",
+        [OPS.save, OPS.transform, OPS.paintImageXObject, OPS.restore],
+        [[], [0, 0, 0, 800, 0, 0], ["img", 1200, 1600], []],
+      ],
+    ] as const)("handles discriminant %s", async (name, fnArray, opArgs) => {
+      const page = createMockPage(0, [], []);
+      page.getTextContent = vi.fn(() => Promise.resolve({ items: [] }));
+      page.getOperatorList = vi.fn(() => Promise.resolve({ fnArray, argsArray: opArgs }));
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(createMockPdfDocument(1, () => page)),
+      );
+      await engine.init(ctx);
+      const output = await engine.process(createValidInput(`doc-dpi-${name}`), ctx);
+      expect(output.document.pages[0]!.ocrDpiCap).toBe(name === "rotated CTM" ? 144 : undefined);
+    });
+
+    it("leaves cap absent on a native-text page", async () => {
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
+          createMockPdfDocument(1, () =>
+            createMockPage(
+              0,
+              [{ str: "native", x: 10, y: 700, width: 40, height: 12 }],
+              [{ x: 0, y: 0, width: 600, height: 800, nativeWidth: 1200, nativeHeight: 1600 }],
+            ),
+          ),
+        ),
+      );
+      await engine.init(ctx);
+      const output = await engine.process(createValidInput("doc-dpi-native"), ctx);
+      expect(output.document.pages[0]!.ocrDpiCap).toBeUndefined();
     });
 
     it("marks page with text content as requiresOCR=false", async () => {
@@ -977,7 +1113,11 @@ describe("PdfEngine — unit tests", () => {
             const textless = i === 1 || i === 3;
             return textless
               ? {
-                  getViewport: vi.fn(() => ({ width: 595, height: 842 })),
+                  getViewport: vi.fn(() => ({
+                    width: 595,
+                    height: 842,
+                    transform: [1, 0, 0, -1, 0, 842],
+                  })),
                   getTextContent: vi.fn(() => Promise.resolve({ items: [] })),
                   getOperatorList: vi.fn(() => Promise.resolve({ fnArray: [], argsArray: [] })),
                 }
@@ -1095,7 +1235,12 @@ describe("PdfEngine — unit tests", () => {
       vi.mocked(getDocument).mockReturnValue(
         mockGetDocumentResult(
           createMockPdfDocument(1, () => ({
-            getViewport: vi.fn(() => ({ width: 596, height: 842 })),
+            rotate: 0,
+            getViewport: vi.fn(() => ({
+              width: 596,
+              height: 842,
+              transform: [1, 0, 0, -1, 0, 842],
+            })),
             getTextContent: vi.fn(() =>
               Promise.resolve({
                 items: [
@@ -1130,7 +1275,12 @@ describe("PdfEngine — unit tests", () => {
               // extensión (sin swap de width/height), origen en la esquina
               // opuesta.
               return {
-                getViewport: vi.fn(() => ({ width: 595, height: 800 })),
+                rotate: 0,
+                getViewport: vi.fn(() => ({
+                  width: 595,
+                  height: 800,
+                  transform: [1, 0, 0, -1, 0, 800],
+                })),
                 getTextContent: vi.fn(() =>
                   Promise.resolve({
                     items: [
@@ -1143,7 +1293,12 @@ describe("PdfEngine — unit tests", () => {
             }
             // 270°: dir=(0,-1), up=(1,0). Swap de width/height, igual que 90°.
             return {
-              getViewport: vi.fn(() => ({ width: 595, height: 800 })),
+              rotate: 0,
+              getViewport: vi.fn(() => ({
+                width: 595,
+                height: 800,
+                transform: [1, 0, 0, -1, 0, 800],
+              })),
               getTextContent: vi.fn(() =>
                 Promise.resolve({
                   items: [
@@ -1176,7 +1331,12 @@ describe("PdfEngine — unit tests", () => {
       vi.mocked(getDocument).mockReturnValue(
         mockGetDocumentResult(
           createMockPdfDocument(1, () => ({
-            getViewport: vi.fn(() => ({ width: 595, height: 842 })),
+            rotate: 0,
+            getViewport: vi.fn(() => ({
+              width: 595,
+              height: 842,
+              transform: [1, 0, 0, -1, 0, 842],
+            })),
             getTextContent: vi.fn(() =>
               Promise.resolve({
                 items: [
@@ -1202,7 +1362,12 @@ describe("PdfEngine — unit tests", () => {
       vi.mocked(getDocument).mockReturnValue(
         mockGetDocumentResult(
           createMockPdfDocument(1, () => ({
-            getViewport: vi.fn(() => ({ width: 595, height: 800 })),
+            rotate: 0,
+            getViewport: vi.fn(() => ({
+              width: 595,
+              height: 800,
+              transform: [1, 0, 0, -1, 0, 800],
+            })),
             getTextContent: vi.fn(() =>
               Promise.resolve({
                 items: [
@@ -1249,7 +1414,12 @@ describe("PdfEngine — unit tests", () => {
       vi.mocked(getDocument).mockReturnValue(
         mockGetDocumentResult(
           createMockPdfDocument(1, () => ({
-            getViewport: vi.fn(() => ({ width: 595, height: pageHeight })),
+            rotate: 0,
+            getViewport: vi.fn(() => ({
+              width: 595,
+              height: pageHeight,
+              transform: [1, 0, 0, -1, 0, pageHeight],
+            })),
             getTextContent: vi.fn(() =>
               Promise.resolve({
                 items: [{ str: "Diagonal45", transform: [a, b, c, d, e, f], width, height }],
@@ -1282,6 +1452,82 @@ describe("PdfEngine — unit tests", () => {
     });
   });
 
+  // ADR-141 §2/§3: página con `/Rotate` GENUINO — `viewport.transform` no es
+  // la identidad con volteo (el caso de todos los tests de arriba, que
+  // simulan texto rotado sobre una página SIN `/Rotate`), sino el que
+  // produce `viewportTransformFor(90, ...)` para una página realmente girada
+  // — el "caso doble rotación" (texto rotado DENTRO de una página rotada,
+  // §Consecuencias) que menos evidencia real tiene y cuyo fixture el ADR
+  // exige.
+  //
+  // El mock declara `rotate: 0` a propósito, aunque el `viewport.transform`
+  // simula una página `/Rotate 90`: el guard de ADR-140 (`pdf.engine.ts`,
+  // `pageProxy.rotate !== 0 && ...`) descarta cualquier palabra que produzca
+  // una página con `/Rotate` real antes de que este test pueda leerla — el
+  // guard se retira recién en un commit posterior, una vez verificados
+  // Render/OCR/Export (ADR-141 §6). La composición geométrica que este test
+  // ejercita (`convertTextItemsToWords`) lee únicamente `viewport.transform`,
+  // nunca `pageProxy.rotate` — son dos entradas independientes en el código
+  // real — así que fijar el mock en `rotate: 0` aísla la matemática de
+  // composición del guard sin inventar ningún atajo en el motor.
+  describe("Página con /Rotate genuino — doble rotación (ADR-141 §2/§3)", () => {
+    it("raw horizontal text on a /Rotate 90 page composes to a 270°-labeled vertical bbox", async () => {
+      // Página /Rotate 90: viewport.transform = viewportTransformFor(90, …) =
+      // [0,1,1,0,0,0] — verificado byte a byte contra pdfjs-dist real
+      // (ADR-140/141, ver test-helpers.ts). Es su propia inversa (traslación
+      // cero): aplicarla dos veces es la identidad, así que las coordenadas
+      // crudas de abajo se construyen aplicando ESA MISMA matriz al bbox
+      // presentado que se quiere obtener — la "inversa de
+      // viewportTransformFor(rot)" que ADR-141 §5 pide para un test de página
+      // rotada, en vez del atajo `pageHeight − y` de `rotatedTextItem` (que
+      // documentadamente solo vale para `/Rotate 0`).
+      //
+      // Bbox presentado deseado: origin (200,150), dir=(0,1) (avanza hacia
+      // abajo en pantalla), up=(-1,0), advance=60, em=10.
+      //   raw = viewportTransformFor(90) aplicada al bbox deseado (self-inverso):
+      //   origin cruda:  (a·200+c·150, b·200+d·150) con [a,b,c,d]=[0,1,1,0] → (150, 200)
+      //   dir cruda:     (a·0+c·1,   b·0+d·1)                                → (1, 0)   — horizontal
+      //   up cruda:      (a·-1+c·0,  b·-1+d·0)                               → (0, -1)
+      // item.transform = [dirX, dirY, upX, upY, originX, originY] = [1, 0, 0, -1, 150, 200].
+      const viewportWidth = 400;
+      const viewportHeight = 300;
+
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
+          createMockPdfDocument(1, () => ({
+            rotate: 0, // ver comentario del describe: aísla la composición del guard de ADR-140.
+            getViewport: vi.fn(() => ({
+              width: viewportWidth,
+              height: viewportHeight,
+              transform: viewportTransformFor(90, viewportWidth, viewportHeight),
+            })),
+            getTextContent: vi.fn(() =>
+              Promise.resolve({
+                items: [
+                  { str: "Doble90", transform: [1, 0, 0, -1, 150, 200], width: 60, height: 10 },
+                ],
+              }),
+            ),
+            getOperatorList: vi.fn(() => Promise.resolve({ fnArray: [], argsArray: [] })),
+          })),
+        ),
+      );
+
+      await engine.init(ctx);
+      const output = await engine.process(createValidInput("doc-rotate90-doble"), ctx);
+      const bbox = output.document.pages[0]!.words[0]!.bbox;
+
+      // Texto horizontal en espacio crudo, pero la página está /Rotate 90:
+      // el resultado presentado es una palabra VERTICAL, etiquetada 270 —
+      // exactamente la fila "/Rotate 90 | dir crudo horizontal" de la tabla
+      // medida de ADR-141 §3. Ninguna versión anterior a ADR-141 podía
+      // producir esto: sin componer `viewport.transform`, este texto salía
+      // horizontal (rotation ausente) porque nada en el código leía la
+      // rotación de la página para una palabra de texto nativo.
+      expect(bbox).toEqual({ x: 190, y: 150, width: 10, height: 60, rotation: 270 });
+    });
+  });
+
   // ADR-066 §6/§8: `rotation` sale del mismo versor que ya calcula la
   // envolvente. Se puebla para 90/180/270 (ya probado arriba, describe
   // "Rotated text bbox geometry") y queda AUSENTE en 0° y en cualquier
@@ -1291,7 +1537,12 @@ describe("PdfEngine — unit tests", () => {
       vi.mocked(getDocument).mockReturnValue(
         mockGetDocumentResult(
           createMockPdfDocument(1, () => ({
-            getViewport: vi.fn(() => ({ width: 595, height: 842 })),
+            rotate: 0,
+            getViewport: vi.fn(() => ({
+              width: 595,
+              height: 842,
+              transform: [1, 0, 0, -1, 0, 842],
+            })),
             getTextContent: vi.fn(() =>
               Promise.resolve({
                 items: [
@@ -1579,7 +1830,12 @@ describe("PdfEngine — unit tests", () => {
       vi.mocked(getDocument).mockReturnValue(
         mockGetDocumentResult(
           createMockPdfDocument(1, () => ({
-            getViewport: vi.fn(() => ({ width: 800, height: 800 })),
+            rotate: 0,
+            getViewport: vi.fn(() => ({
+              width: 800,
+              height: 800,
+              transform: [1, 0, 0, -1, 0, 800],
+            })),
             getTextContent: vi.fn(() => Promise.resolve({ items: [] })),
             getOperatorList: vi.fn(() => Promise.resolve({ fnArray, argsArray })),
           })),
@@ -1594,6 +1850,86 @@ describe("PdfEngine — unit tests", () => {
       const word = words[0]!;
       expect(word.text).toBe("Z");
       expect(word.bbox).toEqual({ x: 0, y: 798, width: 1, height: 2 });
+    });
+
+    // O-2 (ADR-141 §2): un `restore` desbalanceado DENTRO de una anotación
+    // (más `restore` que `save`) caía a `IDENTITY_MATRIX_2D` — la identidad
+    // cruda, sin el flip Y de `baseMatrix` — en vez de la semilla propia de
+    // la anotación (`beginAnnotation.transform × CTM de página`). El
+    // síntoma es texto verticalmente espejado incluso en una página SIN
+    // rotación, porque toda página tiene el flip Y de `viewport.transform`
+    // (bottom-up de PDF a top-down del motor), rotada o no. La prueba: dos
+    // renders del MISMO textRun, uno sin ninguna operación de pila y otro
+    // con `save`/`transform`/`restore` balanceado + un `restore` EXTRA antes
+    // del texto — tienen que dar el mismo bbox, porque el extra debería
+    // recuperar exactamente la semilla en la que ya estaba (no una semilla
+    // distinta, y mucho menos la identidad cruda).
+    it("an unbalanced restore inside an annotation falls back to its own seed, not raw identity — text stays upright on an unrotated page", async () => {
+      const sharedTextRun: MockAnnotationSpec["innerOps"][number] = {
+        kind: "textRun",
+        textMatrix: MEASURED_TEXT_MATRIX,
+        glyphs: [
+          { unicode: "A", width: 500 },
+          { unicode: "B", width: 500 },
+        ],
+      };
+
+      async function renderAnnotationWords(
+        innerOps: MockAnnotationSpec["innerOps"],
+        documentId: string,
+      ) {
+        const annotationSpec: MockAnnotationSpec = {
+          id: "21R",
+          rect: MEASURED_RECT,
+          transform: MEASURED_ANNOTATION_TRANSFORM,
+          innerOps,
+        };
+        vi.mocked(getDocument).mockReturnValue(
+          mockGetDocumentResult(
+            // Página SIN rotación (595x842, `rotate: 0` por default en
+            // `createMockPage`) — el bug no depende de `/Rotate`, depende
+            // del flip Y que TODA página trae en `viewport.transform`.
+            createMockPdfDocument(1, () =>
+              createMockPage(0, [], [], { width: 595, height: 842 }, [annotationSpec]),
+            ),
+          ),
+        );
+        const output = await engine.process(createValidInput(documentId), ctx);
+        return output.document.pages[0]!.words;
+      }
+
+      await engine.init(ctx);
+
+      // Referencia: el texto es lo primero que corre en la anotación — nunca
+      // toca la pila, así que usa la semilla tal cual.
+      const reference = await renderAnnotationWords([sharedTextRun], "doc-restore-seed-ref");
+
+      // Mismo texto, pero después de save + transform + restore (balanceado,
+      // vuelve a la semilla) + un restore EXTRA (desbalanceado, la pila ya
+      // está vacía) — con el fix, cae de nuevo a la MISMA semilla; con el
+      // bug, cae a la identidad cruda y el resultado sale distinto.
+      const withExtraRestore = await renderAnnotationWords(
+        [
+          { kind: "save" },
+          { kind: "transform", matrix: MEASURED_INNER_TRANSFORM },
+          { kind: "restore" },
+          { kind: "restore" },
+          sharedTextRun,
+        ],
+        "doc-restore-seed-extra",
+      );
+
+      expect(withExtraRestore).toHaveLength(1);
+      expect(reference).toHaveLength(1);
+      expect(withExtraRestore[0]!.bbox).toEqual(reference[0]!.bbox);
+      // La composición además tiene que reflejar el flip Y real de la
+      // página (sin rotación aparente, no 180 — "espejado verticalmente" es
+      // exactamente eso con este textMatrix upright): confirma que la
+      // semilla recuperada trae el flip de `baseMatrix`, no una identidad
+      // sin flip. `rotation` ausente/0 es "sin rotación" (mismo criterio
+      // que el resto de este describe, que nunca fija `rotation` para el
+      // caso no rotado).
+      expect(withExtraRestore[0]!.bbox.rotation ?? 0).toBe(0);
     });
 
     it("image inside an annotation is placed with the annotation transform", async () => {
@@ -1669,7 +2005,11 @@ describe("PdfEngine — unit tests", () => {
       vi.mocked(getDocument).mockReturnValue(
         mockGetDocumentResult(
           createMockPdfDocument(1, () => ({
-            getViewport: vi.fn(() => ({ width: 595, height: 842 })),
+            getViewport: vi.fn(() => ({
+              width: 595,
+              height: 842,
+              transform: [1, 0, 0, -1, 0, 842],
+            })),
             getTextContent: vi.fn(() => Promise.resolve({ items: [] })),
             getOperatorList: vi.fn(() => Promise.resolve({ fnArray, argsArray })),
           })),
@@ -1693,7 +2033,11 @@ describe("PdfEngine — unit tests", () => {
             numPages: 1,
             getPage: vi.fn(() =>
               Promise.resolve({
-                getViewport: vi.fn(() => ({ width: 595, height: 842 })),
+                getViewport: vi.fn(() => ({
+                  width: 595,
+                  height: 842,
+                  transform: [1, 0, 0, -1, 0, 842],
+                })),
                 getTextContent: vi.fn(() => new Promise(() => {})),
               }),
             ),
@@ -1725,7 +2069,11 @@ describe("PdfEngine — unit tests", () => {
       vi.mocked(getDocument).mockReturnValue(
         mockGetDocumentResult(
           createMockPdfDocument(1, () => ({
-            getViewport: vi.fn(() => ({ width: 595, height: 842 })),
+            getViewport: vi.fn(() => ({
+              width: 595,
+              height: 842,
+              transform: [1, 0, 0, -1, 0, 842],
+            })),
             getTextContent: vi.fn(() => Promise.resolve({ items: [] })),
             getOperatorList: vi.fn(() => Promise.resolve({ fnArray: [], argsArray: [] })),
           })),
@@ -1819,7 +2167,11 @@ describe("PdfEngine — unit tests", () => {
         vi.mocked(getDocument).mockReturnValue(
           mockGetDocumentResult(
             createMockPdfDocument(1, () => ({
-              getViewport: vi.fn(() => ({ width: 595, height: 842 })),
+              getViewport: vi.fn(() => ({
+                width: 595,
+                height: 842,
+                transform: [1, 0, 0, -1, 0, 842],
+              })),
               getTextContent: vi.fn(() => Promise.resolve({ items: [] })),
               getOperatorList: vi.fn(() => Promise.resolve({ fnArray: [], argsArray: [] })),
             })),
@@ -1872,7 +2224,11 @@ describe("PdfEngine — unit tests", () => {
       vi.mocked(getDocument).mockReturnValue(
         mockGetDocumentResult(
           createMockPdfDocument(1, () => ({
-            getViewport: vi.fn(() => ({ width: 595, height: 842 })),
+            getViewport: vi.fn(() => ({
+              width: 595,
+              height: 842,
+              transform: [1, 0, 0, -1, 0, 842],
+            })),
             getTextContent: vi.fn(() => Promise.resolve({ items: [] })),
             getOperatorList: vi.fn(() => Promise.resolve({ fnArray: [], argsArray: [] })),
           })),

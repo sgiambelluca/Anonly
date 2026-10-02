@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=modelo-de-datos | dependencias=01_Technical_Architecture_Document.md,core/Contracts.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-043-RenderEngine-Reparto-Host-Worker-Kernel.md,adr/ADR-046-NerEngine-Pool-Propia-Kernel-Puro.md,adr/ADR-064-Palabras-De-OCR-En-Puntos.md,adr/ADR-065-OCR-Por-Region.md,adr/ADR-066-Texto-De-Anotaciones-Y-Reemplazo-Rotado.md,adr/ADR-067-Orden-De-Lectura-Por-Runs-Rotados.md,adr/ADR-074-Una-Entidad-Partida-En-Varias-Lineas.md,adr/ADR-109-La-Caja-De-Una-Palabra-Es-Su-Caja-De-Tinta.md,adr/ADR-110-El-Renglon-Es-Un-Grupo-No-Una-Coordenada.md | audiencia=IA+humanos | fase=1 (fase 10.9: §7/§8/§12 `fragments` —la descomposición por línea de una ocurrencia que cruza un salto de renglón, ADR-074 §1—; §18 actualizado en fase 10: OcrPagePayload.imageData→ImageData y payloads de transporte LoadDocument/RasterizePage/ExportSave, ADR-036 §4; UnloadDocumentPayload, ADR-043 §4; NerPagePayload por batch + NerKernelSpan/NerKernelProgress, ADR-046; fase 10.5/10.6: §9 EntityGroup.personGender + PersonGender —ADR-060 §2—, §11 escalera de abreviaturas del placeholder —ADR-057 §1—, §18 RenderPagePayload.lineWords —ADR-058 §5—, ExportSavePayload.legendImage + MarkerLegendEntry/MarkerLegendRow + RenderLegendPayload —ADR-059 §3/§5/§6—, §19 ExportOptions.includeMarkerLegend —ADR-059 §1—; fase 10.8: §4 invariante de orden de lectura por runs rotados —ADR-067— y `ocrCompleted` relajado a `requiresOCR === false` con región —ADR-065 §7—, §4.1 `OcrRegion` nueva —ADR-065 §4—, §5 `Word.bbox.rotation` y aclaración de puntos de página para `source: "ocr"` —ADR-066 §6, ADR-064—, §6 `BoundingBox.rotation` —ADR-066 §6—, §18 `RasterizePagePayload.region` —ADR-065 §5—; fase 10.6: §9 `EntityGroup.personGender` —ADR-060 §2—, reescrita por ADR-069 §4/§6 —quién lo escribe, qué significa la ausencia, y que la elección del humano se recuerda aparte en `personGenderUserSet`, interno—; fase 11: §4 la clave de orden de lectura pasa a la línea de base, §5 `Word.bbox` es la caja de tinta también para `source: "pdf"` y §6 gana el invariante de que `y + height` es la línea de base —ADR-109 §1/§3—; §4 vuelve a cambiar: el orden de lectura deja de tener clave escalar y pasa a agrupar renglones —ADR-110 §1, supersede ADR-109 §3—) -->
+<!-- CONTEXT: scope=modelo-de-datos | dependencias=01_Technical_Architecture_Document.md,core/Contracts.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-043-RenderEngine-Reparto-Host-Worker-Kernel.md,adr/ADR-046-NerEngine-Pool-Propia-Kernel-Puro.md,adr/ADR-064-Palabras-De-OCR-En-Puntos.md,adr/ADR-065-OCR-Por-Region.md,adr/ADR-066-Texto-De-Anotaciones-Y-Reemplazo-Rotado.md,adr/ADR-067-Orden-De-Lectura-Por-Runs-Rotados.md,adr/ADR-074-Una-Entidad-Partida-En-Varias-Lineas.md,adr/ADR-109-La-Caja-De-Una-Palabra-Es-Su-Caja-De-Tinta.md,adr/ADR-110-El-Renglon-Es-Un-Grupo-No-Una-Coordenada.md,adr/ADR-141-La-Geometria-Se-Entrega-En-La-Pagina-Que-Se-Ve.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,adr/ADR-170-Las-Vistas-Previas-De-Edicion-Las-Calcula-El-Core.md,adr/ADR-171-El-Usuario-Puede-Eliminar-Una-Entidad.md,adr/ADR-172-Deshacer-Y-Rehacer-Exactos.md,adr/ADR-174-Un-Agregado-Manual-Que-Choca-Se-Resuelve-En-El-Momento.md,adr/ADR-175-Un-Choque-Manual-No-Queda-Colgado.md,adr/ADR-176-Un-Choque-Pendiente-Bloquea-El-Export.md | audiencia=IA+humanos | fase=1 (fase 11: §6 gana la definición normativa del marco de coordenadas de `BoundingBox` — el de la página presentada, no el crudo de PDF — ADR-141 §1; fase 10.9: §7/§8/§12 `fragments` —la descomposición por línea de una ocurrencia que cruza un salto de renglón, ADR-074 §1—; §18 actualizado en fase 10: OcrPagePayload.imageData→ImageData y payloads de transporte LoadDocument/RasterizePage/ExportSave, ADR-036 §4; UnloadDocumentPayload, ADR-043 §4; NerPagePayload por batch + NerKernelSpan/NerKernelProgress, ADR-046; fase 10.5/10.6: §9 EntityGroup.personGender + PersonGender —ADR-060 §2—, §11 escalera de abreviaturas del placeholder —ADR-057 §1—, §18 RenderPagePayload.lineWords —ADR-058 §5—, ExportSavePayload.legendImage + MarkerLegendEntry/MarkerLegendRow + RenderLegendPayload —ADR-059 §3/§5/§6—, §19 ExportOptions.includeMarkerLegend —ADR-059 §1—; fase 10.8: §4 invariante de orden de lectura por runs rotados —ADR-067— y `ocrCompleted` relajado a `requiresOCR === false` con región —ADR-065 §7—, §4.1 `OcrRegion` nueva —ADR-065 §4—, §5 `Word.bbox.rotation` y aclaración de puntos de página para `source: "ocr"` —ADR-066 §6, ADR-064—, §6 `BoundingBox.rotation` —ADR-066 §6—, §18 `RasterizePagePayload.region` —ADR-065 §5—; fase 10.6: §9 `EntityGroup.personGender` —ADR-060 §2—, reescrita por ADR-069 §4/§6 —quién lo escribe, qué significa la ausencia, y que la elección del humano se recuerda aparte en `personGenderUserSet`, interno—; fase 11: §4 la clave de orden de lectura pasa a la línea de base, §5 `Word.bbox` es la caja de tinta también para `source: "pdf"` y §6 gana el invariante de que `y + height` es la línea de base —ADR-109 §1/§3—; §4 vuelve a cambiar: el orden de lectura deja de tener clave escalar y pasa a agrupar renglones —ADR-110 §1, supersede ADR-109 §3—); §18 `OcrPagePayload` lleva la imagen codificada y clonada en vez de `ImageData` transferida, fase 11 por ADR-158 §2/§5; §18 sincronizado con ADR-164 el 2026-09-30 —`OcrPagePayload.orientation` y `OcrOrientationPayload` en `WorkerJobPayload`— -->
 
 # Anonly — Modelo de Datos (TAD bloque 5)
 
@@ -108,6 +108,7 @@ export interface Page {
   readonly requiresOCR: boolean;             // true si PDF Engine no extrajo texto
   readonly ocrCompleted: boolean;            // true si OCR ya completó esta página
   readonly dpi?: number;                     // si fue OCR-ada
+  readonly ocrDpiCap?: number;               // cap seguro derivado del único ráster fuente (ADR-163)
 }
 ```
 
@@ -115,6 +116,11 @@ export interface Page {
 - `words` está **agrupado en renglones** y, dentro de cada renglón, ordenado por `bbox.x` asc (ADR-110 §1). No hay una clave escalar con tolerancia: un word entra al renglón vigente si su centro vertical cae dentro de la banda de ese renglón (mediana de sus centros ± 0,5 × la mediana de sus altos), y si no, abre uno nuevo. Hasta ADR-110 el orden salía de un comparador con tolerancia, que **no es transitivo** — sobre un escaneo eso rompía uno de cada tres pares de palabras consecutivos. **ADR-067**: los words con `bbox.rotation` 90/180/270 se agrupan en *runs* —misma coordenada transversal (tolerancia 1) y contiguos sobre el eje de avance (hueco ≤ 2 cuerpos)—, cada run se ordena en su dirección de avance, y los runs se emiten **enteros y contiguos, en una pasada aparte después de todo el texto horizontal** (nunca intercalados: intercalarlos parte una línea horizontal al medio, porque el comparador con tolerancia no es transitivo). Para `rotation` ausente o `0` el orden es literalmente el de la primera oración, en **cualquier** página tenga o no texto rotado.
 - Si `requiresOCR === false`, entonces `words.length > 0` o la página es genuinamente vacía.
 - `ocrCompleted === true` implica que la página **pasó por OCR**, entera o por región (ADR-065 §7). Hasta ADR-065 implicaba `requiresOCR === true`, porque solo existía el camino de página entera; con el OCR por región una página con texto nativo (`requiresOCR === false`) también puede haber pasado por OCR. `requiresOCR` conserva su significado exacto —"`pdf-engine` no extrajo texto nativo de esta página"— y no debe leerse como "esta página no vio OCR".
+- `ocrDpiCap` solo existe cuando `requiresOCR === true` y PDF Engine demostró
+  que todo el contenido pintado es un único ráster con dimensiones nativas
+  válidas (ADR-163). Es un entero positivo calculado con el eje de mayor
+  densidad; ausente significa conservar `OcrConfig.dpi`. No es el `dpi` al que
+  ya se ejecutó OCR.
 - `text` es la concatenación de `words.map(w => w.text).join(" ")` con normalización NFC.
 
 ### 4.1 `OcrRegion`
@@ -171,7 +177,7 @@ export interface BoundingBox {
 
 **Invariantes**
 - `width ≥ 0`, `height ≥ 0`.
-- Coordenadas en sistema de la página (puntos PDF). Para Canvas se convierte con escala `screenDpi / 72`.
+- **Marco de coordenadas, normativo (ADR-141 §1)**: el de la página **tal como se ve** — origen arriba-izquierda, `x` hacia la derecha, `y` hacia abajo —, no el espacio de usuario crudo de PDF (`item.transform` sin componer). Unidad: puntos PDF (1/72") a `scale: 1`; un ráster a escala *s* se obtiene multiplicando por *s*, y esa es la única conversión de escala — para Canvas, `screenDpi / 72`. Extensión: `0 ≤ x ≤ Page.width`, `0 ≤ y ≤ Page.height`, con `Page.width`/`Page.height` ya intercambiados cuando la página se presenta rotada 90°/270°. Es el mismo marco que ya usan `RenderEngine.renderPage`/`rasterizePage`, las palabras de OCR y las anotaciones de UI (`PDF_Engine.md`, ADR-141 §1 tabla de productores/consumidores) — con ADR-141, `pdf-engine` deja de ser la única excepción.
 - Para un `Word` de `source: "pdf"`, el rectángulo **cubre la tinta** de la palabra y `y + height` es su línea de base (ADR-109 §1). Para uno de `source: "ocr"` es la mancha que midió Tesseract: cubre la tinta igual, pero **ninguno de sus bordes es una línea de base** (ADR-109 §3, errata). Por eso el orden de lectura de §4 no se apoya en ningún borde, sino en el centro vertical y el agrupado en renglones (ADR-110 §1).
 
 ---
@@ -263,6 +269,10 @@ export interface EntityGroup {
   // lectura — no entra en `GroupUpdatePatch`; para volver al valor calculado
   // se re-aplica el mismo `replacementMode` (ADR-078 §3).
   readonly replacementValueUserSet: boolean;
+  // ADR-170 §1: el valor que tendría el grupo en cada modo (ver ReplacementPreviews,
+  // Contracts.md §5). Requerido. Lo calcula Grouping con la misma función que
+  // replacementValue; la UI lo muestra en el selector de modo y en "Editar reemplazo".
+  readonly replacementPreviews: ReplacementPreviews;
   readonly createdAt: number;
   readonly updatedAt: number;
 }
@@ -285,6 +295,7 @@ export type PersonGender = "f" | "m";
 | `aliases` | Variantes de valor unificadas (ej. `"J. Pérez"` y `"Juan Pérez"` en el mismo grupo). |
 | `replacementValueUserSet` | `true` si el `replacementValue` lo escribió el usuario. Es lo que hace visible en la UI (`ui/UX_Guidelines.md` §3.3) una edición manual que, de otro modo, es indistinguible de un valor calculado — el caso que **no** aplica a `personGender`, cuyo valor sí delata su procedencia, y por eso `personGenderUserSet` sigue siendo interno (ADR-078 §2). |
 | `personGender` | Solo `type === Person` (ADR-060 §2). `"f"`/`"m"` cambian el label resuelto del `placeholder` (`MUJER`/`HOMBRE` en vez de `PERSONA`); ausente = sin determinar → label neutro y marca en el árbol de entidades. Inferido de un léxico first-party (ADR-069 §6: al asignar/cambiar `canonicalValue` y en `finishSession`) o puesto por el usuario, que gana siempre. **La ausencia tiene dos orígenes que el dato público no distingue** —nunca se infirió, o el usuario eligió `"neutral"` (ADR-069 §4)— y el motor los separa con bookkeeping interno (`personGenderUserSet`, `Grouping_Engine.md` §13 caso 34) para que una re-inferencia no pise la elección. Ese flag **no** es parte de `EntityGroup` ni de ningún evento. |
+| `replacementPreviews` | ADR-170 §1: lo que valdría `replacementValue` en `placeholder`, `mask` y `synthetic` (y los niveles de la escalera de ADR-057), calculado por Grouping con la misma función e ignorando `replacementValueUserSet`. Existe para que la UI muestre valores exactos sin reimplementar la lógica del motor (P-1, U-3). No lo leen Render ni Export. |
 | `createdAt`, `updatedAt` | Epoch ms. Para UX y merge de ediciones. |
 
 **Invariantes**
@@ -295,6 +306,8 @@ export type PersonGender = "f" | "m";
 - Si `enabled === false`, `replacementValue` no se aplica pero se conserva el último valor para re-activación.
 - **Todas** las `Replacement` derivadas de un mismo grupo comparten `replacementValue` (ADR-012, re-asertado por ADR-057 §4: el nivel de abreviatura se elige por grupo con la ocurrencia más apretada y se aplica a todas — nunca por ocurrencia).
 - `personGender` solo puede estar presente si `type === EntityType.Person` (ADR-060 §2).
+- Si `replacementMode ∈ {placeholder, mask, synthetic}` y `replacementValueUserSet === false`, entonces `replacementPreviews[replacementMode] === replacementValue` (ADR-170 §1).
+- `replacementPreviews.placeholderLadder` contiene a `replacementPreviews.placeholder` y no tiene repetidos.
 
 ---
 
@@ -453,6 +466,11 @@ export interface Conflict {
   readonly candidates: ReadonlyArray<ConflictCandidate>;
   readonly resolved: boolean;
   readonly resolvedType?: EntityType;   // ADR-083 §3: el tipo con el que quedó clasificado el grupo (antes: resolvedMode)
+  // ADR-174 §1: una ocurrencia manual perdió esta superposición y quedó retenida,
+  // esperando que el usuario elija quién gana (ConflictResolveRequested.winner).
+  // ADR-175 §1, invariante: heldManual => resolved === false y hay exactamente una
+  // ocurrencia retenida. Ningún camino deja resolved: true con heldManual.
+  readonly heldManual?: true;
 }
 
 export enum ConflictReason {
@@ -473,7 +491,8 @@ export interface ConflictCandidate {
 **Invariantes**
 - `candidates.length ≥ 2`.
 - Si `resolved === true`, `resolvedType` es obligatorio (ADR-083 §3).
-- Un conflicto bloquea el export hasta ser resuelto o ignorado explícitamente.
+- Un conflicto sin resolver bloquea el export hasta ser resuelto, en la UI y en el Core (ADR-176 §1). La redacción anterior decía "o ignorado explícitamente": no existe mecanismo para ignorar un conflicto, y se retira.
+- Todo conflicto sin resolver apunta a un grupo que existe: la fusión y la división lo reapuntan (ADR-176 §2).
 
 ---
 
@@ -546,6 +565,7 @@ export interface WorkerJob {
 export type WorkerJobType =
   | "pdf-parse"
   | "ocr-page"
+  | "ocr-orient" // ADR-164: servicio de orientación serial separado
   | "ner-page"
   | "render-page"
   | "export-page";
@@ -554,9 +574,13 @@ export type WorkerJobType =
 Payloads concretos por job (forma exacta de `shared/src/types.ts`; `05_Worker_Architecture.md` §2.1 los tipa `unknown` a nivel de transporte y cada worker los afina a estos — ADR-019; documentados acá por P-10, ADR-034 §7):
 
 ```ts
+// ADR-164 §2.1-§2.2 (errata sincronizada el 2026-09-30, ronda E B01-F01):
+// el job `ocr-orient` existía en `WorkerJobType` con su payload exportado, pero
+// la unión no lo admitía. Declaración canónica en `core/Contracts.md` §7.2.
 export type WorkerJobPayload =
   | PdfParsePayload
   | OcrPagePayload
+  | OcrOrientationPayload
   | NerPagePayload
   | RenderPagePayload
   | ExportPagePayload;
@@ -571,10 +595,18 @@ export interface PdfParsePayload {
 export interface OcrPagePayload {
   readonly documentId: string;
   readonly pageIndex: number;
-  // Errata corregida (ADR-036 §4): era ArrayBuffer, que no transporta
-  // width/height y el OcrWorker no puede reconstruir la imagen. Coincide con
-  // OcrPageInput del motor. Transferencia: postMessage(msg, [imageData.data.buffer]).
-  readonly imageData: ImageData;
+  // ADR-158 §2: imagen CODIFICADA (PNG), no píxeles crudos. Declaración
+  // canónica en `core/Contracts.md` §7.1. Se CLONA, no se transfiere: el
+  // reintento del pool reusa el buffer (ADR-079).
+  //
+  // Antes era `imageData: ImageData`, transferida — y antes de eso un
+  // `ArrayBuffer` pelado, que no transportaba width/height (errata de
+  // ADR-036 §4). El consumidor final, tesseract.js, no acepta píxeles en
+  // ningún formato: su `loadImage` convierte toda entrada a bytes de imagen
+  // codificada, así que mandarlos crudos obligaba a reconstruir un canvas del
+  // otro lado y a encodear igual.
+  readonly image: EncodedPageImage;
+  readonly orientation: OcrOrientation; // ADR-164 §2.2: requerido; validado, nunca inferido por LSTM
   readonly dpi: number;
   readonly languages: ReadonlyArray<string>;
 }
@@ -777,6 +809,10 @@ export interface ExportOptions {
   // que ADR-057 pudo abreviar. Default false: sin el flag, el export no cambia en
   // nada. Con el flag, el PDF tiene document.pageCount + 1 páginas.
   readonly includeMarkerLegend: boolean;    // default false
+  // ADR-190 §5: páginas que se exportan enteramente negras, con sus mismas
+  // dimensiones, sin pedir su render. Fuera de rango → InvalidInputError;
+  // duplicados se ignoran; ausente o vacío → export idéntico al previo.
+  readonly coveredPages?: ReadonlyArray<number>;
 }
 
 export interface ExportMetadata {

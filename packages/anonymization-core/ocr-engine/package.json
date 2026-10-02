@@ -18,6 +18,10 @@
     "./worker": {
       "types": "./src/worker/entry.ts",
       "import": "./src/worker/entry.ts"
+    },
+    "./orientation-worker": {
+      "types": "./src/worker/orientation-entry.ts",
+      "import": "./src/worker/orientation-entry.ts"
     }
   },
   "publishConfig": {
@@ -32,6 +36,10 @@
       "./worker": {
         "types": "./dist/worker/entry.d.ts",
         "import": "./dist/worker/entry.js"
+      },
+      "./orientation-worker": {
+        "types": "./dist/worker/orientation-entry.d.ts",
+        "import": "./dist/worker/orientation-entry.js"
       }
     }
   },

@@ -143,10 +143,22 @@ describe("GroupingEngine — snapshot", () => {
     expect(snapshot.groups.length).toBeGreaterThan(0);
 
     // `id` (grupo) es un UUID v4 aleatorio: se excluye del snapshot, mismo
-    // criterio que regex-engine/ner-engine con `occurrence.id`.
+    // criterio que regex-engine/ner-engine con `occurrence.id`. ADR-170 §1:
+    // `replacementPreviews.synthetic` hereda esa misma aleatoriedad —
+    // `synthesize()` siembra con `(group.id, session.seed)` y los dos son
+    // `crypto.randomUUID()` (ADR-072 §1) — así que se excluye por el mismo
+    // motivo; el resto de `replacementPreviews` (`placeholder`/`mask`/
+    // `placeholderLadder`) sí es determinista y se snapshotea.
     const groups = [...snapshot.groups]
       .sort((a, b) => a.type.localeCompare(b.type) || a.indexInType - b.indexInType)
-      .map(({ id: _id, ...rest }) => rest);
+      .map(({ id: _id, replacementPreviews, ...rest }) => ({
+        ...rest,
+        replacementPreviews: {
+          placeholder: replacementPreviews.placeholder,
+          mask: replacementPreviews.mask,
+          placeholderLadder: replacementPreviews.placeholderLadder,
+        },
+      }));
 
     expect({
       groupCount: snapshot.groups.length,

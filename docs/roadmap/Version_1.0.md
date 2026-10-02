@@ -49,7 +49,7 @@ Producto pulido para uso profesional diario. Mejor calidad de detección, mejor 
 ### 2.5 Performance
 
 - **WebGPU para NER** cuando esté disponible.
-- **SharedArrayBuffer para NER** (requiere COOP/COEP headers; ADR específico).
+- ~~**SharedArrayBuffer para NER**~~ — **hecho en el producto de escritorio**: ONNX Runtime carga su variante WASM multihilo bajo `crossOriginIsolated` (ADR-100/130/132). Es independiente de tener más de un worker NER.
 - **Cache más agresiva**: snapshots de `EntityGroup[]` por `documentId` en sesión para reabrir rápido.
 - **Bundle inicial < 600 KB gz** (optimización de deps).
 
@@ -80,7 +80,8 @@ Lo que la PWA prometía lo cubre el instalador, mejor: los assets viajan adentro
 |---|---|
 | PDF 10p texto | < 5 s |
 | PDF 10p escaneado | < 40 s |
-| Pico memoria 50p | < 320 MB |
+| Pico memoria 50p (M1, ADR-146) | < 320 MB |
+| Pico total (M2, ADR-192) | bajar los techos del MVP (P1 2,0 GB, P2 3,0 GB) y revisar el equipo mínimo de 8 GB, para soportar equipos más chicos. El número se fija con mediciones, en el ADR que lo decida |
 | Bundle inicial | < 600 KB gz |
 | Recall NER | ≥ 88% |
 | Precision NER | ≥ 92% |

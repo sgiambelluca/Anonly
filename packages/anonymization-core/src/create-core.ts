@@ -133,6 +133,25 @@ export async function createCore(
     ...(runtime?.workers?.ocr !== undefined ? { workerFactory: runtime.workers.ocr } : {}),
   });
 
+  const orientationPool = new WorkerPool({
+    poolKey: "ocr-orientation",
+    jobType: "ocr-orient",
+    size: 1,
+    maxQueue: mergedConfig.workerPool.maxQueuePerPool.ocr,
+    // O-7: leer del config, como los demás pools — antes era un literal que
+    // dejaba muerto cualquier override de `maxRetries["ocr-orient"]`. El
+    // default sigue siendo 0 (Contracts.md §6, config.ts).
+    maxRetries: mergedConfig.workerPool.maxRetries["ocr-orient"],
+    baseRetryDelayMs: mergedConfig.workerPool.baseRetryDelayMs,
+    maxRetryDelayMs: mergedConfig.workerPool.maxRetryDelayMs,
+    idleDisposeMs: mergedConfig.workerPool.idleDisposeMs,
+    bus,
+    logger,
+    ...(runtime?.workers?.["ocr-orientation"] !== undefined
+      ? { workerFactory: runtime.workers["ocr-orientation"] }
+      : {}),
+  });
+
   // ADR-046 §2/§7: tercer espejo de renderPool/ocrPool, sin onWorkerCreated
   // (sin estado por documento que re-primear, ADR-041 §5/§9).
   const nerPool = new WorkerPool({
@@ -143,11 +162,10 @@ export async function createCore(
     maxRetries: mergedConfig.workerPool.maxRetries["ner-page"],
     baseRetryDelayMs: mergedConfig.workerPool.baseRetryDelayMs,
     maxRetryDelayMs: mergedConfig.workerPool.maxRetryDelayMs,
-    // ADR-080: los cuatro pools que construye este archivo salieron de
-    // `WorkerPoolManager` (ADR-043/045/046/047) y con eso perdieron el
-    // idle-dispose de `05_Worker_Architecture.md` §8 — retenían sus workers
-    // (incluidos los ~178 MB del modelo NER) hasta cerrar la pestaña.
-    idleDisposeMs: mergedConfig.workerPool.idleDisposeMs,
+    // ADR-167 §2: temporizador propio, no el `idleDisposeMs` compartido —
+    // 15 s default en vez de 60 s, para no trasladarle al documento
+    // siguiente el costo de recarga que ADR-166 medía.
+    idleDisposeMs: mergedConfig.workerPool.nerIdleDisposeMs,
     bus,
     logger,
     ...(runtime?.workers?.ner !== undefined ? { workerFactory: runtime.workers.ner } : {}),
@@ -185,7 +203,7 @@ export async function createCore(
 
   const engines: AnonymizationCoreEngines = {
     pdf: new PdfEngine(),
-    ocr: new OcrEngine(ocrPool),
+    ocr: new OcrEngine(ocrPool, orientationPool),
     regex: new RegexEngine(),
     ner: new NerEngine(nerPool),
     grouping: new GroupingEngine(),
@@ -235,6 +253,7 @@ export async function createCore(
       initAbortController.abort();
       renderPool.dispose();
       ocrPool.dispose();
+      orientationPool.dispose();
       nerPool.dispose();
       exportPool.dispose();
       await orchestrator.dispose();

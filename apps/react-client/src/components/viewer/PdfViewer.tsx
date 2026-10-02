@@ -12,8 +12,8 @@
  *   `PageVirtualizer` ya monta con contenido real, incluyendo el buffer que
  *   existe para evitar pop-in al scrollear (`07_Performance_Strategy.md` §3).
  * - Cambio de `zoom` → el escalado CSS/canvas es inmediato porque
- *   `PageCanvas`/`PageVirtualizer` leen `zoom` reactivamente vía `pageSize`
- *   (`pageLayout.ts`); el re-render real se dispara **debounced**
+ *   `PageCanvas`/`PageVirtualizer` leen `zoom` reactivamente vía la geometría de
+ *   filas (`pageLayout.ts`, `pageSlots.ts`); el re-render real se dispara **debounced**
  *   (`ZOOM_RERENDER_DEBOUNCE_MS`, `zoomRenderScheduler.ts`) con
  *   `scale = previewScale × zoom` (`zoomRenderScale.ts`).
  * - Los tres emisores (render inicial al observar `Ready`, cambio de rango
@@ -39,21 +39,30 @@
  */
 
 import type { TextMatch } from "@anonly/anonymization-core";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { actions } from "../../core-adapter/actions.js";
 import { useDocumentStore } from "../../store/document.store.js";
 import { usePipelineStore } from "../../store/pipeline.store.js";
+import { useUnreadableInkStore } from "../../store/unreadableInk.store.js";
 import { useViewerStore, type ViewerKind } from "../../store/viewer.store.js";
 
-import { DocumentSearchBox } from "./DocumentSearchBox.js";
 import { PageCanvas } from "./PageCanvas.js";
 import { computePageHeight, computePageWidth } from "./pageLayout.js";
+import { computePageSlots } from "./pageSlots.js";
 import { PageVirtualizer } from "./PageVirtualizer.js";
 import { PREVIEW_RETRY_INTERVAL_MS, pagesMissingPreview } from "./previewRetry.js";
 import { shouldTriggerReadyRender } from "./readyRenderTrigger.js";
+import { createScrollRequestMerger } from "./scrollRequestMerge.js";
+import { UnreadablePageStrip } from "./UnreadablePageStrip.js";
+import {
+  describePageSeparator,
+  PAGE_SEPARATOR_PX,
+  pageStride,
+  zoomFromWheel,
+} from "./viewerGestures.js";
 import { computeMountRange, rangeToPageIndices, type VisibleRange } from "./visibleRange.js";
-import { WordSelectionOverlay } from "./WordSelectionOverlay.js";
+import { WordSelectionOverlay, type PageSelection } from "./WordSelectionOverlay.js";
 import { isOriginalPanel } from "./wordSelectionRect.js";
 import { computeZoomRenderScale } from "./zoomRenderScale.js";
 import { createZoomRenderScheduler } from "./zoomRenderScheduler.js";
@@ -63,7 +72,18 @@ const KIND_LABEL: Readonly<Record<ViewerKind, string>> = {
   anonymized: "Documento anonimizado",
 };
 
-export function PdfViewer() {
+export interface PdfViewerProps {
+  /**
+   * El resultado activo de la lupa (`DocumentSearchBox`), que ahora vive en la
+   * barra del visor y no adentro de este componente (ADR-169 §7): el visor
+   * scrollea a su página y lo resalta.
+   */
+  readonly activeMatch: TextMatch | null;
+  /** Fuerza el salto aunque dos resultados caigan en la misma página. */
+  readonly scrollNonce: number;
+}
+
+export function PdfViewer({ activeMatch, scrollNonce }: PdfViewerProps) {
   // `kind` sale del toggle (ADR-087 §2), no de una prop: hay un solo visor.
   const kind = useViewerStore((state) => state.mode);
   const documentId = useDocumentStore((state) => state.id);
@@ -77,8 +97,24 @@ export function PdfViewer() {
   const previewByPage = useViewerStore((state) => state.previewByPage[kind]);
   const failedPages = useViewerStore((state) => state.failedPages);
 
+  // ADR-190 §4: las páginas marcadas `unreadableInk` reservan una franja de
+  // aviso arriba de su imagen, así que las filas del visor dejan de medir lo
+  // mismo (`pageSlots.ts`). Solo depende de la marca — no de las entidades —,
+  // que cambia con un `reanalyze` de OCR o un documento nuevo.
+  const unreadablePages = useUnreadableInkStore((state) => state.pages);
+
   const pageHeight = computePageHeight(zoom);
   const pageWidth = computePageWidth(pageHeight);
+  const slots = useMemo(
+    () =>
+      computePageSlots({
+        pageCount,
+        // El paso incluye el separador de arriba de cada página (ADR-169 §9).
+        baseHeight: pageStride(pageHeight),
+        stripPages: unreadablePages,
+      }),
+    [pageCount, pageHeight, unreadablePages],
+  );
 
   const mountRange = useMemo(
     () => computeMountRange(visibleRange, pageCount),
@@ -193,104 +229,162 @@ export function PdfViewer() {
     useViewerStore.getState().setPage(pageIndex);
   }
 
-  // DocumentSearchBox (ui/Components.md §5.4c, ADR-061 §8): estado local del
-  // match activo de la lupa. Solo tiene sentido en `original` — el buscador
-  // no se monta en `anonymized` — pero vive acá (no en `viewer.store`) porque
-  // es efímero y de un solo panel, sin nada que otro componente necesite leer.
-  const [activeMatch, setActiveMatch] = useState<TextMatch | null>(null);
-  const scrollNonceRef = useRef(0);
+  // ADR-169 §7: la selección sobre el original persiste hasta que se agrega,
+  // se cancela, se hace otra, se presiona Escape, se conmuta a Anonimizado o
+  // se cierra el documento. Vive acá —y no en cada página— para que haya una
+  // sola en todo el documento y sobreviva a que su página salga del rango
+  // montado.
+  const [selection, setSelection] = useState<PageSelection | null>(null);
+  const clearSelection = useCallback(() => setSelection(null), []);
+  useEffect(() => {
+    setSelection(null);
+  }, [kind, documentId]);
 
-  function handleActiveMatchChange(match: TextMatch | null): void {
-    setActiveMatch(match);
-    if (match) scrollNonceRef.current += 1;
-  }
+  // ADR-169 §9: pellizco del trackpad y `Ctrl + rueda`. React registra
+  // `onWheel` como pasivo, así que `preventDefault()` no frenaría el zoom de
+  // la ventana entera: va por `addEventListener` con `{ passive: false }`.
+  const viewportRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const node = viewportRef.current;
+    if (!node) return;
+    function handleWheel(event: WheelEvent): void {
+      if (!event.ctrlKey) return;
+      event.preventDefault();
+      const state = useViewerStore.getState();
+      state.setZoom(zoomFromWheel(state.zoom, event.deltaY));
+    }
+    node.addEventListener("wheel", handleWheel, { passive: false });
+    return () => node.removeEventListener("wheel", handleWheel);
+  }, []);
 
-  const scrollRequest =
-    activeMatch === null
-      ? null
-      : { pageIndex: activeMatch.pageIndex, nonce: scrollNonceRef.current };
+  // ADR-190 §4: "Ir a la página" de la confirmación de `ExportDialog` pide un
+  // salto sin pasar por la lupa — `ExportDialog` no es descendiente de este
+  // componente (vive bajo `Toolbar`, no bajo `RightPanel`), así que el pedido
+  // viaja por `viewer.store.pageJumpRequest` en vez de una prop. Los dos
+  // nonces (el de la lupa y el del store) son contadores independientes: se
+  // fusionan localmente en `mergedScrollRequest`, con nonce propio, así que
+  // "cuál llegó después" siempre está bien definido sin comparar dominios
+  // distintos entre sí.
+  const pageJumpRequest = useViewerStore((state) => state.pageJumpRequest);
+  const [mergedScrollRequest, setMergedScrollRequest] = useState<{
+    pageIndex: number;
+    nonce: number;
+  } | null>(null);
+  const scrollMergerRef = useRef(createScrollRequestMerger());
+
+  useEffect(() => {
+    if (activeMatch === null) return;
+    setMergedScrollRequest(scrollMergerRef.current.next(activeMatch.pageIndex));
+    // `scrollNonce` fuerza el salto aunque dos resultados de la lupa caigan en
+    // la misma página — sin él en las deps, un segundo click sobre el mismo
+    // resultado no dispararía este efecto.
+  }, [activeMatch, scrollNonce]);
+
+  // El pedido se **consume**: el store lo suelta apenas este efecto lo toma, así
+  // que un `PdfViewer` que se desmonta y vuelve a montarse con un pedido viejo
+  // todavía en el store no repite el salto. `consumePageJump` devuelve `null`
+  // si otro efecto ya lo tomó (p. ej. la segunda pasada de StrictMode).
+  useEffect(() => {
+    if (pageJumpRequest === null) return;
+    const request = useViewerStore.getState().consumePageJump();
+    if (request === null) return;
+    setMergedScrollRequest(scrollMergerRef.current.next(request.pageIndex));
+  }, [pageJumpRequest]);
+
+  const scrollRequest = mergedScrollRequest;
 
   return (
     <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-      {/*
-        El rótulo del lado lo dice ahora el `ViewerModeToggle` (ADR-087 §2), así
-        que esta barra solo existe cuando hay buscador — o sea, en `original`.
-        Repetir "Documento original" al lado del toggle que ya dice "Original"
-        sería decir lo mismo dos veces en la misma línea.
-      */}
-      {isOriginalPanel(kind) ? (
-        <div className="flex h-9 shrink-0 items-center justify-end gap-2 border-b border-border bg-bg-secondary px-3">
-          <DocumentSearchBox onActiveMatchChange={handleActiveMatchChange} />
-        </div>
-      ) : null}
-      <div className="flex-1 overflow-hidden" aria-label={KIND_LABEL[kind]}>
+      <div ref={viewportRef} className="flex-1 overflow-hidden" aria-label={KIND_LABEL[kind]}>
         <PageVirtualizer
           pageCount={pageCount}
           visibleRange={visibleRange}
-          pageSize={pageHeight}
+          // Geometría de filas: paso base (página + separador, ADR-169 §9) más
+          // la franja de aviso en las páginas `unreadableInk` (ADR-190 §4).
+          slots={slots}
           pageWidth={pageWidth}
           onVisibleRangeChange={handleVisibleRangeChange}
           onCurrentPageIndexChange={handleCurrentPageIndexChange}
           scrollRequest={scrollRequest}
           renderItem={(pageIndex) => {
-            // `exactOptionalPropertyTypes` (Code_Standards.md §2) distingue
-            // "prop ausente" de "prop presente con valor undefined": no se
-            // puede pasar `blobUrl={maybeUndefined}` directo a un `blobUrl?:
-            // string`. `previewByPage.get(pageIndex)` puede dar `string | undefined`.
+            // `exactOptionalPropertyTypes`: no se puede pasar `blobUrl` en
+            // `undefined` explícito a un `blobUrl?: string`.
             const blobUrl = previewByPage.get(pageIndex);
             const activeMatchBbox =
               activeMatch && activeMatch.pageIndex === pageIndex ? activeMatch.bbox : undefined;
             return (
-              // Ancho/alto explícitos en vez de `w-full h-full`: `PagePhantom`
-              // (`PageVirtualizer.tsx`) es `absolute inset-x-0` — su ancho es
-              // el del panel entero, no `pageWidth`. Con `w-full` este wrapper
-              // heredaba ese ancho y estiraba `PageCanvas`/`WordSelectionOverlay`
-              // al ancho del panel, mientras `wordSelectionRect.ts` seguía
-              // asumiendo `displayWidth = pageWidth` (`ui/Components.md`
-              // §5.4b): la selección sobre el original traducía coordenadas de
-              // pantalla a página con una escala equivocada (bug encontrado en
-              // verificación manual post-aprobación del Hito 10.7, ADR-061).
-              // Con tamaño fijo, `PagePhantom` centra este wrapper (ya tenía
-              // `flex items-center justify-center`, sin uso hasta ahora) en
-              // exactamente `pageWidth × pageHeight` — el tamaño que
-              // `PageCanvas`/`WordSelectionOverlay` (`h-full w-full` de ESTE
-              // wrapper) y `pointerSelectionToPageRect`/`pageRectToScreenRect`
-              // ya asumían.
-              //
-              // `shrink-0` es necesario y no cosmético: `PagePhantom` es un
-              // contenedor flex, y un hijo con `width` fija pero sin
-              // `flex-shrink: 0` sigue con el `flex-shrink: 1` por defecto —
-              // si `pageWidth` (crece con `zoom`) supera el ancho real del
-              // panel (constante, no depende del zoom), el motor de flexbox
-              // encoge el wrapper para que entre, y el tamaño renderizado
-              // vuelve a divergir de `pageWidth` exactamente como antes de
-              // este fix (confirmado con el mismo harness aislado: sin
-              // `shrink-0`, un wrapper de 509px en un panel de 500px
-              // renderiza a 500px real). Con `shrink-0` el wrapper mantiene
-              // su tamaño real aunque desborde — el contenedor scrollea
-              // horizontal en vez de mentir sobre su tamaño.
-              <div className="relative shrink-0" style={{ width: pageWidth, height: pageHeight }}>
-                <PageCanvas
-                  pageIndex={pageIndex}
-                  kind={kind}
-                  {...(blobUrl !== undefined ? { blobUrl } : {})}
-                  width={pageWidth}
-                  height={pageHeight}
-                  failed={failedPages.has(pageIndex)}
-                />
-                {isOriginalPanel(kind) ? (
-                  <WordSelectionOverlay
-                    pageIndex={pageIndex}
-                    displayWidth={pageWidth}
-                    displayHeight={pageHeight}
-                    {...(activeMatchBbox !== undefined ? { activeMatchBbox } : {})}
-                  />
+              <div className="flex shrink-0 flex-col items-center" style={{ width: pageWidth }}>
+                <PageSeparator pageIndex={pageIndex} pageCount={pageCount} />
+                {/*
+                  ADR-190 §4: franja fija justo arriba de la imagen, fuera de
+                  ella, en toda página `unreadableInk` (su alto ya está en
+                  `slots`). El texto aparece y desaparece dentro de la franja.
+                */}
+                {unreadablePages.has(pageIndex) ? (
+                  <UnreadablePageStrip pageIndex={pageIndex} width={pageWidth} />
                 ) : null}
+                {/*
+                  Ancho/alto explícitos y `shrink-0`: `WordSelectionOverlay` y
+                  `wordSelectionRect.ts` asumen que la página mide exactamente
+                  `pageWidth × pageHeight` — con `w-full` heredaba el ancho del
+                  panel y la selección traducía coordenadas con otra escala
+                  (Hito 10.7, ADR-061).
+                */}
+                <div
+                  className="relative shrink-0 bg-bg-tertiary"
+                  style={{ width: pageWidth, height: pageHeight }}
+                >
+                  <PageCanvas
+                    pageIndex={pageIndex}
+                    kind={kind}
+                    {...(blobUrl !== undefined ? { blobUrl } : {})}
+                    width={pageWidth}
+                    height={pageHeight}
+                    failed={failedPages.has(pageIndex)}
+                  />
+                  {isOriginalPanel(kind) ? (
+                    <WordSelectionOverlay
+                      pageIndex={pageIndex}
+                      displayWidth={pageWidth}
+                      displayHeight={pageHeight}
+                      {...(activeMatchBbox !== undefined ? { activeMatchBbox } : {})}
+                      selection={selection?.pageIndex === pageIndex ? selection : null}
+                      onSelect={setSelection}
+                      onClearSelection={clearSelection}
+                    />
+                  ) : null}
+                </div>
               </div>
             );
           }}
         />
       </div>
+    </div>
+  );
+}
+
+/**
+ * ADR-169 §9: el paso de una página a otra se nota — un espacio con una línea
+ * punteada y *"Página N de M"* centrada. Va arriba de cada página.
+ */
+function PageSeparator({
+  pageIndex,
+  pageCount,
+}: {
+  readonly pageIndex: number;
+  readonly pageCount: number;
+}) {
+  const label = describePageSeparator(pageIndex, pageCount);
+  return (
+    <div
+      role="separator"
+      aria-label={label}
+      className="flex w-full shrink-0 items-center gap-3 text-sm font-semibold text-text-secondary"
+      style={{ height: PAGE_SEPARATOR_PX }}
+    >
+      <i aria-hidden className="h-0 flex-1 border-t-2 border-dashed border-border" />
+      <span className="rounded-full border border-border bg-bg-primary px-2.5 py-0.5">{label}</span>
+      <i aria-hidden className="h-0 flex-1 border-t-2 border-dashed border-border" />
     </div>
   );
 }

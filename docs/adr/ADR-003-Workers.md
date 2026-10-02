@@ -6,6 +6,8 @@
 - **Fecha**: 2026-06-17
 - **Decidido por**: Planificación inicial
 
+> **Estado posterior**: la alternativa de WebAssembly multihilo para NER que figura abajo dejó de ser futura: ADR-100 declaró los headers para la variante web y ADR-130/132 fijaron y verificaron el aislamiento en el contenedor de escritorio. Los hilos internos de ONNX Runtime y los workers del `NerPool` son niveles de paralelismo distintos. La tabla se conserva como registro de la decisión de 2026-06-17.
+
 ## Contexto
 
 PDF parsing, OCR (Tesseract) y NER (ONNX) son CPU-intensivos y de alta memoria. Correrlos en el main thread del navegador:

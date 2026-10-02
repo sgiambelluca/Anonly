@@ -311,4 +311,35 @@ describe("ExportEngine — edge cases", () => {
       );
     });
   });
+
+  // ADR-190 §5.
+  it("coveredPages with an out-of-range index throws InvalidInputError", async () => {
+    await engine.init(ctx);
+    const document = createDocumentWithPageCount(2);
+
+    await expect(
+      engine.export(
+        createExportEngineInput({
+          document,
+          options: createExportOptions({ coveredPages: [2] }), // pageCount=2 -> [0,1]
+        }),
+        ctx,
+      ),
+    ).rejects.toThrow(InvalidInputError);
+  });
+
+  it("coveredPages with a non-integer index throws InvalidInputError", async () => {
+    await engine.init(ctx);
+    const document = createDocumentWithPageCount(2);
+
+    await expect(
+      engine.export(
+        createExportEngineInput({
+          document,
+          options: createExportOptions({ coveredPages: [0.5] }),
+        }),
+        ctx,
+      ),
+    ).rejects.toThrow(InvalidInputError);
+  });
 });

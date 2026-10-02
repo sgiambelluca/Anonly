@@ -1123,3 +1123,21 @@ Después de ADR-126 no hay un solo camino de la app que escriba `settings.store.
 3. **Subir la versión de pnpm** a una que use el endpoint moderno. Es el cambio de mayor alcance (formato de lockfile, CI, hooks) y el menos verificable sin probarlo.
 
 **No bloquea** ningún merge hoy, y esa es exactamente la razón por la que conviene no dejarlo dormido: un gate que no dice nada no se nota.
+
+---
+
+## 32. En un documento mixto, el contador de páginas del OCR salta (2026-09-09)
+
+**Procedencia**: el humano, al revisar ADR-152 (el progreso por etapa de la pantalla de escaneo). Descartó la primera redacción —que mostraba el tamaño del trabajo de OCR como total, "página 3 de 8" sobre un documento de 20— con un argumento de producto que no estaba en el ADR: **un usuario que ve un total que no reconoce piensa que cargó el archivo equivocado y cancela el procesamiento**, justo cuando la aplicación está funcionando bien.
+
+ADR-152 §2 resuelve eso con una regla dura: el total mostrado es **siempre** `document.store.pageCount`, y en `OCRing` el número de página deja de ser "cuántas se leyeron" y pasa a ser **cuál se está leyendo**, numerada sobre el documento entero. La barra sigue usando la fracción real del trabajo de OCR, que nunca se muestra como número.
+
+**Lo que queda por validar**: con esa regla, en un documento **mixto** los números de página **saltan**. En un PDF de 20 páginas donde solo la 3, la 12 y la 15 son escaneadas, el texto pasa de "página 3 de 20" a "página 12 de 20" sin las del medio. Cada afirmación es cierta y el total es el que el usuario reconoce, pero **nadie lo probó con usuarios**.
+
+La hipótesis con la que se decidió —y es una hipótesis, no una medición— es que el salto molesta mucho menos que un total equivocado: nadie cuenta las páginas que ya pasaron, todo el mundo mira el total y lo compara con su documento.
+
+En un documento **enteramente escaneado**, que es el caso frecuente, no hay salto: cuenta 1, 2, 3… de 20.
+
+**Cómo probarlo, cuando haya otra ronda de usuarios**: un PDF mixto con las páginas escaneadas separadas entre sí (no consecutivas), mirando a alguien usarlo sin avisarle de qué se trata. La pregunta a contestar es si el salto genera desconfianza o pasa inadvertido. Si genera desconfianza, las salidas —en orden de menor a mayor cambio— son: dejar de nombrar la página durante el OCR y mostrar solo la barra con un texto sin número; o unificar las dos etapas en una sola barra global que nunca retroceda, con el texto cambiando pero el número siempre creciendo.
+
+**No bloquea nada**: es una validación de producto sobre una decisión ya tomada y documentada, no un defecto conocido.

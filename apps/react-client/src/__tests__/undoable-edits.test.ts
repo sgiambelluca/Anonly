@@ -21,11 +21,11 @@ describe("groupsToToggle", () => {
 
   it("excluye los que ya estaban en el estado pedido", () => {
     // Incluirlos inflaría el contador del toast ("12 grupos" cuando el usuario
-    // cambió 3) y haría que el undo emitiera escrituras que no deshacen nada.
+    // cambió 3) y emitiría escrituras que no cambian nada.
     expect(groupsToToggle([{ id: "a", enabled: false }], false)).toEqual([]);
   });
 
-  it("sin cambios no hay nada que deshacer", () => {
+  it("sin cambios no hay edición (ni entrada en la pila)", () => {
     expect(
       groupsToToggle(
         [
@@ -37,9 +37,8 @@ describe("groupsToToggle", () => {
     ).toEqual([]);
   });
 
-  it("el snapshot conserva el valor por grupo, no uno global", () => {
-    // En una cascada la mitad de las filas podía estar ya en ese estado; el
-    // undo tiene que devolver a cada una lo suyo.
+  it("en una cascada cuenta por grupo, no un estado global", () => {
+    // En una cascada la mitad de las filas podía estar ya en ese estado.
     expect(
       groupsToToggle(
         [

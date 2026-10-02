@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=componentes-ui | dependencias=ui/React_Client.md,ui/UX_Guidelines.md,ADR-001-Framework.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-054-Scroll-Independiente-Por-Panel.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-056-RenderRequested-Kind-Por-Panel.md,adr/ADR-069-Lexico-De-Genero-Fuente-Unica-Y-Canal-Del-Usuario.md,adr/ADR-071-El-Genero-Se-Muestra-Solo-Donde-Se-Usa.md,adr/ADR-089-Buscar-No-Es-Agregar.md,adr/ADR-114-La-Seleccion-Del-Mouse-Es-De-Un-Renglon.md | audiencia=IA-implementador-ui | fase=4 (reconciliado en fase 10 por ADR-036: PasswordDialog/SettingsDialog/ConfirmDialog agregados §2.6–2.7/§8.9, zoom §5.2, mapeo §12; §2.6/§5.2/§5.5/§12 reescritos por ADR-037 —zoom con re-render real— y ADR-038 —SettingsDialog dispara reanalyze, no recreación del core—; §2.1/§2.5/§13.9 ajustados 2026-07-22 por el bug #7 del Escenario 1 E2E: gate de visibilidad por stage vs. vida del diálogo hijo abierto; §5.2/§5.4 en fase 11 por ADR-056 —requestRender con kind por panel, canvas que no se borra—; §3.3/§3.4/§7.1/§12 en fase 10.5 por ADR-058 —marca de reemplazo degradado— y ADR-059 —checkbox de leyenda—; §3.3 por ADR-062 —el canal `PREVIEW_UPDATED.degraded` del que sale esa marca, y las tres reglas de su consumo; el checkbox de leyenda entra en el Hito 10.5 y la marca queda para después—; §3.3/§3.4b/§12 en fase 10.6 por ADR-060 —PersonGenderSelect y marca de género sin determinar— y ADR-069 —§3.4b actualizado: el patch usa `PersonGenderChoice`, "sin determinar" viaja como `"neutral"` explícito—; §3.3/§3.4b/§8.3/§12 reescritos en fase 10.6 por ADR-071 —`PersonGenderSelect` pasa a ser `PersonGenderToggle`: visible solo en `placeholder`/`synthetic`, botón cíclico de tres estados con SVG propios, la marca de "sin determinar" fusionada con el estado neutro, y `Select` sin apertura controlada—; §3.4c/§5.4b/§5.4c/§12 en fase 10.7 por ADR-061 —agregado manual, hit-test de selección y buscador—; §1/§2.6 en fase 10.6 por ADR-070 —sección "Acerca de" con la atribución CC-BY dentro del SettingsDialog, y `thirdPartyCredits.ts` como módulo de datos—; post-Hito 10.10: §3.3 por ADR-086 —la marca de degradado se enciende cuando el texto queda más angosto que `DEGRADED_FONT_RATIO` de su ancho natural, criterio y valor nuevos—); §1/§2/§3/§4/§5/§7 reescritos en el rediseño post-10.9 por **ADR-087** —tres momentos en vez de cuatro paneles: `SideBySideViewer`/`ScrollSyncToggle` y los cuatro componentes de `rules/` se retiran, aparecen `LoadScreen`/`ScanScreen`/`ViewerModeToggle`/`DocumentModeSelect`/`TypeModeSelect`, y `ExportDialog` queda con un solo control—; §5.4c en fase 11 por **ADR-089** —la lupa afloja el último sub-token por prefijo y "Agregar como…" no, porque barre el documento entero—; §5.4b en fase 11 por **ADR-114** —la selección del arrastre se recorta a un renglón y el resultado de `addManualEntity` se muestra—; §3.3/§3.4d en fase 11 por **ADR-094** —`NeedsReviewBadge`: el detector sugiere lo que duda, apagado y marcado, y la fila sugerida no se atenúa— -->
+<!-- CONTEXT: scope=componentes-ui | dependencias=ui/React_Client.md,ui/UX_Guidelines.md,ADR-001-Framework.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-054-Scroll-Independiente-Por-Panel.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-056-RenderRequested-Kind-Por-Panel.md,adr/ADR-150-La-Pantalla-De-Escaneo-Dura-Lo-Que-Dura-El-Escaneo.md,adr/ADR-151-La-Primera-Pagina-Ya-Esta-Dibujada-Cuando-Se-Abre-El-Panel.md,adr/ADR-152-La-Pantalla-De-Escaneo-Dice-En-Que-Pagina-Va.md,adr/ADR-069-Lexico-De-Genero-Fuente-Unica-Y-Canal-Del-Usuario.md,adr/ADR-071-El-Genero-Se-Muestra-Solo-Donde-Se-Usa.md,adr/ADR-089-Buscar-No-Es-Agregar.md,adr/ADR-114-La-Seleccion-Del-Mouse-Es-De-Un-Renglon.md,adr/ADR-168-Pantallas-De-Carga-Y-Escaneo-Tras-Pruebas-De-Usuario.md,adr/ADR-169-La-Pantalla-De-Trabajo-Tras-Pruebas-De-Usuario.md,adr/ADR-170-Las-Vistas-Previas-De-Edicion-Las-Calcula-El-Core.md,adr/ADR-171-El-Usuario-Puede-Eliminar-Una-Entidad.md,adr/ADR-172-Deshacer-Y-Rehacer-Exactos.md,adr/ADR-174-Un-Agregado-Manual-Que-Choca-Se-Resuelve-En-El-Momento.md,adr/ADR-175-Un-Choque-Manual-No-Queda-Colgado.md,adr/ADR-176-Un-Choque-Pendiente-Bloquea-El-Export.md,adr/ADR-177-Una-Entidad-Eliminada-No-Ocupa-Lugar.md,adr/ADR-178-Lo-Contenido-Se-Oculta-Solo-Si-Su-Contenedor-Se-Elimina.md | audiencia=IA-implementador-ui | fase=4 (reconciliado en fase 10 por ADR-036: PasswordDialog/SettingsDialog/ConfirmDialog agregados §2.6–2.7/§8.9, zoom §5.2, mapeo §12; §2.6/§5.2/§5.5/§12 reescritos por ADR-037 —zoom con re-render real— y ADR-038 —SettingsDialog dispara reanalyze, no recreación del core—; §2.1/§2.5/§13.9 ajustados 2026-07-22 por el bug #7 del Escenario 1 E2E: gate de visibilidad por stage vs. vida del diálogo hijo abierto; §5.2/§5.4 en fase 11 por ADR-056 —requestRender con kind por panel, canvas que no se borra—; §3.3/§3.4/§7.1/§12 en fase 10.5 por ADR-058 —marca de reemplazo degradado— y ADR-059 —checkbox de leyenda—; §3.3 por ADR-062 —el canal `PREVIEW_UPDATED.degraded` del que sale esa marca, y las tres reglas de su consumo; el checkbox de leyenda entra en el Hito 10.5 y la marca queda para después—; §3.3/§3.4b/§12 en fase 10.6 por ADR-060 —PersonGenderSelect y marca de género sin determinar— y ADR-069 —§3.4b actualizado: el patch usa `PersonGenderChoice`, "sin determinar" viaja como `"neutral"` explícito—; §3.3/§3.4b/§8.3/§12 reescritos en fase 10.6 por ADR-071 —`PersonGenderSelect` pasa a ser `PersonGenderToggle`: visible solo en `placeholder`/`synthetic`, botón cíclico de tres estados con SVG propios, la marca de "sin determinar" fusionada con el estado neutro, y `Select` sin apertura controlada—; §3.4c/§5.4b/§5.4c/§12 en fase 10.7 por ADR-061 —agregado manual, hit-test de selección y buscador—; §1/§2.6 en fase 10.6 por ADR-070 —sección "Acerca de" con la atribución CC-BY dentro del SettingsDialog, y `thirdPartyCredits.ts` como módulo de datos—; post-Hito 10.10: §3.3 por ADR-086 —la marca de degradado se enciende cuando el texto queda más angosto que `DEGRADED_FONT_RATIO` de su ancho natural, criterio y valor nuevos—); §1/§2/§3/§4/§5/§7 reescritos en el rediseño post-10.9 por **ADR-087** —tres momentos en vez de cuatro paneles: `SideBySideViewer`/`ScrollSyncToggle` y los cuatro componentes de `rules/` se retiran, aparecen `LoadScreen`/`ScanScreen`/`ViewerModeToggle`/`DocumentModeSelect`/`TypeModeSelect`, y `ExportDialog` queda con un solo control—; §5.4c en fase 11 por **ADR-089** —la lupa afloja el último sub-token por prefijo y "Agregar como…" no, porque barre el documento entero—; §5.4b en fase 11 por **ADR-114** —la selección del arrastre se recorta a un renglón y el resultado de `addManualEntity` se muestra—; §3.3/§3.4d en fase 11 por **ADR-094** —`NeedsReviewBadge`: el detector sugiere lo que duda, apagado y marcado, y la fila sugerida no se atenúa—; §2.10 en fase 11 por **ADR-150**/**ADR-151**/**ADR-152** — `ScanScreen` pierde el techo y suelta cuando el `stage` es terminal, precalienta y espera la página 1 antes de soltar, y muestra progreso real por etapa incluido el OCR -->
 
 # Anonly — Catálogo de Componentes
 
@@ -122,7 +122,8 @@ apps/react-client/src/components/
 - **Visible**: cuando `stage ∈ {Ready, Done}` (`Done` permite reabrir el diálogo con el resultado — "Descargar"/"Exportar otro", §7.2).
 - **Vida del diálogo (bug #7 del Escenario 1 E2E, 2026-07-22)**: el gate de visibilidad aplica **solo al botón**; mientras `ExportDialog` esté abierto, el componente permanece montado aunque `stage` salga del set (`Exporting` durante el export, `Done` al finalizar) — `if (!visible && !open) return null`, nunca `if (!visible) return null` a secas. Sin esto, la transición `Ready → Exporting → Done` que el Core hace por spec (`Orchestrator.md` §8) desmonta el diálogo abierto con todo su estado justo antes de pintar el link de descarga.
 - **Acción**: abre `ExportDialog`.
-- **Atajo**: `Cmd/Ctrl+E` (activo solo cuando el botón es visible).
+- **Atajo**: `Cmd/Ctrl+E` (activo solo cuando el botón es visible **y no está bloqueado**).
+- **Bloqueo** (ADR-176 §1): `exportBlockReason(conflicts)` —función pura con test, ADR-056— devuelve `null` o el motivo. Con motivo, el botón queda deshabilitado y un **globo flotante** debajo (ADR-177 §4, reemplaza la "ranura fija con alto reservado" de ADR-176 §1: siempre montado e invisible sin motivo, así que aparecer no mueve nada; anclado al **borde derecho** del botón, `right-0`; ancho máximo que entra en la ventana más angosta soportada, con el texto en hasta dos renglones; fondo, borde y sombra de superficie para leerse sobre el contenido en los dos temas) muestra *"Hay un choque sin resolver. Resolvelo para exportar."* con **"Resolver"** (abre `ManualOverlapDialog` sobre la primera fila con un choque pendiente, igual que el aviso de §6.3). Si el pendiente no es `heldManual`: *"Hay un conflicto sin resolver."* y "Resolver" abre el `ConflictDialog` de la primera fila con uno.
 
 ### 2.6 `SettingsButton` + `SettingsDialog` (ADR-036 §7, vocabulario por ADR-087 §4)
 
@@ -140,19 +141,17 @@ apps/react-client/src/components/
 
 - **Trigger**: icono de engranaje en el Toolbar (siempre visible; `UX_Guidelines.md` §2).
 - **Stores**: `settings`, `document` (para saber si hay documento abierto).
-- **Form** (`MVP.md` §2.3): idioma (`es` default), performance preset (`auto`/`low`/`high`), idiomas del documento. **Sin toggle de detección de nombres** (ADR-126).
-- **Acción**: muta `settings.store` + `settings.persist()`. Si el cambio es `ocrLanguages` y hay documento abierto: `ConfirmDialog` "¿Reanalizar el documento con la nueva configuración? Tus ediciones se conservan." → `actions.reanalyze(patch)` (ADR-038 §7, `React_Client.md` §3.7 — **no** recrea el core). Si es `performancePreset` con documento abierto: se persiste y aplica al próximo documento, sin diálogo de confirmación (ADR-038 §7 Q3).
+- **Form** (`MVP.md` §2.3): idioma (`es` default; **el selector está oculto desde el 2026-10-01**, por decisión del humano, hasta que exista la traducción: el código queda comentado en `SettingsDialog` y el setting `language` se conserva), performance preset (`auto`/`low`/`medium`/`high`/`ultra`, ADR-194: cinco opciones en el orden Automático, Bajo consumo, Intermedio, Alto rendimiento, Ultra; la descripción de cada una es la de ADR-194 §6, y con Automático nombra el nivel que resolvió para el equipo, «En este equipo usa: _nivel_»), idiomas del documento. **Sin toggle de detección de nombres** (ADR-126).
+- **Acción**: muta `settings.store` + `settings.persist()`. Si el cambio es `ocrLanguages` y hay documento abierto: `ConfirmDialog` "¿Reanalizar el documento con la nueva configuración? Tus ediciones se conservan, pero lo hecho hasta acá ya no se va a poder deshacer." (la segunda mitad por ADR-172 §1: los puntos de restauración no cruzan un re-análisis) → `actions.reanalyze(patch)` (ADR-038 §7, `React_Client.md` §3.7 — **no** recrea el core). Si es `performancePreset` con documento abierto: se persiste y aplica al próximo documento, sin diálogo de confirmación (ADR-038 §7 Q3).
 - **ARIA**: `aria-label="Configuración"`.
-- **Sección "Acerca de"** (ADR-070): bloque **estático** al pie del diálogo, separado del formulario por un divisor, con la atribución de datos de terceros. Es obligación de licencia CC-BY (ADR-060 §11), no una cortesía.
-  - **Contenido**: una entrada por cada elemento de `THIRD_PARTY_CREDITS` (`toolbar/thirdPartyCredits.ts`, ADR-070 §2), con título de la obra, titular, licencia, indicación de cambios y para qué la usa Anonly. Hoy hay **una**: el léxico de nombres de Buenos Aires Data (CC-BY-2.5-AR).
-  - **Enlaces**: el título enlaza a `sourceUrl` y el nombre de la licencia a `licenseUrl`, ambos `target="_blank" rel="noopener noreferrer"`. Son las **únicas** URLs externas navegables del producto: agregar otra requiere ADR (ADR-070 §3). No son requests de la app — `connect-src 'self'` sigue sin excepciones (`08_Security_Model.md` §3.2).
-  - **Fuera del guardado atómico**: no lee ni escribe `settings.store`, no entra en `diffReanalyzeChange`, y "Cancelar"/"Guardar" no lo afectan. La garantía de §2.6 —si el usuario cancela, ningún campo se aplica— no admite excepciones.
-  - **ARIA**: `<section aria-label="Acerca de">` con encabezado visible; los enlaces son `<a>` nativos (accesibles por teclado sin wrapper).
-  - **Sincronización**: el contenido de la entrada del léxico coincide con `gender-lexicon.provenance.json` y con `NOTICE`, y un test lo verifica (ADR-070 §5) — no se sostiene por disciplina.
+- **Sin sección "Acerca de"** (ADR-168 §3, reemplaza ADR-070 §1): los créditos y el código fuente pasan a `AboutDialog` (§2.9). Al pie del formulario queda **una línea** que dice dónde están ahora, para quien los busque acá.
+- **Actualizaciones** (solo en el contenedor de escritorio; ADR-195, reemplaza los dos interruptores de ADR-188 §5): subtítulo *"Elegí qué hace Anonly con las versiones nuevas."*; **un selector** (`updateMode`, default `notify`) con tres opciones en este orden: "Instalar automáticamente" (`install`), "Avisarme" (`notify`) y "No buscar" (`off`), con su descripción en un renglón de alto fijo (textos en ADR-195 §3); y el aviso de la salida de red de ADR-131 §5 con este texto: *"Es la única conexión de Anonly a internet: le pregunta a GitHub si hay una versión nueva. Como en cualquier conexión, GitHub ve desde dónde llega la consulta (tu IP) y qué versión tenés. Nunca se envía el contenido ni el nombre de un documento. Si elegís "No buscar", Anonly no se conecta a internet salvo que toques "Buscar actualizaciones ahora"."* Debajo, la versión instalada y "Buscar actualizaciones ahora", que funciona siempre.
+- **Apariencia**: tres opciones con miniatura —*Como el sistema*, *Claro*, *Oscuro*— en vez del checkbox "Seguir la configuración del sistema" más dos miniaturas (ADR-169 §8).
+- **Diseño estable** (ADR-169 §1): la descripción del perfil de rendimiento ocupa siempre el mismo renglón para los cinco perfiles (ADR-194 §6), y el error "Elegí al menos un idioma" y el aviso de re-análisis comparten una ranura de alto fijo con un texto neutro cuando no hay nada que avisar. Cambiar una opción no cambia el alto del diálogo.
 
 ### 2.7 `PasswordDialog` (ADR-036 §7)
 
-- **Se abre por**: `PDF_PASSWORD_REQUIRED` (suscripción **directa** de la UI al canal `pdf` — ADR-034 §4; el stage queda en `Extracting`).
+- **Se abre por**: `PDF_PASSWORD_REQUIRED` (suscripción **directa** de la UI al canal `pdf` — ADR-034 §4; el stage queda en `Extracting`). **La suscripción sigue al Core vivo** (ADR-194 §9): cada Core tiene su propio bus, así que tras una recreación (ADR-125, o al cerrar un documento con el perfil cambiado) el diálogo se suscribe al bus del Core nuevo y deja el anterior.
 - **Acción**: submit → `actions.retryWithPassword(password)` (`orchestrator.retryWithPassword`; **nunca** `engines.pdf.process` — Orchestrator.md §6). Si el evento vuelve a llegar, muestra "Contraseña incorrecta" y re-pide.
 - **Cancelar**: cierra el diálogo y ofrece cerrar el documento (`actions.closeDocument`).
 - **Seguridad**: el input **nunca** se loguea ni persiste (`08_Security_Model.md` §7); `type="password"`, sin autocompletado.
@@ -184,6 +183,22 @@ apps/react-client/src/components/
   ser cargar un PDF primero, que es lo contrario de lo que hace falta para elegir con qué
   analizarlo.
 - **Acción**: `actions.importDocument(file)`, por drop o por el botón.
+- **Organización en cajas** (ADR-168 §1): barra superior (logo, nombre, `SettingsButton`), caja
+  principal con la `DropZone`, caja `HowItWorks` (animación de tres fases + tres pasos), tres
+  tarjetas de rasgos y un pie con versión, licencia, "Acerca de…" y "Reportar un problema".
+- **`DropZone`** (ADR-168 §2): cuatro estados —reposo, arrastrando encima, abriendo, error— en el
+  mismo recuadro de tamaño fijo. El de error se usa para el archivo que no es PDF y para el fallo de
+  importación que vuelve desde `ScanScreen` (§2.10); muestra el nombre del archivo y el mensaje de
+  `pipelineErrorPresentation.ts`.
+- **`AboutDialog`** (ADR-168 §3, antes sección de `SettingsDialog` por ADR-070 §1): código
+  fuente (enlace al repositorio) y "Datos de terceros", una entrada por `THIRD_PARTY_CREDITS` con
+  título, titular, licencia, para qué se usa y cambios. `<section>` con encabezado visible por
+  bloque; enlaces `<a>` nativos `target="_blank" rel="noopener noreferrer"`. El test de
+  sincronización con `NOTICE` y el provenance (ADR-070 §5) **no cambia**.
+- **URLs externas navegables** (ADR-070 §3 extendido por ADR-168 §3): las dos del crédito
+  (`sourceUrl`, `licenseUrl`) más `https://github.com/sgiambelluca/Anonly` (código fuente) y
+  `https://github.com/sgiambelluca/Anonly/issues/new` ("Reportar un problema", en el pie y en
+  `AboutDialog`). Son las **únicas**; cualquier otra necesita ADR.
 
 ### 2.10 `ScanScreen` (ADR-087 §1/§6, momento ②a)
 
@@ -193,9 +208,10 @@ apps/react-client/src/components/
   `Cancelar` propios. Montar la toolbar arriba dejaba **dos barras de progreso del mismo pipeline y
   dos botones "Cancelar"** en pantalla al mismo tiempo — verificado en el browser. El logo de
   continuidad entre ① y ② lo pone esta pantalla.
-- **Render**: `ScanAnimation`, nombre del archivo, la frase que rota tipos de dato, estado en
-  lenguaje llano, progreso `current`/`total` real de la etapa vigente y `Cancelar`. Ver
-  `UX_Guidelines.md` §7.3.
+- **Render**: `ScanAnimation`, nombre del archivo, la frase que rota tipos de dato (acompañamiento,
+  no contenido principal — ADR-152 §4), estado en lenguaje llano con su contador cuando la etapa lo
+  tiene (`OCRing`/`Detecting`, siempre sobre `document.store.pageCount` — ADR-152 §2) y `Cancelar`.
+  Ver `UX_Guidelines.md` §7.3.
 
   > **Sin la lista de entidades encontradas**, que la primera versión mostraba apareciendo en vivo
   > acá. Se retira porque **se ven mejor donde importan**: en el árbol del panel de trabajo llegan
@@ -204,19 +220,22 @@ apps/react-client/src/components/
   > primera impresión del dato en un lugar donde no sirve. Lo que sostiene la paciencia pasa a ser
   > el movimiento.
 - **Sin skeleton del documento**: no promete un layout que todavía no existe.
-- **Salida** (`UX_Guidelines.md` §7.2): pasa a ②b con la primera de — `Detecting` ≥
-  `SCAN_ADVANCE_PAGE_RATIO` (0.20) de `document.store.pageCount`, con `modelLoading === null`, o
-  `SCAN_ADVANCE_MAX_MS` (6000 ms) desde el import — y **nunca** antes de `SCAN_ADVANCE_MIN_MS`
-  (1200 ms).
+- **Salida** (`UX_Guidelines.md` §7.2, ADR-150/ADR-151): la única condición de pase es que el
+  `stage` sea terminal. `Ready`/`Done` ⇒ pasa cuando pasaron `SCAN_ADVANCE_MIN_MS` (1200 ms) desde
+  el import **y** la página 1 ya está dibujada (precalentada en `Ready`, ADR-151) o vencieron
+  `SCAN_ADVANCE_PREWARM_GRACE_MS` (1000 ms) desde `Ready`. `Failed`/`Cancelled` ⇒ pasa de
+  inmediato, sin piso y sin esperar preview. **Un `Failed` de importación** (última etapa
+  `Importing`/`Extracting`, ADR-168 §4) no pasa a ②b: la UI cierra el documento y vuelve a
+  `LoadScreen` con la `DropZone` en estado de error.
+- **Flujo de cuatro pasos** (ADR-168 §5): componente `ScanSteps`, derivado solo de
+  `pipeline.store.stage` (y de si hubo `OCRing`). Cuatro pasos fijos —Abrir, Leer, Escanear,
+  Ordenar—; el de Leer se marca terminado con "El PDF ya tenía texto" si no hubo OCR. Va en su propia
+  caja; la animación y la barra de progreso con `Cancelar` (+ `Ctrl+.`) van en otras dos.
 
-  > **El denominador es `pageCount`, no `pipeline.store.total`**: `total` se reasigna por etapa, y
-  > durante la descarga del modelo NER vale 1 con el stage ya en `Detecting` — razón 1.0, umbral
-  > satisfecho al instante, usuario soltado apenas termina el OCR. Medido en el browser.
-
-  > Piso y techo son **globales** desde el import, no relativos a `Detecting`: la descarga del
-  > modelo NER es tiempo muerto sin entidades, y un techo medido desde `Detecting` dejaría al
-  > usuario sin cota. El umbral de páginas sí se mide sobre `Detecting`, que es la etapa larga y la
-  > que produce la mayoría de las entidades (`orchestrator.ts:267`).
+  > **Sin techo ni umbral de páginas** (retirados por ADR-150: `SCAN_ADVANCE_MAX_MS` y
+  > `SCAN_ADVANCE_PAGE_RATIO` ya no existen). ②a dura lo que dure el escaneo — lo que lo hace
+  > tolerable es el progreso real por etapa de `UX_Guidelines.md` §7.3 (ADR-152) y `Cancelar`
+  > operativo, no una cota de tiempo.
 
 - **Tras el pase, el escaneo sigue** en segundo plano, con el estado visible en `PipelineStatus`
   (§2.3) y `CancelButton` (§2.4) activos.
@@ -230,13 +249,22 @@ apps/react-client/src/components/
 - **Stores**: `entities`, `pipeline`.
 - **Comportamiento**: lista `groupsByType` ordenada por `EntityType` (orden fijo: Person, Organization, Address, DNI, CUIT, Phone, Email, IBAN, CreditCard, Date, License, Plate, Custom).
 - **Sub-componentes**: `EntityTypeGroup` por tipo.
-- **Header**: "Entidades" + input de búsqueda + "Colapsar todo" / "Expandir todo".
+- **Header** (ADR-169 §2): "Entidades" con el resumen ("N entidades en M tipos"), botón **primario**
+  "Agregar entidad", input de filtro, control segmentado **Aparición | A–Z** (`entities.store.sortOrder`,
+  solo presentación) y la franja de `DocumentModeSelect` (§3.9). Debajo, el **encabezado de columnas**
+  fijo: N.º · Entidad · Avisos · Apar. · Reemplazo.
+- **Orden de las filas**: `sortOrder === "appearance"` → `indexInType` ascendente; `"alpha"` →
+  `canonicalValue` con `localeCompare(…, "es")`. No cambia `indexInType` ni emite nada.
+- **Nota al pie** "¿Falta algo?…" con botón de cerrar (`settings.store.dismissedHints`).
 - **Estado vacío**: ver `UX_Guidelines.md` §11.
 
 ### 3.2 `EntityTypeGroup`
 
 - **Props**: `type: EntityType`, `groups: ReadonlyArray<EntityGroup>`.
-- **Render**: cabecera expandible con checkbox cascade + lista de `EntityGroupItem`.
+- **Render** (ADR-169 §2): **franja** expandible —fondo `bg-tertiary` con el color del tipo al 6 %
+  (7 % en oscuro), bordes superior e inferior de 1,5 px en `--color-border-strong`, `position: sticky`—
+  con checkbox cascade, punto de color, nombre en mayúsculas, contador en pastilla y `TypeModeSelect`;
+  debajo, la lista de `EntityGroupItem`.
 - **Eventos**:
   - Click cabecera → toggle expand.
   - Checkbox cabecera → `actions.updateGroup(g.id, { enabled: value })` para todos los grupos del tipo.
@@ -245,10 +273,16 @@ apps/react-client/src/components/
 ### 3.3 `EntityGroupItem`
 
 - **Props**: `group: EntityGroup`.
-- **Render**: checkbox + canonicalValue + badge ocurrencias + `ReplacementModeSelect` + `[⋯]` (`GroupContextMenu` trigger).
+- **Render** (ADR-169 §2): grilla de **columnas de ancho fijo** —checkbox · N.º (`indexInType` con dos
+  dígitos) · `canonicalValue` (la única que encoge) · avisos (52 px) · apariciones · ranura de género ·
+  `ReplacementModeSelect` · `[⋯]` (`GroupContextMenu`)—. Borde inferior fino (`--color-border`),
+  salvo la última fila del tipo. **Con un menú abierto** (modo o ⋯) la fila lleva fondo y contorno de
+  acento. Nada que aparezca en la fila puede correr a otra columna (UX-10).
 - **Estados**:
   - habilitado / deshabilitado.
-  - con conflicto (icono ⚠).
+  - **avisos** (ADR-169 §3, `UX_Guidelines.md` §3.3): tres botones con forma y color propios —sugerida
+    `?` ámbar (`NeedsReviewBadge`), conflicto con una Y que se abre en dos, en rojo (`ConflictBadge`),
+    espacio justo `]↔[` naranja de 26×22 (`DegradedBadge`)—, en la columna de avisos.
   - editado manualmente (punto azul).
   - **reemplazo degradado** (ADR-058 §7, canal por ADR-062): alguna ocurrencia del grupo recibió `AnnotationKind.Degraded` — el texto de reemplazo quedó más angosto que `DEGRADED_FONT_RATIO` de su ancho natural (ADR-086 §1) y esos píxeles quedaron comprometidos. Es una marca **accionable**, no informativa: existe porque la palanca para arreglarlo ya existía y era invisible. Al abrirla, ofrece las tres salidas —editar el `replacementValue` a mano, cambiar el modo a `redact` (que no tiene problema de espacio) o deshabilitar el grupo—. **No** aparece cada vez que el repintado de línea no se activó: solo bajo el umbral, para que la señal signifique algo.
 
@@ -262,11 +296,12 @@ apps/react-client/src/components/
   - **género sin determinar** (ADR-060 §5, **fusionado con el control por ADR-071 §4**): ya **no** es un badge propio. Es el **estado neutro del `PersonGenderToggle` de §3.4b**, con trazo atenuado, y por lo tanto aparece exactamente donde aparece el control: grupos `Person` en modo `placeholder` o `synthetic`. Sigue siendo una **afordancia de UI sobre información faltante**, distinta de la marca de degradación —el grupo se renderiza perfecto, lo que falta es un dato—, así que **no** usa `AnnotationKind.Degraded` ni se pinta en el canvas. Lo que se retira es la duplicación: antes había un badge `?` **más** el selector, los dos sobre el mismo campo.
 - **Eventos**:
   - Checkbox → `actions.updateGroup(group.id, { enabled: value })`.
-  - Click canonicalValue → popover con aliases y "Editar valor canónico".
-  - Click ⚠ → `ConflictDialog`.
+  - Click en el aviso de conflicto → `ConflictDialog`.
 - **ARIA**: `role="treeitem"`, `aria-checked`, `aria-label` con tipo + count + estado.
 
 ### 3.4 `ReplacementModeSelect`
+
+> **El menú de modos abre hacia arriba si abajo no entra (2026-10-01, pedido del humano).** Al abrirse mide el lugar que queda entre el disparador y el borde del área que lo recorta (la lista que scrollea, o la ventana). Abajo si entra; si no, arriba; si no entra en ninguno, el lado con más lugar. Antes abría siempre hacia abajo y en las últimas filas había que scrollear para leerlo. Regla pura en `entities/menuPlacement.ts`, con tests; `tests/e2e/mode-menu-opens-upward.spec.ts` lo cubre en la app.
 
 - **Props**: `groupId`, `currentMode`.
 - **Opciones**: `placeholder` (default), `mask`, `synthetic`, `redact` — con las **etiquetas de
@@ -276,14 +311,22 @@ apps/react-client/src/components/
 - **Cada opción trae un ejemplo construido con el grupo real de esa fila**, no un valor genérico: la
   pregunta del usuario es qué le pasa *a su dato*.
 
-  > **El único valor exacto que la UI puede mostrar es el del modo vigente** (`replacementValue`, ya
-  > resuelto por Grouping). Los otros tres se describen de forma esquemática y **no se inventan**: el
-  > token de `placeholder` sale de la escalera de ADR-057 y del género de ADR-060, el formato de
-  > `mask` de `MASK_FORMAT_BY_TYPE` —que vive en `grouping-engine`, un motor que la UI no puede
-  > importar (P-1)—, y el de `synthetic` del sintetizador sembrado con el `id` (ADR-072 §1).
-  > Reimplementarlos violaría `React_Client.md` U-3, y un ejemplo *casi* correcto es peor que uno
-  > declaradamente esquemático: la primera versión mostraba `[PERSONA 01]` para **todos** los tipos,
-  > así que un DNI previsualizaba como si fuera una persona.
+- **Cada opción es: título + descripción fija + vista previa exacta** (ADR-169 §6), y **elegir otra
+  opción solo mueve el tilde** — ningún texto del menú cambia. Encabezado: *"Cómo reemplazar «X»"*.
+
+  | Modo | Descripción fija | Vista previa |
+  |---|---|---|
+  | Etiquetar | Tipo y número, para seguir quién es quién | `group.replacementPreviews.placeholder` |
+  | Ocultar parcialmente | Tapa cada letra y conserva la forma | `group.replacementPreviews.mask` |
+  | Reemplazar por dato falso | Un dato inventado del mismo tipo | `group.replacementPreviews.synthetic` |
+  | Tapar con negro | Un bloque negro sobre el texto | un bloque negro dibujado (`redact` no tiene texto) |
+
+  > **Las cuatro vistas previas las calcula el Core** (ADR-170): `EntityGroup.replacementPreviews`.
+  > Hasta ADR-170 la UI solo podía mostrar exacto el modo vigente, porque los formatos viven en
+  > `grouping-engine` y la UI no puede importar motores (P-1); los otros tres se describían de forma
+  > esquemática, y el menú se reescribía entero al elegir. **La UI no reimplementa ninguno**
+  > (`React_Client.md` U-3): un ejemplo *casi* correcto es peor que ninguno — la primera versión
+  > mostraba `[PERSONA 01]` para todos los tipos.
 - **Acción**: crea/actualiza una **`Rule` de scope `group`** para ese grupo (ADR-087 §3.1a). **Esto cambia** respecto de la implementación vigente, que emitía `GROUP_UPDATE_REQUESTED` con `patch.replacementMode`.
 
   > **Por qué cambia**: `resolveMode` chequea las reglas **antes** que `group.replacementMode`, y `grouping.engine.ts:1150-1151` lo hace literal — asigna lo que el usuario eligió y una línea después lo pisa con el resultado de `resolveMode`. Con una regla de tipo vigente, el selector de la fila **es inerte**. Hoy casi no se nota porque el panel de Reglas no se usa; con §3.9/§3.10 creando reglas de rutina, pasaría a ser el comportamiento normal.
@@ -297,7 +340,7 @@ apps/react-client/src/components/
 - **Etiqueta corta en el disparador, larga en el menú y en el nombre accesible**: el disparador de
   la fila mide 11 rem y "Ocultar parcialmente" se cortaba en "Ocultar parcialme…". El menú —donde
   el usuario lee qué hace cada modo— muestra siempre la forma larga.
-- **Nota (ADR-057)**: el preview es `group.replacementValue`, ya resuelto por el Grouping Engine — así que **muestra el token abreviado sin ningún cambio en este componente**. Un grupo apretado va a previsualizar `[PRS-01]` y no `[PERSONA 01]`, y eso es correcto: es exactamente lo que va a salir en el documento.
+- **Nota (ADR-057)**: las vistas previas vienen ya resueltas por el Grouping Engine —`replacementPreviews.placeholder` sale de la misma escalera que `replacementValue`— así que **muestran el token abreviado sin ningún cambio en este componente**. Un grupo apretado va a previsualizar `[PRS-01]` y no `[PERSONA 01]`, y eso es correcto: es exactamente lo que va a salir en el documento.
 
 ### 3.4b `PersonGenderToggle` (ADR-060 §6, forma y visibilidad por ADR-071 §1-§3, wire por ADR-069 §4)
 
@@ -306,6 +349,7 @@ apps/react-client/src/components/
 - **Props**: `groupId`, `currentGender: PersonGender | undefined` — el valor **almacenado** en el grupo (`EntityGroup.personGender` no cambió de forma, ADR-069 §4).
 - **Visibilidad**: `type === EntityType.Person` **y** `replacementMode ∈ { placeholder, synthetic }` — los dos únicos modos cuyo valor depende de `personGender`. En `mask` y `redact` el control sería una palanca sin nada del otro lado. La condición vive en `isPersonGenderToggleVisible(group)` (`personGenderVisibility.ts`), función pura, y **reemplaza a las dos anteriores** (`isPersonGenderSelectVisible` + `isPersonGenderUndeterminedMarkVisible`).
   - Leer `group.replacementMode` es correcto: el motor le escribe encima el resultado de `resolveMode()` en cada mutación, así que ese campo **siempre lleva el modo efectivo**, ya resuelto contra las reglas de grupo/tipo/globales. La UI no replica la escalera de prioridades y no puede desincronizarse de ella.
+- **Borde y ranura** (ADR-169 §4): el botón lleva **borde** (punteado en el estado neutro) para que se lea como botón, y ocupa una **ranura de ancho fijo siempre reservada** en la fila: cuando la visibilidad de arriba es falsa, la ranura queda vacía y nada se corre (UX-10). La visibilidad **no cambia**: sigue siendo la de ADR-071.
 - **Forma**: un `<button>` del ancho de un icono que muestra el estado actual y **cicla** al siguiente con un click: `neutral → f → m → neutral`. El neutro es el estado de reposo de un grupo sin resolver, y ♀ antes que ♂ es el orden en que se conocen los símbolos.
 - **Símbolos**: SVG **first-party**, los tres sobre la misma grilla de 16×16 para que el botón no salte al ciclar — `lucide-react@0.451.0` no tiene `Venus`/`Mars`, y el glifo Unicode del neutro (`U+26B2`) tiene cobertura de fuente irregular.
 
@@ -326,8 +370,22 @@ apps/react-client/src/components/
 
 ### 3.4c `AddEntityButton` + `AddEntityDialog` (ADR-061 §3, ruta A)
 
-- **Ubicación**: sobre el árbol de entidades, encima de las coincidencias ya encontradas.
-- **Render del diálogo**: selector de `EntityType` + campo de texto para el valor + confirmar.
+- **Ubicación** (ADR-169 §2): **botón primario** "Agregar entidad" en la cabecera del panel (§3.1).
+- **Render del diálogo** (ADR-169 §7), en dos pasos numerados:
+  1. *¿Qué texto querés ocultar?* — campo de texto. Mientras se escribe (con debounce), una caja de
+     **alto fijo** con scroll interno muestra dónde aparece: `findText(documentId, value)` → por
+     cada `TextMatch`, la página y la frase alrededor (armada con `getPageWords` y el `wordSpan`)
+     con el texto resaltado. Sin coincidencias, la misma caja dice *"No aparece en el documento"*
+     **antes** de confirmar. Vacío (< 2 caracteres), un texto neutro.
+  2. *¿Qué es?* — `EntityTypePicker` (§8.10) con los 13 tipos, en su caja gris.
+  Debajo, en una caja azul distinta, la advertencia de alcance (ver abajo). Pie: *"También podés
+  seleccionarlo en el PDF original"*, "Cancelar" y el botón **"Agregar N apariciones"** con ancho
+  mínimo fijo, deshabilitado sin coincidencias.
+- **Qué decir** (ADR-174, **ADR-175 §3**), en este orden y solo con el resultado del Core —sin buscar el grupo por texto (`findAddedGroup`/`foldForLookup` se retiran, U-3)—: `heldConflictIds` no vacío → **no** hay toast de alta, se abre `ManualOverlapDialog` (§6.3) con **todos** esos ids; si no, `groupIds` no vacío → toast de alta nombrando el primer grupo del tipo pedido (o el primero); si no, `occurrenceCount === 0` → "no se encontró"; el resto rompe el invariante del Core → toast de error *"No se pudo agregar «X»."*, se retira la entrada de deshacer y se loguea.
+- **Si no encontró nada o no cambió nada** (`not-found` / `no-op`): la entrada de deshacer registrada antes de agregar se retira de `history.store` (ADR-174 §4).
+- **Tras agregar**: se cierra y muestra el toast de ADR-169 §7 (*"Agregaste «X» · Persona N.º 06 · N
+  apariciones ocultas"*, "Ver en la lista", "Deshacer"). El N.º se lee del grupo **después** de
+  `finishSession`.
 - **Acción**: `actions.addManualEntity({ value, entityType })` → `ManualEntityResult` con `occurrenceCount` (errata de ADR-061 §6). El adaptador devuelve `ManualEntityResult | null`: `null` **solo** cuando no hay documento activo —un estado en el que el diálogo no puede estar abierto— y el diálogo lo trata como "no hacer nada", **nunca** como "no se encontró".
 - **Sin coincidencias**: `occurrenceCount === 0` → **no se creó grupo** y el diálogo lo informa ("no se encontró ese texto en el documento"), sin cerrarse, para que el usuario corrija un typo y reintente. **No es un error y no llega por excepción**: es el valor de retorno (ADR-061 §6 y su errata). Un `try/catch` acá sería para los `InvalidInputError` reales (documento inexistente, stage inválido), que son otra cosa.
 - **Con coincidencias**: `occurrenceCount > 0` → se cierra e informa éxito. El número son **apariciones del valor en el documento**, antes del dedup; no es "cuántos grupos se crearon" ni "cuántas ocurrencias se sumaron". Si el copy muestra el número, tiene que decir "se encontraron N apariciones" — decir "se agregaron N" mentiría en el caso de fusión.
@@ -339,7 +397,7 @@ apps/react-client/src/components/
 Marca los grupos que **el detector sugirió sin estar seguro**: nacen con `enabled: false` y `needsReview: true`, así que están a la vista y **no tapan nada** hasta que el usuario decida.
 
 - **Props**: `group: EntityGroup`. No renderiza nada si `group.needsReview` es `false`.
-- **Forma**: un badge con icono + `Tooltip`, mismo patrón que `DegradedBadge` (§3.3). **Sin diálogo**: no hay nada que explicar más allá de una frase y la acción ya existe — la casilla de la fila.
+- **Forma** (ADR-169 §3): botón de 22 px con un `?` de ~20 px, en `--color-warning-strong` sobre fondo ámbar al ~15 %, + `Tooltip` (*"Sugerida."* + la frase de abajo). Mismo patrón que `DegradedBadge` (§3.3). **Sin diálogo**: no hay nada que explicar más allá de una frase y la acción ya existe — la casilla de la fila.
 - **Dónde**: en `EntityGroupItem`, junto a las otras marcas.
 
 **El copy no lleva jerga, y no muestra el número.** El usuario no tiene que ver "0,59" ni saber qué es un umbral de confianza: tiene que saber que **esa fila merece una mirada más que las otras**. Mismo criterio que §3.3 ya fija para el aviso de degradado.
@@ -353,18 +411,48 @@ Marca los grupos que **el detector sugirió sin estar seguro**: nacen con `enabl
 
 **La marca se apaga sola con la decisión del usuario** (ADR-094 §4): tildar o destildar la casilla limpia `needsReview` en el motor, en los dos sentidos — habilitar es aceptar la sugerencia, deshabilitar es rechazarla. La UI no hace nada especial para eso: recibe el `ENTITY_GROUP_UPDATED` y re-renderiza.
 
+### 3.4e `EditReplacementDialog` (ADR-076, ADR-078; rediseño por ADR-169 §10)
+
+- **Props**: `group: EntityGroup`.
+- **Render**: la entidad arriba (con el aviso de espacio justo si lo tiene); el campo *"Texto de
+  reemplazo"* con un **medidor de ancho fijo** a la derecha —**Entra bien / Queda justo / No entra**—
+  calculado con `estimateReplacementFit(value, group.members)` (función de la UI sobre
+  `estimateTokenWidth` de `@anonly/shared`, ya existente); debajo, **sugerencias más cortas** como
+  botones: los niveles de la escalera de ADR-057 que vienen en
+  `group.replacementPreviews.placeholderLadder` (ADR-170), sin repetir el valor vigente; y una vista
+  previa *"Así queda en el documento"*: la frase de la aparición más apretada, original arriba y con el
+  cambio abajo, con el reemplazo dibujado dentro del ancho del original (se achica si no entra). El
+  texto que explica el medidor ocupa **dos renglones reservados** (UX-10).
+- **Pie**: "Volver al calculado" a la izquierda (solo habilitado si el valor difiere del calculado;
+  despacha el mismo modo, ADR-078 §3), "Cancelar" y "Guardar".
+- **Acción**: `applyReplacementValue({ group, value })` (sin cambios). Confirmar cierra y muestra el
+  toast *"Cambiaste el reemplazo de «X» · Ahora dice …"* con "Deshacer" (ADR-172).
+- **Aviso**: *"Si después cambiás el modo de reemplazo, este texto vuelve al calculado"* (ADR-076 §3),
+  fijo.
+
 ### 3.5 `GroupContextMenu`
 
 - **Trigger**: botón `[⋯]` en `EntityGroupItem`.
-- **Opciones**:
+- **Opciones, en este orden** (ADR-169 §10): Ver apariciones · Editar reemplazo… · Cambiar tipo… ·
+  Fusionar con… · Dividir… · separador · **Eliminar entidad** (en rojo). "Restaurar valor calculado"
+  aparece solo si `group.replacementValueUserSet`. **La fila que abrió el menú queda resaltada**
+  mientras está abierto, y el panel es flotante. Toda acción confirmada muestra un toast con
+  "Deshacer" (UX-11, ADR-172).
+  - "Editar reemplazo…" → `EditReplacementDialog` (§3.4e). No aparece en modo `redact`.
   - "Fusionar con…" → `MergeDialog`.
   - "Dividir…" → `SplitDialog`.
+  - **"Eliminar entidad"** (ADR-171) → `ConfirmDialog` que nombra la entidad y aclara que su dato
+    queda **a la vista** en el documento → `actions.removeGroup(groupId)` (`GROUP_REMOVE_REQUESTED`).
+    Toast *"Eliminaste «X» · Ya no está en la lista ni se va a ocultar"* con "Deshacer". Si en el mismo
+    pedido se resolvió un conflicto `heldManual` de ese grupo (ADR-175 §1), el toast pasa a *"Eliminaste
+    «X» · Lo que marcaste («Z») ahora se oculta"*. Si la eliminación deja **un choque nuevo** (ADR-178 §2: algo marcado a mano que el contenedor eliminado tapaba ahora pisa otra entidad, `Grouping_Engine.md` §13 caso 69), el toast no cambia y no se abre ningún diálogo: el choque se muestra con el aviso persistente y el ⚠ de la fila (§6.3, ADR-175 §5), y Exportar queda bloqueado (§2.5). No hace falta código nuevo, porque la UI ya reacciona a `CONFLICT_DETECTED` con `heldManual`.
   - **"Ver ocurrencias"** (ADR-084 §2) → escribe `group.canonicalValue` en `viewer.store.searchQuery`. El `DocumentSearchBox` (§5.4c) reacciona solo: busca, cuenta y deja anterior/siguiente listos para recorrer el documento resaltando cada aparición. **No se construye un popover propio**: el buscador ya scrollea, resalta y navega — el popover de la redacción anterior (que además pedía un `value` por ocurrencia, que en ese momento `OccurrenceRef` no tenía — ADR-104 se lo agregó después, por otro motivo) habría sido una segunda UI de navegación, peor que la que existe.
     - **El contador del buscador puede no coincidir con el `(N)` del grupo**, y está bien (ADR-084 §3): `findText` busca el literal, `members` son las ocurrencias agrupadas. Un grupo con aliases tiene members que la búsqueda del canónico no encuentra; y la búsqueda puede encontrar apariciones que el detector no agrupó — que es justamente el recall que ADR-061 cubre, con el "Agregar como…" de cada resultado a mano.
-  - **"Cambiar categoría"** (ADR-082 §6) → `ChangeTypeDialog` (§3.8): `Select` con todos los `EntityType`, preseleccionado en el actual → `actions.updateGroup(groupId, { type })`. Sin `ConfirmDialog`: es reversible volviendo a elegir el tipo anterior.
+  - **"Cambiar tipo…"** (ADR-082 §6, rótulo por ADR-169 §10) → `ChangeTypeDialog` (§3.8) → `actions.updateGroup(groupId, { type })`.
   - **"Restaurar valor calculado"** (ADR-078 §4) → **solo** si `group.replacementValueUserSet`; despacha `actions.updateGroup(groupId, { replacementMode: <el mismo modo> })`, que recalcula el valor y apaga el flag sin API nueva.
-  - "Editar valor canónico" → input inline.
-  - "Eliminar grupo" → `ConfirmDialog` → `actions.updateGroup(groupId, { enabled: false })` (no se elimina, se deshabilita; en MVP no se elimina completamente).
+  > La redacción anterior listaba "Editar valor canónico" (input inline) y "Eliminar grupo" como
+  > deshabilitar. Ninguno se implementó así: el primero nunca existió, y el segundo lo reemplaza
+  > "Eliminar entidad" de ADR-171, que sí elimina.
 
 > **Accesibilidad**: el menú es un disclosure hecho a mano (trigger con `aria-expanded` + panel `role="group"` con botones, cierre por click-fuera/Escape/selección), sin `@radix-ui/react-dropdown-menu` — agregar esa dependencia requiere ADR (P-9/R-12). Los items se recorren con **Tab**, no con flechas.
 >
@@ -375,31 +463,41 @@ Marca los grupos que **el detector sugirió sin estar seguro**: nacen con `enabl
 ### 3.8 `ChangeTypeDialog` (ADR-082 §6)
 
 - **Props**: `groupId`, `currentType`, `canonicalValue`.
-- **Acción**: `actions.updateGroup(groupId, { type })`. Un tipo igual al vigente es no-op (el motor no emite nada, ADR-082 §1) y el diálogo además se ahorra el viaje.
+- **Render** (ADR-169 §10): la entidad arriba (punto de color, nombre, "Persona N.º 06 · N apariciones"); `EntityTypePicker` (§8.10) con el tipo actual marcado "Actual" y no seleccionable; una caja **"Cómo queda"** de alto fijo con el token antes → después (**`[PERSONA 06]` → `[ORGANIZACION 03]`**, calculado por el Core con `previewEdit({ kind: "type", … })`, ADR-170) y, si deja de ser `Person`, *"El género se borra: solo se usa para personas"*. Botón "Cambiar tipo" (ancho fijo).
+- **Acción**: `actions.updateGroup(groupId, { type })`. Un tipo igual al vigente es no-op (el motor no emite nada, ADR-082 §1) y el diálogo además se ahorra el viaje. Confirmar cierra y muestra toast con "Deshacer" (ADR-172).
 - **Por qué existe**: el tipo no es una etiqueta suelta — gobierna el token del documento anonimizado, su numeración por tipo, qué regla de scope `type` aplica y de qué pool sortea el sintetizador. Un tipo equivocado produce un documento que **afirma algo falso** sobre el dato que ocultó.
 
 ### 3.6 `MergeDialog`
 
 - **Props**: `sourceGroupId`.
-- **Comportamiento**: autocomplete para elegir `targetGroupId` (filtrado por mismo `EntityType`).
-  **Varios destinos a la vez** (`UX_Guidelines.md` §3.2, "2+ grupos del mismo tipo"): el botón
-  **"+ Agregar otro grupo"** suma una fila de destino, y cada fila ofrece solo los grupos que
-  ninguna otra tomó. La **primera fila es el grupo que sobrevive** —conserva su `id`, su modo y su
-  identidad— y por eso no se puede quitar; las demás tienen su botón de quitar.
+- **Comportamiento** (ADR-169 §10): la entidad de origen arriba; debajo, una lista de **alto fijo** con
+  scroll y un filtro, con las demás entidades del mismo `EntityType` (N.º, nombre, apariciones) y una
+  casilla cada una — se eligen **una o varias** de una vez (reemplaza a las filas de `Select` con
+  "+ Agregar otro grupo"). Una caja **"Resultado"** de alto fijo muestra cómo queda —nombre, N.º,
+  apariciones y token— calculado por el Core con `previewEdit({ kind: "merge", … })` (ADR-170); sin
+  selección, un texto neutro en la misma caja. La UI pone primero en `targetGroupIds` al elegido de
+  menor `indexInType`: el sobreviviente conserva el `id` del primero y el menor número de todos
+  (ADR-170 §2), así que el `id` que queda es el del número que queda.
 - **Acción**: `actions.mergeGroups(sourceGroupId, targetGroupId)`, una vez por cada paso de
   `mergePlan(sourceGroupId, targetGroupIds)`. **El contrato no cambia**: `GROUP_MERGE_REQUESTED`
   sigue siendo 1→1 (`Contracts.md`) y la UI emite N-1 requests contra el mismo destino. Es seguro
   en fila porque `applyGroupMerge` corre síncrono (no hay `await` en su cuerpo) y porque el grupo
   que sobrevive es el `target`, que conserva su `id` — el destino de los pasos siguientes existe
   todavía. Cada paso se queda con `min(index)`, así que el resultado conserva el menor de todos.
-- **Feedback**: toast "Grupos fusionados. Índice conservado: 01."
+- **Feedback**: el diálogo se cierra y muestra el toast *"Fusionaste N entidades en «X» · Persona N.º 01 · M apariciones"* con "Deshacer" (ADR-172). Botón "Fusionar N entidades" con ancho mínimo fijo.
 
 ### 3.7 `SplitDialog`
 
 - **Props**: `groupId`.
-- **Comportamiento**: lista de `members` con checkbox. Muestra bbox miniatura por ocurrencia.
+- **Comportamiento** (ADR-169 §10): lista de `members` con casilla; por cada una, la página, la frase
+  alrededor con el valor tal como aparece (ADR-104, ADR-105) y su origen (*Detectado / Agregado por
+  vos*). Debajo, dos tarjetas: **"Se quedan en N.º 02"** → **"Pasan a una nueva: Persona N.º NN"**, con
+  los conteos al día; el N.º nuevo sale de `previewEdit({ kind: "split", … })` (ADR-170). Una ranura de
+  alto fijo muestra la nota *"La entidad nueva toma el próximo número libre y mantiene el modo de
+  reemplazo de la original"* o, si se marcaron todas, el error *"Tiene que quedar al menos una
+  aparición en N.º 02"* (UX-10).
 - **Acción**: `actions.splitGroup(groupId, selectedOccurrenceIds)`.
-- **Feedback**: toast "Grupo dividido. Nuevo grupo: <type> <NN>."
+- **Feedback**: se cierra y muestra el toast *"Dividiste «X» · N apariciones pasaron a Persona N.º NN"* con "Deshacer" (ADR-172).
 
 ---
 
@@ -412,10 +510,12 @@ Marca los grupos que **el detector sugirió sin estar seguro**: nacen con `enabl
 - **Tratamiento visual** (ADR-087 §3.1): **borde sólido + label explícito**. Es el control de mayor
   alcance, así que es el que más deliberado tiene que verse accionar. Estar fuera del árbol es
   parte del tratamiento: no puede confundirse con una fila.
-- **Estado de precaución** (ADR-087 §3.3a): **neutro por defecto**; con alguna `Rule` de scope
-  `type` o `group` vigente, gana **acento ámbar + resumen** (`⚠ 5 categorías y 12 entidades con
-  ajustes propios`). El color aparece cuando significa algo, y el resumen entera del riesgo antes
-  de abrir el menú. **Nunca señala solo con color**: ícono + texto además del acento.
+- **Estado de precaución** (ADR-087 §3.3a, forma por ADR-169 §5): la franja tiene **siempre dos
+  líneas** (UX-10). Neutra: la segunda dice *"Se aplica a todas las entidades."* en gris, con ícono
+  de información. Con alguna `Rule` de scope `type` o `group` vigente, **la caja entera** pasa a
+  ámbar (fondo `warning` al ~15 %, borde `warning-strong`) y la línea dice *"N entidades tienen modo
+  propio: cambiar este modo las pisa."*, con ícono de advertencia. Reemplaza al borde izquierdo de
+  acento con una línea que aparecía. **Nunca señala solo con color**: ícono + texto además del acento.
   - Usa **`--color-warning-strong`** (§10), **no** `--color-warning`, que no llega al contraste
     mínimo de elementos no textuales.
   - **Ámbar y no rojo**: la acción es reversible y no toca el documento, solo los ajustes.
@@ -455,25 +555,27 @@ Marca los grupos que **el detector sugirió sin estar seguro**: nacen con `enabl
 - **Confirmación**: solo si algún grupo del tipo tiene `Rule` de scope `group`.
 - **Undo** (§3.11): toast de 5 s, **con snapshot** de las reglas borradas.
 
-### 3.11 Undo de los cambios de modo (ADR-087 §3.3)
+### 3.11 Deshacer (ADR-087 §3.3, mecanismo por ADR-172)
 
 **La fricción escala con lo que hay en juego.** Ningún nivel confirma cuando no hay nada que romper:
 
-| Nivel | Confirmación | Toast "Deshacer" (5 s) |
-|---|---|---|
-| `ReplacementModeSelect` (§3.4) | nunca | solo si `replacementValueUserSet === true` |
-| `TypeModeSelect` (§3.10) | solo si el tipo tiene reglas de grupo | siempre |
-| `DocumentModeSelect` (§3.9) | solo si hay reglas de tipo o de grupo | siempre |
+| Nivel | Confirmación | Toast "Deshacer" (5 s) | `Ctrl+Z` |
+|---|---|---|---|
+| `ReplacementModeSelect` (§3.4) | nunca | solo si `replacementValueUserSet === true` | sí |
+| `TypeModeSelect` (§3.10) | solo si el tipo tiene reglas de grupo | siempre | sí |
+| `DocumentModeSelect` (§3.9) | solo si hay reglas de tipo o de grupo | siempre | sí |
+| Menú ⋯ (§3.5) y agregados (§3.4c, §5.4b, §5.4c) | solo "Eliminar entidad" | siempre | sí |
 
-- **El toast lleva snapshot, no un id**: deshacer un barrido tiene que **recrear las `Rule` que
-  borró** (§3.9/§3.10), no solo eliminar la que creó. Sigue sin necesitar infraestructura de undo
-  general — es guardar la lista y recrearla — pero el `Toast` (§8.6) carga esa lista.
+- **Un solo mecanismo** (ADR-172): `history.store` (`React_Client.md` §3.6c). Toda acción de edición
+  llama a `record(label)` antes de emitir; el "Deshacer" del toast y `Ctrl+Z` llaman a `undo()`. El
+  toast ya **no** carga un snapshot de reglas: el punto de restauración del Core incluye las reglas, y
+  deshacer un barrido las recrea todas.
 - **Toast y no `ConfirmDialog` como mecanismo principal**: una confirmación por cada cambio de modo
-  se vuelve ruido que se aprende a saltear. La confirmación queda para los dos barridos, y solo
-  cuando barren algo.
+  se vuelve ruido que se aprende a saltear. La confirmación queda para los dos barridos (cuando barren
+  algo) y para eliminar.
 - **Por qué la fila normalmente no lleva toast**: es la acción más frecuente de la app, y es
   autoevidente y autorreversible con el mismo control. Un toast por cada una arrastra consigo la
-  credibilidad de los toasts de los otros dos niveles.
+  credibilidad de los otros. Se deshace igual con `Ctrl+Z`.
 
 ---
 
@@ -539,12 +641,13 @@ existen. Lo que se retira es la superficie de UI, no el modelo.
 
 ### 5.3 `PageVirtualizer`
 
-- **Props**: `pageCount`, `renderItem: (index) => ReactNode`, `visibleRange`, `pageSize`, `pageWidth`, `onVisibleRangeChange`, `onCurrentPageIndexChange`, `scrollRequest?`. **Sin `scrollToPageIndex`** (ADR-054 §6) y **sin `scrollSync` ni `kind`** (ADR-087 §2): con un solo panel no hay seguidor ni sincronización que instanciar, y `kind` solo servía para identificarse ante el controller.
+- **Props**: `pageCount`, `renderItem: (index) => ReactNode`, `visibleRange`, `slots`, `pageWidth`, `onVisibleRangeChange`, `onCurrentPageIndexChange`, `scrollRequest?`. **Sin `scrollToPageIndex`** (ADR-054 §6) y **sin `scrollSync` ni `kind`** (ADR-087 §2): con un solo panel no hay seguidor ni sincronización que instanciar, y `kind` solo servía para identificarse ante el controller.
   - Se retira con `scrollSync` el `ResizeObserver` que detectaba el panel volviéndose visible (alto 0 → alto > 0) para realinearlo: sin panel oculto no hay transición que observar.
   - `pageWidth` (post-Hito 10.7, hallazgo post-`APPROVED` 2026-08-15): el ancho de página en CSS px, mismo `pageWidth` que `PdfViewer` ya calcula. El contenedor con scroll lo usa como `width: max(pageWidth, 100%)` — no el 100% implícito de un bloque — para que a zoom alto, cuando `pageWidth` supera el ancho del panel, el contenedor **crezca** en vez de dejar que `PagePhantom` (`inset-x-0`) centre por flex un `renderItem` más ancho que él: ese centrado desborda por igual a los dos lados, pero un navegador en LTR solo cuenta el desborde a la **derecha** como `scrollWidth` — el borde izquierdo de la página queda a `scrollLeft` negativo, inalcanzable. Con el contenedor ya del ancho correcto, todo el desborde cae a la derecha y se alcanza scrolleando.
+  - `slots` (ADR-190 §4, 2026-09-29; reemplaza a `pageSize`): la geometría por fila que calcula `pageSlots.ts`, una función pura con test. Cada fila es la página más, si la página está marcada con `unreadableInk`, la franja fija del aviso arriba de la imagen (§5.4). Las filas dejan de tener alto uniforme. Con `slots` se calculan la altura total, la página actual (`computeCurrentPageIndexFromScroll`) y el destino de un salto (`scrollTopForPage`, que suma las franjas de las páginas anteriores). **Anclaje del scroll (decisión del humano, 2026-09-29):** cuando `slots` cambia porque una página gana o pierde la franja (en la práctica, durante un `reanalyze` de OCR), `PageVirtualizer` conserva lo que el usuario está mirando. Toma la fila visible de arriba antes del cambio y su desplazamiento dentro de la vista, y después del cambio ajusta `scrollTop` para que esa fila quede en el mismo lugar. Si la franja cambia en la propia fila de arriba o por debajo de ella, no hay corrección. El cálculo vive en una función pura con test.
   - `onVisibleRangeChange`: reporta al rango que detecta el `IntersectionObserver` (rango de **montaje** únicamente, ADR-054 §5) — cierra el loop de "usa `IntersectionObserver` para detectar visibilidad" hacia el estado controlado por `PdfViewer`.
   - `onCurrentPageIndexChange(pageIndex)`: página actual derivada por geometría de scroll (ADR-054 §5), reportada solo cuando cambia.
-- **Comportamiento**: mantiene un pool de `<canvas>` reutilizables. Calcula scroll height total con `pageCount × pageSize`. Solo renderiza items en `visibleRange` + 1 antes + 1 después. El contenedor con scroll es `overflow-auto` en los dos ejes (antes solo `overflow-y-auto`; el eje horizontal lo necesita `pageWidth` arriba).
+- **Comportamiento**: mantiene un pool de `<canvas>` reutilizables. Calcula el scroll height total como la suma de las filas de `slots`. Solo renderiza items en `visibleRange` + 1 antes + 1 después. El contenedor con scroll es `overflow-auto` en los dos ejes (antes solo `overflow-y-auto`; el eje horizontal lo necesita `pageWidth` arriba).
 - **Performance**: usa `IntersectionObserver` para detectar visibilidad y `requestAnimationFrame` para scroll suave.
 - **Alcance del `IntersectionObserver` (ADR-054 §5)**: decide **únicamente el rango de montaje**. Reducir el conjunto de índices que reporta a `min..max` es correcto para eso —un conjunto transitoriamente no contiguo monta una página de más, que es inofensivo— pero **no** sirve para derivar la página actual: ahí un índice viejo colapsaba el rango a `start: 0`. La página actual se calcula de la geometría del scroll (`React_Client.md` §3.5).
 
@@ -553,6 +656,7 @@ existen. Lo que se retira es la superficie de UI, no el modelo.
 - **Props**: `pageIndex`, `kind`, `blobUrl?`, `annotations?`, `highlights?`.
 - **Render**: `<canvas>` con dimensión correcta. Si `blobUrl`, dibuja la imagen. Si `annotations` (kind=original), dibuja bordes color por tipo. Si `highlights` con conflicto, dibuja borde rojo.
 - **Skeleton**: si `!blobUrl`, dibuja skeleton gris con dimensión.
+- **Página con contenido que no se pudo leer (ADR-190 §4)**: si la página tiene `unreadableInk` y **ninguna entidad**, se muestra el aviso *"Esta página tiene contenido que no se pudo leer. Revisala: si tiene datos sensibles, no se van a tapar solos."*. Una página tiene entidad si algún grupo no eliminado (ADR-171) tiene una ocurrencia en ella, sea automático o manual, habilitado o no. **El aviso va en una franja fija justo arriba de la imagen de la página, fuera de ella**, para no tapar el contenido que pide revisar (decisión del humano, 2026-09-29; antes era una barra superpuesta a la parte inferior de la imagen). La franja queda reservada, con alto fijo, en toda página marcada con `unreadableInk`. Cuando la página recibe una entidad, el texto desaparece pero la franja sigue reservada hasta que cambie la marca, así que agregar o quitar entidades no desplaza el layout (UX-10). La marca cambia solo con un `reanalyze` de OCR o con un documento nuevo, y en ese momento se recalcula el layout de todas formas.
 - **Las dimensiones del `<canvas>` solo se asignan cuando cambian (ADR-056 §5)**. Asignar `canvas.width`/`canvas.height` **borra el bitmap aunque el valor sea idéntico** — es comportamiento del estándar HTML, no del navegador. Como el `blobUrl` cambia en cada `PREVIEW_UPDATED` aunque los píxeles sean los mismos (el motor acuña un `URL.createObjectURL` nuevo también en aciertos de cache, ADR-056 §6), asignarlas incondicionalmente al re-ejecutarse el efecto dejaba la página en gris hasta que la `Image` nueva terminaba de cargar: ese era el parpadeo constante que se veía al scrollear. La comprobación va en una **función pura testeable en Node** (los tests de `apps/react-client` corren sin jsdom), no en un `if` inline sin cobertura.
 - **Interacción**:
   - Hover sobre highlight → tooltip.
@@ -561,26 +665,32 @@ existen. Lo que se retira es la superficie de UI, no el modelo.
 ### 5.4b `WordSelectionOverlay` (ADR-061 §3/§4, ruta B)
 
 - **Solo sobre el panel `original`.** En el `anonymized` el texto visible puede ser un reemplazo, y señalarlo no significaría nada.
-- **Interacción**: click sobre una palabra, o arrastre de un recuadro sobre varias. Al soltar, aparece "Agregar entidad como…" con el selector de `EntityType`.
+- **Interacción**: click sobre una palabra, o arrastre de un recuadro sobre varias. Al soltar, aparece el globo flotante "Agregar «X» como…" con `EntityTypePicker` (§8.10), el conteo de apariciones y "Cancelar" / "Agregar".
+- **La selección persiste** (ADR-169 §7): el recuadro de lo señalado se dibuja con **borde punteado de acento animado** (`prefers-reduced-motion`: borde quieto) y **no desaparece** hasta que se agrega la entidad, se cancela, se hace otra selección, se presiona Escape, se conmuta a Anonimizado o se cierra el documento.
+- **Descubrimiento** (ADR-169 §7): `SelectionHintCard`, tarjeta flotante sobre el visor —solo con el toggle en Original— con una animación del gesto de clic y arrastre, *"Agregá entidades desde el documento"* y "Entendido". Al cerrarla no vuelve (`settings.store.dismissedHints`, persistido).
 - **Cómo resuelve qué se señaló**: **hit-test contra `Page.words`, no selección de texto**. El overlay traduce coordenadas de pantalla a coordenadas de página y aplica `wordsInRect(words, rect)` (función pura de `@anonly/shared`). Los datos salen de `actions.getPageWords(pageIndex)` — el adaptador (`actions.ts`) resuelve el documento activo por su cuenta, mismo criterio que el resto de `actions.*` (§3.4c).
 - **Por qué no una capa de texto de pdf.js**: en un PDF escaneado **no hay texto** — es una foto —, y es justo donde más falta hace corregir a mano. Las palabras de OCR tienen bbox igual que las de PDF, así que el hit-test no distingue el origen y no hay una rama por tipo de documento. Además evita meter pdf.js en el cliente y una copia del texto original en el DOM (ADR-061 §4).
 - **Coordenadas**: usa `getPageSize` para el mapeo, **no** la estimación de `pageLayout.ts`. Con zoom, el factor de escala del visor entra en la misma transformación.
 - **La selección se recorta a UN renglón** (ADR-114 §1): de las palabras que el rectángulo tocó se conserva la corrida con más **área seleccionada**, y una corrida se corta cuando aparece una palabra no señalada o cuando la `x` **retrocede** (el retorno de carro). El renglón no se re-deriva acá: `Page.words` ya viene agrupado por renglón (ADR-110/ADR-113), y las dos condiciones hacen falta porque dos renglones seguidos de la misma columna son contiguos en ese array. **El desempate es por área, no por cantidad de palabras**: dos renglones de cuatro palabras empatan, y el que el usuario cubrió es el que vale.
   - **Por qué**: el valor se arma con `join(" ")` y `findLiteral` exige sub-tokens consecutivos de una misma línea (ADR-089 §1), así que un valor de dos renglones **no puede matchear nunca**. Medido sobre el sello de un fallo escaneado, donde los renglones están a 4–6 pt: con el rectángulo justo la frase se encuentra en 18/18 páginas; con 4 pt de holgura, en 0/18.
 - **Acción**: `actions.addManualEntity({ value, entityType })` con el texto de las palabras señaladas. **Se espera el resultado** y se pasa por `manualEntityFeedback` —el mismo helper de §3.4c—: con `not-found` el popover queda abierto con "No se encontró ese valor en el documento"; con `added` se cierra (ADR-114 §2). Antes era una promesa suelta, así que encontrar 18 apariciones y no encontrar ninguna se veían igual.
+- **Tras agregar**: el toast de ADR-169 §7 (*"Agregaste «X» · Persona N.º NN · N apariciones ocultas"*, "Ver en la lista", "Deshacer"). El recuadro punteado se retira recién ahí.
 
 ### 5.4c `DocumentSearchBox` (ADR-061 §8)
 
-- **Ubicación**: junto al encabezado "PDF ORIGINAL", con icono de lupa (punto 4 de `Cambios para hacer.txt`).
+> **Ancho de la barra (2026-10-01).** El conmutador de vista se centra recién desde 1536 px de ventana (`2xl`). Por debajo, la lupa toma todo el espacio que sobra, y por debajo de 1160 px el contador de resultados queda solo para lectores de pantalla. Con tres columnas simétricas el campo de texto medía 0 px a 1024 px, el ancho mínimo de la ventana. Lo cubre `tests/e2e/search-box-narrow-window.spec.ts`.
+
+- **Ubicación** (ADR-169 §7): a la izquierda de la barra del visor, **siempre visible y habilitada, en Original y en Anonimizado** — antes aparecía y desaparecía al conmutar. Campo *"Buscar un texto en el documento…"*, un contador en **ranura de ancho fijo** y un botón **"+ Agregar"** aparte, habilitado cuando hay resultados.
 - **La consulta vive en `viewer.store.searchQuery`** (ADR-084 §1), no en el estado local del componente: "Ver ocurrencias" del panel de entidades (§3.5) la escribe desde el otro extremo del árbol. **No es por panel** —a diferencia de `currentPageIndex`/`visibleRange` desde ADR-054 §1— porque el buscador existe una sola vez, sobre el `original`. El resto de su estado (matches, `activeIndex`, el tipo del "Agregar como…") **sigue siendo local**: es trabajo interno suyo.
 - **Acción**: `actions.findText(query)` → `TextMatch[]` con bbox por coincidencia (el adaptador resuelve el documento activo por su cuenta, igual que `getPageWords`/`getPageSize`). Consulta **sincrónica** y de solo lectura: buscar no crea grupos ni modifica la sesión (errata de ADR-061 §8).
 - **El debounce es de este componente**: `findText` es sincrónica y recorre todas las palabras del documento en el main thread, así que una llamada por tecla se nota en documentos largos. El Core no amortigua —es una función de consulta, sin estado ni cache (`Regex_Engine.md` §12)—, así que la caja de búsqueda debe hacerlo, mismo criterio que el re-render del zoom (§5.5). Los resultados vienen en orden documental, así que "anterior/siguiente" navega el array tal cual, sin re-ordenar.
-- **Render**: contador de resultados, navegación anterior/siguiente con scroll a la página, y resaltado del match activo sobre el canvas (reusa el mismo overlay de §5.4b).
-- **Tercera vía de agregado**: cada resultado ofrece "agregar como entidad", que abre el selector de tipo y llama a `addManualEntity`. Es la misma búsqueda literal que alimenta el agregado manual (ADR-061 §8), con **una** diferencia deliberada desde ADR-089 §2: la lupa acepta que el último sub-token de la consulta sea un **prefijo** (`Eta` resalta `Anabella`), y `addManualEntity` **no**. **Agrega todas las apariciones del valor, no solo el resultado clickeado** — `addManualEntity` recorre el documento entero, que es el comportamiento correcto para una entidad manual; el copy debe decirlo para que no se lea como que anonimiza solo esa coincidencia. Esas dos frases juntas son la razón de la asimetría: con prefijo en las dos, agregar `Eta` taparía cada `Anabella` del expediente. **Consecuencia visible**: un resultado resaltado por prefijo puede no ser agregable con ese mismo texto — el usuario tiene que agregar la palabra completa.
+- **Render**: contador de resultados, navegación anterior/siguiente con scroll a la página, y resaltado del match activo sobre el canvas (reusa el mismo overlay de §5.4b). **La lista de resultados** (ADR-169 §7) muestra por cada uno la página, la frase alrededor (`getPageWords` + `TextMatch.wordSpan`) con la coincidencia resaltada y su estado: **oculto como <Tipo> N.º NN** —el match cae sobre un miembro de un grupo **habilitado**; se compara contra `OccurrenceRef.fragments` cuando existen (ADR-074), nunca contra la envolvente— o **Sin ocultar**. El encabezado resume "N ocultos · M sin ocultar", ambos siempre presentes. **Un grupo deshabilitado no oculta** (`Contracts.md` §5: `enabled: false`, incluidas las sugerencias con `needsReview`, «no tapan nada»; decisión del humano, 2026-09-30): un match que cae sobre él cuenta como **sin ocultar** y la fila lo aclara con "Sin ocultar · <Tipo> N.º NN desactivada". Esa fila **no** ofrece "Agregar como…", porque agregar el valor no activaría el grupo; se activa desde el árbol. Si el match cae sobre un grupo habilitado y sobre uno deshabilitado, gana el habilitado.
+- **Tercera vía de agregado**: cada resultado **sin ocultar** ofrece "Agregar como…", que abre `EntityTypePicker` en un **globo flotante** (no expande la fila, UX-10) y llama a `addManualEntity`; al terminar, el toast de ADR-169 §7. Es la misma búsqueda literal que alimenta el agregado manual (ADR-061 §8), con **una** diferencia deliberada desde ADR-089 §2: la lupa acepta que el último sub-token de la consulta sea un **prefijo** (`Eta` resalta `Anabella`), y `addManualEntity` **no**. **Agrega todas las apariciones del valor, no solo el resultado clickeado** — `addManualEntity` recorre el documento entero, que es el comportamiento correcto para una entidad manual; el copy debe decirlo para que no se lea como que anonimiza solo esa coincidencia. Esas dos frases juntas son la razón de la asimetría: con prefijo en las dos, agregar `Eta` taparía cada `Anabella` del expediente. **Consecuencia visible**: un resultado resaltado por prefijo puede no ser agregable con ese mismo texto — el usuario tiene que agregar la palabra completa.
 
 ### 5.5 `ZoomControls`
 
-- **Botones**: `+`, `-`, `Reset`.
+- **Botones** (ADR-169 §9): `−`, el porcentaje (ancho fijo) y `+`. **Sin botón de restablecer**: lo hace `Cmd/Ctrl+0`.
+- **Pellizco del trackpad y `Ctrl + rueda`**: el `PdfViewer` registra `wheel` con `{ passive: false }` (React no lo permite en `onWheel`: va por `addEventListener` en un efecto) y, si `event.ctrlKey`, hace `preventDefault()` y ajusta el zoom proporcional a `deltaY`, dentro de los mismos límites que los botones. Pasa por el mismo `viewer.setZoom` y el mismo debounce de re-render.
 - **Atajos**: `Cmd/Ctrl++`, `Cmd/Ctrl+-`, `Cmd/Ctrl+0`.
 - **Acción**: `viewer.setZoom(newZoom)` (aplica el escalado CSS inmediato vía `PdfViewer` §5.2); el re-render real se dispara con debounce, no en cada click/atajo individual (`ZOOM_RERENDER_DEBOUNCE_MS = 150 ms`, ADR-037 §5).
 
@@ -600,15 +710,26 @@ hay nada que sincronizar: se retira junto con `SideBySideViewer` y `scrollSyncCo
 
 ### 6.2 `ConflictDialog`
 
+> **Recorrido desde «Resolver» (2026-10-01, pedido del humano).** El «Resolver» del globo de Exportar (§2.5) ya no abre un solo conflicto: arma la cola de **todos** los conflictos pendientes que no son `heldManual`, en el orden del árbol (`pendingConflictIdsInTreeOrder`), y el diálogo los muestra uno detrás del otro. A la derecha del título va un contador «5/9» (posición sobre el total que había al empezar; no se muestra si hay uno solo). «Aplicar» o «Descartar» pasa al siguiente sin cerrar; al terminar el último, el diálogo se cierra. **«Saltear»** pasa al siguiente sin aplicar nada: ese conflicto queda pendiente y el export sigue bloqueado (no aparece si hay uno solo). «Cerrar» corta el recorrido. Los que dejaron de estar pendientes mientras tanto se saltean. Abierto desde el ⚠ de una fila, el diálogo sigue mostrando un solo conflicto, sin contador. Los choques `heldManual` siguen yendo primero por `ManualOverlapDialog`. Lógica en `conflicts/conflictWalk.ts`, con tests.
+
 - **Props**: `conflictId`.
 - **Stores**: `entities.conflicts`.
 - **Render** (ADR-083 §6): el valor en disputa + los **tipos de entidad** candidatos como radios, con el de mayor `confidence` preseleccionado. **No nombra a Regex ni a NER** ni muestra números de confidence: son detalles de implementación del pipeline, y la pregunta útil es una sola — ¿esto es una organización o una dirección?
 - **Acción**: `actions.resolveConflict(conflictId, entityType?)`. Aplicar **reclasifica el grupo** por la vía de ADR-082 §2 y marca el conflicto resuelto. Sin tipo elegido, el motor aplica su default (mayor confidence), que coincide con la clasificación ya vigente: confirmar no cambia datos.
-- **`ambiguous_canonical`: se elige la escritura** (ADR-106). El diálogo ofrece los `value` de los candidatos empatados como radios, con el `canonicalValue` vigente preseleccionado, y aplicar emite `actions.updateGroup(groupId, { canonicalValue })` + `actions.resolveConflict(conflictId)`. La pregunta es la que el usuario tiene: *¿cuál de estas dos escrituras usamos?* **Revisa ADR-083 §6**, que metía este caso junto a `low_confidence` bajo "no hay elección": era cierto sobre el eje del **tipo** —todos los candidatos comparten tipo— pero no comparten **valor**, y sobre ese eje la elección existe y está bien definida. Sin contrato nuevo: `canonicalValue` ya estaba en `GroupUpdateRequested.patch` y los `value` ya venían en el conflicto.
+- **`ambiguous_canonical`: se elige la escritura** (ADR-106). El diálogo ofrece los `value` de los candidatos empatados como radios, con el `canonicalValue` vigente preseleccionado, y aplicar emite `actions.updateGroup(groupId, { canonicalValue })` + `actions.resolveConflict(conflictId)`. La pregunta es la que el usuario tiene: *¿cuál de estas dos escrituras usamos?* El botón dice **"Aplicar"** (ADR-193 §4). **Revisa ADR-083 §6**, que metía este caso junto a `low_confidence` bajo "no hay elección": era cierto sobre el eje del **tipo** —todos los candidatos comparten tipo— pero no comparten **valor**, y sobre ese eje la elección existe y está bien definida. Sin contrato nuevo: `canonicalValue` ya estaba en `GroupUpdateRequested.patch` y los `value` ya venían en el conflicto.
 - **Cuando no hay elección**: `low_confidence` no ofrece radios y el botón dice "Descartar" — con **un** candidato por debajo del umbral no hay nada entre qué elegir, y ADR-094 ya le dio a ese caso su propio camino (el grupo sugerido, apagado y visible).
 - **Qué cambió y por qué** (ADR-083): hasta este ADR el diálogo pedía un `ReplacementMode`, que **no resolvía el desacuerdo** — `applyConflictResolve` no tocaba el `entityType`, así que el usuario aplicaba y la discrepancia quedaba igual. El modo de reemplazo se sigue eligiendo donde siempre: el `ReplacementModeSelect` de la fila del grupo (§3.4).
 
 ---
+
+### 6.3 `ManualOverlapDialog` (ADR-174)
+
+- **Cuándo**: se abre solo, después de un agregado manual (cualquiera de las tres vías) cuyo resultado trae `heldConflictIds` (con **todos**, ADR-175 §4); desde el aviso de conflicto de una fila cuando el conflicto tiene `heldManual` (en vez de `ConflictDialog`), con los conflictos `heldManual` sin resolver de **esa** fila; y desde "Resolver" del aviso, con los de la primera fila de la lista que tenga uno.
+- **Varios** (ADR-175 §4): con N > 1, *"Lo que marcaste se superpone con datos ya detectados en N lugares. ¿Qué querés ocultar?"*, el primer par y *"y N−1 lugares más"*.
+- **Ya resuelto** (ADR-175 §4): si todos sus conflictos están resueltos al abrirse o mientras está abierto, se cierra sin registrar deshacer ni toast.
+- **Render**: *"Lo que marcaste se superpone con un dato ya detectado. ¿Qué querés ocultar?"*; los dos candidatos del conflicto con su texto resaltado y su tipo (el `Manual` como "lo que marcaste"); dos botones de ancho fijo: **"Ocultar lo que marqué"** (primario) y **"Dejar lo que ya estaba detectado"**.
+- **Acción**: `actions.resolveConflict(conflictId, { winner })` por **cada** conflicto del diálogo → `CONFLICT_RESOLVE_REQUESTED` con `winner: "manual" | "detected"`. **Una sola** entrada de deshacer para todos (ADR-172). Toast *"Ocultaste «X»"* / *"Dejaste lo que ya estaba detectado"*, con *" en N lugares"* si N > 1, y "Deshacer".
+- **Cerrar sin elegir**: aviso de **advertencia** —*"Quedó un choque sin resolver en «X». El export está bloqueado hasta que elijas."* con **"Resolver"**—. **Es un estado, no un toast de una vez** (ADR-175 §5): se muestra mientras exista un conflicto `heldManual` sin resolver y el diálogo esté cerrado —también si el choque nació en un re-análisis—; usa la única ranura de toast y, si otro toast lo reemplaza, vuelve cuando ese se va. La regla de cuándo mostrarlo es una función pura con test (ADR-056), no lógica dentro del `.tsx`. El conflicto queda visible en la fila y bloquea el export (`03_Data_Model.md` §15).
 
 ## 7. Componentes de Export
 
@@ -665,21 +786,7 @@ hay nada que sincronizar: se retira junto con `SideBySideViewer` y `scrollSyncCo
   documento, y que lista **tipos, nunca los valores originales**. Lo segundo importa: es lo primero
   que un usuario asume que hace, y no lo hace ni puede hacerlo.
 
-### 8.9 `Logo`
-
-- **Concepto**: un documento con una línea de texto reemplazada por una barra sólida. Es lo que hace
-  la app, y la barra sobre texto es el símbolo universal de "censurado".
-- **Se descartó** la alternativa "incógnito de Chrome + icono de PDF": el sombrero con anteojos es
-  una marca muy identificada con Chrome —usarla se lee como derivada— y su significado es "sin
-  historial de navegación", que no es la promesa de Anonly.
-- **`animated`**: la barra tapa el renglón que hay debajo, **una sola vez al montar**. La marca hace
-  lo que la app hace. En loop convertiría la identidad en un banner.
-- **El favicon (`public/favicon.svg`) no es una copia del componente**: tiene su propio ajuste
-  óptico (trazo más grueso, renglones más gordos, barra más grande). A 16 px lo único que tiene que
-  sobrevivir es "página con una barra cruzándola", y el detalle fino compite con eso. Colores
-  literales y no tokens: se sirve suelto, sin la hoja de estilos.
-
----
+- **Páginas que no se pudieron leer (ADR-190 §4)**: al pedir el export, la UI calcula las páginas pendientes: las que tienen `unreadableInk` y **ninguna entidad** (misma regla que `PageCanvas`, §5.4). La lista sale de una función pura con test. Si no está vacía, antes de exportar se abre una confirmación: *"Estas páginas tienen contenido que no se pudo leer y no tienen nada marcado para tapar."*, con una fila por página. Cada fila tiene **"Ir a la página"**, que cierra la confirmación sin exportar y lleva el visor a esa página, y el checkbox **"Tapar página entera"**, marcado por defecto. Los botones son "Cancelar" y "Exportar". Las páginas marcadas viajan en `ExportOptions.coveredPages`. No bloquea como ADR-176: siempre se puede exportar, pero después de ver la lista. Con la lista vacía no aparece nada y el flujo es el de siempre.
 
 ### 7.2 `ExportProgress`
 
@@ -722,11 +829,14 @@ hay nada que sincronizar: se retira junto con `SideBySideViewer` y `scrollSyncCo
 ### 8.5 `Tooltip`
 
 - Wrapper sobre Radix `Tooltip` con delay corto.
+- **Colores que se invierten con el tema** (ADR-169 §3): fondo `bg-text-primary`, texto `text-bg-primary`, flecha `fill-text-primary`. **Nunca `text-white`**: en oscuro `text-primary` es casi blanco y el texto quedaba blanco sobre blanco (reporte de las pruebas de usuario). Mismo criterio para cualquier superficie invertida.
 
 ### 8.6 `Toast`
 
 - Wrapper sobre Radix `Toast` (o `sonner` si se agrega con ADR).
 - Tipos: `info`, `success`, `warning`, `error`.
+- **Posición**: abajo a la derecha, flotante — no desplaza nada (UX-10).
+- **Acción de deshacer** (ADR-172): los toasts de edición llevan **"Deshacer"** con la pista `Ctrl+Z`; deshacer desde el toast y desde el atajo es lo mismo (`history.store.undo()`). Los de agregado llevan además "Ver en la lista".
 
 ### 8.7 `Banner`
 
@@ -740,6 +850,31 @@ hay nada que sincronizar: se retira junto con `SideBySideViewer` y `scrollSyncCo
 - Props: `width`, `height`.
 
 ---
+
+### 8.9 `Logo`
+
+- **Concepto**: un documento con una línea de texto reemplazada por una barra sólida. Es lo que hace
+  la app, y la barra sobre texto es el símbolo universal de "censurado".
+- **Se descartó** la alternativa "incógnito de Chrome + icono de PDF": el sombrero con anteojos es
+  una marca muy identificada con Chrome —usarla se lee como derivada— y su significado es "sin
+  historial de navegación", que no es la promesa de Anonly.
+- **`animated`**: la barra tapa el renglón que hay debajo, **una sola vez al montar**. La marca hace
+  lo que la app hace. En loop convertiría la identidad en un banner.
+- **El favicon (`public/favicon.svg`) no es una copia del componente**: tiene su propio ajuste
+  óptico (trazo más grueso, renglones más gordos, barra más grande). A 16 px lo único que tiene que
+  sobrevivir es "página con una barra cruzándola", y el detalle fino compite con eso. Colores
+  literales y no tokens: se sirve suelto, sin la hoja de estilos.
+
+### 8.10 `EntityTypePicker` (ADR-169 §7)
+
+- **Qué es**: el selector de `EntityType` único de la app. Reemplaza al `Select` de tipo y a los chips
+  sueltos en cuatro lugares: la selección sobre el original (§5.4b), la lupa (§5.4c), `AddEntityDialog`
+  (§3.4c) y `ChangeTypeDialog` (§3.8).
+- **Render**: los **13 tipos** en una grilla (dos columnas en globos, tres en diálogos) dentro de una
+  **caja gris** (`bg-tertiary` con borde), cada uno con su punto de color (§9), su nombre y un botón de
+  opción. `role="radiogroup"` + `role="radio"` con `aria-checked`.
+- **Props**: `value`, `onChange`, `current?` (se muestra marcado "Actual" y no seleccionable —
+  `ChangeTypeDialog`), `columns`.
 
 ## 9. Paleta de colores (highlights por tipo)
 
@@ -789,6 +924,8 @@ sale sólido y nada avisa.
 --color-success: #10b981;
 --color-warning: #f59e0b;        /* solo relleno decorativo — ver nota */
 --color-warning-strong: #b45309; /* ADR-087 §3.1: bordes, iconos y texto de precaución */
+--color-border-strong: #374151;  /* ADR-169 §11: bordes de la franja de tipo */
+--color-space: #c2410c;          /* ADR-169 §11: aviso "espacio justo" — 5.18:1 sobre blanco */
 --color-error: #dc2626;      /* 4.83:1 — era #ef4444, que fallaba en sus tres usos */
 --radius-sm: 4px;
 --radius-md: 8px;
@@ -816,6 +953,8 @@ dark` cuando el usuario no eligió explícitamente. La preferencia vive en
 --color-accent-foreground: #111827; /* 6.98:1 sobre el relleno accent */
 --color-success: #34d399;           /* 7.64:1 */
 --color-warning: #fbbf24;
+--color-border-strong: #9ca3af;     /* ADR-169 §11: bordes de la franja de tipo */
+--color-space: #fb923c;             /* ADR-169 §11: aviso "espacio justo" — 6.49:1 sobre la superficie */
 --color-warning-strong: #fbbf24;    /* 8.79:1 */
 --color-error: #f87171;             /* 5.31:1 como texto */
 --color-error-foreground: #111827;  /* 6.41:1 sobre el relleno error */
@@ -871,6 +1010,10 @@ Modo oscuro: en v1.0. MVP es solo claro.
 - Iconos: `lucide-react` (open source, consistente, tree-shakeable).
 - Tamaños: 16 px (inline), 20 px (botones), 24 px (toolbar), 32 px (hero).
 - `aria-label` siempre que el icono sea interactivo.
+- **SVG first-party** donde `lucide-react@0.451.0` no tiene el glifo o el glifo no se lee chico
+  (ADR-169 §3): el aviso de **conflicto** (una Y que se abre en dos, con puntas de flecha) y el de
+  **espacio justo** (`]↔[`: dos corchetes y una flecha doble entre ellos, sobre una grilla de 22×16).
+  Mismo criterio que los símbolos de género de §3.4b.
 
 ---
 

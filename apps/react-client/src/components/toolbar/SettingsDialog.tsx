@@ -1,7 +1,7 @@
 /**
  * `SettingsDialog` (`ui/Components.md` §2.6, ADR-038 §7).
  *
- * Form: idioma (`es` default), performance preset (`auto`/`low`/`high`), NER
+ * Form: idioma (`es` default), performance preset (`auto`/`low`/`medium`/`high`/`ultra`), NER
  * toggle, OCR languages (`docs/roadmap/MVP.md` §2.3, `settings.store.ts` §3.6).
  * `defaultReplacementMode` **no** es parte de este form: ni `Components.md`
  * §2.6 ni el prompt de este PR lo mencionan como campo de Settings.
@@ -36,45 +36,82 @@
  * formulario queda abierto para seguir editando.
  */
 
-import { useEffect, useState, type ReactNode } from "react";
+import {
+  CheckIcon,
+  GaugeIcon,
+  GlobeIcon,
+  InfoIcon,
+  RefreshCwIcon,
+  SunMoonIcon,
+  TriangleAlertIcon,
+} from "lucide-react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { actions } from "../../core-adapter/actions.js";
 import { recreateCore } from "../../core-adapter/index.js";
 import {
   deriveEngineConfigOverrides,
+  readDeviceSignals,
   sameEngineConfigOverrides,
 } from "../../core-adapter/settingsToEngineConfig.js";
 import { useDocumentStore } from "../../store/document.store.js";
 import {
+  searchesAutomatically,
   useSettingsStore,
   type Language,
   type Theme,
   type PerformancePreset,
+  type UpdateMode,
 } from "../../store/settings.store.js";
 import { useViewerStore } from "../../store/viewer.store.js";
 import { applyTheme } from "../../theme.js";
-import { getShellUpdater } from "../../updater/index.js";
+import { getShellUpdater, sendAutomaticChecksPreference } from "../../updater/index.js";
 import { Button } from "../common/Button.js";
 import { Checkbox } from "../common/Checkbox.js";
 import { ConfirmDialog } from "../common/ConfirmDialog.js";
 import { Dialog } from "../common/Dialog.js";
 import { Select, type SelectOption } from "../common/Select.js";
-import { DARK_PREVIEW, LIGHT_PREVIEW, ThemePreview } from "../common/ThemePreview.js";
+import {
+  DARK_PREVIEW,
+  LIGHT_PREVIEW,
+  SystemThemePreview,
+  ThemePreview,
+} from "../common/ThemePreview.js";
 import { computeReanalyzeRenderRequest } from "../viewer/reanalyzeRenderRequest.js";
 
 import { diffReanalyzeChange, planReanalyzePatches } from "./reanalyzePlan.js";
-import { THIRD_PARTY_CREDITS } from "./thirdPartyCredits.js";
+import {
+  describeTheme,
+  OCR_LANGUAGES_SLOT_TEXT,
+  describePerformancePreset,
+  PERFORMANCE_PRESET_LABEL,
+  PERFORMANCE_PRESET_ORDER,
+  resolveOcrLanguagesSlot,
+  resolveSaveErrorSlot,
+  THEME_LABEL,
+  THEME_ORDER,
+  UPDATE_MODE_DESCRIPTION,
+  UPDATE_MODE_LABEL,
+  UPDATE_MODE_ORDER,
+  UPDATE_NETWORK_NOTICE,
+  UPDATE_NETWORK_NOTICE_CHECK_OFF,
+  UPDATE_NETWORK_NOTICE_EMPHASIS,
+  UPDATE_SECTION_SUBTITLE,
+} from "./settingsCopy.js";
+import { syncAutomaticChecksPreference } from "./updatePreferenceSync.js";
 
-const LANGUAGE_OPTIONS: ReadonlyArray<SelectOption<Language>> = [
-  { value: "es", label: "Español" },
-  { value: "en", label: "English" },
-];
+// Vuelve junto con la sección "Idioma de la interfaz", comentada más abajo.
+// const LANGUAGE_OPTIONS: ReadonlyArray<SelectOption<Language>> = [
+//   { value: "es", label: "Español" },
+//   { value: "en", label: "English" },
+// ];
 
-const PERFORMANCE_PRESET_OPTIONS: ReadonlyArray<SelectOption<PerformancePreset>> = [
-  { value: "auto", label: "Automático" },
-  { value: "low", label: "Bajo consumo" },
-  { value: "high", label: "Alto rendimiento" },
-];
+const UPDATE_MODE_OPTIONS: ReadonlyArray<SelectOption<UpdateMode>> = UPDATE_MODE_ORDER.map(
+  (value) => ({ value, label: UPDATE_MODE_LABEL[value] }),
+);
+
+const PERFORMANCE_PRESET_OPTIONS: ReadonlyArray<SelectOption<PerformancePreset>> =
+  PERFORMANCE_PRESET_ORDER.map((value) => ({ value, label: PERFORMANCE_PRESET_LABEL[value] }));
 
 // Únicos idiomas de OCR documentados (docs/core/OCR_Engine.md, MVP.md §2.3,
 // default de settings.store.ts): ampliar esta lista requiere actualizar esos
@@ -105,6 +142,8 @@ export interface SettingsDialogProps {
 
 export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
   const documentId = useDocumentStore((state) => state.id);
+  // Valor fijo del equipo: se lee una vez (ADR-194 §4).
+  const deviceSignals = useMemo(() => readDeviceSignals(), []);
 
   const [language, setLanguage] = useState<Language>(() => useSettingsStore.getState().language);
   const [performancePreset, setPerformancePreset] = useState<PerformancePreset>(
@@ -120,8 +159,8 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
     () => useSettingsStore.getState().ocrLanguages,
   );
 
-  const [autoUpdate, setAutoUpdate] = useState<boolean>(
-    () => useSettingsStore.getState().autoUpdate,
+  const [updateMode, setUpdateMode] = useState<UpdateMode>(
+    () => useSettingsStore.getState().updateMode,
   );
   /*
    * `null` fuera del contenedor de escritorio: en un navegador no hay
@@ -141,7 +180,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
     setLanguage(current.language);
     setPerformancePreset(current.performancePreset);
     setOcrLanguages(current.ocrLanguages);
-    setAutoUpdate(current.autoUpdate);
+    setUpdateMode(current.updateMode);
     setTheme(current.theme);
     setSaveError(null);
   }, [open]);
@@ -151,11 +190,24 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
     performancePreset: PerformancePreset;
     nerEnabled: boolean;
     ocrLanguages: ReadonlyArray<string>;
-    autoUpdate: boolean;
+    updateMode: UpdateMode;
     theme: Theme;
   }): void {
+    const previousSearches = searchesAutomatically(useSettingsStore.getState().updateMode);
     useSettingsStore.setState(next);
-    useSettingsStore.getState().persist();
+    /*
+     * ADR-188 §2: el otro de los dos momentos en que el renderer avisa la
+     * preferencia (el otro es el arranque, en `App.tsx`, vía
+     * `appStartup.ts`). Sale a `syncAutomaticChecksPreference` —misma razón
+     * que esa función: probar sin jsdom que se persiste ANTES de avisar, y
+     * que se avisa SOLO si cambió que se busque o no (ADR-188 §2, ADR-195 §1:
+     * pasar de "Avisarme" a "Instalar" no manda nada). Sin contenedor,
+     * `sendAutomaticChecksPreference` no hace nada.
+     */
+    syncAutomaticChecksPreference(previousSearches, searchesAutomatically(next.updateMode), {
+      persist: () => useSettingsStore.getState().persist(),
+      send: sendAutomaticChecksPreference,
+    });
     // El tema se aplica al guardar y no al elegir: el diálogo es atómico, y si
     // el usuario cancela nada tiene que haber cambiado. La vista previa es lo
     // que da la devolución inmediata, que es para lo que existe.
@@ -164,7 +216,14 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
 
   async function handleSave(): Promise<void> {
     const previous = useSettingsStore.getState();
-    const next = { language, performancePreset, nerEnabled, ocrLanguages, autoUpdate, theme };
+    const next = {
+      language,
+      performancePreset,
+      nerEnabled,
+      ocrLanguages,
+      updateMode,
+      theme,
+    };
     const change = diffReanalyzeChange(previous, next);
     const needsReanalyze =
       (change.ner !== undefined || change.ocr !== undefined) && documentId !== null;
@@ -188,10 +247,13 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
      * garantiza que nadie suelte un PDF en la ventana sin core, donde
      * `getCore()` lanzaría.
      */
-    const nextOverrides = deriveEngineConfigOverrides(next);
+    const nextOverrides = deriveEngineConfigOverrides(next, deviceSignals);
     const needsRecreate =
       documentId === null &&
-      !sameEngineConfigOverrides(deriveEngineConfigOverrides(previous), nextOverrides);
+      !sameEngineConfigOverrides(
+        deriveEngineConfigOverrides(previous, deviceSignals),
+        nextOverrides,
+      );
 
     if (needsRecreate) {
       setSaving(true);
@@ -214,7 +276,14 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
 
   async function handleConfirmReanalyze(): Promise<void> {
     const previous = useSettingsStore.getState();
-    const next = { language, performancePreset, nerEnabled, ocrLanguages, autoUpdate, theme };
+    const next = {
+      language,
+      performancePreset,
+      nerEnabled,
+      ocrLanguages,
+      updateMode,
+      theme,
+    };
     const change = diffReanalyzeChange(previous, next);
     const patches = planReanalyzePatches(change);
 
@@ -254,6 +323,12 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
   }
 
   const ocrLanguagesEmpty = ocrLanguages.length === 0;
+  const ocrSlot = resolveOcrLanguagesSlot({
+    selected: ocrLanguages,
+    saved: useSettingsStore.getState().ocrLanguages,
+    documentOpen: documentId !== null,
+  });
+  const saveErrorSlot = resolveSaveErrorSlot({ saveError, confirmOpen });
 
   return (
     <>
@@ -261,18 +336,30 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
         open={open}
         onClose={onClose}
         title="Configuración"
+        description="Cómo se analiza el documento y cómo se ve Anonly."
+        size="lg"
         footer={
-          <div className="flex justify-end gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {/*
+              ADR-168 §3: "Acerca de" (créditos y código fuente) dejó este
+              diálogo y pasó al pie de la pantalla de inicio. Una línea dice
+              dónde quedó, para quien lo busque donde estaba.
+            */}
+            <span className="inline-flex flex-1 items-center gap-1.5 text-sm text-text-secondary">
+              <InfoIcon className="h-4 w-4 shrink-0" aria-hidden />
+              Créditos y licencias: en «Acerca de…», al pie del inicio.
+            </span>
             <Button variant="secondary" onClick={onClose}>
               Cancelar
             </Button>
             {/*
               `loading` (no solo `disabled`): guardar puede recrear el core sin
               documento abierto (ADR-125 §2) y eso tarda lo que tardan cinco
-              workers.
+              workers. Ancho mínimo: el texto no cambia de ancho (UX-10).
             */}
             <Button
               variant="primary"
+              className="min-w-[6rem]"
               disabled={ocrLanguagesEmpty}
               loading={saving}
               onClick={() => {
@@ -284,156 +371,237 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
           </div>
         }
       >
-        <div className="flex flex-col gap-4">
-          <FormRow label="Idioma">
-            <Select
-              value={language}
-              onChange={setLanguage}
-              options={LANGUAGE_OPTIONS}
-              aria-label="Idioma"
-            />
-          </FormRow>
+        <div className="flex flex-col gap-3.5">
+          {/*
+            Oculta hasta que exista la traducción: la app todavía no tiene
+            textos en inglés, y ofrecer el selector es prometer algo que no
+            pasa. El setting `language` se conserva y se sigue persistiendo.
 
-          <FormRow label="Rendimiento">
-            <Select
-              value={performancePreset}
-              onChange={setPerformancePreset}
-              options={PERFORMANCE_PRESET_OPTIONS}
-              aria-label="Preset de rendimiento"
-            />
-            {documentId !== null ? (
-              <p className="mt-1 text-sm text-text-secondary">
-                Se aplica al próximo documento; no afecta al que está abierto.
-              </p>
-            ) : null}
-          </FormRow>
-
-          <FormRow label="Idiomas del documento">
-            <div className="flex flex-col gap-1.5">
-              {OCR_LANGUAGE_OPTIONS.map((option) => (
-                <Checkbox
-                  key={option.code}
-                  id={`settings-ocr-${option.code}`}
-                  checked={ocrLanguages.includes(option.code)}
-                  onCheckedChange={(checked) =>
-                    setOcrLanguages(toggleLanguage(ocrLanguages, option.code, checked))
-                  }
-                  label={option.label}
+          <Section
+            icon={<LanguagesIcon className="h-5 w-5" aria-hidden />}
+            title="Idioma de la interfaz"
+            subtitle="Los textos de la app. No cambia el idioma del documento."
+            aside={
+              <div className="w-40">
+                <Select
+                  value={language}
+                  onChange={setLanguage}
+                  options={LANGUAGE_OPTIONS}
+                  aria-label="Idioma"
                 />
-              ))}
-            </div>
-            {ocrLanguagesEmpty ? (
-              <p role="alert" className="mt-1 text-sm text-error">
-                Elegí al menos un idioma.
-              </p>
-            ) : null}
-          </FormRow>
+              </div>
+            }
+          />
+          */}
 
-          <FormRow label="Apariencia">
-            <Checkbox
-              id="settings-theme-system"
-              checked={theme === "system"}
-              onCheckedChange={(checked) => setTheme(checked ? "system" : "light")}
-              label="Seguir la configuración del sistema"
-            />
+          <Section
+            icon={<GaugeIcon className="h-5 w-5" aria-hidden />}
+            title="Análisis"
+            subtitle="Cómo trabaja Anonly al revisar un documento."
+          >
+            <div className="flex flex-col gap-2">
+              <span className="text-sm font-semibold text-text-primary">Rendimiento</span>
+              <div className="w-56">
+                <Select
+                  value={performancePreset}
+                  onChange={setPerformancePreset}
+                  options={PERFORMANCE_PRESET_OPTIONS}
+                  aria-label="Preset de rendimiento"
+                />
+              </div>
+              {/* Ranura de alto fijo para los cinco perfiles (UX-10, ADR-194 §6). */}
+              <p className="h-5 truncate text-sm text-text-secondary">
+                {describePerformancePreset(performancePreset, deviceSignals)}
+              </p>
+              {/* Ranura reservada aunque no haya documento: no cambia el alto. */}
+              <p
+                className={`flex h-5 items-center gap-1.5 text-sm text-text-secondary ${
+                  documentId === null ? "invisible" : ""
+                }`}
+              >
+                <InfoIcon className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                Se aplica al próximo documento; no cambia el que está abierto.
+              </p>
+            </div>
+            <div className="h-px bg-border" />
+            <div className="flex flex-col gap-2">
+              <span className="text-sm font-semibold text-text-primary">Idiomas del documento</span>
+              <span className="text-sm text-text-secondary">
+                Se usan para leer las páginas escaneadas.
+              </span>
+              <div className="flex gap-4">
+                {OCR_LANGUAGE_OPTIONS.map((option) => (
+                  <Checkbox
+                    key={option.code}
+                    id={`settings-ocr-${option.code}`}
+                    checked={ocrLanguages.includes(option.code)}
+                    onCheckedChange={(checked) =>
+                      setOcrLanguages(toggleLanguage(ocrLanguages, option.code, checked))
+                    }
+                    label={option.label}
+                  />
+                ))}
+              </div>
+              {/*
+                Ranura de alto fijo (UX-10): el texto neutro, el error y el
+                aviso de re-análisis ocupan el mismo lugar.
+              */}
+              <div
+                role={ocrSlot === "empty" ? "alert" : undefined}
+                aria-live="polite"
+                className={`flex h-14 items-start gap-2 rounded-lg border px-3 py-2 text-sm leading-snug ${
+                  ocrSlot === "empty"
+                    ? "border-error bg-error/10 font-medium text-error"
+                    : ocrSlot === "reanalyze"
+                      ? "border-warning-strong bg-warning/15 text-text-primary"
+                      : "border-border bg-bg-secondary text-text-secondary"
+                }`}
+              >
+                {ocrSlot === "idle" ? (
+                  <InfoIcon className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+                ) : (
+                  <TriangleAlertIcon
+                    className={`mt-0.5 h-4 w-4 shrink-0 ${
+                      ocrSlot === "reanalyze" ? "text-warning-strong" : ""
+                    }`}
+                    aria-hidden
+                  />
+                )}
+                <span className="line-clamp-2">{OCR_LANGUAGES_SLOT_TEXT[ocrSlot]}</span>
+              </div>
+            </div>
+          </Section>
+
+          <Section
+            icon={<SunMoonIcon className="h-5 w-5" aria-hidden />}
+            title="Apariencia"
+            subtitle={describeTheme(theme)}
+          >
             {/*
-              Las miniaturas son el control, no una ilustración al lado del
-              control: elegir un tema mirando su nombre es adivinar, y elegirlo
-              mirando cómo queda es decidir.
+              ADR-169 §8: tres opciones con miniatura en vez del checkbox
+              "Seguir la configuración del sistema" más dos miniaturas. Las
+              miniaturas son el control: elegir un tema mirando cómo queda es
+              decidir, no adivinar.
             */}
-            <div className="mt-3 grid grid-cols-2 gap-3">
-              {(
-                [
-                  { value: "light", label: "Modo claro", palette: LIGHT_PREVIEW },
-                  { value: "dark", label: "Modo oscuro", palette: DARK_PREVIEW },
-                ] as const
-              ).map((option) => (
+            <div role="radiogroup" aria-label="Apariencia" className="grid grid-cols-3 gap-2.5">
+              {THEME_ORDER.map((option) => (
                 <button
-                  key={option.value}
+                  key={option}
                   type="button"
-                  aria-pressed={theme === option.value}
-                  onClick={() => setTheme(option.value)}
-                  className={`flex flex-col gap-1.5 rounded-md border p-1.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
-                    theme === option.value
-                      ? "border-accent ring-1 ring-accent"
+                  role="radio"
+                  aria-checked={theme === option}
+                  onClick={() => setTheme(option)}
+                  className={`flex flex-col gap-2 rounded-lg border p-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+                    theme === option
+                      ? "border-accent ring-2 ring-accent/20"
                       : "border-border hover:border-text-secondary"
-                  } ${theme === "system" ? "opacity-60" : ""}`}
+                  }`}
                 >
-                  <ThemePreview palette={option.palette} />
-                  <span className="px-0.5 text-sm text-text-primary">{option.label}</span>
+                  {option === "system" ? (
+                    <SystemThemePreview />
+                  ) : (
+                    <ThemePreview palette={option === "light" ? LIGHT_PREVIEW : DARK_PREVIEW} />
+                  )}
+                  <span className="flex items-center justify-between px-0.5 text-sm font-semibold text-text-primary">
+                    {THEME_LABEL[option]}
+                    {theme === option ? (
+                      <CheckIcon className="h-4 w-4 text-accent" aria-hidden />
+                    ) : null}
+                  </span>
                 </button>
               ))}
             </div>
-            {theme === "system" ? (
-              <p className="mt-1 text-sm text-text-secondary">
-                Anonly usa el tema de tu sistema y lo acompaña si lo cambiás.
-              </p>
-            ) : null}
-          </FormRow>
+          </Section>
 
           {/*
             Solo dentro del contenedor de escritorio: en un navegador no hay
             actualizador y mostrar el control sería ofrecer algo que no existe.
           */}
           {shellUpdater !== null ? (
-            <FormRow label="Actualizaciones">
-              <Checkbox
-                id="settings-auto-update"
-                checked={autoUpdate}
-                onCheckedChange={setAutoUpdate}
-                label="Actualizar automáticamente"
-              />
+            <Section
+              icon={<RefreshCwIcon className="h-5 w-5" aria-hidden />}
+              title="Actualizaciones"
+              subtitle={UPDATE_SECTION_SUBTITLE}
+            >
+              {/* ADR-195 §3: un selector en lugar de los dos interruptores de ADR-188 §5. */}
+              <div className="flex flex-col gap-2">
+                <div className="w-56">
+                  <Select
+                    value={updateMode}
+                    onChange={setUpdateMode}
+                    options={UPDATE_MODE_OPTIONS}
+                    aria-label="Actualizaciones"
+                  />
+                </div>
+                {/* Un renglón de alto fijo para las tres opciones (UX-10). */}
+                <p className="h-5 truncate text-sm text-text-secondary">
+                  {UPDATE_MODE_DESCRIPTION[updateMode]}
+                </p>
+              </div>
               {/*
-                Texto único que describe LOS DOS estados, no el estado actual.
-                La versión anterior decía "Te vamos a avisar..." cuando estaba
-                apagado, y pegada debajo de un checkbox sin marcar se leía como
-                lo que iba a pasar **si lo activabas** — o sea, exactamente al
-                revés. Un texto que cambia con el toggle es ambiguo por
-                posición aunque sea correcto por contenido.
+                ADR-131 §5: buscar actualizaciones es la **única** salida de
+                red del producto, y el usuario tiene que enterarse por la app.
+                Texto de `Components.md` §2.6: sigue diciendo que GitHub ve la
+                IP y la versión, y la última oración dice cómo no conectarse
+                (ADR-195 §3).
               */}
-              <p className="mt-1 text-sm text-text-secondary">
-                Activado, las versiones nuevas se instalan solas al reiniciar la app. Desactivado,
-                te avisamos y vos decidís cuándo instalarlas.
-              </p>
-              {/*
-                ADR-131 §5 obliga a decirlo acá y no solo en el README: buscar
-                actualizaciones es la **única** salida de red del producto, y el
-                usuario tiene que enterarse por la app y no descubriéndolo.
-              */}
-              <p className="mt-1 text-sm text-text-secondary">
-                Para buscarlas, Anonly le consulta a GitHub. Esa consulta revela tu IP y la versión
-                instalada, y nada más: nunca el contenido ni el nombre de un documento.
-              </p>
-              <button
-                type="button"
-                onClick={() => shellUpdater.check()}
-                className="mt-2 text-sm text-accent underline"
-              >
-                Buscar actualizaciones ahora
-              </button>
-            </FormRow>
+              <div className="flex gap-2.5 rounded-lg bg-bg-tertiary px-3 py-2.5 text-sm leading-snug text-text-secondary">
+                <GlobeIcon className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+                <span>
+                  {UPDATE_NETWORK_NOTICE}{" "}
+                  <b className="font-semibold text-text-primary">
+                    {UPDATE_NETWORK_NOTICE_EMPHASIS}
+                  </b>{" "}
+                  {UPDATE_NETWORK_NOTICE_CHECK_OFF}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-sm text-text-secondary">
+                  Versión instalada:{" "}
+                  <b className="font-semibold text-text-primary">{__ANONLY_VERSION__}</b>
+                </span>
+                <Button variant="secondary" onClick={() => shellUpdater.check()}>
+                  Buscar actualizaciones ahora
+                </Button>
+              </div>
+            </Section>
           ) : null}
         </div>
-
-        <AboutSection />
 
         {/*
           Hasta ADR-125 `saveError` solo se renderizaba dentro del
           `ConfirmDialog`, que es el camino con documento abierto. El camino
           sin documento no abre ninguna confirmación, así que un fallo al
           recrear el core no tenía dónde aparecer.
+
+          N-5 / UX-10: ranura de **alto fijo** — antes este párrafo solo se
+          montaba con error, y aparecer/desaparecer corría el pie del
+          diálogo. Ahora queda siempre montado (`h-5`, una línea con
+          `truncate`) y solo cambia su texto, igual que la segunda línea de
+          `PipelineStatus` (`UX_Guidelines.md` §7.1).
+
+          No bloqueante 7 de la revisión 2: `truncate` puede cortar el
+          mensaje a la mitad de una palabra — `title` lleva el texto
+          completo, así que un hover (o un lector de pantalla que lo
+          exponga) siempre puede leerlo entero.
         */}
-        {saveError !== null && !confirmOpen ? (
-          <p role="alert" className="mt-4 text-sm text-error">
-            {saveError}
-          </p>
-        ) : null}
+        <p
+          role={saveErrorSlot.visible ? "alert" : undefined}
+          aria-live="polite"
+          title={saveErrorSlot.visible ? saveErrorSlot.text : undefined}
+          className={`mt-4 h-5 truncate text-sm text-error ${
+            saveErrorSlot.visible ? "" : "invisible"
+          }`}
+        >
+          {saveErrorSlot.text}
+        </p>
       </Dialog>
 
       <ConfirmDialog
         open={confirmOpen}
         title="Reanalizar documento"
-        message="¿Reanalizar el documento con la nueva configuración? Tus ediciones se conservan."
+        // ADR-172 §2: la pila de deshacer no cruza un re-análisis.
+        message="¿Reanalizar el documento con la nueva configuración? Tus ediciones se conservan, pero lo hecho hasta acá ya no se va a poder deshacer."
         confirmLabel="Reanalizar"
         cancelLabel="Cancelar"
         busy={saving}
@@ -450,82 +618,38 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
   );
 }
 
-function FormRow({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="flex flex-col gap-1.5">
-      <span className="text-sm font-medium text-text-secondary">{label}</span>
-      {children}
-    </div>
-  );
-}
-
-// Bloque estático (ADR-070 §1): lee `THIRD_PARTY_CREDITS`, un módulo de
-// datos puro, nunca `settings.store`. No participa de `diffReanalyzeChange`
-// ni de `handleSave`/`handleConfirmReanalyze` — "Cancelar" y "Guardar" no lo
-// tocan porque no hay nada de él que aplicar o descartar.
 /**
- * El repo del proyecto. Constante y no un setting: es una propiedad del
- * producto, no algo que el usuario configure.
+ * Una sección del diálogo (ADR-169 §8): ícono, título y bajada, y su
+ * contenido debajo — o un control al costado (`aside`) cuando es uno solo.
  */
-const REPOSITORY_URL = "https://github.com/sgiambelluca/Anonly";
-
-function AboutSection() {
+function Section({
+  icon,
+  title,
+  subtitle,
+  aside,
+  children,
+}: {
+  readonly icon: ReactNode;
+  readonly title: string;
+  readonly subtitle: string;
+  readonly aside?: ReactNode;
+  readonly children?: ReactNode;
+}) {
   return (
-    <>
-      <div className="my-4 border-t border-border" />
-      <section aria-label="Acerca de" className="flex flex-col gap-3">
-        <h3 className="text-sm font-medium text-text-secondary">Acerca de</h3>
-        {/*
-          Que el código sea auditable es parte de la promesa del producto, no
-          un dato de color: alguien que va a confiarle una pericia a esta
-          herramienta tiene que poder ir a mirar qué hace. El link va acá y no
-          escondido en un README.
-        */}
-        <p className="text-sm text-text-secondary">
-          Anonly es software libre.{" "}
-          <a
-            href={REPOSITORY_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-accent underline"
-          >
-            Ver el código fuente en GitHub
-          </a>
-          {" · "}
-          <a
-            href={`${REPOSITORY_URL}/issues/new`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-accent underline"
-          >
-            Reportar un problema
-          </a>
-        </p>
-        {THIRD_PARTY_CREDITS.map((credit) => (
-          <p key={credit.id} className="text-sm text-text-secondary">
-            <a
-              href={credit.sourceUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-accent underline"
-            >
-              {credit.title}
-            </a>
-            {" — "}
-            {credit.holder}. Licencia{" "}
-            <a
-              href={credit.licenseUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-accent underline"
-            >
-              {credit.license}
-            </a>
-            {". "}
-            {credit.changes} {credit.usedFor}
-          </p>
-        ))}
-      </section>
-    </>
+    <section className="flex flex-col gap-3.5 rounded-xl border border-border bg-bg-primary p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-bg-tertiary text-text-secondary">
+            {icon}
+          </span>
+          <div className="flex min-w-0 flex-col">
+            <h3 className="text-sm font-semibold text-text-primary">{title}</h3>
+            <p className="text-sm text-text-secondary">{subtitle}</p>
+          </div>
+        </div>
+        {aside}
+      </div>
+      {children}
+    </section>
   );
 }

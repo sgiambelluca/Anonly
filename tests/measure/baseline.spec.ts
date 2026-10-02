@@ -27,12 +27,38 @@ import { fileURLToPath } from "node:url";
 import { expect, test, type Page } from "@playwright/test";
 
 import { rasterizeToScannedPdf } from "../e2e/support/scannedPdf.js";
+import { installSettingsOverride } from "../e2e/support/settingsOverride.js";
+import type { BaselineRuntime } from "../quality/baseline/schema.js";
 import { classifyGroups } from "../quality/classify-groups.js";
 import { aggregateEvaluations, evaluateDocument } from "../quality/evaluate.js";
 import { loadReferenceDataset } from "../quality/load-reference-dataset.js";
 import { formatReport } from "../quality/print-report.js";
 
 import { TIMED_EVENTS, type BrowserCollector, type MeasuredDocument } from "./collect.js";
+
+/**
+ * ADR-147 §6: el runtime es parte de la identidad de la baseline, y el
+ * comparador exige que coincida — tiene que salir de ACÁ (el único lugar que
+ * sabe de verdad qué corrió esta medición), no asumirse después en
+ * `tests/quality/baseline/generate-candidate.ts`, que solo ve el JSON que
+ * este archivo escribe en disco.
+ *
+ * Este harness corre siempre dentro de una `page` de Playwright — nunca en
+ * Node, es la razón de ser de este archivo (ver el comentario de cabecera:
+ * "en el browser usa WASM"). `playwright.measure.config.ts` declara hoy un
+ * solo proyecto, `"chromium"`, para el que Transformers.js resuelve NER por
+ * WASM (nunca el backend nativo de Node). Si algún día se agrega otro
+ * proyecto (Firefox, WebKit, un runtime headless distinto), este `throw`
+ * fuerza a decidir su `BaselineRuntime` explícitamente en vez de heredar
+ * `"chromium-wasm"` en silencio para un backend que no se verificó.
+ */
+function detectRuntime(projectName: string): BaselineRuntime {
+  if (projectName === "chromium") return "chromium-wasm";
+  throw new Error(
+    `No hay un BaselineRuntime definido para el proyecto de Playwright "${projectName}". ` +
+      "Decidilo explícitamente en tests/measure/baseline.spec.ts (ADR-147 §6) antes de medir con él.",
+  );
+}
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const OUT_DIR = resolve(HERE, "../../.measure");
@@ -62,7 +88,10 @@ function selectedDocumentIds(): ReadonlyArray<string> | undefined {
   return raw.split(",").map((s) => s.trim());
 }
 
-test("línea de base sobre el dataset de referencia, con NER encendido", async ({ page }) => {
+test("línea de base sobre el dataset de referencia, con NER encendido", async ({
+  page,
+}, testInfo) => {
+  const runtime = detectRuntime(testInfo.project.name);
   const dataset = await loadReferenceDataset();
   const only = selectedDocumentIds();
   const documents = only ? dataset.filter((d) => only.includes(d.entry.documentId)) : dataset;
@@ -116,7 +145,7 @@ test("línea de base sobre el dataset de referencia, con NER encendido", async (
   const outFile = resolve(OUT_DIR, `${process.env.MEASURE_LABEL ?? "baseline"}.json`);
   await writeFile(
     outFile,
-    JSON.stringify({ capturedAt: new Date().toISOString(), results }, null, 2),
+    JSON.stringify({ capturedAt: new Date().toISOString(), runtime, results }, null, 2),
   );
   console.log(`\nMedición escrita en ${outFile}`);
 });
@@ -135,6 +164,8 @@ async function measureOne(
    * Se reporta aparte —columna `modelo`— justamente para poder descontarlo:
    * lo que comparan A/B/C es el tiempo POR PÁGINA, no el arranque.
    */
+  // ADR-194 §8: la medición no deja que Automático elija el nivel del equipo.
+  await installSettingsOverride(page, {});
   await page.goto("/", { waitUntil: "networkidle" });
   // El hook de dev de `core-adapter/index.ts`; sin él no hay bus que escuchar.
   await page.waitForFunction(() => "__anonlyCore" in globalThis, undefined, { timeout: 60_000 });

@@ -183,6 +183,25 @@ const DEFAULT_TIMEOUT_MS = 30_000; // spec §11/§12: "default 30 s por página"
 const MAX_RETRIES = 1; // spec §11: "reintentar 1 vez".
 const MAX_TITLE_LENGTH = 500; // spec §13 caso 16: "título muy largo".
 
+/**
+ * ADR-190 §5: una página `coveredPages` se exporta como un rectángulo negro
+ * lleno, SIN pedir su render (`renderPageProvider.renderFull` no se llama, y
+ * ningún píxel original llega al archivo). En vez de un tipo de job nuevo
+ * (que exigiría extender `ExportPagePayload` — un contrato ya documentado en
+ * `03_Data_Model.md` §18 que este cambio no toca), se reusa el `append-page`
+ * de siempre con esta imagen sintética: un PNG opaco de 1×1 negro. `drawImage`
+ * en `appendPage` (`worker/assembler.ts`) ya estira cualquier imagen a
+ * `pageWidthPt`×`pageHeightPt`, así que un solo píxel alcanza para cubrir la
+ * página entera — no hace falta generar un PNG del tamaño real de la página.
+ * Bytes verificados: PNG válido (firma + IHDR 1×1 color-type 2 + IDAT con un
+ * píxel (0,0,0) + IEND), embebido y dibujado con éxito por pdf-lib.
+ */
+const BLACK_PIXEL_PNG_BYTES = new Uint8Array([
+  137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 2, 0, 0,
+  0, 144, 119, 83, 222, 0, 0, 0, 12, 73, 68, 65, 84, 120, 156, 99, 96, 96, 96, 0, 0, 0, 4, 0, 1,
+  246, 23, 56, 85, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
+]).buffer;
+
 // ─── Puerto interno de despacho (ADR-047 §2, espejo exacto de
 // OcrJobPool/OcrDispatchParams en ocr-engine/src/ocr.engine.ts y
 // NerJobPool/NerDispatchParams en ner-engine/src/ner.engine.ts). No
@@ -672,6 +691,17 @@ export class ExportEngine implements IEngine {
         { documentId: input.documentId, jpegQuality },
       );
     }
+    // ADR-190 §5: índices fuera de [0, pageCount) o no enteros lanzan
+    // InvalidInputError; los duplicados se ignoran acá y en exportPage.
+    for (const pageIndex of input.options.coveredPages ?? []) {
+      if (!Number.isInteger(pageIndex) || pageIndex < 0 || pageIndex >= input.document.pageCount) {
+        throw new InvalidInputError(
+          `options.coveredPages tiene un índice fuera de rango: ${pageIndex} ` +
+            `(pageCount=${input.document.pageCount}).`,
+          { documentId: input.documentId, pageIndex },
+        );
+      }
+    }
   }
 
   private async exportPage(
@@ -689,6 +719,8 @@ export class ExportEngine implements IEngine {
     }
 
     const replacements = buildPageReplacements(pageIndex, input.groups);
+    // ADR-190 §5: índices duplicados se ignoran naturalmente por ser un Set.
+    const isCovered = new Set(input.options.coveredPages ?? []).has(pageIndex);
 
     let lastError: unknown;
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
@@ -696,14 +728,18 @@ export class ExportEngine implements IEngine {
         throw new CancelledError(input.documentId);
       }
       try {
-        const pageImage = await renderPageWithTimeout(
-          input.renderPageProvider,
-          pageIndex,
-          replacements,
-          ctx.abortSignal,
-          input.documentId,
-          timeoutMs,
-        );
+        // ADR-190 §4-§5, caso 26 (Export_Engine.md §13): página tapada ->
+        // rectángulo negro sintético, SIN pedir el render de la página.
+        const pageImage = isCovered
+          ? { bytes: BLACK_PIXEL_PNG_BYTES, format: "png" as const }
+          : await renderPageWithTimeout(
+              input.renderPageProvider,
+              pageIndex,
+              replacements,
+              ctx.abortSignal,
+              input.documentId,
+              timeoutMs,
+            );
 
         if (ctx.abortSignal.aborted) {
           throw new CancelledError(input.documentId);

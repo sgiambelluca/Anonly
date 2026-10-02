@@ -62,6 +62,21 @@ describe("getPipelineErrorPresentation", () => {
    * los nombres intactos — un resultado equivocado con cara de éxito, que es
    * peor que no poder analizar. La salida es reintentar, y el mensaje lo dice.
    */
+  it("maps PDF_PAGE_ROTATED to a message that neither names /Rotate nor claims the file is damaged", () => {
+    const presentation = getPipelineErrorPresentation(
+      PipelineStage.Failed,
+      makeError({
+        code: EngineErrorCode.PDF_PAGE_ROTATED,
+        details: { documentId: "doc-1", pageIndex: 6, rotation: 90 },
+      }),
+    );
+    expect(presentation?.message).toMatch(/girada/);
+    expect(presentation?.message).not.toMatch(/Rotate/);
+    expect(presentation?.message).not.toMatch(/dañad|corrupt/i);
+    // ADR-087 §4: un mensaje de error sin salida es un cartel, no una ayuda.
+    expect(presentation?.message).toMatch(/probá con otro documento/i);
+  });
+
   it("maps NER_MODEL_MISSING to a message that says to retry, never to continue without names", () => {
     const presentation = getPipelineErrorPresentation(
       PipelineStage.Failed,

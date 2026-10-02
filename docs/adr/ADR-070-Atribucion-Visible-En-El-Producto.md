@@ -8,6 +8,12 @@
 - **Relacionado con**: ADR-060 §11 (la obligación de licencia, que este ADR no crea sino que aterriza), ADR-069 §1 (la fuente única, que reduce la atribución a una sola licencia), ADR-036 §7 (el `SettingsDialog` donde se inserta), ADR-018 (el criterio de auditabilidad de assets de terceros)
 - **Parte de**: Hito 10.6, PR 12b
 
+> **Reemplazado en parte por ADR-168 §3 (2026-09-23).** §1 ya no vale: la sección sale del
+> `SettingsDialog` y pasa a `AboutDialog`, abierto desde el pie de la pantalla de carga. §3 se
+> **extiende** con dos URLs (el repositorio y su página de issues), que ya existían en el producto
+> sin ADR. §2, §4 y §5 siguen vigentes sin cambios: cambia dónde se muestra el crédito, no qué se
+> muestra ni cómo se verifica.
+
 > Convención de citas: `ADR-070 §N` refiere a **Decisión §N**; el contexto se cita como `ADR-070, Contexto §N`.
 
 ## Contexto

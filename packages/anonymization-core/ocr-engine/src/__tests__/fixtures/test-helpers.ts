@@ -8,13 +8,13 @@
  * (Code_Standards.md §10; ADR-021 §5; precedente: mockGetDocumentResult en
  * pdf-engine).
  */
-import type { EngineConfig, EngineContext } from "@anonly/shared";
+import type { EncodedPageImage, EngineConfig, EngineContext } from "@anonly/shared";
 import { createEngineContext as sharedCreateEngineContext, createMockConfig as sharedCreateMockConfig } from "@anonly/test-utils";
 import type { createWorker } from "tesseract.js";
 import { vi } from "vitest";
 
 
-import type { OcrPageInput } from "../../ocr.types.js";
+import type { OcrImageProducer, OcrPageInput, OcrPageRequest } from "../../ocr.types.js";
 
 
 /*
@@ -185,6 +185,31 @@ export function createImageData(width: number, height: number): ImageData {
   };
 }
 
+/**
+ * ADR-158 §2: `EncodedPageImage` de prueba — `bytes` es un buffer no vacío
+ * de relleno. La decodificación real (`createImageBitmap`) está stubbeada
+ * acá abajo (`installCreateImageBitmapStub`) y `decodeEncodedImage`
+ * (worker/kernel.ts) arma el canvas con `widthPx`/`heightPx` del propio
+ * `EncodedPageImage` — nunca lee dimensiones del bitmap decodificado —, así
+ * que el CONTENIDO de `bytes` nunca importa en tests, solo estos dos campos.
+ * Tiene que ser no vacío: `byteLength === 0` es el guard de
+ * `OCR_Engine.md` §9/§13 caso 4 (`image.bytes` detached), y un default vacío
+ * dispararía ese guard en todos los tests que no lo ejercitan a propósito.
+ */
+export function createEncodedPageImage(
+  widthPx: number,
+  heightPx: number,
+  overrides?: Partial<EncodedPageImage>,
+): EncodedPageImage {
+  return {
+    bytes: new ArrayBuffer(4),
+    format: "png",
+    widthPx,
+    heightPx,
+    ...overrides,
+  };
+}
+
 export function createValidOcrPageInput(
   documentId: string,
   pageIndex = 0,
@@ -193,11 +218,36 @@ export function createValidOcrPageInput(
   return {
     documentId,
     pageIndex,
-    imageData: createImageData(100, 40),
+    image: createEncodedPageImage(100, 40),
     dpi: 300,
     languages: ["spa", "eng"],
     ...overrides,
   };
+}
+
+/** ADR-143 §1: descriptor liviano para `processSession`, espejo de `createValidOcrPageInput`. */
+export function createValidOcrPageRequest(
+  documentId: string,
+  pageIndex = 0,
+  overrides?: Partial<OcrPageRequest>,
+): OcrPageRequest {
+  return {
+    documentId,
+    pageIndex,
+    dpi: 300,
+    languages: ["spa", "eng"],
+    // Chico y arbitrario: por debajo de cualquier maxLiveImageBytes salvo que
+    // un test lo pise a propósito (§4, presupuesto excedido).
+    estimatedBytes: 1024,
+    ...overrides,
+  };
+}
+
+/** `OcrImageProducer` trivial: siempre resuelve con el mismo `EncodedPageImage` (ADR-143 §1, ADR-158 §2). */
+export function createImageProducer(
+  image: EncodedPageImage = createEncodedPageImage(100, 40),
+): OcrImageProducer {
+  return () => Promise.resolve(image);
 }
 
 /**
@@ -213,6 +263,58 @@ export function createValidOcrPageInput(
  * los píxeles.
  */
 let stubCanvasContextAvailable = true;
+let stubDrawImageThrowsOnce = false;
+let stubPutImageDataThrowsOnce = false;
+let stubDecodedPixel: readonly [number, number, number, number] = [0, 0, 0, 255];
+let stubDecodedPixelSequence: ReadonlyArray<readonly [number, number, number, number]> | undefined;
+let stubDecodedDataReadThrowsOnce = false;
+/**
+ * ADR-165: a diferencia de `stubDecodedPixelSequence` (un color uniforme por
+ * franja), los tests de la caja explicada necesitan un patrón NO uniforme
+ * dentro de una misma franja — un solo píxel de tinta en una posición
+ * precisa. Cada entrada pinta UNA decodificación completa (mismo criterio de
+ * "una por llamada, en orden" que la secuencia de color uniforme).
+ */
+let stubDecodedPixelPainterSequence:
+  | ReadonlyArray<(x: number, y: number) => readonly [number, number, number, number]>
+  | undefined;
+/** ADR-165: contenido real que llegó a `putImageData` (no-op en el resto del
+ * stub) — permite afirmar que la franja reconocida recibe píxeles sin tocar. */
+let putImageDataCalls: ImageData[] = [];
+
+/** Permite a los tests de ADR-162 elegir el contenido de la franja decodificada. */
+export function setStubDecodedPixel(
+  pixel: readonly [number, number, number, number],
+): void {
+  stubDecodedPixel = pixel;
+  stubDecodedPixelSequence = undefined;
+  stubDecodedDataReadThrowsOnce = false;
+  stubDecodedPixelPainterSequence = undefined;
+  putImageDataCalls = [];
+}
+
+export function setStubDecodedPixelSequence(
+  pixels: ReadonlyArray<readonly [number, number, number, number]>,
+): void {
+  stubDecodedPixelSequence = pixels;
+}
+
+export function setStubDecodedDataReadThrowsOnce(): void {
+  stubDecodedDataReadThrowsOnce = true;
+}
+
+/** ADR-165: una función de pintado por decodificación, consumida en orden. */
+export function setStubDecodedPixelPainterSequence(
+  painters: ReadonlyArray<(x: number, y: number) => readonly [number, number, number, number]>,
+): void {
+  stubDecodedPixelPainterSequence = painters;
+}
+
+/** ADR-165: lo que efectivamente se dibujó vía `putImageData`, en orden de llamada. */
+export function getPutImageDataCalls(): ReadonlyArray<ImageData> {
+  return putImageDataCalls;
+}
+
 
 class StubOffscreenCanvas {
   width: number;
@@ -226,10 +328,83 @@ class StubOffscreenCanvas {
    * de detectar la orientación. Como `putImageData`, no rasteriza: los tests
    * mockean tesseract.js entero y lo único observable —y lo único que hace
    * falta observar— son las DIMENSIONES del canvas que recibe `detect`.
+   *
+   * ADR-158 §2/§3: `getImageData` existe porque `decodeEncodedImage`
+   * (worker/kernel.ts) lo llama para materializar el `ImageData` decodificado
+   * — devuelve un `createImageData(w, h)` de la forma pedida, mismo criterio
+   * que el resto del stub: sin píxeles reales, solo dimensiones correctas.
    */
-  getContext(): { putImageData: () => void; drawImage: () => void } | null {
+  getContext(): {
+    putImageData: (imageData: ImageData, dx: number, dy: number) => void;
+    drawImage: () => void;
+    getImageData: (x: number, y: number, w: number, h: number) => ImageData;
+  } | null {
     if (!stubCanvasContextAvailable) return null;
-    return { putImageData: () => undefined, drawImage: () => undefined };
+    return {
+      putImageData: (imageData: ImageData): void => {
+        if (stubPutImageDataThrowsOnce) {
+          stubPutImageDataThrowsOnce = false;
+          throw new Error("stub putImageData failed");
+        }
+        putImageDataCalls.push(imageData);
+      },
+      drawImage: () => {
+        if (stubDrawImageThrowsOnce) {
+          stubDrawImageThrowsOnce = false;
+          throw new Error("stub drawImage failed");
+        }
+      },
+      getImageData: (_x: number, _y: number, w: number, h: number) => {
+        const image = createImageData(w, h);
+        if (stubDecodedPixelPainterSequence !== undefined) {
+          const [painter, ...rest] = stubDecodedPixelPainterSequence;
+          if (painter !== undefined) {
+            stubDecodedPixelPainterSequence = rest;
+            for (let y = 0; y < h; y++) {
+              for (let x = 0; x < w; x++) {
+                const [r, g, b, a] = painter(x, y);
+                const index = (y * w + x) * 4;
+                image.data[index] = r;
+                image.data[index + 1] = g;
+                image.data[index + 2] = b;
+                image.data[index + 3] = a;
+              }
+            }
+            return image;
+          }
+        }
+        const nextPixel = stubDecodedPixelSequence?.[0] ?? stubDecodedPixel;
+        if (stubDecodedPixelSequence !== undefined) {
+          stubDecodedPixelSequence = stubDecodedPixelSequence.slice(1);
+        }
+        for (let index = 0; index < image.data.length; index += 4) {
+          image.data[index] = nextPixel[0];
+          image.data[index + 1] = nextPixel[1];
+          image.data[index + 2] = nextPixel[2];
+          image.data[index + 3] = nextPixel[3];
+        }
+        if (stubDecodedDataReadThrowsOnce) {
+          stubDecodedDataReadThrowsOnce = false;
+          let throwOnDataRead = true;
+          return new Proxy(image, {
+            get(target, property) {
+              if (property === "data") {
+                if (throwOnDataRead) {
+                  throwOnDataRead = false;
+                  throw new Error("uncertain");
+                }
+                return target.data;
+              }
+              if (property === "width") return target.width;
+              if (property === "height") return target.height;
+              if (property === "colorSpace") return target.colorSpace;
+              return undefined;
+            },
+          });
+        }
+        return image;
+      },
+    };
   }
 }
 
@@ -245,6 +420,14 @@ export function setStubCanvasContextAvailable(available: boolean): void {
   stubCanvasContextAvailable = available;
 }
 
+export function setStubDrawImageThrowsOnce(): void {
+  stubDrawImageThrowsOnce = true;
+}
+
+export function setStubPutImageDataThrowsOnce(): void {
+  stubPutImageDataThrowsOnce = true;
+}
+
 function installOffscreenCanvasStub(): void {
   if (typeof globalThis.OffscreenCanvas !== "undefined") return;
 
@@ -256,6 +439,108 @@ function installOffscreenCanvasStub(): void {
 }
 
 installOffscreenCanvasStub();
+
+/**
+ * Stub de `createImageBitmap` para el entorno `node` de Vitest (sin DOM):
+ * `createImageBitmap` no existe en Node de forma nativa (a diferencia de
+ * `Blob`, global desde Node 18). `decodeEncodedImage` (worker/kernel.ts) lo
+ * llama para decodificar `EncodedPageImage.bytes`, pero nunca lee
+ * `bitmap.width`/`bitmap.height` — arma el canvas con `widthPx`/`heightPx`
+ * del propio `EncodedPageImage` — así que el bitmap devuelto acá solo
+ * necesita `close()`. No instala si ya existe (entorno con soporte real).
+ */
+function installCreateImageBitmapStub(): void {
+  if (typeof globalThis.createImageBitmap !== "undefined") return;
+
+  Object.defineProperty(globalThis, "createImageBitmap", {
+    value: (): Promise<{ close: () => void }> => Promise.resolve({ close: () => undefined }),
+    writable: true,
+    configurable: true,
+  });
+}
+
+installCreateImageBitmapStub();
+
+// ─── Instrumentación para ADR-160 (el kernel no decodifica la página) ───────
+
+export interface OffscreenCanvasConstruction {
+  readonly width: number;
+  readonly height: number;
+}
+
+/**
+ * Intercepta cada `new OffscreenCanvas(...)` durante la vida del test
+ * (ADR-160 §6.2: el test estructural "cero superficies de página completa").
+ * Envuelve la clase YA instalada (`StubOffscreenCanvas` arriba, o la nativa
+ * si el entorno la trae) en vez de reemplazarla por una propia: el
+ * comportamiento de `getContext`/`drawImage`/`getImageData` sigue siendo el
+ * mismo, solo se agrega el registro de tamaños. Llamar a `restore()` en un
+ * `finally` — deja `globalThis.OffscreenCanvas` como estaba.
+ */
+export function trackOffscreenCanvasConstructions(): {
+  readonly constructions: ReadonlyArray<OffscreenCanvasConstruction>;
+  readonly canvases: ReadonlyArray<OffscreenCanvas>;
+  readonly restore: () => void;
+} {
+  const original = globalThis.OffscreenCanvas;
+  const constructions: OffscreenCanvasConstruction[] = [];
+  const canvases: OffscreenCanvas[] = [];
+  class TrackingOffscreenCanvas extends original {
+    constructor(width: number, height: number) {
+      super(width, height);
+      constructions.push({ width, height });
+      canvases.push(this);
+    }
+  }
+  Object.defineProperty(globalThis, "OffscreenCanvas", {
+    value: TrackingOffscreenCanvas,
+    writable: true,
+    configurable: true,
+  });
+  return {
+    constructions,
+    canvases,
+    restore: (): void => {
+      Object.defineProperty(globalThis, "OffscreenCanvas", {
+        value: original,
+        writable: true,
+        configurable: true,
+      });
+    },
+  };
+}
+
+/**
+ * Intercepta cada `createImageBitmap(...)` (ADR-160 §2/§3: verificar que el
+ * OSD y las franjas de margen piden un recorte/resize, no la página entera)
+ * delegando en la implementación ya instalada. Mismo criterio de `restore()`
+ * que `trackOffscreenCanvasConstructions`.
+ */
+export function trackCreateImageBitmapCalls(): {
+  readonly calls: ReadonlyArray<ReadonlyArray<unknown>>;
+  readonly restore: () => void;
+} {
+  const original = globalThis.createImageBitmap;
+  const calls: unknown[][] = [];
+  Object.defineProperty(globalThis, "createImageBitmap", {
+    value: (...args: Parameters<typeof original>): ReturnType<typeof original> => {
+      calls.push(args);
+      return original(...args);
+    },
+    writable: true,
+    configurable: true,
+  });
+  return {
+    calls,
+    restore: (): void => {
+      Object.defineProperty(globalThis, "createImageBitmap", {
+        value: original,
+        writable: true,
+        configurable: true,
+      });
+    },
+  };
+}
 
 // ─── Puerto interno OcrJobPool (ADR-045 §2) — fake estructural para tests ───
 
@@ -275,6 +560,8 @@ export interface OcrDispatchCall {
 export interface TrackingOcrPool {
   readonly dispatch: <T>(params: OcrPoolDispatchParams<T>) => Promise<T>;
   readonly calls: OcrDispatchCall[];
+  readonly releaseIdleWorkers: () => boolean;
+  readonly releaseIdleWorkersCallCount: () => number;
 }
 
 /**
@@ -289,12 +576,23 @@ export interface TrackingOcrPool {
  */
 export function createTrackingOcrPool(): TrackingOcrPool {
   const calls: OcrDispatchCall[] = [];
+  let releaseIdleWorkersCalls = 0;
   return {
     calls,
     dispatch: <T>(params: OcrPoolDispatchParams<T>): Promise<T> => {
       calls.push({ payload: params.payload, maxRetriesOverride: params.maxRetriesOverride });
       return params.run();
     },
+    // ADR-157 §1bis: cuenta las llamadas en vez de simular la guarda de
+    // ociosidad real de `WorkerPool` — esa guarda ya la prueba
+    // `worker-pool.test.ts`/`unit.test.ts` de `packages/anonymization-core/src`
+    // (`releaseIdleWorkers es no-op si el pool NO está ocioso`); acá solo
+    // hace falta confirmar que `OcrEngine.releaseIdleWorkers()` delega.
+    releaseIdleWorkers: (): boolean => {
+      releaseIdleWorkersCalls += 1;
+      return true;
+    },
+    releaseIdleWorkersCallCount: (): number => releaseIdleWorkersCalls,
   };
 }
 
@@ -311,9 +609,11 @@ export function createTrackingOcrPool(): TrackingOcrPool {
  */
 export function createResolvedOcrPool(resolvedValue: unknown): {
   readonly dispatch: (params: OcrPoolDispatchParams<unknown>) => Promise<unknown>;
+  readonly releaseIdleWorkers: () => boolean;
 } {
   return {
     dispatch: (): Promise<unknown> => Promise.resolve(resolvedValue),
+    releaseIdleWorkers: (): boolean => false,
   };
 }
 
@@ -324,7 +624,7 @@ export function createResolvedOcrPool(resolvedValue: unknown): {
  */
 export function createMockConfig(overrides?: Partial<EngineConfig>): EngineConfig {
   return sharedCreateMockConfig({
-    ocr: { languages: ["spa", "eng"], dpi: 300 },
+    ocr: { languages: ["spa", "eng"], dpi: 300, maxLiveImageBytes: 128 * 1024 * 1024 },
     ...overrides,
   });
 }

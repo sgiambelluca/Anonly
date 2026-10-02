@@ -2,7 +2,7 @@
 
 # ADR-087 — La herramienta tiene tres momentos, no cuatro paneles
 
-- **Estado**: Accepted
+- **Estado**: Accepted (**§6 superseded en su regla de pase por ADR-150**, 2026-09-09: se pasa a ②b cuando el pipeline **terminó**, no antes. Desaparecen el techo de 6 s y el umbral del 20 % de páginas; el piso de 1,2 s se conserva y recién ahí ata de verdad. El motivo es la propia razón fuerte de §6 —no editar sobre datos que se mueven—, que el techo contradecía: medido, el pase caía ~700-1200 ms antes de `Ready`, con el árbol todavía renumerando marcadores y sin botón de exportar. El resto de §6 —por qué existe la pantalla, qué muestra, que el escaneo siga con `Cancelar`— queda intacto)
 - **Fecha**: 2026-08-21
 - **Decidido por**: El humano, tras una auditoría de la UI contra las heurísticas de Nielsen: *"en vez de que sea todo una SPA, que sea como un wizard de algunos pasos"*, *"el panel de reglas apenas y lo uso"*, *"mostrar un solo visor con un toggle puede servir más que el modo actual"*, *"no hace falta mostrar con qué calidad exportarlo"*, *"alguien que no usó nunca la herramienta no sabe qué es placeholder o redacted"*.
 - **Relacionado con**: `00_Project_Vision.md` §8 (layout), `ui/UX_Guidelines.md` §2/§3/§4/§5/§7/§8/§11, `ui/Components.md` §1/§2/§3/§4/§5/§7, ADR-012 (los cuatro modos), ADR-044 (de dónde salen los `replacements` del preview), ADR-054/ADR-056 (scroll y render por panel), ADR-059 (referencia de marcadores), ADR-078 ("Personalizado" ya está tomado; y el valor escrito a mano que §3.3 protege), `core/Grouping_Engine.md` §"Resolución de modo" (la precedencia que §3.1a/§3.1b usan).
@@ -366,6 +366,20 @@ Valores fijos, retirados del formulario:
 
 ### 6. La pantalla de escaneo suelta temprano, con piso y techo, medida sobre `Detecting`
 
+> **Superseded por ADR-150 (2026-09-10) en su regla de pase.** Medido contra el
+> build de producción, el pase temprano dejaba al usuario en ②b entre 700 y
+> 1200 ms **antes** de que el documento estuviera listo (`stage === Detecting`,
+> sin botón de exportar), contradiciendo la razón fuerte de este mismo §6 —no
+> editar sobre datos que se mueven. ADR-150 retira el techo (`SCAN_ADVANCE_MAX_MS`)
+> y el umbral de páginas (`SCAN_ADVANCE_PAGE_RATIO`, y con él la guarda
+> `modelLoading === null`): la única condición de pase pasa a ser que el
+> `stage` sea terminal. El piso (`SCAN_ADVANCE_MIN_MS`, 1200 ms) **se
+> conserva** y ADR-151 le suma una segunda condición para `Ready`/`Done` —que
+> la página 1 ya esté dibujada, o venza su gracia. El resto de esta sección
+> (por qué existe la pantalla, la corrección del denominador `pageCount`) sigue
+> siendo contexto histórico válido; la regla de pase en sí la reemplaza
+> ADR-150 §1.
+
 **Por qué existe.** Dos razones, y la segunda es la fuerte:
 
 1. Acota el tiempo en que el usuario espera sin nada que hacer, y le da prueba de vida — las entidades aparecen en vivo, que es lo que distingue "está trabajando" de "se colgó".
@@ -451,7 +465,7 @@ Se detectaron en la misma auditoría y **no** se deciden acá — necesitan su p
 3. **`prefers-reduced-motion`**: **cerrado**. Las animaciones que entraron con el rediseño de estilo se declaran dentro de un `@media (prefers-reduced-motion: no-preference)`, de modo que el estado quieto es el default.
 4. **Atajos declarados y no implementados**: `Cmd/Ctrl+F`, flechas, `Space`, `Enter` (§9). — **cerrado** (`treeNavigation.ts` + roving tabindex en el árbol; `Cmd/Ctrl+F` enfoca el buscador de entidades).
 5. **Drag & drop**: el dropzone del Hero es decorativo. §1 de este ADR lo declara funcional; la implementación es trabajo de PR.
-6. **Sin deshacer general**: §3.3 cubre los dos barridos y el único caso de fila que destruye algo irrecuperable. Todo lo demás (habilitar/deshabilitar grupos, fusionar, dividir, reclasificar, agregar entidades a mano) sigue sin undo. — **parcialmente cerrado**: habilitar/deshabilitar (fila y cascada de tipo), reclasificar y editar el valor de reemplazo ya lo llevan (`UX_Guidelines.md` §3.3b). Fusionar, dividir y el agregado manual **no**, y ahí la razón está medida: el borrado no existe como pedido en `Contracts.md`, y la fusión/división inversa devuelve un grupo con otro `id` e `indexInType`, o sea algo parecido y no lo mismo.
+6. **Sin deshacer general**: §3.3 cubre los dos barridos y el único caso de fila que destruye algo irrecuperable. Todo lo demás (habilitar/deshabilitar grupos, fusionar, dividir, reclasificar, agregar entidades a mano) sigue sin undo. — **parcialmente cerrado**: habilitar/deshabilitar (fila y cascada de tipo), reclasificar y editar el valor de reemplazo ya lo llevan (`UX_Guidelines.md` §3.3b). Fusionar, dividir y el agregado manual **no**, y ahí la razón está medida: el borrado no existe como pedido en `Contracts.md`, y la fusión/división inversa devuelve un grupo con otro `id` e `indexInType`, o sea algo parecido y no lo mismo. — **cerrado por ADR-172** (2026-09-23): todo se deshace con puntos de restauración que guarda el Core, así que ya no depende de que exista una inversa exacta.
 7. **Ruido de detección**: falsos positivos ("20-12345678" como teléfono) y errores de NER ("DNI" como Organización) se muestran con el mismo peso que los aciertos. Detalle medido y direcciones posibles en `roadmap/Post_Hito10.8_Pendientes.md` §18.
 8. **Sin estrategia responsive** — y es la **única regresión** de este ADR. — **cerrada** (cajón por debajo de 1024 px, aviso por debajo de 640; `ui/UX_Guidelines.md` §2.1). `SideBySideViewer` cargaba la única conducta responsive de la app (tabs por debajo de `lg`); §2 lo retira sin reemplazo, y a 375 px la barra lateral se come el ancho. Necesita una decisión de producto sobre el ancho mínimo soportado: `roadmap/Post_Hito10.8_Pendientes.md` §19.
 9. **Los tokens de reemplazo se pisan entre sí en el preview anonimizado**: no es regresión de este ADR, pero §2 lo vuelve mucho más visible al darle todo el ancho al visor. `roadmap/Post_Hito10.8_Pendientes.md` §17.

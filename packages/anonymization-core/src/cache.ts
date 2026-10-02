@@ -14,7 +14,7 @@
  * un nuevo contrato público.
  */
 
-import type { ICache } from "@anonly/shared";
+import { InvalidInputError, type ICache } from "@anonly/shared";
 
 const DEFAULT_MAX_ITEMS = 32; // WORDS_CACHE_PAGES (Contracts.md §6)
 const DEFAULT_MAX_BYTES = 64 * 1024 * 1024; // 64 MB, red de seguridad adicional
@@ -29,7 +29,12 @@ export interface LruCacheOptions {
   readonly maxBytes?: number;
 }
 
-export class LruCache implements ICache {
+/** Caché del host: `ICache` más el borrado por prefijo (interno al façade, no es contrato público). */
+export interface PrefixDeletableCache extends ICache {
+  deleteByPrefix(prefix: string): void;
+}
+
+export class LruCache implements PrefixDeletableCache {
   private readonly store = new Map<string, CacheEntry>();
   private readonly maxItems: number;
   private readonly maxBytes: number;
@@ -50,6 +55,16 @@ export class LruCache implements ICache {
   }
 
   set<T>(key: string, value: T, bytes?: number): void {
+    // ADR-145 §3: `bytes` sigue siendo opcional (ausente -> 0, sin cambio de
+    // contrato), pero si el call site lo pasa tiene que ser un tamaño real —
+    // normalizar un valor inválido a 0 en silencio es exactamente el bug que
+    // dejaba el límite de bytes sin efecto para quien sí lo pasaba mal.
+    if (bytes !== undefined && (!Number.isFinite(bytes) || bytes < 0)) {
+      throw new InvalidInputError(
+        `LruCache.set: bytes debe ser finito y no negativo (recibido ${bytes}).`,
+        { key, bytes },
+      );
+    }
     const size = bytes ?? 0;
     const existing = this.store.get(key);
     if (existing !== undefined) {
@@ -68,6 +83,13 @@ export class LruCache implements ICache {
     this.store.delete(key);
   }
 
+  /** ADR-145 §5: borra toda entrada cuya clave empieza con `prefix`. */
+  deleteByPrefix(prefix: string): void {
+    for (const key of [...this.store.keys()]) {
+      if (key.startsWith(prefix)) this.delete(key);
+    }
+  }
+
   clear(): void {
     this.store.clear();
     this.totalBytes = 0;
@@ -81,9 +103,21 @@ export class LruCache implements ICache {
     return this.totalBytes;
   }
 
+  /*
+   * ADR-145 §1: nunca expulsa la entrada que `set()` acaba de insertar. La
+   * entrada recién insertada es siempre la ÚLTIMA en el orden de iteración
+   * del `Map` (todo `set()` borra cualquier entrada previa con la misma
+   * clave y vuelve a insertar al final); la "más vieja" (primera en orden de
+   * iteración) solo coincide con ella cuando `size === 1`. `size > 1` alcanza
+   * entonces para proteger la última sin necesitar guardar su clave aparte.
+   * Si después de expulsar todo lo demás esa entrada sigue excediendo
+   * `maxBytes`, la caché queda por encima de su presupuesto por esa única
+   * entrada — el exceso acotado que ADR-145 prefiere sobre perder palabras
+   * ya depositadas con `OCR_PAGE_FINISHED` a punto de emitirse.
+   */
   private evictIfNeeded(): void {
     while (
-      this.store.size > 0 &&
+      this.store.size > 1 &&
       (this.store.size > this.maxItems || this.totalBytes > this.maxBytes)
     ) {
       const oldestKey = this.store.keys().next().value;

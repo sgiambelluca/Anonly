@@ -47,6 +47,24 @@ export const DARK_PREVIEW: ThemePreviewPalette = {
 const HL_PERSON = "#10b981";
 const HL_DNI = "#3b82f6";
 
+/**
+ * ADR-169 §8: la miniatura de "Como el sistema" — mitad clara, mitad oscura.
+ * Las dos son la misma `ThemePreview`; la oscura se recorta a la mitad
+ * derecha, así las dos mitades calzan línea con línea.
+ */
+export function SystemThemePreview() {
+  return (
+    <span className="relative block">
+      <ThemePreview palette={LIGHT_PREVIEW} />
+      <span className="absolute inset-y-0 right-0 block w-1/2 overflow-hidden">
+        <span className="absolute inset-y-0 right-0 block w-[200%]">
+          <ThemePreview palette={DARK_PREVIEW} />
+        </span>
+      </span>
+    </span>
+  );
+}
+
 export function ThemePreview({ palette }: { readonly palette: ThemePreviewPalette }) {
   return (
     <svg viewBox="0 0 200 128" className="h-auto w-full" role="img" aria-hidden focusable="false">

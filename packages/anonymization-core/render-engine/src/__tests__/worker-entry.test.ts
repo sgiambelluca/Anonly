@@ -156,9 +156,16 @@ describe("RenderWorker entry-point (ADR-043 §4)", () => {
     await vi.waitFor(() => expect(outboundOfType(fakeSelf, "COMPLETED")).toBeDefined());
     const completed = outboundOfType(fakeSelf, "COMPLETED");
     expect(completed?.jobId).toBe("job-render");
-    const result = completed?.result as { imageData: ImageData; encoded: unknown };
-    expect(result.imageData.width).toBe(100);
-    expect(result.encoded).toBeDefined();
+    // ADR-156: `mode: "preview"` ya no trae `imageData` en el resultado del
+    // kernel — `encoded` (siempre presente) es lo que confirma que el
+    // render corrió con las dimensiones correctas.
+    const result = completed?.result as {
+      imageData?: ImageData;
+      encoded: { widthPx: number; heightPx: number };
+    };
+    expect(result.imageData).toBeUndefined();
+    expect(result.encoded.widthPx).toBe(100);
+    expect(result.encoded.heightPx).toBe(100);
   });
 
   it('RUN("render-page") con payload que trae "pageIndex" (sin "buffer"/"kind") despacha rasterize', async () => {
@@ -190,9 +197,11 @@ describe("RenderWorker entry-point (ADR-043 §4)", () => {
     await vi.waitFor(() => expect(outboundOfType(fakeSelf, "COMPLETED")).toBeDefined());
     const completed = outboundOfType(fakeSelf, "COMPLETED");
     expect(completed?.jobId).toBe("job-rasterize");
-    const imageData = completed?.result as ImageData;
-    expect(imageData.width).toBe(100); // 50 * scale(2)
-    expect(imageData.height).toBe(120); // 60 * scale(2)
+    // ADR-158 §1: kernelRasterizePage devuelve EncodedPageImage, no ImageData.
+    const result = completed?.result as { format: string; widthPx: number; heightPx: number };
+    expect(result.format).toBe("png");
+    expect(result.widthPx).toBe(100); // 50 * scale(2)
+    expect(result.heightPx).toBe(120); // 60 * scale(2)
   });
 
   it('RUN("render-page") con payload sin "buffer"/"kind"/"pageIndex" despacha unload (idempotente)', async () => {

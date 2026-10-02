@@ -102,6 +102,10 @@ export interface OcrPageFinished {
   readonly pageIndex: number;
   readonly wordCount: number;
   readonly confidence: number;
+  // ADR-190 §4: una página ENTERA (no una región) con tinta terminó la cadena
+  // de verificación sin lectura fiable. Ausente ≡ false, mismo criterio que
+  // `degraded` (ADR-062).
+  readonly unreadableInk?: true;
 }
 export interface OcrFinished {
   readonly documentId: string;
@@ -329,6 +333,12 @@ export interface GroupSplitRequested {
   readonly groupId: string;
   readonly occurrenceIds: ReadonlyArray<string>;
 }
+// ADR-171 §1: el usuario elimina la entidad. Grouping la quita, emite
+// ENTITY_GROUP_REMOVED y suprime sus valores para que un re-análisis no la traiga.
+export interface GroupRemoveRequested {
+  readonly documentId: string;
+  readonly groupId: string;
+}
 export interface RuleCreated {
   readonly documentId: string;
   readonly rule: Rule;
@@ -358,6 +368,15 @@ export interface ConflictResolveRequested {
    * y no cambia ningún dato.
    */
   readonly entityType?: EntityType;
+  /**
+   * ADR-174 §3: solo en conflictos con `heldManual`. `"manual"` agrupa la
+   * ocurrencia manual retenida (por el mismo camino que si hubiera ganado);
+   * `"detected"` la descarta (su identidad sigue registrada). Ausente =
+   * `"detected"`, para que un `CONFLICT_RESOLVE_REQUESTED` sin el campo siga
+   * siendo compatible. En un conflicto sin `heldManual` →
+   * `GroupingInvalidPatchError` (rechazo con warn).
+   */
+  readonly winner?: "manual" | "detected";
 }
 export interface DocumentClosed {
   readonly documentId: string;
@@ -416,6 +435,7 @@ export type EventPayloadMap = {
   [EngineEvents.GROUP_UPDATE_REQUESTED]: GroupUpdateRequested;
   [EngineEvents.GROUP_MERGE_REQUESTED]: GroupMergeRequested;
   [EngineEvents.GROUP_SPLIT_REQUESTED]: GroupSplitRequested;
+  [EngineEvents.GROUP_REMOVE_REQUESTED]: GroupRemoveRequested;
   [EngineEvents.RULE_CREATED]: RuleCreated;
   [EngineEvents.RULE_UPDATED]: RuleUpdated;
   [EngineEvents.RULE_DELETED]: RuleDeleted;

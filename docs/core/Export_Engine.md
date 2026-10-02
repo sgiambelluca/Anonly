@@ -188,6 +188,7 @@ ExportOptions {
   title?: string;
   filename: string;
   includeMarkerLegend: boolean;    // ADR-059 §1, default false
+  coveredPages?: ReadonlyArray<number>; // ADR-190 §5: páginas enteramente negras
 }
 ```
 
@@ -196,6 +197,7 @@ ExportOptions {
 - `options.dpi > 0` y `≤ 600` (limit superior razonable).
 - `options.jpegQuality ∈ [0.5, 1]` si `imageFormat = "jpeg"`.
 - `options.includeOriginalMetadata` debe ser literalmente `false` (garantía de tipo).
+- `options.coveredPages` (ADR-190 §5), si está, tiene índices enteros en `[0, document.pageCount)`. Un índice fuera de rango o no entero lanza `InvalidInputError`, y los duplicados se ignoran.
 - `renderPageProvider` debe estar poblado.
 
 ---
@@ -279,6 +281,8 @@ Garantías del PDF final:
 25. **Fallo al renderizar la leyenda (ADR-059 §8)**: se trata como un fallo de página —retry y, si persiste, `EXPORT_FAILED`—, nunca dejando el PDF a medio ensamblar ni emitiendo `EXPORT_FINISHED` con un documento incompleto. Una leyenda que no se pudo dibujar **no** degrada a "export sin leyenda" en silencio: el usuario la pidió explícitamente.
 
 ---
+26. **Página tapada entera (ADR-190 §4-§5)**: con `pageIndex ∈ options.coveredPages`, esa página se exporta como un rectángulo **negro lleno** con las mismas dimensiones que la página del documento. **No se invoca `renderPageProvider.renderFull`** para esa página, así que ningún píxel original llega al archivo. El resto de las páginas se exporta igual que siempre, y la leyenda (caso 21) no cambia. Con `coveredPages` ausente o vacío, el export es bit a bit el mismo que antes.
+
 
 ## 14. Casos de prueba
 
@@ -323,6 +327,11 @@ Garantías del PDF final:
 | `gender prefixes fall under the Person row without touching buildMarkerLegend` | `unit.test.ts` | unit | caso 22 (ADR-060 §8) |
 | **`export buffer with legend contains no canonicalValue nor originalValue`** | `tests/security/` | security | caso 22 — **el test que no puede faltar**; mismo criterio y dataset que el `no-recuperability` de ADR-009, corrido específicamente sobre el camino con leyenda |
 | **`no page of the export contains text objects`** | `tests/security/` | security | ADR-059 §4 — convierte "el export es 100% imagen" en una aserción de CI en vez de una convención |
+| `covered pages are exported fully black with the same size and no page render` | `contract.test.ts` | contract | ADR-190 §5 |
+| `coveredPages with an out-of-range index throws InvalidInputError` | `edge.test.ts` | edge | ADR-190 §5 |
+| `absent coveredPages leaves the export unchanged` | `contract.test.ts` | contract | ADR-190 §5: no-regresión |
+| `duplicate coveredPages entries are ignored` | `contract.test.ts` | contract | ADR-190 §5 |
+| `empty coveredPages leaves the export identical to an absent one` | `contract.test.ts` | contract | ADR-190 §5: no-regresión |
 
 Fixtures: `tests/fixtures/text-10p.pdf`, `text-50p.pdf`, `huge-1000p.pdf`.
 
@@ -367,6 +376,8 @@ Fixtures: `tests/fixtures/text-10p.pdf`, `text-50p.pdf`, `huge-1000p.pdf`.
 - [ ] 28. Embebido en `savePdf` con `embedPng`/`embedJpg` + `addPage` + `drawImage`, antes de aplicar la metadata y serializar. **No** por `appendPage` (§13 caso 21). Sin filas → no se invoca `renderLegend`, no se agrega página, `warn` (caso 23). Un fallo de `renderLegend` sigue el camino de fallo de página (caso 25).
 - [ ] 29. La imagen de la leyenda en `ExportSavePayload`; `includeMarkerLegend` en la validación de `options` (§9).
 - [ ] 30. Tests de §14, **incluidos los dos de `tests/security/`**. Verificación manual: abrir el PDF exportado e **intentar seleccionar texto en cualquier página, incluida la leyenda — no debe seleccionarse nada**. Es la verificación de un segundo que motivó rasterizarla (ADR-059 §4).
+
+- [x] 31. (ADR-190 §5) `coveredPages`: validación en §9, página negra con las dimensiones del documento y sin `renderFull`, tests de §14.
 
 ---
 

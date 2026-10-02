@@ -5,8 +5,8 @@
  * Fuente de verdad: docs/ui/React_Client.md §3.6. Defaults:
  * - `language`/`defaultReplacementMode`: docs/roadmap/MVP.md §2.3 (es default)
  *   y docs/ui/UX_Guidelines.md UX-7 ("placeholder por defecto, más informativo").
- * - `performancePreset`: "auto" (docs/ui/React_Client.md §3.7: "auto = defaults
- *   ... derivados de hardwareConcurrency").
+ * - `performancePreset`: "auto" (ADR-194: se resuelve a un nivel según la RAM
+ *   y los hilos del equipo, docs/ui/React_Client.md §3.7).
  * - `nerEnabled`/`ocrLanguages`: mismos defaults que `EngineConfig` del Core
  *   (`ner.enabled = true`, `ocr.languages = ["spa", "eng"]`), replicados acá
  *   a propósito — el cliente no importa el façade del Core para esto porque
@@ -53,7 +53,66 @@ export type Language = "es" | "en";
  * volver a hacerlo por aplicación.
  */
 export type Theme = "system" | "light" | "dark";
-export type PerformancePreset = "auto" | "low" | "high";
+/**
+ * ADR-194 §1: cuatro niveles y `auto`, que no es un nivel: se resuelve a uno
+ * (`core-adapter/settingsToEngineConfig.ts`).
+ */
+export type PerformancePreset = "auto" | "low" | "medium" | "high" | "ultra";
+
+const PERFORMANCE_PRESETS: ReadonlySet<string> = new Set<PerformancePreset>([
+  "auto",
+  "low",
+  "medium",
+  "high",
+  "ultra",
+]);
+
+/**
+ * Versión del formato persistido. 2 = ADR-194: `high` pasó de dos a cuatro
+ * reconocedores, así que un `high` guardado sin versión (o con una menor) no
+ * se respeta.
+ */
+const SETTINGS_VERSION = 2;
+
+/**
+ * El preset a cargar (ADR-194 §5). Un `high` de una versión anterior vuelve a
+ * `auto` y un valor desconocido también; `load()` no escribe, así que la
+ * migración se repite igual hasta el primer `persist()`.
+ */
+function migratePerformancePreset(value: unknown, version: unknown): PerformancePreset {
+  if (typeof value !== "string" || !PERFORMANCE_PRESETS.has(value)) return "auto";
+  const preset = value as PerformancePreset;
+  const outdated = typeof version !== "number" || version < SETTINGS_VERSION;
+  return preset === "high" && outdated ? "auto" : preset;
+}
+
+/** ADR-195 §1: una sola preferencia en lugar de `autoUpdate` y `checkUpdates`. */
+export type UpdateMode = "install" | "notify" | "off";
+
+const UPDATE_MODES: ReadonlySet<string> = new Set<UpdateMode>(["install", "notify", "off"]);
+
+/** Lo que se le informa al shell con `setAutomaticChecks` (ADR-188 §2). */
+export function searchesAutomatically(mode: UpdateMode): boolean {
+  return mode !== "off";
+}
+
+/** Con una versión lista, ¿se aplica sin preguntar? Solo en `install` (ADR-195 §1). */
+export function installsWithoutAsking(mode: UpdateMode): boolean {
+  return mode === "install";
+}
+
+/**
+ * El modo a cargar (ADR-195 §2). Sin `updateMode` guardado se deduce de las
+ * dos claves anteriores; la búsqueda apagada gana sobre la instalación.
+ */
+function migrateUpdateMode(parsed: PersistedSettings): UpdateMode {
+  if (parsed.updateMode !== undefined) {
+    const value: unknown = parsed.updateMode;
+    return typeof value === "string" && UPDATE_MODES.has(value) ? (value as UpdateMode) : "notify";
+  }
+  if (parsed.checkUpdates === false) return "off";
+  return parsed.autoUpdate === true ? "install" : "notify";
+}
 
 export interface SettingsSlice {
   readonly language: Language;
@@ -62,21 +121,57 @@ export interface SettingsSlice {
   readonly nerEnabled: boolean;
   readonly ocrLanguages: ReadonlyArray<string>;
   /**
-   * `false` = preguntar antes de instalar una actualización; `true` = aplicarla
-   * sola.
+   * Qué hace Anonly con las versiones nuevas (ADR-195): `install` busca y
+   * aplica sola al reiniciar, `notify` busca y pregunta, `off` no se conecta
+   * salvo con "Buscar actualizaciones ahora".
    *
-   * El default es preguntar, y es una decisión de producto, no una comodidad:
-   * reemplazarle la aplicación en silencio a alguien que está anonimizando
-   * pericias es exactamente lo que genera desconfianza en una herramienta que
-   * se vende como local. Quien prefiera que no le pregunten más lo apaga acá.
+   * El default es preguntar, y es una decisión de producto: reemplazarle la
+   * aplicación en silencio a alguien que está anonimizando pericias es lo que
+   * genera desconfianza en una herramienta que se vende como local.
    *
    * Solo tiene efecto dentro del contenedor de escritorio (ADR-131 §3). En un
    * navegador no hay actualizador y el control no se muestra.
    */
-  readonly autoUpdate: boolean;
+  readonly updateMode: UpdateMode;
   readonly theme: Theme;
+  /**
+   * ADR-169 §7: avisos de descubrimiento que el usuario cerró
+   * (`"selection-hint"` = la tarjeta sobre el visor; `"panel-footer-hint"` =
+   * la nota al pie del panel). **Persistido**: cerrado una vez, no vuelve.
+   */
+  readonly dismissedHints: ReadonlyArray<DismissibleHint>;
   persist(): void;
   load(): void;
+}
+
+export type DismissibleHint = "selection-hint" | "panel-footer-hint";
+
+const DISMISSIBLE_HINTS: ReadonlySet<string> = new Set<DismissibleHint>([
+  "selection-hint",
+  "panel-footer-hint",
+]);
+
+function isDismissibleHint(value: unknown): value is DismissibleHint {
+  return typeof value === "string" && DISMISSIBLE_HINTS.has(value);
+}
+
+/**
+ * La lista con `hint` agregado, sin repetidos. Una clave desconocida que haya
+ * quedado en `localStorage` se descarta al leer (`load`), así que la lista
+ * solo contiene avisos que existen.
+ */
+export function withDismissedHint(
+  hints: ReadonlyArray<DismissibleHint>,
+  hint: DismissibleHint,
+): ReadonlyArray<DismissibleHint> {
+  return hints.includes(hint) ? hints : [...hints, hint];
+}
+
+/** Cierra un aviso de descubrimiento y lo persiste (ADR-169 §7). */
+export function dismissHint(hint: DismissibleHint): void {
+  const state = useSettingsStore.getState();
+  useSettingsStore.setState({ dismissedHints: withDismissedHint(state.dismissedHints, hint) });
+  useSettingsStore.getState().persist();
 }
 
 const STORAGE_KEY = "anonly:settings";
@@ -88,8 +183,9 @@ type SettingsData = Pick<
   | "defaultReplacementMode"
   | "nerEnabled"
   | "ocrLanguages"
-  | "autoUpdate"
+  | "updateMode"
   | "theme"
+  | "dismissedHints"
 >;
 
 const DEFAULT_SETTINGS: SettingsData = {
@@ -98,11 +194,17 @@ const DEFAULT_SETTINGS: SettingsData = {
   defaultReplacementMode: ReplacementMode.Placeholder,
   nerEnabled: true,
   ocrLanguages: ["spa", "eng"],
-  autoUpdate: false,
+  updateMode: "notify",
   theme: "system",
+  dismissedHints: [],
 };
 
-type PersistedSettings = Partial<SettingsData>;
+type PersistedSettings = Partial<SettingsData> & {
+  readonly settingsVersion?: number;
+  // Claves anteriores a ADR-195: se leen para migrar y ya no se escriben.
+  readonly autoUpdate?: unknown;
+  readonly checkUpdates?: unknown;
+};
 
 function isPersistedSettings(value: unknown): value is PersistedSettings {
   return typeof value === "object" && value !== null;
@@ -113,12 +215,14 @@ export const useSettingsStore = create<SettingsSlice>((set, get) => ({
   persist() {
     const state = get();
     const toStore: PersistedSettings = {
+      settingsVersion: SETTINGS_VERSION,
       language: state.language,
       performancePreset: state.performancePreset,
       defaultReplacementMode: state.defaultReplacementMode,
       ocrLanguages: state.ocrLanguages,
-      autoUpdate: state.autoUpdate,
+      updateMode: state.updateMode,
       theme: state.theme,
+      dismissedHints: state.dismissedHints,
     };
     try {
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(toStore));
@@ -150,15 +254,25 @@ export const useSettingsStore = create<SettingsSlice>((set, get) => ({
     set({
       ...(parsed.language !== undefined ? { language: parsed.language } : {}),
       ...(parsed.performancePreset !== undefined
-        ? { performancePreset: parsed.performancePreset }
+        ? {
+            performancePreset: migratePerformancePreset(
+              parsed.performancePreset,
+              parsed.settingsVersion,
+            ),
+          }
         : {}),
       ...(parsed.defaultReplacementMode !== undefined
         ? { defaultReplacementMode: parsed.defaultReplacementMode }
         : {}),
       ...(parsed.nerEnabled !== undefined ? { nerEnabled: parsed.nerEnabled } : {}),
       ...(parsed.ocrLanguages !== undefined ? { ocrLanguages: parsed.ocrLanguages } : {}),
-      ...(parsed.autoUpdate !== undefined ? { autoUpdate: parsed.autoUpdate } : {}),
+      updateMode: migrateUpdateMode(parsed),
       ...(parsed.theme !== undefined ? { theme: parsed.theme } : {}),
+      // Se filtra contra los avisos que existen: una clave vieja o corrupta no
+      // puede esconder un aviso nuevo.
+      ...(Array.isArray(parsed.dismissedHints)
+        ? { dismissedHints: parsed.dismissedHints.filter(isDismissibleHint) }
+        : {}),
     });
   },
 }));

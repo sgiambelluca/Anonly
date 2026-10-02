@@ -105,33 +105,23 @@ export function resolveTypeHeaderState(
 }
 
 /**
- * Qué hace falta emitir para aplicar un modo en un nivel, y qué hace falta
- * para deshacerlo.
- *
- * **Las dos mitades del undo son distintas y no se pueden mezclar**: las
- * reglas barridas se **borraron** (se deshacen recreándolas), mientras que la
- * regla del propio nivel, si ya existía, se **actualizó** (se deshace
- * devolviéndole su modo anterior). Un `restore` único que juntara las dos
- * llevaría a recrear una regla vigente, y `rules.store.addRule` agrega sin
- * deduplicar por id: quedaría duplicada.
+ * Qué hace falta emitir para aplicar un modo en un nivel: las reglas de abajo
+ * que el barrido borra, y si la regla del propio nivel se crea o se
+ * actualiza. Deshacerlo ya no se arma desde acá: el plan entero es una
+ * entrada de la pila, que vuelve al punto de restauración del Core, reglas
+ * incluidas (ADR-172 §4 retiró el snapshot de reglas del toast).
  */
 export interface ApplyModePlan {
   /** Ids de las reglas de niveles **de abajo** que el barrido retira. */
   readonly deleteRuleIds: ReadonlyArray<string>;
-  /** Las mismas, completas, para recrearlas en el undo. */
-  readonly sweptRules: ReadonlyArray<Rule>;
-  /** `undefined` ⇒ crear una regla nueva; si viene, actualizar ésa. */
+  /** `undefined` ⇒ crear una regla nueva; si viene, actualizar ésa (no duplicarla). */
   readonly updateRuleId: string | undefined;
-  /** Modo que tenía la regla del nivel antes de aplicarse; `undefined` si no había regla. */
-  readonly previousMode: ReplacementMode | undefined;
 }
 
 function buildPlan(swept: ReadonlyArray<Rule>, existing: Rule | undefined): ApplyModePlan {
   return {
     deleteRuleIds: swept.map((rule) => rule.id),
-    sweptRules: swept,
     updateRuleId: existing?.id,
-    previousMode: existing?.mode,
   };
 }
 
@@ -192,6 +182,29 @@ export function countOverrides(rules: ReadonlyArray<Rule>): OverrideCounts {
 /** `true` si aplicar en ese nivel destruiría algo — o sea, si hay que confirmar. */
 export function needsConfirmation(counts: OverrideCounts): boolean {
   return counts.types > 0 || counts.groups > 0;
+}
+
+/**
+ * ADR-169 §5: cuántas entidades **no** siguen hoy a la franja "Todo el
+ * documento" — las de un tipo con regla propia más las que tienen regla de
+ * grupo (sin contar dos veces). Es el N de *"N entidades tienen modo propio:
+ * cambiar este modo las pisa."*, o sea exactamente las filas que el barrido
+ * del documento va a tocar.
+ */
+export function countEntitiesWithOwnMode(
+  rules: ReadonlyArray<Rule>,
+  groups: ReadonlyArray<{ readonly id: string; readonly type: EntityType }>,
+): number {
+  return groups.filter(
+    (group) => hasOwnDecision(rules, group.id) || findTypeRule(rules, group.type) !== undefined,
+  ).length;
+}
+
+/** La segunda línea de la franja "Todo el documento" (ADR-169 §5), siempre presente. */
+export function describeDocumentBandNote(entitiesWithOwnMode: number): string {
+  if (entitiesWithOwnMode === 0) return "Se aplica a todas las entidades.";
+  if (entitiesWithOwnMode === 1) return "1 entidad tiene modo propio: cambiar este modo la pisa.";
+  return `${entitiesWithOwnMode} entidades tienen modo propio: cambiar este modo las pisa.`;
 }
 
 /**

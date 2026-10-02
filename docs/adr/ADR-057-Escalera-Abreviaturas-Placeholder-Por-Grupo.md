@@ -3,6 +3,7 @@
 # ADR-057 — Escalera de abreviaturas del `placeholder`, elegida por grupo
 
 - **Estado**: Accepted
+- **Enmendado por**: ADR-191 §1 (2026-09-30): la entrada de una ocurrencia a un grupo existente pasa a ser disparador del recálculo del `placeholder`. La frase «sin disparadores nuevos» deja de valer para ese caso: sin él, la vista previa (ADR-170) y el valor vigente divergían.
 - **Fecha**: 2026-08-06
 - **Decidido por**: El humano, tras reportar que el reemplazo se superpone al texto original cuando el token es más largo que el dato que tapa ("el nombre que aparece en el documento es Eta y se decide reemplazarlo con Placeholder... termina superponiéndose sobre el texto original, complicando la legibilidad"). Es el punto 5 de `Cambios para hacer.txt`.
 - **Relacionado con**: ADR-012 §"Formato para `placeholder`" (**este ADR lo modifica**: `[<TYPE> <NN>]` deja de ser el único formato y pasa a ser el nivel 0 de una escalera), ADR-028 (renumeración canónica — mismo punto de recálculo), ADR-029 (resolución por grupo del formato de `mask` — precedente directo de forma), ADR-038 §2-§4 (re-análisis), ADR-058 (la cascada de render donde esta escalera es la primera pieza), ADR-060 (reemplazo por género, que depende de §3 de este ADR)

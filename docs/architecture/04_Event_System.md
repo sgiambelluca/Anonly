@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=eventos | dependencias=03_Data_Model.md,core/Contracts.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-044-Preview-Grupos-Mediacion-Orchestrator.md,adr/ADR-056-RenderRequested-Kind-Por-Panel.md | audiencia=IA+humanos | fase=1 (§2/§5/§6/§10 actualizados en fase 10: RENDER_REQUESTED.scale —ADR-037—, PIPELINE_READY/GROUPING_FINISHED emitibles más de una vez y dedup real de ENTITY_FOUND —ADR-038—; §6/§11: ENTITY_GROUP_* al Orchestrator y Render sin suscripciones a grouping —ADR-044—; fase 11: §10 RENDER_REQUESTED.kind requerido —ADR-056—; fase 10.6: §10 `GROUP_UPDATE_REQUESTED.patch` gana `personGender?: PersonGenderChoice`, con el tercer estado del selector como valor explícito `"neutral"` —ADR-069 §4—) -->
+<!-- CONTEXT: scope=eventos | dependencias=03_Data_Model.md,core/Contracts.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-044-Preview-Grupos-Mediacion-Orchestrator.md,adr/ADR-056-RenderRequested-Kind-Por-Panel.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,adr/ADR-171-El-Usuario-Puede-Eliminar-Una-Entidad.md,adr/ADR-174-Un-Agregado-Manual-Que-Choca-Se-Resuelve-En-El-Momento.md | audiencia=IA+humanos | fase=1 (§2/§5/§6/§10 actualizados en fase 10: RENDER_REQUESTED.scale —ADR-037—, PIPELINE_READY/GROUPING_FINISHED emitibles más de una vez y dedup real de ENTITY_FOUND —ADR-038—; §6/§11: ENTITY_GROUP_* al Orchestrator y Render sin suscripciones a grouping —ADR-044—; fase 11: §10 RENDER_REQUESTED.kind requerido —ADR-056—; fase 10.6: §10 `GROUP_UPDATE_REQUESTED.patch` gana `personGender?: PersonGenderChoice`, con el tercer estado del selector como valor explícito `"neutral"` —ADR-069 §4—) -->
 
 # Anonly — Sistema de Eventos (TAD bloque 7)
 
@@ -44,10 +44,16 @@
 
 ## 4. Eventos de OCR Engine (canal `ocr`)
 
+**ADR-164 (T-5)**: no cambia ningún evento de dominio. `ocr-orient` es un nuevo
+WorkerJobType para los eventos WORKER_JOB_* existentes en canal Workers; no
+produce OCR_PAGE_FINISHED ni OCR_PAGE_FAILED directamente. OcrEngine emite una
+sola terminación/falla por página tras sus pasos de orientación y reconocimiento.
+El aviso de UI sigue contando OCR_PAGE_FAILED, sin duplicarlo por el job interno.
+
 | Evento | Emisor | Receptores | Payload | Timing | Idempotente | Orden | Notas |
 |---|---|---|---|---|---|---|---|
 | `OCR_STARTED` | OCR Engine | UI | `{ documentId, pagesToProcess: number[], modelLoading? }` | async | sí | none | |
-| `OCR_PAGE_FINISHED` | OCR Engine | Orchestrator | `{ documentId, pageIndex, wordCount, confidence }` | async | sí | none | Orchestrator lee `Word[]` de `ctx.cache` (clave `ocr-words:<documentId>:<pageIndex>`) y aplica la función pura `fuseOcrPage` de `pdf-engine` sobre su `Document` retenido (ver ADR-014, ADR-041). PDF Engine no se suscribe a este evento. |
+| `OCR_PAGE_FINISHED` | OCR Engine | Orchestrator, UI | `{ documentId, pageIndex, wordCount, confidence, unreadableInk? }` | async | sí | none | Orchestrator lee `Word[]` de `ctx.cache` (clave `ocr-words:<documentId>:<pageIndex>`) y aplica la función pura `fuseOcrPage` de `pdf-engine` sobre su `Document` retenido (ver ADR-014, ADR-041). PDF Engine no se suscribe a este evento. `unreadableInk: true` (ADR-190 §4) marca una página entera con tinta que terminó sin lectura fiable: **ausente ≡ false**. La UI lo usa para el aviso de la página y la confirmación del export. |
 | `OCR_FINISHED` | OCR Engine | Orchestrator | `{ documentId, durationMs, modelDownloaded? }` | async | sí | none | Dispara detección. |
 | `OCR_PAGE_FAILED` | OCR Engine | Orchestrator | `{ documentId, pageIndex, error: SerializedEngineError }` | async | sí | none | Reintentable hasta `maxRetries`. (Errata ADR-036 §9: decía `EngineError`.) |
 
@@ -77,11 +83,11 @@ Estos son los eventos que la UI **sí** escucha para construir el árbol de enti
 |---|---|---|---|---|---|---|---|
 | `ENTITY_GROUP_CREATED` | Grouping Engine | UI, Orchestrator | `{ documentId, group: EntityGroup }` | async | no | none | Crea un nodo en el árbol. El Orchestrator lo media hacia el preview: mapa `groupId → páginas` + re-render con reemplazos del snapshot (ADR-044). |
 | `ENTITY_GROUP_UPDATED` | Grouping Engine | UI, Orchestrator | `{ documentId, group: EntityGroup, changes: ReadonlyArray<keyof EntityGroup> }` | async | sí | none | Mutación por copia: el `group` es una nueva ref. Mediado al preview igual que `CREATED` (ADR-044). |
-| `ENTITY_GROUP_REMOVED` | Grouping Engine | UI, Orchestrator | `{ documentId, groupId }` | async | sí | none | El Orchestrator re-renderiza las páginas que el grupo ocupaba (mapa retenido, ADR-044). |
+| `ENTITY_GROUP_REMOVED` | Grouping Engine | UI, Orchestrator | `{ documentId, groupId }` | async | sí | none | El Orchestrator re-renderiza las páginas que el grupo ocupaba (mapa retenido, ADR-044). Desde ADR-171 también lo dispara `GROUP_REMOVE_REQUESTED` (eliminación pedida por el usuario). |
 | `GROUP_REPLACEMENT_CHANGED` | Grouping Engine | UI | `{ documentId, groupId, mode, value }` | async | sí | none | Render ya no se suscribe (ADR-044): el re-render de páginas afectadas lo media el Orchestrator vía el `ENTITY_GROUP_UPDATED` que siempre acompaña a este evento (punto único de emisión en Grouping). |
 | `GROUP_TOGGLED` | Grouping Engine | UI | `{ documentId, groupId, enabled }` | async | sí | none | Ídem `GROUP_REPLACEMENT_CHANGED`: sin receptor en Render desde ADR-044. |
 | `CONFLICT_DETECTED` | Grouping Engine | UI | `{ documentId, conflict: Conflict }` | async | sí | none | |
-| `CONFLICT_RESOLVED` | Grouping Engine | UI | `{ documentId, conflictId, mode }` | async | sí | none | |
+| `CONFLICT_RESOLVED` | Grouping Engine | UI | `{ documentId, conflictId, entityType }` (ADR-083: el tipo con que se resolvió, no un modo) | async | sí | none | |
 | `GROUPING_FINISHED` | Grouping Engine | Orchestrator | `{ documentId, groupCount, conflictCount, durationMs }` | async | sí | none | Dispara `PIPELINE_READY`. Puede emitirse **más de una vez** por documento tras `reopenSession`/`finishSession` re-ejecutado tras un `reanalyze` (ADR-038 §2, §5). |
 
 ---
@@ -138,10 +144,11 @@ Inputs del usuario que mutan el estado de grupos/reglas/pipeline o solicitan tra
 | `GROUP_UPDATE_REQUESTED` | UI | Grouping Engine | `{ documentId, groupId, patch: Partial<Pick<EntityGroup, "type" \| "replacementMode" \| "replacementValue" \| "enabled" \| "canonicalValue">> & { personGender?: PersonGenderChoice } }` | sync | sí | none | Grouping valida y emite `ENTITY_GROUP_UPDATED` + `GROUP_REPLACEMENT_CHANGED`. `personGender` (ADR-069 §4): `"f"`/`"m"` escriben el campo, **`"neutral"` lo borra** (el tercer estado del selector viaja como valor, no como ausencia de clave), y en los tres casos el motor marca la elección como del humano para que ninguna inferencia posterior la pise. Sobre un grupo de `type` distinto de `Person` se ignora con `warn`. **`type` (ADR-082 §1)**: reclasifica el grupo — arrastra `indexInType` (secuencia por tipo), el label del token, la re-resolución de reglas de scope `type` y el `personGender`; los `SessionOccurrenceRecord` **no** lo siguen (conservan el tipo del detector, ADR-082 §3). Igual al vigente = no-op. |
 | `GROUP_MERGE_REQUESTED` | UI | Grouping Engine | `{ documentId, sourceGroupId, targetGroupId }` | sync | sí | none | Fusiona dos grupos en uno. |
 | `GROUP_SPLIT_REQUESTED` | UI | Grouping Engine | `{ documentId, groupId, occurrenceIds: string[] }` | sync | sí | none | Crea un grupo nuevo con esas ocurrencias. |
+| `GROUP_REMOVE_REQUESTED` | UI | Grouping Engine | `{ documentId, groupId }` | sync | sí | none | **ADR-171**: el usuario elimina la entidad. Grouping la quita (`ENTITY_GROUP_REMOVED`), descarta sus conflictos (`CONFLICT_RESOLVED`) y **suprime sus valores** (`Session.removedValues`, interno) para que un re-análisis no la vuelva a crear. Grupo inexistente → `warn` + no-op. |
 | `RULE_CREATED` | UI | Grouping Engine | `{ documentId, rule: Rule }` | sync | sí | none | |
 | `RULE_UPDATED` | UI | Grouping Engine | `{ documentId, ruleId, patch }` | sync | sí | none | |
 | `RULE_DELETED` | UI | Grouping Engine | `{ documentId, ruleId }` | sync | sí | none | |
-| `CONFLICT_RESOLVE_REQUESTED` | UI | Grouping Engine | `{ documentId, conflictId, entityType?: EntityType }` | sync | sí | none | **ADR-083 §1**: el usuario elige el **tipo de entidad**, no un `ReplacementMode` (ese se edita en la fila del grupo). Ausente = default: el candidato de mayor `confidence`, empate a `regex` — que con `confidence: 1.0` de regex coincide con la resolución automática ya vigente, o sea que confirmar no cambia datos. Aplicar reclasifica por la vía de ADR-082 §2. |
+| `CONFLICT_RESOLVE_REQUESTED` | UI | Grouping Engine | `{ documentId, conflictId, entityType?: EntityType, winner?: "manual" \| "detected" }` | sync | sí | none | **ADR-083 §1**: el usuario elige el **tipo de entidad**, no un `ReplacementMode` (ese se edita en la fila del grupo). Ausente = default: el candidato de mayor `confidence`, empate a `regex` — que con `confidence: 1.0` de regex coincide con la resolución automática ya vigente, o sea que confirmar no cambia datos. Aplicar reclasifica por la vía de ADR-082 §2. **ADR-174 §3**: `winner` solo en conflictos con `heldManual` (una ocurrencia manual perdió la superposición y quedó retenida): `"manual"` la agrupa, `"detected"` la descarta; ausente = `"detected"`; en otro conflicto, rechazo con `warn`. |
 | `DOCUMENT_CLOSED` | UI | Orchestrator, Grouping Engine | `{ documentId }` | sync | sí | none | Grouping limpia su sesión por suscripción propia; los demás motores liberan por **invocación directa** del Orchestrator (`unloadDocument`, caches, blobUrls — ADR-021 §7, ADR-030, ADR-034 §4/§5; `PdfEngine.releaseDocument` eliminado por ADR-041). |
 
 ---

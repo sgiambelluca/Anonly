@@ -18,7 +18,11 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { useSettingsStore } from "../store/settings.store.js";
+import {
+  installsWithoutAsking,
+  searchesAutomatically,
+  useSettingsStore,
+} from "../store/settings.store.js";
 
 const STORAGE_KEY = "anonly:settings";
 
@@ -98,43 +102,90 @@ describe("settings.store persistence", () => {
   });
 });
 
-describe("autoUpdate", () => {
+describe("updateMode (ADR-195)", () => {
   beforeEach(() => {
-    useSettingsStore.setState({ autoUpdate: false });
+    // Desde el default REAL del módulo (`getInitialState()`), no forzando el
+    // literal que se espera: así "arranca en notify" puede fallar.
+    useSettingsStore.setState(useSettingsStore.getInitialState());
   });
 
   afterEach(() => {
     vi.unstubAllGlobals();
   });
 
-  it("arranca en false: se pregunta antes de instalar", () => {
-    // No es una comodidad: reemplazarle la app en silencio a alguien que está
-    // anonimizando pericias es lo que erosiona la confianza en una herramienta
-    // que se vende como local (ADR-131 §3). El default es preguntar.
-    expect(useSettingsStore.getState().autoUpdate).toBe(false);
+  it("arranca en notify: busca y pregunta antes de instalar", () => {
+    // Reemplazarle la app en silencio a alguien que está anonimizando pericias
+    // es lo que erosiona la confianza en una herramienta que se vende como
+    // local (ADR-131 §3). El default es preguntar.
+    expect(useSettingsStore.getInitialState().updateMode).toBe("notify");
   });
 
-  it("se persiste y sobrevive a una sesión nueva", () => {
+  it("se persiste, sobrevive a una sesión nueva y no escribe las claves viejas", () => {
     const storage = stubLocalStorage();
-    useSettingsStore.setState({ autoUpdate: true });
+    useSettingsStore.setState({ updateMode: "install" });
     useSettingsStore.getState().persist();
 
-    expect(JSON.parse(storage.written() ?? "{}")).toHaveProperty("autoUpdate", true);
+    const written = JSON.parse(storage.written() ?? "{}") as Record<string, unknown>;
+    expect(written).toHaveProperty("updateMode", "install");
+    expect(written).not.toHaveProperty("autoUpdate");
+    expect(written).not.toHaveProperty("checkUpdates");
 
-    // Simula el arranque siguiente: estado limpio, se hidrata de localStorage.
-    useSettingsStore.setState({ autoUpdate: false });
+    useSettingsStore.setState(useSettingsStore.getInitialState());
     useSettingsStore.getState().load();
 
-    expect(useSettingsStore.getState().autoUpdate).toBe(true);
+    expect(useSettingsStore.getState().updateMode).toBe("install");
   });
 
-  it("una preferencia ausente no pisa el default", () => {
-    // Alguien que actualiza desde una versión sin este setting no debería
-    // encontrarse con que la app se actualiza sola sin habérselo pedido.
-    stubLocalStorage(JSON.stringify({ language: "en" }));
+  // ADR-195 §2: la tabla de migración, combinación por combinación.
+  it.each([
+    [{ checkUpdates: false, autoUpdate: true }, "off"],
+    [{ checkUpdates: false, autoUpdate: false }, "off"],
+    [{ checkUpdates: false }, "off"],
+    [{ checkUpdates: true, autoUpdate: true }, "install"],
+    [{ autoUpdate: true }, "install"],
+    [{ checkUpdates: true, autoUpdate: false }, "notify"],
+    [{ checkUpdates: true }, "notify"],
+    [{ language: "en" }, "notify"],
+  ] as const)("sin updateMode guardado, %j carga como %s", (stored, expected) => {
+    stubLocalStorage(JSON.stringify(stored));
     useSettingsStore.getState().load();
 
-    expect(useSettingsStore.getState().autoUpdate).toBe(false);
+    expect(useSettingsStore.getState().updateMode).toBe(expected);
+  });
+
+  it("un updateMode guardado gana sobre las claves viejas", () => {
+    stubLocalStorage(JSON.stringify({ updateMode: "off", checkUpdates: true, autoUpdate: true }));
+    useSettingsStore.getState().load();
+
+    expect(useSettingsStore.getState().updateMode).toBe("off");
+  });
+
+  it("un updateMode desconocido carga como notify", () => {
+    stubLocalStorage(JSON.stringify({ updateMode: "siempre", checkUpdates: false }));
+    useSettingsStore.getState().load();
+
+    expect(useSettingsStore.getState().updateMode).toBe("notify");
+  });
+
+  it("load() no escribe: la migración se repite hasta el primer persist()", () => {
+    const stored = JSON.stringify({ checkUpdates: false });
+    const storage = stubLocalStorage(stored);
+    useSettingsStore.getState().load();
+
+    expect(storage.written()).toBe(stored);
+  });
+
+  it("solo off deja de buscar, y solo install instala sin preguntar", () => {
+    expect((["install", "notify", "off"] as const).map(searchesAutomatically)).toEqual([
+      true,
+      true,
+      false,
+    ]);
+    expect((["install", "notify", "off"] as const).map(installsWithoutAsking)).toEqual([
+      true,
+      false,
+      false,
+    ]);
   });
 });
 
@@ -159,5 +210,69 @@ describe("theme", () => {
     useSettingsStore.getState().load();
 
     expect(useSettingsStore.getState().theme).toBe("dark");
+  });
+});
+
+describe("migración de performancePreset (ADR-194 §5)", () => {
+  beforeEach(() => {
+    useSettingsStore.setState(useSettingsStore.getInitialState());
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const loadWith = (stored: Record<string, unknown>) => {
+    const storage = stubLocalStorage(JSON.stringify(stored));
+    useSettingsStore.getState().load();
+    return { preset: useSettingsStore.getState().performancePreset, storage };
+  };
+
+  it("un `high` sin versión carga como `auto`", () => {
+    expect(loadWith({ performancePreset: "high" }).preset).toBe("auto");
+  });
+
+  it("un `high` con una versión menor que 2 carga como `auto`", () => {
+    expect(loadWith({ performancePreset: "high", settingsVersion: 1 }).preset).toBe("auto");
+  });
+
+  it("un `high` con `settingsVersion: 2` carga como `high`", () => {
+    expect(loadWith({ performancePreset: "high", settingsVersion: 2 }).preset).toBe("high");
+  });
+
+  it("`low` y `auto` sin versión se conservan", () => {
+    expect(loadWith({ performancePreset: "low" }).preset).toBe("low");
+    expect(loadWith({ performancePreset: "auto" }).preset).toBe("auto");
+  });
+
+  it("`medium` y `ultra` guardados se conservan", () => {
+    expect(loadWith({ performancePreset: "medium", settingsVersion: 2 }).preset).toBe("medium");
+    expect(loadWith({ performancePreset: "ultra", settingsVersion: 2 }).preset).toBe("ultra");
+  });
+
+  it("un valor desconocido carga como `auto`", () => {
+    useSettingsStore.setState({ performancePreset: "low" });
+    expect(loadWith({ performancePreset: "turbo", settingsVersion: 2 }).preset).toBe("auto");
+    expect(loadWith({ performancePreset: 7 }).preset).toBe("auto");
+  });
+
+  it("`load()` no escribe: el JSON guardado queda como estaba", () => {
+    const original = JSON.stringify({ performancePreset: "high" });
+    const storage = stubLocalStorage(original);
+    useSettingsStore.getState().load();
+    expect(storage.written()).toBe(original);
+  });
+
+  it("`persist()` escribe `settingsVersion: 2`, y desde ahí un `high` se respeta", () => {
+    const storage = stubLocalStorage(JSON.stringify({ performancePreset: "high" }));
+    useSettingsStore.getState().load();
+    useSettingsStore.getState().persist();
+    expect(JSON.parse(storage.written() ?? "{}")).toHaveProperty("settingsVersion", 2);
+
+    useSettingsStore.setState({ performancePreset: "high" });
+    useSettingsStore.getState().persist();
+    useSettingsStore.setState(useSettingsStore.getInitialState());
+    useSettingsStore.getState().load();
+    expect(useSettingsStore.getState().performancePreset).toBe("high");
   });
 });

@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=performance | dependencias=05_Worker_Architecture.md,06_Pipeline.md,03_Data_Model.md,adr/ADR-054-Scroll-Independiente-Por-Panel.md,adr/ADR-056-RenderRequested-Kind-Por-Panel.md | audiencia=IA+humanos | fase=1 (§3.1 actualizado en el cierre de fase 10: scroll independiente por panel, ADR-054; §11.3 en fase 11: escenario 12 —un panel no dispara el render del otro—, ADR-056) -->
+<!-- CONTEXT: scope=performance | dependencias=adr/ADR-192-El-Pico-Total-De-Memoria-Tiene-Un-Techo-Medido-Por-Perfil.md,05_Worker_Architecture.md,06_Pipeline.md,03_Data_Model.md,adr/ADR-054-Scroll-Independiente-Por-Panel.md,adr/ADR-056-RenderRequested-Kind-Por-Panel.md,adr/ADR-151-La-Primera-Pagina-Ya-Esta-Dibujada-Cuando-Se-Abre-El-Panel.md,adr/ADR-153-El-Gate-De-Tiempos-Se-Mide-Sobre-El-Producto.md,adr/ADR-185-Gates-De-Leak-Y-Stress-En-Electron.md | audiencia=IA+humanos | fase=1 (§3.1 actualizado en el cierre de fase 10: scroll independiente por panel, ADR-054; §11.3 en fase 11: escenario 12 —un panel no dispara el render del otro—, ADR-056; §1/§11.4 en fase 11 por ADR-151/ADR-153 — retira "first preview", agrega las dos filas de página-1-visible e import→panel, y el gate de Performance pasa a correr sobre el shell de Electron empaquetado en vez de un servidor HTTP; §11.4 activa gates Leak/Stress de ADR-185, verdes localmente en macOS, CI pendiente) -->
 
 # Anonly — Estrategia de Performance (TAD bloque 10)
 
@@ -15,8 +15,20 @@
 | Pico de memoria para 50 páginas | < 512 MB |
 | Bundle inicial (sin modelos IA) | < 800 KB gz |
 | Cancelación efectiva | < 200 ms desde input hasta cese de CPU |
-| First preview (página 1, lado original) | < 1.5 s desde import |
+| Primera página visible al abrir el panel de trabajo | ya dibujada: cero `RENDER_REQUESTED` necesarios y píxeles en el primer frame de ②b |
+| Import → panel de trabajo | el presupuesto de extremo a extremo de su clase de documento (< 8 s nativo, < 60 s escaneado — mismas dos filas de arriba), más el piso de 1,2 s de ADR-150 |
 | Re-render delta tras editar 1 grupo | < 150 ms |
+
+> **ADR-151 §3 (2026-09-10)**: retira el renglón "First preview (página 1, lado original) < 1.5 s
+> desde import", vigente desde la fase 1 con una UI de cuatro paneles simultáneos que ADR-087 §1
+> retiró — el visor no monta hasta que la pantalla de escaneo suelta al usuario, así que ese
+> renglón terminaba midiendo la pantalla de escaneo entera, no el dibujo (~120 ms de render contra
+> ~2,4-3,9 s de espera real, medido). Lo reemplazan las dos filas de arriba: la primera verifica que
+> el precalentado de ADR-151 §1 hizo su trabajo; la segunda **no agrega un número nuevo** — desde
+> ADR-150, "import → panel de trabajo" y "import → `Ready`" son el mismo instante, y ya tiene
+> presupuesto contractual en las dos filas de arriba. Este renglón retirado nunca estuvo en la
+> tabla contractual de `00_Project_Vision.md` §7 (se había agregado solo acá): retirarlo no toca el
+> contrato de producto.
 
 ---
 
@@ -135,7 +147,9 @@ Toda LRU tiene límite por **cantidad de items** y por **bytes** (lo que se alca
 | Cache LRU `ImageData` | 200 MB | 16 páginas |
 | `EntityGroup[]` + `Annotation[]` | 10 MB | |
 | Render workers (x4) | 480 MB | 120 MB c/u, compartido con export |
-| **Total pico (con OCR + NER)** | **~ 1.6 GB** | Bajo objetivo. Sin OCR/NER: ~ 870 MB. |
+| **Total pico (con OCR + NER)** | **~ 1.6 GB** | Estimación de la fase 1, **reemplazada por ADR-192**. Sin OCR/NER: ~ 870 MB. |
+
+> **ADR-192 (2026-09-30) — el total de esta tabla ya no es el presupuesto.** Las filas son estimaciones por componente de la fase 1: nunca se midieron y omiten el proceso de la GPU. El pico total del árbol de procesos (M2, ADR-146) se gobierna con techos medidos por perfil de medición, para un equipo mínimo de **8 GB de RAM**, con la configuración por defecto y en Windows nativo: **P1 (10 páginas con texto, NER) ≤ 2,0 GB** y **P2 (50 páginas escaneadas, OCR y NER) ≤ 3,0 GB**. Cómo se evalúa: §11.4, fila «Memoria (M2)». El objetivo de 512 MB de abajo es M1, la memoria atribuible al documento, y no cambia.
 
 Para 50 páginas, objetivo pico < 512 MB implica que OCR + NER no pueden correr simultáneos en dispositivos chicos. Estrategia: si `deviceMemory < 4` GB, **serializar** OCR y NER (no paralelos), y reducir caches LRU a 8 páginas.
 
@@ -157,7 +171,9 @@ Para 50 páginas, objetivo pico < 512 MB implica que OCR + NER no pueden correr 
 
 ### 8.1 Limpieza garantizada
 
-- Todo `IEngine` implementa `dispose()` que **debe** liberar todo. Hay un test de leak que carga y cierra 10 documentos consecuidos y verifica que la memoria regresó al baseline.
+- Todo `IEngine` implementa `dispose()` que **debe** liberar todo. El gate de
+  fuga de ADR-185 carga y cierra diez documentos y verifica crecimiento de
+  workers vivos y heap JS con GC forzado; informa RSS sin usarlo como veredicto.
 
 ---
 
@@ -229,7 +245,29 @@ Fixtures pesados (> 5 MB) vía Git LFS o descargados en `postinstall` con hash v
 4. Cargar PDF enorme → cancelar a mitad → verificar cese de CPU < 200 ms. **Reparto (mismo criterio que el item 7)**: el E2E ejercita el **flujo** (la cancelación llega, el pipeline queda en `Cancelled` y el documento se puede cerrar/reimportar); la **medición del SLA de 200 ms** es del gate `test:cancel` (`tests/cancel/`, Hito 11 — §11.4), que instrumenta el cese de CPU por motor. Sin esa nota, `scenario-4-cancel-huge-pdf.spec.ts` se lee como incumplimiento del item cuando en realidad cubre la mitad que le toca.
 5. Editar grupo mientras NER sigue corriendo → verificar que no se pierden ediciones.
 6. Cargar PDF corrupto → verificar error tipado y mensaje claro.
-7. Abrir y cerrar 10 documentos consecutivos → verificar que la memoria regresa al baseline. **Reparto (ADR-048 §3)**: el E2E ejercita el **flujo** (cada `DOCUMENT_CLOSED` deja estado limpio —sin documento activo, sin preview, sin blob URLs vivos— y el ciclo 10 se comporta como el 1); la **medición de bytes contra baseline** es del gate `test:leak` (`tests/leak/`, Hito 11), porque `performance.measureUserAgentSpecificMemory()` exige `crossOriginIsolated` (COOP/COEP) — headers que la app **no llevaba** hasta ADR-100, que los declara en `public/_headers` y los replica en el dev server; con eso este bloqueo del gate `test:leak` desaparece. **Depende de ADR-051 (PR 17.7)**: el supuesto de ADR-048 §3 —que el ciclo open/close ya era ejercitable— era falso. Hasta ese PR no existe ningún control de UI para cerrar un documento que llegó a `Ready` (solo el banner de `Failed` y el cancelar de `PasswordDialog`), así que ni este escenario ni el gate `test:leak` tienen ciclo que medir.
+7. Abrir y cerrar 10 documentos consecutivos → verificar que la memoria regresa al baseline. **Reparto (ADR-048 §3)**: el E2E ejercita el **flujo** (cada `DOCUMENT_CLOSED` deja estado limpio —sin documento activo, sin preview, sin blob URLs vivos— y el ciclo 10 se comporta como el 1); el gate `test:leak` (`tests/leak/`, Hito 11) mide **crecimiento tras el primer uso** con workers vivos y heap JS por CDP (ADR-185). El costo único del primer documento se informa aparte. **Depende de ADR-051 (PR 17.7)**: el supuesto de ADR-048 §3 —que el ciclo open/close ya era ejercitable— era falso. Hasta ese PR no existe ningún control de UI para cerrar un documento que llegó a `Ready` (solo el banner de `Failed` y el cancelar de `PasswordDialog`), así que ni este escenario ni el gate `test:leak` tienen ciclo que medir.
+
+   > **Medido el 2026-09-18 (T-8, Paso 0): la API no está disponible en la app
+   > empaquetada.** `performance.measureUserAgentSpecificMemory()` existe como
+   > función y `crossOriginIsolated` da `true`, pero al llamarla el runtime lanza
+   > *«performance.measureUserAgentSpecificMemory is not available»*. El control de
+   > la sonda confirmó que la memoria de prueba estaba montada, así que el negativo
+   > es de la API (`roadmap/mediciones/ner/AB_Intercalado_Medicion.md` §2). La causa probable es
+   > que la app se sirve por `app://` (ADR-130/132) — **plausible, no verificado**, y
+   > **no se probó contra el dev server**. Lo que sí queda establecido: **ADR-100 no
+   > levantó el bloqueo de `test:leak` en el producto empaquetado**, que es sobre lo
+   > que se miden los gates de rendimiento (ADR-153). Antes de construir
+   > La fuente para `tests/leak/` queda decidida en ADR-185: heap JS con GC
+   > forzado y workers vivos por CDP; RSS se conserva solo como diagnóstico.
+   >
+   > **Medido el 2026-09-18 (T-9, `roadmap/mediciones/transversal/Ciclos_Y_Documentos_Reales_Medicion.md`):
+   > el RSS no sirve para este gate.** En diez ciclos idénticos, dentro de una misma
+   > instancia, el reposo se movió hasta ~250 MB de un ciclo al siguiente sin ninguna
+   > fuga. Las dos señales que dieron lecturas limpias en las tres corridas son **la
+   > cantidad de workers vivos** y **el heap de JS con GC forzado** (ADR-159,
+   > `tests/perf/support/cdpHeap.ts`); el instrumento de T-9 (`support/leakCycles.ts`)
+   > ya las lee.
+
 8. Cargar PDF sin NER activado → verificar que solo Regex detecta. **Desbloqueado por PR16.5** (ADR-048 §7 punto 2): hasta entonces no existía forma de desactivar NER antes de la primera importación (`App.tsx` llamaba `initCore()` sin derivar overrides de `settings.store`) y el spec estaba en `test.fixme` desde PR10. PR17 lo saca del `fixme`.
 9. Disparar un `reanalyze` (ADR-038) con documento abierto → verificar que reanaliza **preservando las ediciones previas del usuario**: un grupo que el usuario deshabilitó sigue deshabilitado, una regla creada sigue aplicando, un merge manual persiste. **Disparador (ADR-126)**: el escenario decía "activar NER en runtime", que era el disparador y no lo que mide; ese control se retiró —la detección de nombres está siempre activa— y con él la única forma de activarla en runtime. El disparador pasa a ser **Idiomas del documento**, el otro setting que abre la confirmación de reanálisis. La mitad "se descarga el modelo en runtime" ya no describe ningún camino de usuario: que el detector corre y llega a la UI lo cubre el escenario 5.
 10. Fusionar y dividir grupos → verificar índices y reemplazos.
@@ -250,14 +288,15 @@ Fixtures pesados (> 5 MB) vía Git LFS o descargados en `postinstall` con hash v
 | Snapshot (aislado) | `pnpm test:snapshot` | cualquier drift | activo (local / pre-PR) |
 | Integration | `pnpm test:integration` | cualquier par crítico rojo (pares mínimos en ADR-034 §6) | auto-activa al existir `tests/integration/` (Hito 9); también corre dentro de `pnpm test` |
 | E2E | `pnpm assets:mirror && pnpm test:e2e` | cualquier escenario crítico de §11.3 rojo | auto-activa al existir `tests/e2e/` (Hito 10). **`pnpm assets:mirror` es prerequisito obligatorio** (ADR-048 §1): los assets first-party no se commitean (ADR-018) y sin ellos Vite ni siquiera resuelve el `import ?url` de `src/assets/onnxruntime/` — se cae la suite entera, no solo los escenarios de NER/OCR. En CI: paso previo al `pnpm test:e2e` del job `test-e2e`, con cache por hash de `assets.lock.json` |
-| Performance | `pnpm test:perf` | métrica gate de `00_Project_Vision.md` §7 fuera de target ± 10% | auto-activa al existir `tests/perf/` (Hito 11) |
-| Stress | `pnpm test:stress` | documento grande excede presupuesto de memoria/tiempo | auto-activa al existir `tests/stress/` (Hito 11) |
-| Leak | `pnpm test:leak` | memoria no regresa al baseline tras 10 open/close | auto-activa al existir `tests/leak/` (Hito 11) |
-| Cancel | `pnpm test:cancel` | SLA > 200 ms en cualquier motor | auto-activa al existir `tests/cancel/` (Hito 11) |
+| Performance | `pnpm assets:mirror && pnpm exec cross-env VITE_E2E=1 pnpm --filter @anonly/react-client build && pnpm --filter @anonly/desktop-shell build && pnpm test:perf` | **CI**: la spec del gate no corre, no llega a `Ready` o se saltea (ADR-149 §1). **Local, antes de cada release (§5 del plan de revisión)**: además, tiempo end-to-end de §1 (10 páginas con texto, 10 escaneadas) o la primera fila de ADR-151 §3 fuera de target, con `ANONLY_PERF_ENFORCE_BUDGET=1` | activo. `test:perf` corre **solo** `pipeline-timing.spec.ts`; las campañas de `tests/perf/` se corren por archivo explícito con sus `run-*.sh` y no forman parte del gate. En CI (macOS, `timeout-minutes` explícito) mide y reporta los tiempos, pero **no** aplica el umbral: el hardware de referencia del objetivo de 8 s sigue sin decidir (Hito 11) y el runner no es ese hardware (decisión del humano, 2026-09-29; ADR-149 §5). El job exige un mínimo de tests ejecutados y cero salteados sobre el reporte JSON de Playwright. Corre sobre el **shell de Electron empaquetado** (ADR-153), no Vitest/Node ni un servidor HTTP |
+| Stress | `pnpm test:stress` | 50/200 páginas escaneadas fallan o superan las razones M2 ≤ 3 y tiempo ≤ 8 de ADR-185; centinela relativo, no cambia el presupuesto contractual | activo; verde local en macOS arm64 (2026-09-25) y en Windows x64 (2026-09-26). En CI **ejecuta o falla** (ADR-149 §1): sin specs el job falla, y exige un mínimo de tests ejecutados y cero salteados sobre el reporte JSON de Playwright En CI corre al mergear a `main` o a mano, no en cada PR (ADR-185, enmienda del 2026-10-01) |
+| Leak | `pnpm test:leak` | diez open/close incompletos, workers crecen o heap JS con GC supera el umbral T-9/ADR-185; RSS solo diagnóstico | activo; verde local en macOS arm64 (2026-09-25) y en Windows x64 (2026-09-26). En CI **ejecuta o falla** (ADR-149 §1): sin specs el job falla, y exige un mínimo de tests ejecutados y cero salteados sobre el reporte JSON de Playwright En CI corre al mergear a `main` o a mano, no en cada PR (ADR-185, enmienda del 2026-10-01) |
+| Memoria (M2) | `pnpm exec playwright test --config=playwright.perf.config.ts tests/perf/memory.spec.ts --repeat-each=3`, con la app construida como en la fila Performance | **Local, en Windows nativo, antes de cada release** (ADR-192 §4): el máximo de M2 de tres corridas frías y tres calientes supera el techo de su perfil (P1 2,0 GB, P2 3,0 GB), o hay un OOM o una corrida abortada. Un resultado no disponible es inconcluso, no cumplimiento | manual: `memory.spec.ts` mide y reporta sin afirmar umbrales, y la comparación la hace y la registra quien corre el release. CI no lo aplica (Linux y macOS; macOS es informativo). Automatizarlo con una variable de entorno queda pendiente |
+| Cancel | `pnpm test:cancel` | SLA > 200 ms en cualquier motor | activo; ejecuta o falla (ADR-149 §1): en CI corre siempre, y `scripts/ci/assert-min-tests.mjs` exige un mínimo de tests ejecutados y cero salteados sobre el reporte JSON de Vitest. El control discriminante corre contra `createCore()` real con la cancelación rota (ADR-149 §2) |
 | Security | `pnpm test:security` | `no-recuperability`, `metadata-strip`, `no-network-from-core` o `no-password-in-logs` rojo | auto-activa al existir `tests/security/` (Hito 8+) |
 | Audit | `pnpm audit --audit-level=high` | vulnerabilidad high/critical | activo no bloqueante; bloqueante desde Hito 11 |
 
-Comando mínimo pre-PR (subset local de esta tabla): `pnpm lint && pnpm typecheck && pnpm test && pnpm test:contract`.
+Comando mínimo pre-PR (subset local de esta tabla): `pnpm lint && pnpm typecheck && pnpm test && pnpm test:contract && pnpm format:check`. `format:check` se agregó el 2026-09-29 porque CI ya lo exige en el job Lint; los tests de contrato corren en CI dentro de `pnpm test`, y `test:contract` los aísla en local.
 
 Además de los ejecutables, hay **gates de revisión** (no automatizables por comando) definidos en `ai/AI_Development_Guide.md` §4: Diff scope, Spec sync y Prohibiciones.
 

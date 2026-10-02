@@ -1,0 +1,193 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`OcrEngine — snapshot (ADR-160 §1/§6) > active strips preserve ADR-121 words, confidence, bboxes and fusion 1`] = `
+{
+  "confidence": 0.95,
+  "documentId": "doc-162-active",
+  "pageIndex": 0,
+  "words": [
+    {
+      "bbox": {
+        "height": 2.88,
+        "width": 7.199999999999999,
+        "x": 14.399999999999999,
+        "y": 2.4,
+      },
+      "confidence": 0.95,
+      "pageIndex": 0,
+      "source": "ocr",
+      "text": "cuerpo",
+    },
+    {
+      "bbox": {
+        "height": 7.199999999999999,
+        "rotation": 90,
+        "width": 2.88,
+        "x": 2.4,
+        "y": -12,
+      },
+      "confidence": 0.95,
+      "pageIndex": 0,
+      "source": "ocr",
+      "text": "cuerpo",
+    },
+    {
+      "bbox": {
+        "height": 7.199999999999999,
+        "rotation": 270,
+        "width": 2.88,
+        "x": -0.48,
+        "y": 14.399999999999999,
+      },
+      "confidence": 0.95,
+      "pageIndex": 0,
+      "source": "ocr",
+      "text": "cuerpo",
+    },
+    {
+      "bbox": {
+        "height": 7.199999999999999,
+        "rotation": 90,
+        "width": 2.88,
+        "x": 21.599999999999998,
+        "y": -12,
+      },
+      "confidence": 0.95,
+      "pageIndex": 0,
+      "source": "ocr",
+      "text": "cuerpo",
+    },
+    {
+      "bbox": {
+        "height": 7.199999999999999,
+        "rotation": 270,
+        "width": 2.88,
+        "x": 18.72,
+        "y": 14.399999999999999,
+      },
+      "confidence": 0.95,
+      "pageIndex": 0,
+      "source": "ocr",
+      "text": "cuerpo",
+    },
+  ],
+}
+`;
+
+exports[`OcrEngine — snapshot (ADR-160 §1/§6) > preserves words confidence and geometry for mixed page orientations 1`] = `
+[
+  {
+    "confidence": 0.91,
+    "documentId": "doc-mixed-orientations",
+    "pageIndex": 0,
+    "words": [
+      {
+        "bbox": {
+          "height": 3.5999999999999996,
+          "width": 8.4,
+          "x": 1.2,
+          "y": 1.2,
+        },
+        "confidence": 0.91,
+        "pageIndex": 0,
+        "source": "ocr",
+        "text": "upright-word",
+      },
+    ],
+  },
+  {
+    "confidence": 0.88,
+    "documentId": "doc-mixed-orientations",
+    "pageIndex": 1,
+    "words": [
+      {
+        "bbox": {
+          "height": 8.64,
+          "rotation": 90,
+          "width": 3.5999999999999996,
+          "x": 1.44,
+          "y": -0.48,
+        },
+        "confidence": 0.88,
+        "pageIndex": 1,
+        "source": "ocr",
+        "text": "ninety-word",
+      },
+    ],
+  },
+  {
+    "confidence": 0.93,
+    "documentId": "doc-mixed-orientations",
+    "pageIndex": 2,
+    "words": [
+      {
+        "bbox": {
+          "height": 3.5999999999999996,
+          "rotation": 180,
+          "width": 8.879999999999999,
+          "x": 13.44,
+          "y": 4.32,
+        },
+        "confidence": 0.93,
+        "pageIndex": 2,
+        "source": "ocr",
+        "text": "upside-down-word",
+      },
+    ],
+  },
+  {
+    "confidence": 0.85,
+    "documentId": "doc-mixed-orientations",
+    "pageIndex": 3,
+    "words": [
+      {
+        "bbox": {
+          "height": 9.12,
+          "rotation": 270,
+          "width": 3.5999999999999996,
+          "x": 18.48,
+          "y": 1.92,
+        },
+        "confidence": 0.85,
+        "pageIndex": 3,
+        "source": "ocr",
+        "text": "two-seventy-word",
+      },
+    ],
+  },
+]
+`;
+
+exports[`OcrEngine — snapshot (ADR-160 §1/§6) > words and confidence are identical to the pre-ADR kernel for the same PNG 1`] = `
+{
+  "confidence": 0.898,
+  "documentId": "doc-snapshot",
+  "pageIndex": 0,
+  "words": [
+    {
+      "bbox": {
+        "height": 3.84,
+        "width": 9.6,
+        "x": 2.88,
+        "y": 1.92,
+      },
+      "confidence": 0.915,
+      "pageIndex": 0,
+      "source": "ocr",
+      "text": "Pérez",
+    },
+    {
+      "bbox": {
+        "height": 3.84,
+        "width": 9.12,
+        "x": 14.399999999999999,
+        "y": 1.92,
+      },
+      "confidence": 0.882,
+      "pageIndex": 0,
+      "source": "ocr",
+      "text": "34.567.891",
+    },
+  ],
+}
+`;

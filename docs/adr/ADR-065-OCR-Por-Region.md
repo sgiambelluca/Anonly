@@ -2,7 +2,7 @@
 
 # ADR-065 — OCR de la región, no de la página: rescatar imágenes con texto que ningún texto nativo explica
 
-- **Estado**: Accepted
+- **Estado**: Accepted (**§5 amendado por ADR-158 §1**, 2026-09-12: `rasterizePage` devuelve `EncodedPageImage` (PNG) en vez de `ImageData`; el recorte por `region` y su clampeo no cambian, solo la forma en que la imagen sale del motor)
 - **Fecha**: 2026-08-09
 - **Decidido por**: El humano, tras probar la herramienta sobre una pericia judicial real donde el 55% de una página —una imagen con el fiscal responsable adentro— nunca se escaneó y el dato se exportó sin anonimizar. Rechazó explícitamente delegarle la decisión al usuario (*"la aplicación tiene que ser lo suficientemente inteligente para poder saber manejar dichas páginas por sí misma"*) y pidió medir antes de escribir.
 - **Relacionado con**: ADR-064 (**precondición**: sin la conversión px→pt no se puede traducir un recorte a coordenadas de página), ADR-020 §6 (el guard de `fuseOcrPage` que este ADR refleja invertido), ADR-041 (el precedente de función pura host-side), ADR-034 §1 (`rasterizePage`), ADR-063 (el otro defecto del hito, independiente)

@@ -391,6 +391,12 @@ describe("@anonly/event-system — EventBus contracts", () => {
           enabled: true,
           aliases: ["34.567.891"],
           replacementValueUserSet: false,
+          replacementPreviews: {
+            placeholder: "[DNI 01]",
+            mask: "[DNI 01]",
+            synthetic: "[DNI 01]",
+            placeholderLadder: ["[DNI 01]"],
+          },
           needsReview: false,
           createdAt: 0,
           updatedAt: 0,

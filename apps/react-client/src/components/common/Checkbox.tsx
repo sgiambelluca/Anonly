@@ -47,7 +47,7 @@ export function Checkbox({
         }}
         className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-sm border border-border bg-bg-primary data-[state=checked]:border-accent data-[state=checked]:bg-accent"
       >
-        <RadixCheckbox.Indicator className="text-white">
+        <RadixCheckbox.Indicator className="text-accent-foreground">
           {checked === "indeterminate" ? (
             <MinusIcon className="h-3 w-3" aria-hidden />
           ) : (

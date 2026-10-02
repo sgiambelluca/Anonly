@@ -45,6 +45,8 @@ export default tseslint.config(
       // (Vite los procesa como módulos vía `?url`) siguen siendo vendor, no
       // código propio — mismo criterio que los de public/ de arriba.
       "apps/react-client/src/assets/onnxruntime/**",
+      ".measure/**",
+      ".agents/skills/**",
     ],
   },
   js.configs.recommended,
@@ -53,6 +55,7 @@ export default tseslint.config(
     languageOptions: {
       parserOptions: {
         projectService: {
+          maximumDefaultProjectFileMatchCount_THIS_WILL_SLOW_DOWN_LINTING: 19,
           allowDefaultProject: [
             "eslint.config.js",
             "commitlint.config.js",
@@ -60,8 +63,19 @@ export default tseslint.config(
             "playwright.config.ts",
             "playwright.measure.config.ts",
             "playwright.electron.config.ts",
+            "playwright.perf.config.ts",
+            "playwright.leak.config.ts",
+            "playwright.stress.config.ts",
             "apps/react-client/postcss.config.js",
             "apps/react-client/tailwind.config.js",
+            "tests/perf/ner-batch-feasibility.mjs",
+            "tests/perf/ner-batch-real.mjs",
+            "tests/perf/ocr-platform-probe.mjs",
+            "tests/perf/ocr-platform-synthetic.mjs",
+            "tests/perf/support/summarize-ocr-pool.mjs",
+            "tests/perf/support/summarize-ocr-memory.mjs",
+            "scripts/ci/assert-min-tests.mjs",
+            "scripts/ci/assert-no-e2e-hooks.mjs",
           ],
         },
         tsconfigRootDir: import.meta.dirname,
@@ -71,6 +85,30 @@ export default tseslint.config(
       // no-unnecessary-type-assertion conflicta con noUncheckedIndexedAccess
       // (no detecta que arr[i] es T | undefined). Preferimos noUncheckedIndexedAccess.
       "@typescript-eslint/no-unnecessary-type-assertion": "off",
+    },
+  },
+  {
+    files: ["tests/perf/*.mjs", "tests/perf/support/*.mjs"],
+    languageOptions: {
+      globals: {
+        process: "readonly",
+        document: "readonly",
+        crossOriginIsolated: "readonly",
+        NerBatchProbe: "readonly",
+      },
+    },
+  },
+  {
+    // ADR-149: script de CI (Node puro, fuera de todo tsconfig — mismo
+    // criterio que el bloque de `tests/perf/*.mjs` arriba). `console.*` sí
+    // corre acá (a diferencia de `packages/**`, P-4): es lo que un step de
+    // CI necesita para reportar por qué falló.
+    files: ["scripts/ci/*.mjs"],
+    languageOptions: {
+      globals: {
+        process: "readonly",
+        console: "readonly",
+      },
     },
   },
   {

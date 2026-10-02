@@ -55,4 +55,26 @@ El argumento es el que el propio motor ya usaba, aplicado al otro evento: si el 
 - **Se pierde visibilidad del calentamiento del segundo worker.** Si algún día ese segundo modelo tardara muchísimo o fallara, nada lo mostraría. Es aceptable porque el pipeline ya está produciendo resultados con el primero, pero conviene saberlo.
 - La dedup es **por instancia del motor**. Un cliente que recree el Core (ADR-125) reinicia el flag, que es lo correcto: ahí el modelo sí se carga de nuevo.
 
+> **Extendido por ADR-166 (2026-09-17)**: ese «reiniciar el flag cuando el modelo
+> se carga de nuevo» deja de ser exclusivo de recrear el Core. ADR-166 da de baja
+> el pool de NER al terminar la detección, así que un reanálisis posterior
+> **vuelve a cargar el modelo dentro de la misma instancia**. Por el mismo
+> criterio de arriba, `releaseIdleWorkers()` reinicia `modelWarm`: si no lo
+> hiciera, esa recarga ocurriría muda —sin `LOADING` ni `READY`— y el usuario
+> vería el reanálisis detenido ~1 s sin explicación, que es la misma clase de
+> indicador desincronizado que este ADR existe para evitar. La dedup pasa a ser
+> **por ciclo de carga**, no por instancia; para el caso que motivó este ADR —el
+> segundo worker del pool calentándose— no cambia nada.
+
+> **Generalizado por ADR-167 (2026-09-18)**: el ciclo se reabre con **cualquier**
+> baja del pool, no solo con la que pedía ADR-166. La nota de arriba dejó un
+> camino afuera sin saberlo: el temporizador de ADR-080 libera el pool sin
+> avisarle al motor, así que tras una liberación por inactividad `modelWarm`
+> quedaba en `true` y la recarga siguiente era **muda** — medido: el modelo se
+> recarga (~2 s) y `NER_MODEL_READY` no se emite. Pasaba desde ADR-080 con los
+> 60 s, cada vez que alguien revisaba más de un minuto. ADR-167 §3 mueve el
+> reinicio al pool (`onWorkersReleased`), que notifica toda baja efectiva, venga
+> del temporizador o de una llamada explícita. La regla de este ADR no cambia;
+> cambia quién se entera.
+
 **Lo que no toca**: el contrato de eventos, los códigos de error, ni el cliente.

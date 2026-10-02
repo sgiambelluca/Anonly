@@ -16,6 +16,7 @@ import {
   type SerializedEngineError,
 } from "@anonly/anonymization-core";
 import { beforeEach, describe, expect, it } from "vitest";
+import { create } from "zustand";
 
 import { subscribe, subscribePasswordRequired, type Stores } from "../core-adapter/bus-bridge.js";
 import { selectGroupIsDegraded, useDegradedStore } from "../store/degraded.store.js";
@@ -24,6 +25,11 @@ import { useEntitiesStore } from "../store/entities.store.js";
 import { usePipelineStore } from "../store/pipeline.store.js";
 import { useRulesStore } from "../store/rules.store.js";
 import { useSettingsStore } from "../store/settings.store.js";
+import {
+  selectPageHasUnreadableInk,
+  useUnreadableInkStore,
+  type UnreadableInkSlice,
+} from "../store/unreadableInk.store.js";
 import { useViewerStore } from "../store/viewer.store.js";
 
 function createTestLogger(): ILogger {
@@ -42,6 +48,7 @@ const stores: Stores = {
   pipeline: usePipelineStore,
   viewer: useViewerStore,
   settings: useSettingsStore,
+  unreadableInk: useUnreadableInkStore,
 };
 
 function makeGroup(overrides: Partial<EntityGroup> = {}): EntityGroup {
@@ -56,6 +63,12 @@ function makeGroup(overrides: Partial<EntityGroup> = {}): EntityGroup {
     enabled: true,
     aliases: ["Juan Pérez"],
     replacementValueUserSet: false,
+    replacementPreviews: {
+      placeholder: "[PERSON 01]",
+      mask: "[PERSON 01]",
+      synthetic: "[PERSON 01]",
+      placeholderLadder: ["[PERSON 01]"],
+    },
     needsReview: false,
     createdAt: 0,
     updatedAt: 0,
@@ -96,6 +109,7 @@ describe("bus-bridge", () => {
     useRulesStore.getState().reset();
     usePipelineStore.getState().reset();
     useViewerStore.getState().reset();
+    useUnreadableInkStore.getState().reset();
   });
 
   it("DOCUMENT_IMPORTED sets id/name immediately, leaving pageCount/sourceKind at defaults", () => {
@@ -175,6 +189,168 @@ describe("bus-bridge", () => {
     unsubscribe();
   });
 
+  it("OCR_PAGE_FINISHED keeps the highest pageIndex seen — OCR dispatches in parallel, so it can arrive out of order (ADR-152 §3)", () => {
+    const bus = createEventBus({ logger: createTestLogger() });
+    const unsubscribe = subscribe(bus, stores);
+    // N-3: el puente descarta un OCR_PAGE_FINISHED de otro documento (ver el
+    // test dedicado más abajo) — sin un documento activo que coincida, no
+    // hay contador que actualizar. Mismo criterio que el `beforeEach` de
+    // "PREVIEW_UPDATED.degraded".
+    useDocumentStore.setState({ id: "doc-1" });
+
+    // Página 2 termina primero (despacho paralelo, ocrPoolSize > 1).
+    bus.emit(EventChannel.Ocr, EngineEvents.OCR_PAGE_FINISHED, {
+      documentId: "doc-1",
+      pageIndex: 2,
+      wordCount: 5,
+      confidence: 0.9,
+    });
+    expect(usePipelineStore.getState().lastOcrPageIndex).toBe(2);
+
+    // Página 1 termina después, aunque es anterior en el documento — no debe
+    // hacer retroceder "página 3 de N" a "página 2 de N" bajo la misma etapa.
+    bus.emit(EventChannel.Ocr, EngineEvents.OCR_PAGE_FINISHED, {
+      documentId: "doc-1",
+      pageIndex: 1,
+      wordCount: 4,
+      confidence: 0.9,
+    });
+    expect(usePipelineStore.getState().lastOcrPageIndex).toBe(2);
+
+    // Una página más adelante todavía avanza el contador con normalidad.
+    bus.emit(EventChannel.Ocr, EngineEvents.OCR_PAGE_FINISHED, {
+      documentId: "doc-1",
+      pageIndex: 4,
+      wordCount: 6,
+      confidence: 0.9,
+    });
+    expect(usePipelineStore.getState().lastOcrPageIndex).toBe(4);
+
+    unsubscribe();
+  });
+
+  // ADR-190 §4: el veredicto de "no se pudo leer" viaja en el mismo evento y
+  // se reemplaza por página, no se acumula — un reanalyze de OCR que vuelve a
+  // leer bien una página tiene que poder apagar la marca.
+  it("OCR_PAGE_FINISHED.unreadableInk se refleja en unreadableInk.store, y se apaga si un reanalyze la vuelve a leer", () => {
+    const bus = createEventBus({ logger: createTestLogger() });
+    const unsubscribe = subscribe(bus, stores);
+    useDocumentStore.setState({ id: "doc-1" });
+
+    bus.emit(EventChannel.Ocr, EngineEvents.OCR_PAGE_FINISHED, {
+      documentId: "doc-1",
+      pageIndex: 2,
+      wordCount: 0,
+      confidence: 0,
+      unreadableInk: true,
+    });
+    expect(selectPageHasUnreadableInk(useUnreadableInkStore.getState(), 2)).toBe(true);
+
+    // Ausente ≡ false: una página distinta que termina sin la marca no la trae.
+    bus.emit(EventChannel.Ocr, EngineEvents.OCR_PAGE_FINISHED, {
+      documentId: "doc-1",
+      pageIndex: 3,
+      wordCount: 20,
+      confidence: 0.9,
+    });
+    expect(selectPageHasUnreadableInk(useUnreadableInkStore.getState(), 3)).toBe(false);
+
+    // Reanalyze de OCR: la página 2 se reprocesa y esta vez se lee bien.
+    bus.emit(EventChannel.Ocr, EngineEvents.OCR_PAGE_FINISHED, {
+      documentId: "doc-1",
+      pageIndex: 2,
+      wordCount: 12,
+      confidence: 0.8,
+    });
+    expect(selectPageHasUnreadableInk(useUnreadableInkStore.getState(), 2)).toBe(false);
+
+    unsubscribe();
+  });
+
+  // Revisión ronda B (O-10): el bridge escribe en el store INYECTADO, no en el
+  // singleton global. Con la misma instancia en ambos lados los otros tests no
+  // lo distinguen: acá se inyecta uno distinto y se mira que el global no se toque.
+  it("OCR_PAGE_FINISHED.unreadableInk se escribe en el store inyectado, no en el global", () => {
+    const injected = create<UnreadableInkSlice>((set) => ({
+      pages: new Set(),
+      setPageVerdict(pageIndex, unreadableInk) {
+        set((state) => {
+          const next = new Set(state.pages);
+          if (unreadableInk) next.add(pageIndex);
+          else next.delete(pageIndex);
+          return { pages: next };
+        });
+      },
+      reset() {
+        set({ pages: new Set() });
+      },
+    }));
+    const bus = createEventBus({ logger: createTestLogger() });
+    const unsubscribe = subscribe(bus, { ...stores, unreadableInk: injected });
+    useDocumentStore.setState({ id: "doc-1" });
+
+    bus.emit(EventChannel.Ocr, EngineEvents.OCR_PAGE_FINISHED, {
+      documentId: "doc-1",
+      pageIndex: 4,
+      wordCount: 0,
+      confidence: 0,
+      unreadableInk: true,
+    });
+
+    expect(selectPageHasUnreadableInk(injected.getState(), 4)).toBe(true);
+    expect(selectPageHasUnreadableInk(useUnreadableInkStore.getState(), 4)).toBe(false);
+
+    unsubscribe();
+  });
+
+  // N-3 (revisión, ronda B): `ocr.engine.ts` (~607-613) emite
+  // `OCR_PAGE_FINISHED` sin chequear `abortSignal` — un evento tardío del
+  // documento A puede llegar después de que el usuario ya cerró A y abrió B.
+  // Con `Math.max` solo (sin filtrar por documento), un número alto de A
+  // quedaría pegado durante TODA la etapa de OCR de B, porque un B recién
+  // empezado nunca lo supera.
+  it("a late OCR_PAGE_FINISHED from a closed document is ignored — the counter follows the active document", () => {
+    const bus = createEventBus({ logger: createTestLogger() });
+    const unsubscribe = subscribe(bus, stores);
+
+    // El usuario abrió A e hizo bastante progreso...
+    useDocumentStore.setState({ id: "doc-A" });
+    bus.emit(EventChannel.Ocr, EngineEvents.OCR_PAGE_FINISHED, {
+      documentId: "doc-A",
+      pageIndex: 18,
+      wordCount: 5,
+      confidence: 0.9,
+    });
+    expect(usePipelineStore.getState().lastOcrPageIndex).toBe(18);
+
+    // ...cerró A y abrió B (mismo criterio que `closeDocument`/
+    // `DOCUMENT_IMPORTED`: el store pasa a apuntar al documento activo).
+    useDocumentStore.setState({ id: "doc-B" });
+    usePipelineStore.setState({ lastOcrPageIndex: null });
+
+    // Un OCR_PAGE_FINISHED tardío de A llega después — sin el filtro por
+    // documento, `Math.max(null ?? -1, 18)` volvería a fijarlo en 18 aunque
+    // B recién esté en su página 0.
+    bus.emit(EventChannel.Ocr, EngineEvents.OCR_PAGE_FINISHED, {
+      documentId: "doc-A",
+      pageIndex: 18,
+      wordCount: 5,
+      confidence: 0.9,
+    });
+    expect(usePipelineStore.getState().lastOcrPageIndex).toBeNull();
+
+    // B avanza con normalidad, sin que el 18 de A lo bloquee.
+    bus.emit(EventChannel.Ocr, EngineEvents.OCR_PAGE_FINISHED, {
+      documentId: "doc-B",
+      pageIndex: 0,
+      wordCount: 3,
+      confidence: 0.9,
+    });
+    expect(usePipelineStore.getState().lastOcrPageIndex).toBe(0);
+
+    unsubscribe();
+  });
+
   it("PIPELINE_READY sets stage Ready with group/conflict counts", () => {
     const bus = createEventBus({ logger: createTestLogger() });
     const unsubscribe = subscribe(bus, stores);
@@ -194,7 +370,7 @@ describe("bus-bridge", () => {
     unsubscribe();
   });
 
-  it("PIPELINE_CANCELLED sets stage Cancelled", () => {
+  it("PIPELINE_CANCELLED keeps Cancelled visible despite a late NER loading event", () => {
     const bus = createEventBus({ logger: createTestLogger() });
     const unsubscribe = subscribe(bus, stores);
 
@@ -204,6 +380,99 @@ describe("bus-bridge", () => {
     });
 
     expect(usePipelineStore.getState().stage).toBe(PipelineStage.Cancelled);
+    bus.emit(EventChannel.Ner, EngineEvents.NER_MODEL_LOADING, {
+      modelId: "test-model",
+      progress: 0.5,
+    });
+    expect(usePipelineStore.getState().modelLoading).toBeNull();
+    expect(usePipelineStore.getState().stage).toBe(PipelineStage.Cancelled);
+
+    unsubscribe();
+  });
+
+  it("PIPELINE_CANCELLED of an import stays Cancelled", () => {
+    const bus = createEventBus({ logger: createTestLogger() });
+    const unsubscribe = subscribe(bus, stores);
+
+    bus.emit(EventChannel.Pipeline, EngineEvents.PIPELINE_READY, {
+      documentId: "doc-1",
+      groupCount: 1,
+      conflictCount: 0,
+    });
+    bus.emit(EventChannel.Pipeline, EngineEvents.DOCUMENT_IMPORTED, {
+      documentId: "doc-2",
+      name: "b.pdf",
+      sizeBytes: 1,
+    });
+    bus.emit(EventChannel.Pipeline, EngineEvents.PIPELINE_CANCELLED, {
+      documentId: "doc-2",
+      reason: "user requested",
+    });
+
+    expect(usePipelineStore.getState().stage).toBe(PipelineStage.Cancelled);
+
+    unsubscribe();
+  });
+
+  it("PIPELINE_CANCELLED of a reanalysis of a Ready document returns to Ready and keeps the counts", () => {
+    const bus = createEventBus({ logger: createTestLogger() });
+    const unsubscribe = subscribe(bus, stores);
+
+    bus.emit(EventChannel.Pipeline, EngineEvents.PIPELINE_READY, {
+      documentId: "doc-1",
+      groupCount: 3,
+      conflictCount: 1,
+    });
+    usePipelineStore.getState().setState({ reanalyzeInFlight: true });
+    bus.emit(EventChannel.Pipeline, EngineEvents.PIPELINE_STAGE_CHANGED, {
+      documentId: "doc-1",
+      stage: PipelineStage.Detecting,
+      progress: 0.5,
+    });
+    bus.emit(EventChannel.Ner, EngineEvents.NER_MODEL_LOADING, { modelId: "m", progress: 0.2 });
+
+    bus.emit(EventChannel.Pipeline, EngineEvents.PIPELINE_CANCELLED, {
+      documentId: "doc-1",
+      reason: "user requested",
+    });
+
+    const state = usePipelineStore.getState();
+    expect(state.stage).toBe(PipelineStage.Ready);
+    expect(state.modelLoading).toBeNull();
+    expect(state.groupCount).toBe(3);
+    expect(state.conflictCount).toBe(1);
+
+    unsubscribe();
+  });
+
+  it("PIPELINE_CANCELLED of a reanalysis of a document that failed on import returns to Ready", () => {
+    const bus = createEventBus({ logger: createTestLogger() });
+    const unsubscribe = subscribe(bus, stores);
+
+    // La importación falló en Detecting: el documento nunca pasó por Ready,
+    // pero el Core admite `reanalyze` desde Failed (ADR-040).
+    bus.emit(EventChannel.Pipeline, EngineEvents.DOCUMENT_IMPORTED, {
+      documentId: "doc-1",
+      name: "a.pdf",
+      sizeBytes: 1,
+    });
+    bus.emit(EventChannel.Pipeline, EngineEvents.PIPELINE_STAGE_CHANGED, {
+      documentId: "doc-1",
+      stage: PipelineStage.Detecting,
+      progress: 0.5,
+    });
+    bus.emit(EventChannel.Pipeline, EngineEvents.PIPELINE_FAILED, {
+      documentId: "doc-1",
+      error: makeSerializedError({ message: "NER down" }),
+    });
+    usePipelineStore.getState().setState({ reanalyzeInFlight: true });
+
+    bus.emit(EventChannel.Pipeline, EngineEvents.PIPELINE_CANCELLED, {
+      documentId: "doc-1",
+      reason: "user requested",
+    });
+
+    expect(usePipelineStore.getState().stage).toBe(PipelineStage.Ready);
 
     unsubscribe();
   });

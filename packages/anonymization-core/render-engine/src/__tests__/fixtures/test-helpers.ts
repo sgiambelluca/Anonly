@@ -355,9 +355,19 @@ export function makeSampledImageData(params: {
 // se construyen con el formato/calidad efectivos, sin depender de un encoder real.
 let convertToBlobError: Error | null = null;
 let convertToBlobCalls: Array<{ readonly type?: string; readonly quality?: number }> = [];
+// ADR-156: `estimateEntryBytes` cuenta solo `encoded.bytes.byteLength` — el
+// fake de 6 bytes de abajo no sirve para ejercitar la eviction por
+// `PREVIEW_CACHE_MAX_BYTES` (200 MB), que antes dominaba el `ImageData`
+// crudo. `null` = comportamiento de siempre (el PNG de juguete de 6 bytes);
+// un test que necesite empujar el límite por bytes fija un tamaño acá.
+let convertToBlobByteLength: number | null = null;
 
 export function setConvertToBlobError(error: Error | null): void {
   convertToBlobError = error;
+}
+
+export function setConvertToBlobByteLength(bytes: number | null): void {
+  convertToBlobByteLength = bytes;
 }
 
 export function getConvertToBlobCalls(): ReadonlyArray<{ readonly type?: string; readonly quality?: number }> {
@@ -420,7 +430,10 @@ class StubOffscreenCanvas {
       ...(options?.quality !== undefined ? { quality: options.quality } : {}),
     });
     if (convertToBlobError !== null) return Promise.reject(convertToBlobError);
-    const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, this.width & 0xff, this.height & 0xff]);
+    const bytes =
+      convertToBlobByteLength !== null
+        ? new Uint8Array(convertToBlobByteLength)
+        : new Uint8Array([0x89, 0x50, 0x4e, 0x47, this.width & 0xff, this.height & 0xff]);
     return Promise.resolve(new Blob([bytes], { type: options?.type ?? "image/png" }));
   }
 }
@@ -445,6 +458,9 @@ export function resetCreatedCanvases(): void {
   // siguiente — mismo criterio de limpieza que `createdCanvases`, sin exigir
   // que cada archivo de test recuerde llamar un reset aparte.
   imageDataProvider = null;
+  // ADR-156: mismo criterio — un `setConvertToBlobByteLength` de un test no
+  // debe filtrarse al siguiente.
+  convertToBlobByteLength = null;
 }
 
 export function installOffscreenCanvasStub(): void {

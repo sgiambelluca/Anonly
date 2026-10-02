@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # Para lanzar a mano, sobre cualquier branch, los gates que no corren en
+  # cada PR (fugas y estrés).
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -206,9 +209,16 @@ jobs:
   # Gates que se activan en hitos posteriores.
   # Cada uno corre solo si su directorio de tests existe (hashFiles check).
 
-  test-e2e:
-    name: E2E (Playwright)
+  # Partido en dos mitades en paralelo: de a uno, los E2E tardaban más de diez
+  # minutos en el runner. El check requerido para mergear sigue siendo
+  # "E2E (Playwright)", que es el job de más abajo y junta las dos mitades.
+  test-e2e-shard:
+    name: E2E mitad ${{ matrix.shard }}/2
     needs: install
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     # macOS y no ubuntu: desde ADR-130 los E2E corren contra el contenedor
     # de escritorio, o sea una app de Electron con ventana. En un runner de
     # Linux eso necesita un display virtual (xvfb) — y encima probaría una
@@ -257,24 +267,43 @@ jobs:
         run: pnpm exec playwright install --with-deps chromium
       - name: Run e2e tests
         if: steps.check_e2e.outputs.has_tests == 'true'
-        run: pnpm test:e2e
+        run: pnpm test:e2e --shard=${{ matrix.shard }}/2
+
+  test-e2e:
+    name: E2E (Playwright)
+    needs: test-e2e-shard
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Las dos mitades de E2E pasaron
+        env:
+          SHARDS_RESULT: ${{ needs.test-e2e-shard.result }}
+        run: |
+          if [ "$SHARDS_RESULT" != "success" ]; then
+            echo "::error::Los E2E no pasaron (resultado de las mitades: $SHARDS_RESULT)."
+            exit 1
+          fi
 
   test-perf:
     name: Performance
     needs: install
-    runs-on: ubuntu-latest
+    # Perf mide Electron con ventana sobre un target nativo publicado, igual
+    # que E2E; Ubuntu sin display medía otro entorno y podía omitir el gate.
+    runs-on: macos-latest
+    # ADR-149 §1: un tope explícito. El gate son 4 tests de un solo spec
+    # (`pipeline-timing.spec.ts`); el resto de `tests/perf/` son campañas que se
+    # corren por archivo y no entran acá.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Check if perf tests exist
-        id: check_perf
+      # ADR-149 §1: sin el spec del gate el job falla, no se saltea.
+      - name: Ensure the perf gate spec exists
         run: |
-          if [ -d "tests/perf" ] && [ -n "$(find tests/perf -name '*.test.ts' -type f 2>/dev/null)" ]; then
-            echo "has_tests=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "has_tests=false" >> "$GITHUB_OUTPUT"
-            echo "No perf tests found, skipping."
+          if [ ! -f tests/perf/pipeline-timing.spec.ts ]; then
+            echo "::error::tests/perf/pipeline-timing.spec.ts not found; the test:perf gate must not pass empty."
+            exit 1
           fi
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -282,26 +311,52 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Run perf tests
-        if: steps.check_perf.outputs.has_tests == 'true'
+      - name: Cache first-party assets (wasm/models)
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            apps/react-client/public/wasm
+            apps/react-client/public/models
+            apps/react-client/src/assets/onnxruntime
+          key: assets-mirror-${{ hashFiles('assets.lock.json') }}
+      - name: Mirror first-party assets
+        run: pnpm assets:mirror
+      - name: Install Playwright browsers
+        run: pnpm exec playwright install chromium
+      # Mide y reporta los tiempos SIN aplicar el umbral de 8 s (decisión del
+      # humano, 2026-09-29; ADR-149 §5): el runner no es el hardware de
+      # referencia. El umbral se aplica en local, antes de cada release, con
+      # `ANONLY_PERF_ENFORCE_BUDGET=1`. Falla igual si el pipeline no llega a
+      # Ready o si nada corrió.
+      - name: Run perf gate (measures and reports; no time threshold)
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_NAME: perf-report.json
         run: pnpm test:perf
+      # El mínimo (4) es el número de tests que tiene hoy `pipeline-timing.spec.ts`:
+      # se sube a mano cuando se agreguen más (mismo criterio que Cancel).
+      - name: Assert perf tests actually ran (ADR-149 §1)
+        run: node scripts/ci/assert-min-tests.mjs --report perf-report.json --min 4 --format playwright
 
   test-leak:
     name: Memory leak
     needs: install
-    runs-on: ubuntu-latest
+    # No corre en cada push de un PR (tarda entre 15 y 30 minutos): corre al
+    # mergear a `main` y cuando se lo lanza a mano (ADR-185, enmienda del
+    # 2026-10-01).
+    if: github.event_name != 'pull_request'
+    runs-on: macos-latest
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Check if leak tests exist
-        id: check_leak
+      # ADR-149 §1 (y ADR-185 §5, aclaración del 2026-09-29): sin specs el job
+      # falla, no se saltea.
+      - name: Ensure leak specs exist
         run: |
-          if [ -d "tests/leak" ] && [ -n "$(find tests/leak -name '*.test.ts' -type f 2>/dev/null)" ]; then
-            echo "has_tests=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "has_tests=false" >> "$GITHUB_OUTPUT"
-            echo "No leak tests found, skipping."
+          if [ ! -d tests/leak ] || [ -z "$(find tests/leak -name '*.spec.ts' -type f 2>/dev/null)" ]; then
+            echo "::error::No Playwright leak specs found; the test:leak gate must not pass empty."
+            exit 1
           fi
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -309,9 +364,26 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Cache first-party assets (wasm/models)
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            apps/react-client/public/wasm
+            apps/react-client/public/models
+            apps/react-client/src/assets/onnxruntime
+          key: assets-mirror-${{ hashFiles('assets.lock.json') }}
+      - name: Mirror first-party assets
+        run: pnpm assets:mirror
+      - name: Install Playwright Chromium
+        run: pnpm exec playwright install chromium
       - name: Run leak tests
-        if: steps.check_leak.outputs.has_tests == 'true'
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_NAME: leak-report.json
         run: pnpm test:leak
+      # El mínimo (3) es el número de tests que tiene hoy `tests/leak/leak.spec.ts`
+      # (L1, L2, L3): se sube a mano cuando se agreguen más.
+      - name: Assert leak tests actually ran (ADR-149 §1)
+        run: node scripts/ci/assert-min-tests.mjs --report leak-report.json --min 3 --format playwright
 
   test-cancel:
     name: Cancellation SLA
@@ -321,41 +393,46 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Check if cancel tests exist
-        id: check_cancel
-        run: |
-          if [ -d "tests/cancel" ] && [ -n "$(find tests/cancel -name '*.test.ts' -type f 2>/dev/null)" ]; then
-            echo "has_tests=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "has_tests=false" >> "$GITHUB_OUTPUT"
-            echo "No cancel tests found, skipping."
-          fi
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # ADR-149 §1: sin "Check if cancel tests exist" ni `if:` — el job corre
+      # siempre y falla si el runner no ejecutó nada. `pnpm test:cancel`
+      # falla igual si `tests/cancel` no existe (Vitest no encuentra specs),
+      # así que ESTE step no necesita su propio guard — el mínimo real lo
+      # exige el siguiente.
       - name: Run cancel tests
-        if: steps.check_cancel.outputs.has_tests == 'true'
-        run: pnpm test:cancel
+        run: pnpm exec vitest run tests/cancel --reporter=default --reporter=json --outputFile=cancel-report.json
+      # El mínimo (4) es el número de tests que tiene hoy `tests/cancel` —
+      # se sube a mano cuando se agreguen más (nunca se calcula solo: un
+      # cálculo automático no distinguiría "se borró un test" de "nunca
+      # hizo falta tener más").
+      - name: Assert cancel tests actually ran (ADR-149 §1)
+        run: node scripts/ci/assert-min-tests.mjs --report cancel-report.json --min 4
 
   test-stress:
     name: Stress
     needs: install
-    runs-on: ubuntu-latest
+    # No corre en cada push de un PR (tarda entre 15 y 30 minutos): corre al
+    # mergear a `main` y cuando se lo lanza a mano (ADR-185, enmienda del
+    # 2026-10-01).
+    if: github.event_name != 'pull_request'
+    runs-on: macos-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Check if stress tests exist
-        id: check_stress
+      # ADR-149 §1 (y ADR-185 §5, aclaración del 2026-09-29): sin specs el job
+      # falla, no se saltea.
+      - name: Ensure stress specs exist
         run: |
-          if [ -d "tests/stress" ] && [ -n "$(find tests/stress -name '*.test.ts' -type f 2>/dev/null)" ]; then
-            echo "has_tests=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "has_tests=false" >> "$GITHUB_OUTPUT"
-            echo "No stress tests found, skipping."
+          if [ ! -d tests/stress ] || [ -z "$(find tests/stress -name '*.spec.ts' -type f 2>/dev/null)" ]; then
+            echo "::error::No Playwright stress specs found; the test:stress gate must not pass empty."
+            exit 1
           fi
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -363,9 +440,27 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Cache first-party assets (wasm/models)
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            apps/react-client/public/wasm
+            apps/react-client/public/models
+            apps/react-client/src/assets/onnxruntime
+          key: assets-mirror-${{ hashFiles('assets.lock.json') }}
+      - name: Mirror first-party assets
+        run: pnpm assets:mirror
+      - name: Install Playwright Chromium
+        run: pnpm exec playwright install chromium
       - name: Run stress tests
-        if: steps.check_stress.outputs.has_tests == 'true'
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_NAME: stress-report.json
         run: pnpm test:stress
+      # El mínimo (3) es el número de tests que tiene hoy `tests/stress/stress.spec.ts`
+      # (P2 50p, P2 200p y el centinela de razones): se sube a mano cuando se
+      # agreguen más.
+      - name: Assert stress tests actually ran (ADR-149 §1)
+        run: node scripts/ci/assert-min-tests.mjs --report stress-report.json --min 3 --format playwright
 
   test-security:
     name: Security gates

@@ -34,7 +34,9 @@ Operativamente:
    - Transformers.js: `env.allowRemoteModels = false`, `env.localModelPath` → `/models/ner/` (o `env.remoteHost` al mismo origen).
    - onnxruntime-web: `env.wasm.wasmPaths` → `/wasm/onnx/`.
    - pdfjs-dist: `workerSrc`/wasm → `/wasm/pdfjs/`.
-3. **Verificación de integridad en runtime**: al cargar un modelo, `crypto.subtle.digest` comparado contra el hash de `assets.lock.json` (el mismo mecanismo que `08_Security_Model.md` §8.2 ya define). Hash mismatch → `OCR_MODEL_MISSING` / `NER_MODEL_LOAD_FAILED`.
+3. ~~**Verificación de integridad en runtime**: al cargar un modelo, `crypto.subtle.digest` comparado contra el hash de `assets.lock.json` (el mismo mecanismo que `08_Security_Model.md` §8.2 ya define). Hash mismatch → `OCR_MODEL_MISSING` / `NER_MODEL_LOAD_FAILED`.~~
+
+   > **Retirado por ADR-187 (2026-09-26).** Desde que la app se instala (ADR-130), el código que haría el chequeo vive como archivo suelto junto a los modelos, así que no protege contra quien pueda reemplazarlos. Además exigiría un `fetch` desde el Core (`no-network-from-core`) y una copia transitoria del modelo de NER. La integridad se garantiza al construir (punto 1) y al distribuir (procedencia y firma del instalador).
 4. **CSP intacta**: `connect-src 'self'` sin excepciones. El test `no-third-party-connect` (§11 del Security Model) sigue siendo válido y bloqueante.
 5. Actualizar un modelo = actualizar `assets.lock.json` (URL/revisión/hash) en un PR revisable.
 
@@ -62,7 +64,7 @@ Operativamente:
 ## Validación
 
 - Test E2E `no-third-party-connect`: cero requests fuera del origen propio durante OCR y NER (ya definido en `08_Security_Model.md` §11; esta decisión lo hace cumplible).
-- Test de integridad: modelo con hash alterado → error tipado, no se carga.
+- ~~Test de integridad: modelo con hash alterado → error tipado, no se carga.~~ Retirado junto con el punto 3 (ADR-187).
 - Hito 3 (OCR) y Hito 5 (NER) implementan la configuración de librerías descrita; el checklist de cada spec lo referencia.
 
 ## Referencias

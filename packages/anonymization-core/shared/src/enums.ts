@@ -95,6 +95,9 @@ export enum EngineEvents {
   GROUP_UPDATE_REQUESTED = "GROUP_UPDATE_REQUESTED",
   GROUP_MERGE_REQUESTED = "GROUP_MERGE_REQUESTED",
   GROUP_SPLIT_REQUESTED = "GROUP_SPLIT_REQUESTED",
+  // ADR-171 §1: el usuario elimina la entidad. Grouping la quita, emite
+  // ENTITY_GROUP_REMOVED y suprime sus valores para que un re-análisis no la traiga.
+  GROUP_REMOVE_REQUESTED = "GROUP_REMOVE_REQUESTED",
   RULE_CREATED = "RULE_CREATED",
   RULE_UPDATED = "RULE_UPDATED",
   RULE_DELETED = "RULE_DELETED",
@@ -182,7 +185,13 @@ export enum PipelineStage {
 
 export type RuleScope = "group" | "type" | "global";
 
-export type WorkerJobType = "pdf-parse" | "ocr-page" | "ner-page" | "render-page" | "export-page";
+export type WorkerJobType =
+  | "pdf-parse"
+  | "ocr-page"
+  | "ocr-orient"
+  | "ner-page"
+  | "render-page"
+  | "export-page";
 
 /**
  * Códigos de error canónicos del Core.
@@ -196,6 +205,10 @@ export enum EngineErrorCode {
   PDF_PASSWORD_REQUIRED = "PDF_PASSWORD_REQUIRED",
   PDF_INVALID = "PDF_INVALID",
   PDF_CORRUPTED = "PDF_CORRUPTED",
+  // ADR-140: página con `/Rotate` (heredado o propio) distinto de 0 que
+  // produce al menos una palabra nativa. No aplica a una página rotada sin
+  // texto nativo — ese camino va entero por OCR, cuyo ráster ya está rotado.
+  PDF_PAGE_ROTATED = "PDF_PAGE_ROTATED",
   PDF_TIMEOUT = "PDF_TIMEOUT",
   // OCR
   OCR_PAGE_FAILED = "OCR_PAGE_FAILED",
@@ -219,6 +232,10 @@ export enum EngineErrorCode {
   EXPORT_FAILED = "EXPORT_FAILED",
   EXPORT_NO_ENABLED_GROUPS = "EXPORT_NO_ENABLED_GROUPS",
   EXPORT_TIMEOUT = "EXPORT_TIMEOUT",
+  // ADR-176 §1: runExport con conflictos sin resolver. Solo viaja en la
+  // metadata de un warn (mismo patrón que EXPORT_NO_ENABLED_GROUPS, ADR-032
+  // §3): sin clase de error ni evento.
+  EXPORT_UNRESOLVED_CONFLICTS = "EXPORT_UNRESOLVED_CONFLICTS",
   // Generic
   ENGINE_NOT_INITIALIZED = "ENGINE_NOT_INITIALIZED",
   ENGINE_DISPOSED = "ENGINE_DISPOSED",

@@ -1,0 +1,12 @@
+diff --git a/packages/anonymization-core/ner-engine/src/worker/kernel.ts b/packages/anonymization-core/ner-engine/src/worker/kernel.ts
+index 64ab2e7..d175571 100644
+--- a/packages/anonymization-core/ner-engine/src/worker/kernel.ts
++++ b/packages/anonymization-core/ner-engine/src/worker/kernel.ts
+@@ -664,6 +664,7 @@ async function ensureClassifierLoaded(
+       classifier = await pipeline("token-classification", modelId, {
+         dtype,
+         progress_callback: progressHandler,
++        session_options: { graphOptimizationLevel: "basic" },
+       });
+       loadedModelKey = key;
+       onProgress?.(1, { phase: "model-ready", modelId });

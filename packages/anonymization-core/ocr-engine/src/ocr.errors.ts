@@ -14,11 +14,23 @@ export class OcrPageFailedError extends EngineError {
   readonly code = EngineErrorCode.OCR_PAGE_FAILED;
   readonly engineId = EngineId.Ocr;
 
-  constructor(documentId: string, pageIndex: number, reason: string) {
+  /**
+   * `extraDetails` (ADR-143 §4): un fallo del productor de `processSession`
+   * (Render) se reporta con el mismo `OCR_PAGE_FAILED`, pero llevando el
+   * `code` del error original en `details` — el único caso que necesita algo
+   * más allá de `documentId`/`pageIndex`/`reason`.
+   */
+  constructor(
+    documentId: string,
+    pageIndex: number,
+    reason: string,
+    extraDetails?: Readonly<Record<string, unknown>>,
+  ) {
     super(`OCR falló en la página ${pageIndex} del documento ${documentId}: ${reason}`, false, {
       documentId,
       pageIndex,
       reason,
+      ...extraDetails,
     });
   }
 }

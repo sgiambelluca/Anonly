@@ -11,18 +11,45 @@
 
 import { EntityType } from "@anonly/shared";
 import { PDFDocument } from "pdf-lib";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   TEXT_10P_PAGES,
+  TEXT_200P_ENTITY_PAGE_INDICES,
+  TEXT_50P_ENTITY_PAGE_INDICES,
   buildReferenceDocSpecs,
   buildReferenceManifest,
+  buildText200pEntityParagraph,
+  buildText200pNeutralParagraph,
+  buildText50pDenseParagraph,
+  buildText50pEntityParagraph,
+  buildText50pNeutralParagraph,
   generateCorrupt,
   generateEmpty,
   generateImageAlpha,
   generateReferenceDataset,
   generateText10p,
+  generateText200p,
+  generateText50p,
+  generateText50pDense,
+  generateText50pSmallPage,
 } from "./generate.js";
+
+async function expectStableGeneratedPdf(generate: () => Promise<Uint8Array>): Promise<void> {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  try {
+    vi.setSystemTime(new Date("2030-01-01T00:00:00.000Z"));
+    const first = await generate();
+    vi.setSystemTime(new Date("2040-01-01T00:00:00.000Z"));
+    const second = await generate();
+    expect(Buffer.from(first).equals(Buffer.from(second))).toBe(true);
+    const pdf = await PDFDocument.load(first, { updateMetadata: false });
+    expect(pdf.getCreationDate()).toEqual(new Date("2026-01-01T00:00:00.000Z"));
+    expect(pdf.getModificationDate()).toEqual(new Date("2026-01-01T00:00:00.000Z"));
+  } finally {
+    vi.useRealTimers();
+  }
+}
 
 /**
  * Helper para acceder a un índice con la garantía de que existe.
@@ -85,6 +112,175 @@ describe("generate.ts — text-10p.pdf", () => {
     expect(p1).toContain("18.445.212");
     expect(p2).toContain("Carlos López");
     expect(p2).toContain("42.998.103");
+  });
+});
+
+describe("generate.ts — text-50p.pdf (H-10, ADR-146)", () => {
+  it("produce 50 páginas", async () => {
+    const bytes = await generateText50p();
+    const pdf = await PDFDocument.load(bytes);
+    expect(pdf.getPageCount()).toBe(50);
+  });
+
+  it("el header es %PDF-", async () => {
+    const bytes = await generateText50p();
+    const header = new TextDecoder().decode(bytes.slice(0, 5));
+    expect(header).toBe("%PDF-");
+  });
+
+  it("es determinista: dos corridas producen bytes idénticos", async () => {
+    await expectStableGeneratedPdf(generateText50p);
+  });
+
+  it("el texto fuente de cada una de las 50 páginas es distinto del de las demás (no se rasteriza la misma imagen 50 veces)", () => {
+    // El texto fuente es lo que determina la imagen rasterizada
+    // (`rasterizeToScannedPdf` dibuja exactamente este contenido) — verificar
+    // acá que las 50 páginas difieren es lo que garantiza que H-10 mide 50
+    // imágenes distintas, no la misma repetida.
+    const texts = new Set<string>();
+    for (let index = 0; index < 50; index++) {
+      const pageNumber = index + 1;
+      const text = TEXT_50P_ENTITY_PAGE_INDICES.includes(index)
+        ? buildText50pEntityParagraph("fixture-text-50p", index, pageNumber)
+        : buildText50pNeutralParagraph(pageNumber);
+      texts.add(text);
+    }
+    expect(texts.size).toBe(50);
+  });
+
+  it("las páginas de TEXT_50P_ENTITY_PAGE_INDICES llevan un nombre y un DNI reales, sintetizados por índice", () => {
+    for (let entityIndex = 0; entityIndex < TEXT_50P_ENTITY_PAGE_INDICES.length; entityIndex++) {
+      const index = at(TEXT_50P_ENTITY_PAGE_INDICES, entityIndex, "TEXT_50P_ENTITY_PAGE_INDICES");
+      const text = buildText50pEntityParagraph("fixture-text-50p", index, index + 1);
+      // DNI sintetizado: 1-2 dígitos, punto, 3 dígitos, punto, 3 dígitos —
+      // mismo patrón que synthesizeDni produce en el resto del repo.
+      expect(text).toMatch(/DNI \d{1,2}\.\d{3}\.\d{3}/);
+      expect(text).toContain(`Página ${index + 1} de 50`);
+    }
+  });
+
+  it("dos páginas de entidad distintas sintetizan nombre y DNI distintos (índice deriva la semilla)", () => {
+    const first = buildText50pEntityParagraph("fixture-text-50p", 0, 1);
+    const second = buildText50pEntityParagraph("fixture-text-50p", 10, 11);
+    expect(first).not.toBe(second);
+  });
+
+  it("las páginas neutras no contienen ningún DNI (no-false-positives)", () => {
+    for (let pageNumber = 1; pageNumber <= 50; pageNumber++) {
+      if (TEXT_50P_ENTITY_PAGE_INDICES.includes(pageNumber - 1)) continue;
+      const text = buildText50pNeutralParagraph(pageNumber);
+      expect(text).not.toMatch(/\d{1,2}\.\d{3}\.\d{3}/);
+      expect(text).toContain(`Página ${pageNumber} de 50`);
+    }
+  });
+});
+
+describe("generate.ts — text-50p-dense.pdf (H-10, control de densidad)", () => {
+  it("produce 50 páginas", async () => {
+    const bytes = await generateText50pDense();
+    const pdf = await PDFDocument.load(bytes);
+    expect(pdf.getPageCount()).toBe(50);
+  });
+
+  it("es determinista: dos corridas producen bytes idénticos", async () => {
+    await expectStableGeneratedPdf(generateText50pDense);
+  });
+
+  it("las 50 páginas llevan las 5 entidades (Person, DNI, CUIT, Phone, Email), no solo 5 de 50", () => {
+    for (let index = 0; index < 50; index++) {
+      const text = buildText50pDenseParagraph("fixture-text-50p-dense", index, index + 1);
+      expect(text).toMatch(/DNI \d{1,2}\.\d{3}\.\d{3}/);
+      expect(text).toMatch(/CUIT \d{2}-\d{8}-\d/);
+      expect(text).toMatch(/\+54 11 \d{4}-\d{4}/);
+      expect(text).toMatch(/correo electrónico user\d{5}@/);
+      expect(text).toContain(`Página ${index + 1} de 50`);
+    }
+  });
+
+  it("es más densa que la variante liviana: más palabras por página", () => {
+    const dense = buildText50pDenseParagraph("fixture-text-50p-dense", 0, 1);
+    const light = buildText50pEntityParagraph("fixture-text-50p", 0, 1);
+    expect(dense.split(/\s+/).length).toBeGreaterThan(light.split(/\s+/).length);
+  });
+
+  it("dos páginas distintas sintetizan entidades distintas (índice deriva la semilla)", () => {
+    const first = buildText50pDenseParagraph("fixture-text-50p-dense", 0, 1);
+    const second = buildText50pDenseParagraph("fixture-text-50p-dense", 1, 2);
+    expect(first).not.toBe(second);
+  });
+});
+
+describe("generate.ts — text-200p.pdf (H-10 T-3)", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("produce 200 páginas A4", async () => {
+    const bytes = await generateText200p();
+    const pdf = await PDFDocument.load(bytes);
+    expect(pdf.getPageCount()).toBe(200);
+    const firstPage = pdf.getPages()[0];
+    expect(firstPage?.getWidth()).toBe(595);
+    expect(firstPage?.getHeight()).toBe(842);
+  });
+
+  it("produce un PDF con header %PDF-", async () => {
+    const bytes = await generateText200p();
+    const header = new TextDecoder().decode(bytes.slice(0, 5));
+    expect(header).toBe("%PDF-");
+  });
+
+  it("es determinista: dos corridas producen bytes idénticos", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2030-01-01T00:00:00.000Z"));
+    const first = await generateText200p();
+    vi.setSystemTime(new Date("2040-01-01T00:00:00.000Z"));
+    const second = await generateText200p();
+    expect(Buffer.from(first).equals(Buffer.from(second))).toBe(true);
+    const pdf = await PDFDocument.load(first, { updateMetadata: false });
+    expect(pdf.getCreationDate()).toEqual(new Date("2026-01-01T00:00:00.000Z"));
+    expect(pdf.getModificationDate()).toEqual(new Date("2026-01-01T00:00:00.000Z"));
+  }, 15_000);
+
+  it("mantiene 20 páginas con entidad, una cada diez, incluida la última verificación", () => {
+    expect(TEXT_200P_ENTITY_PAGE_INDICES).toEqual(
+      Array.from({ length: 20 }, (_, entityIndex) => entityIndex * 10),
+    );
+    expect(TEXT_200P_ENTITY_PAGE_INDICES.at(-1)).toBe(190);
+    for (const index of TEXT_200P_ENTITY_PAGE_INDICES) {
+      const text = buildText200pEntityParagraph("fixture-text-200p", index, index + 1);
+      expect(text).toContain(`Página ${index + 1} de 200`);
+      const entityMatch = text.match(/Se deja constancia de que (.+), DNI (\d{1,2}\.\d{3}\.\d{3}),/);
+      expect(entityMatch?.[1]?.trim().length).toBeGreaterThan(0);
+      expect(entityMatch?.[2]).toMatch(/^\d{1,2}\.\d{3}\.\d{3}$/);
+    }
+  });
+
+  it("tiene texto fuente distinto en las 200 páginas y rótulos de 200 páginas", () => {
+    const texts = new Set<string>();
+    for (let index = 0; index < 200; index++) {
+      const pageNumber = index + 1;
+      const text = TEXT_200P_ENTITY_PAGE_INDICES.includes(index)
+        ? buildText200pEntityParagraph("fixture-text-200p", index, pageNumber)
+        : buildText200pNeutralParagraph(pageNumber);
+      texts.add(text);
+      expect(text).toContain(`Página ${pageNumber} de 200`);
+      if (!TEXT_200P_ENTITY_PAGE_INDICES.includes(index)) expect(text).not.toContain("DNI");
+    }
+    expect(texts.size).toBe(200);
+  });
+});
+
+describe("generate.ts — text-50p-small-page.pdf (H-10, atribución — proxy de DPI)", () => {
+  it("produce 50 páginas, con área ≈ 4/9 de una A4 (mismo ratio que 200dpi contra 300dpi)", async () => {
+    const bytes = await generateText50pSmallPage();
+    const pdf = await PDFDocument.load(bytes);
+    expect(pdf.getPageCount()).toBe(50);
+    const [page0] = pdf.getPages();
+    const areaRatio = (page0!.getWidth() * page0!.getHeight()) / (595 * 842);
+    expect(areaRatio).toBeCloseTo(4 / 9, 2);
+  });
+
+  it("es determinista: dos corridas producen bytes idénticos", async () => {
+    await expectStableGeneratedPdf(generateText50pSmallPage);
   });
 });
 

@@ -32,6 +32,7 @@ import { type Page } from "@playwright/test";
 
 import { expect, openApp, test } from "./support/electronApp.js";
 import { textTenPagesFile } from "./support/fixtures.js";
+import { installSettingsOverride } from "./support/settingsOverride.js";
 
 test.setTimeout(240_000);
 
@@ -52,6 +53,11 @@ async function coreUnchanged(page: Page): Promise<boolean> {
 }
 
 test("la configuración elegida antes de cargar el PDF se aplica al análisis", async ({ page }) => {
+  // Se parte de un nivel fijo y no de Automático: Automático resuelve un nivel
+  // distinto en cada equipo (ADR-194 §3), y en uno de menos de 4 hilos —el
+  // runner de CI— ya es "Bajo consumo", el mismo que se elige más abajo. Sin
+  // esto el paso 2 no cambiaría nada y el Core, con razón, no se recrearía.
+  await installSettingsOverride(page, { performancePreset: "medium" });
   await openApp(page, "networkidle");
 
   // El botón existe en la pantalla de carga, sin ningún documento abierto
@@ -64,12 +70,12 @@ test("la configuración elegida antes de cargar el PDF se aplica al análisis", 
   await markCore(page);
   expect(await coreUnchanged(page)).toBe(true);
 
-  // 1. Un cambio que NO toca el EngineConfig: el idioma de la interfaz.
+  // 1. Un cambio que NO toca el EngineConfig: la apariencia. (Era el idioma
+  // de la interfaz, cuyo selector está oculto hasta que haya traducción.)
   await settingsButton.click();
   const dialog = page.getByRole("dialog", { name: "Configuración" });
   await expect(dialog).toBeVisible();
-  await dialog.getByRole("combobox", { name: "Idioma" }).click();
-  await page.getByRole("option", { name: "English" }).click();
+  await dialog.getByRole("radio", { name: "Oscuro" }).click();
   await dialog.getByRole("button", { name: "Guardar" }).click();
   await expect(dialog).toHaveCount(0);
 

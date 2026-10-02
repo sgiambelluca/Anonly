@@ -1289,6 +1289,27 @@ async function encodeImageData(
   return { bytes, format: imageFormat, widthPx: imageData.width, heightPx: imageData.height };
 }
 
+/**
+ * Codifica un `OffscreenCanvas` ya pintado directo a PNG, sin pasar por
+ * `getImageData`/`putImageData` (ADR-158 §1: el kernel ya tiene el canvas en
+ * la mano). Mismo manejo de errores que `encodeImageData`: `convertToBlob`
+ * puede lanzar (canvas vacío, backend sin soporte de codificación) y eso se
+ * mapea a `RenderPageFailedError`/`CancelledError` vía `toPageFailure`.
+ */
+async function encodeCanvasToPngBytes(
+  canvas: OffscreenCanvas,
+  documentId: string,
+  pageIndex: number,
+): Promise<ArrayBuffer> {
+  let blob: Blob;
+  try {
+    blob = await canvas.convertToBlob({ type: "image/png" });
+  } catch (err: unknown) {
+    throw toPageFailure(documentId, pageIndex, err);
+  }
+  return blob.arrayBuffer();
+}
+
 // ─── Puerto interno (ADR-043 §2): las 4 operaciones ───
 
 export async function kernelLoadDocument(
@@ -1368,7 +1389,17 @@ export interface KernelRenderOptions {
 }
 
 export interface KernelRenderResult {
-  readonly imageData: ImageData;
+  /**
+   * ADR-156: presente solo en `mode: "full"`. En `mode: "preview"` el kernel
+   * ya no lo incluye en el resultado que cruza el `postMessage` — el ahorro
+   * no es dejar de guardarlo (eso lo resuelve el host, `InternalCacheEntry`),
+   * es dejar de materializar la copia completa del RGBA (hasta ~32 MB por
+   * página a `MAX_RENDER_SCALE`) en el proceso host para algo que ningún
+   * consumidor lee. `getImageData()` sigue corriendo igual en los dos modos
+   * —hace falta para producir `encoded`—, lo que cambia es si el resultado
+   * ya construido se **incluye** en lo que se devuelve.
+   */
+  readonly imageData?: ImageData;
   /**
    * ADR-062 §1: las anotaciones `Degraded` de ESTE render. El kernel ya las
    * calculaba para decidir si pintar el recuadro de aviso en el preview; lo
@@ -1501,7 +1532,13 @@ export async function kernelRenderPage(
     opts.onWarn,
   );
 
-  return { imageData, encoded, degraded: degradedVerdict };
+  // ADR-156 §2: `imageData` solo cruza el postMessage en `mode: "full"` — es
+  // exactamente el ahorro del ADR (no materializar en el host una copia que
+  // nadie lee en preview). `getImageData()` de arriba ya corrió en los dos
+  // modos, sin condicional: hace falta igual para producir `encoded`.
+  return mode === "full"
+    ? { imageData, encoded, degraded: degradedVerdict }
+    : { encoded, degraded: degradedVerdict };
 }
 
 export interface KernelRasterizeOptions {
@@ -1549,13 +1586,22 @@ function clampRegionToViewportPx(
  * bit (rama `else` sin tocar); presente, el kernel clampea a los límites de
  * la página ANTES de rasterizar (evita pagar el costo de
  * `renderPageOntoContext` sobre una región inválida) y devuelve únicamente el
- * recorte — es el `ImageData` que cruza el boundary del worker, nunca la
- * página entera.
+ * recorte, ya codificado.
+ *
+ * ADR-158 §1: devuelve `EncodedPageImage` (PNG, sin pérdida — nunca JPEG,
+ * este método alimenta el reconocimiento de OCR) en vez de `ImageData`: es
+ * lo que cruza el boundary del worker. Sin `region`, el canvas recién
+ * pintado se codifica DIRECTO con `convertToBlob` — el kernel ya lo tiene en
+ * la mano, así que no hace falta el round-trip `getImageData`+`putImageData`
+ * que exigiría reusar `encodeImageData` sobre un `ImageData` ya extraído.
+ * Con `region`, ese round-trip es inevitable —`convertToBlob` no recorta—
+ * así que el recorte se extrae con `getImageData` y se codifica con
+ * `encodeImageData`, igual que hacía con la página entera antes de este ADR.
  */
 export async function kernelRasterizePage(
   payload: RasterizePagePayload,
   opts: KernelRasterizeOptions,
-): Promise<ImageData> {
+): Promise<EncodedPageImage> {
   const { documentId, pageIndex, scale, region } = payload;
   const pdfDocument = documents.get(documentId);
   if (pdfDocument === undefined) {
@@ -1613,9 +1659,20 @@ export async function kernelRasterizePage(
 
   if (opts.abortSignal.aborted) throw new CancelledError(documentId);
 
-  return cropRect !== undefined
-    ? context2d.getImageData(cropRect.x, cropRect.y, cropRect.width, cropRect.height)
-    : context2d.getImageData(0, 0, viewport.width, viewport.height);
+  if (cropRect !== undefined) {
+    // `convertToBlob` no recorta: para el recorte no hay forma de evitar
+    // extraer el `ImageData` del rectángulo y codificarlo aparte.
+    const cropped = context2d.getImageData(cropRect.x, cropRect.y, cropRect.width, cropRect.height);
+    return encodeImageData(cropped, "png", 1, documentId, pageIndex, opts.onWarn);
+  }
+
+  // ADR-158 §1: sin `region`, el canvas ya tiene el ráster completo — se
+  // codifica directo, sin reconstruir un segundo canvas vía `encodeImageData`.
+  // `canvas.width`/`canvas.height` (no `viewport.width`/`viewport.height`,
+  // que pdfjs puede devolver fraccionario) son los píxeles enteros que el
+  // PNG codificado realmente tiene.
+  const bytes = await encodeCanvasToPngBytes(canvas, documentId, pageIndex);
+  return { bytes, format: "png", widthPx: canvas.width, heightPx: canvas.height };
 }
 
 // ─── ADR-059 §5 (Hito 10.5, PR 7) — página de leyenda del export ───

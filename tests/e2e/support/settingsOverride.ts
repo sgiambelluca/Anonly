@@ -18,26 +18,61 @@
  * shape persistido, no una importación cruzada de paquete.
  */
 
-import type { Page } from "@playwright/test";
+import { test, type Page } from "@playwright/test";
 
 const SETTINGS_STORAGE_KEY = "anonly:settings";
 
 export interface SettingsOverride {
   readonly language?: "es" | "en";
-  readonly performancePreset?: "auto" | "low" | "high";
+  readonly performancePreset?: "auto" | "low" | "medium" | "high" | "ultra";
   readonly nerEnabled?: boolean;
   readonly ocrLanguages?: ReadonlyArray<string>;
 }
 
-/** Instala `partial` en `localStorage` antes del primer load de la app. */
+/**
+ * ADR-194 §8: las suites de medición no dejan que Automático elija el nivel,
+ * que cambia con el equipo. Son las de `tests/perf`, `tests/leak`,
+ * `tests/stress` y `tests/measure` (la línea de base de calidad); los E2E
+ * funcionales siguen en Automático.
+ */
+const MEASUREMENT_SUITE_DIRS = [
+  "/tests/perf/",
+  "/tests/leak/",
+  "/tests/stress/",
+  "/tests/measure/",
+];
+
+export function isMeasurementSuite(specFile: string): boolean {
+  const normalized = specFile.replaceAll("\\", "/");
+  return MEASUREMENT_SUITE_DIRS.some((dir) => normalized.includes(dir));
+}
+
+/**
+ * El JSON base que se escribe siempre. `settingsVersion: 2` evita que un
+ * `performancePreset: "high"` se migre a `auto` sin avisar (ADR-194 §5); una
+ * suite de medición fija además `medium`, que `partial` puede pisar.
+ */
+export function baseSettings(specFile: string): SettingsOverride & { readonly settingsVersion: 2 } {
+  return {
+    settingsVersion: 2,
+    ...(isMeasurementSuite(specFile) ? { performancePreset: "medium" as const } : {}),
+  };
+}
+
+/**
+ * Instala `partial` en `localStorage` antes del primer load de la app.
+ * `specFile` es el archivo del spec (`testInfo.file`) y decide si rige el
+ * perfil fijo de medición.
+ */
 export async function installSettingsOverride(
   page: Page,
   partial: SettingsOverride,
+  specFile: string = test.info().file,
 ): Promise<void> {
   await page.addInitScript(
     ({ key, value }: { key: string; value: SettingsOverride }) => {
       window.localStorage.setItem(key, JSON.stringify(value));
     },
-    { key: SETTINGS_STORAGE_KEY, value: partial },
+    { key: SETTINGS_STORAGE_KEY, value: { ...baseSettings(specFile), ...partial } },
   );
 }

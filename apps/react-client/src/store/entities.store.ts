@@ -27,8 +27,25 @@ export interface EntitiesSlice {
   addConflict(conflict: Conflict): void;
   /** `resolvedType` (ADR-083 §3): el tipo con el que quedó clasificado el grupo. */
   resolveConflict(conflictId: string, resolvedType?: EntityType): void;
+  /**
+   * ADR-169 §2: orden de presentación de las filas. **Solo UI**: no cambia
+   * `indexInType` ni emite nada al Core. Vale para todos los tipos y se
+   * recuerda mientras la app está abierta — `reset()` (cerrar el documento) no
+   * lo toca, y no persiste.
+   */
+  readonly sortOrder: EntitySortOrder;
+  setSortOrder(order: EntitySortOrder): void;
+  /**
+   * ADR-169 §7: grupo a llevar a la vista y resaltar un momento ("Ver en la
+   * lista" del toast de un agregado). `null` cuando no hay nada que resaltar.
+   */
+  readonly flashGroupId: string | null;
+  setFlashGroupId(groupId: string | null): void;
   reset(): void;
 }
+
+/** `"appearance"` = `indexInType` ascendente; `"alpha"` = `canonicalValue` A–Z (ADR-169 §2). */
+export type EntitySortOrder = "appearance" | "alpha";
 
 // Orden fijo de ui/Components.md §3.1.
 const ENTITY_TYPE_ORDER: ReadonlyArray<EntityType> = [
@@ -62,11 +79,22 @@ function findGroupType(
   return undefined;
 }
 
-type EntitiesData = Pick<EntitiesSlice, "groupsByType" | "conflicts">;
+/** ADR-175 §1 / ADR-191 §3: ningún camino deja `resolved: true` con `heldManual`. */
+function withoutHeldManual(conflict: Conflict): Conflict {
+  const { heldManual: _heldManual, ...rest } = conflict;
+  return rest;
+}
+
+type EntitiesData = Pick<
+  EntitiesSlice,
+  "groupsByType" | "conflicts" | "sortOrder" | "flashGroupId"
+>;
 
 const initialState: EntitiesData = {
   groupsByType: emptyGroupsByType(),
   conflicts: [],
+  sortOrder: "appearance",
+  flashGroupId: null,
 };
 
 export const useEntitiesStore = create<EntitiesSlice>((set) => ({
@@ -137,14 +165,19 @@ export const useEntitiesStore = create<EntitiesSlice>((set) => ({
     });
   },
   addConflict(conflict) {
-    set((state) => ({ conflicts: [...state.conflicts, conflict] }));
+    // ADR-191 §3: CONFLICT_DETECTED es idempotente por `id`; reemplaza en el lugar.
+    set((state) => ({
+      conflicts: state.conflicts.some((existing) => existing.id === conflict.id)
+        ? state.conflicts.map((existing) => (existing.id === conflict.id ? conflict : existing))
+        : [...state.conflicts, conflict],
+    }));
   },
   resolveConflict(conflictId, resolvedType) {
     set((state) => ({
       conflicts: state.conflicts.map((conflict) =>
         conflict.id === conflictId
           ? {
-              ...conflict,
+              ...withoutHeldManual(conflict),
               resolved: true,
               // ADR-083 §3: el tipo con el que quedó clasificado el grupo. Sin
               // esto, el diálogo muestra el `resolvedType` que traía el
@@ -155,7 +188,38 @@ export const useEntitiesStore = create<EntitiesSlice>((set) => ({
       ),
     }));
   },
+  setSortOrder(order) {
+    set({ sortOrder: order });
+  },
+  setFlashGroupId(groupId) {
+    set({ flashGroupId: groupId });
+  },
   reset() {
-    set({ groupsByType: emptyGroupsByType(), conflicts: [] });
+    // `sortOrder` se conserva: es una preferencia de la sesión de la app, no
+    // del documento (ADR-169 §2).
+    set({ groupsByType: emptyGroupsByType(), conflicts: [], flashGroupId: null });
   },
 }));
+
+/**
+ * ¿Esta página tiene alguna entidad? (ADR-190 §4, `ui/Components.md` §5.4 y
+ * §7.1 — misma regla en el aviso de `PageCanvas` y en la lista de pendientes
+ * de `ExportDialog`.) Cuenta cualquier miembro con ese `pageIndex`,
+ * automático o manual, del grupo esté `enabled` o no: lo que importa acá es
+ * si hay algo marcado sobre la página, no si se está tapando.
+ *
+ * Un grupo eliminado (ADR-171/ADR-177) no ocupa lugar en `groupsByType`
+ * —`removeGroup` lo saca del todo—, así que no hace falta filtrarlo acá: todo
+ * lo que este mapa contiene ya es "no eliminado".
+ */
+export function pageHasEntity(
+  groupsByType: ReadonlyMap<EntityType, ReadonlyArray<EntityGroup>>,
+  pageIndex: number,
+): boolean {
+  for (const groups of groupsByType.values()) {
+    for (const group of groups) {
+      if (group.members.some((member) => member.pageIndex === pageIndex)) return true;
+    }
+  }
+  return false;
+}

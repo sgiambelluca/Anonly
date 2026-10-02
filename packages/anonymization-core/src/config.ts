@@ -15,6 +15,7 @@ import type { EngineConfig, EngineConfigOverrides, WorkerJobType } from "@anonly
 const DEFAULT_TIMEOUTS: Readonly<Record<WorkerJobType, number>> = {
   "pdf-parse": 30_000,
   "ocr-page": 60_000,
+  "ocr-orient": 60_000,
   "ner-page": 20_000,
   "render-page": 10_000,
   "export-page": 30_000,
@@ -23,6 +24,7 @@ const DEFAULT_TIMEOUTS: Readonly<Record<WorkerJobType, number>> = {
 const DEFAULT_MAX_RETRIES: Readonly<Record<WorkerJobType, number>> = {
   "pdf-parse": 1,
   "ocr-page": 2,
+  "ocr-orient": 0,
   "ner-page": 1,
   "render-page": 1,
   "export-page": 1,
@@ -35,6 +37,12 @@ const DEFAULT_MAX_QUEUE_PER_POOL: Readonly<Record<"pdf" | "ocr" | "ner" | "rende
   ner: 8,
   render: 32,
 };
+
+// ADR-143 §3: OCR_MAX_LIVE_IMAGE_BYTES (Contracts.md, "Constantes nombradas").
+// Admite cuatro A4 a 300 dpi (33,2 MiB cada una) vivas a la vez — el doble de
+// `ocrPoolSize: 2` del perfil normal, valor de partida que H-10 confirma o
+// corrige con medición.
+const DEFAULT_OCR_MAX_LIVE_IMAGE_BYTES = 128 * 1024 * 1024;
 
 export interface DeviceHints {
   readonly deviceMemory?: number;
@@ -84,6 +92,8 @@ export function buildDefaultEngineConfig(hints?: DeviceHints): EngineConfig {
       maxRetryDelayMs: 2000,
       cancelSlaMs: 200,
       idleDisposeMs: 60_000,
+      // ADR-167 §2: propio del pool de NER; los presets no lo modifican.
+      nerIdleDisposeMs: 15_000,
     },
     pdf: { maxPageCount: 10_000 },
     ner: {
@@ -93,7 +103,11 @@ export function buildDefaultEngineConfig(hints?: DeviceHints): EngineConfig {
       batchSize: 256,
       enabled: true,
     },
-    ocr: { languages: ["spa", "eng"], dpi: 300 },
+    ocr: {
+      languages: ["spa", "eng"],
+      dpi: 300,
+      maxLiveImageBytes: DEFAULT_OCR_MAX_LIVE_IMAGE_BYTES,
+    },
     grouping: { similarityThreshold: 0.88, minAliasFrequency: 1 },
     render: { previewScale: 1, fullScale: 2.08, jpegQuality: 0.85, cachePages: 16 },
     export: { defaultDpi: 150, defaultImageFormat: "jpeg", defaultJpegQuality: 0.85 },

@@ -1,4 +1,5 @@
 import { stat } from "node:fs/promises";
+import { totalmem } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -6,6 +7,7 @@ import { app, BrowserWindow, ipcMain, net, protocol, shell } from "electron";
 
 import { rendererRoot, resolveAssetPath } from "./paths";
 import { headersFor } from "./security";
+import { createMacUpdateCheckPolicy } from "./update-check-policy";
 import { loadBridge, toUpdateEventPayload, type UpdateEventPayload } from "./updater";
 import { checkWindowsUpdates, installWindowsUpdate, startWindowsUpdater } from "./windows-updater";
 
@@ -155,13 +157,20 @@ function createWindow(): BrowserWindow {
     backgroundColor: "#ffffff",
     title: "Anonly",
     /*
-     * El `preload` expone exactamente tres mensajes salientes y un suscriptor,
-     * todos del actualizador (ver `preload.ts`). `contextIsolation` y `sandbox`
-     * siguen puestos: el preload corre aislado y no le da al renderer acceso a
-     * Node ni a `ipcRenderer` crudo.
+     * El `preload` expone tres mensajes salientes y un suscriptor del
+     * actualizador (ver `preload.ts`; el tercer saliente, `setAutomaticChecks`,
+     * lo agregó ADR-188) y un dato de solo lectura, `anonlyDevice` (ADR-194
+     * §4). `contextIsolation` y `sandbox` siguen puestos: el preload corre aislado y no le da al
+     * renderer acceso a Node ni a `ipcRenderer` crudo.
      */
     webPreferences: {
       preload: join(__dirname, "preload.js"),
+      /*
+       * La RAM instalada llega al preload como argumento, sin canal de IPC
+       * (ADR-194 §4): es un valor fijo del equipo y el perfil Automático lo
+       * necesita porque `navigator.deviceMemory` no informa más de 8 GB.
+       */
+      additionalArguments: [`--anonly-total-memory-bytes=${Math.trunc(totalmem())}`],
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
@@ -186,9 +195,24 @@ async function bootstrap(): Promise<void> {
 
   registerProtocol(root);
   const window = createWindow();
-  await window.loadURL(`${ORIGIN}/index.html`);
 
+  /*
+   * `startUpdater` va ANTES de `loadURL`, y no después: registra los
+   * `ipcMain.on` del actualizador de forma síncrona, mientras que `loadURL`
+   * resuelve recién en `did-finish-load`. `App.tsx` manda
+   * `updater:set-automatic-checks` apenas monta —justo después de
+   * `settings.load()`—, típicamente antes de que `loadURL` resuelva. Con el
+   * orden viejo (`startUpdater` después del `await`) ese primer mensaje
+   * llegaba sin que hubiera ningún listener escuchando y se perdía: la app se
+   * quedaba sin buscar actualizaciones automáticas para toda la ejecución, sin
+   * ningún aviso (ADR-188 §2, que depende de que ese primer mensaje llegue).
+   *
+   * Es seguro: sin la búsqueda automática al arrancar (ADR-188 §3), ya no hay
+   * ningún evento que `emitir` pueda mandar antes de que el renderer esté
+   * suscripto, y `emitir` igual chequea `window.isDestroyed()`.
+   */
   startUpdater(window);
+  await window.loadURL(`${ORIGIN}/index.html`);
 
   // En macOS la app sigue viva sin ventanas; el click en el dock la reabre.
   app.on("activate", () => {
@@ -238,7 +262,11 @@ function startUpdater(window: BrowserWindow): void {
   if (process.platform === "win32") {
     ipcMain.on("updater:check", () => checkWindowsUpdates());
     ipcMain.on("updater:install", () => installWindowsUpdate());
-    startWindowsUpdater(emitir, anotar);
+    const windowsUpdater = startWindowsUpdater(emitir, anotar);
+    // ADR-188: el main no busca nada hasta que este mensaje llegue.
+    ipcMain.on("updater:set-automatic-checks", (_event, payload: unknown) => {
+      windowsUpdater.setAutomaticChecks(payload);
+    });
     return;
   }
 
@@ -255,32 +283,54 @@ function startUpdater(window: BrowserWindow): void {
   bridge.setEventHandler((event) => emitir(toUpdateEventPayload(event)));
 
   /*
-   * Si no arranca —típicamente porque el `Info.plist` no tiene
-   * `SUPublicEDKey`— se anota y se sigue. La app funciona igual: Anonly
-   * anonimiza sin tocar la red, así que quedarse sin actualizarse solo es
-   * mucho menos grave que no abrir.
-   */
-  if (!bridge.init({ appcastUrl: APPCAST_URL, publicEdKey: "" })) {
-    anotar("[anonly] actualizador no arrancó (¿falta SUPublicEDKey?)");
-    return;
-  }
-
-  /*
-   * **Sparkle chequea siempre.** No es configurable, y sacarle esa perilla al
-   * usuario fue un arreglo: `setAutomaticChecks` mapea a
-   * `automaticallyChecksForUpdates`, que decide si Sparkle **busca**
-   * actualizaciones — no si las instala sin preguntar. Cablearlo al toggle
-   * "Actualizar automáticamente" hacía que apagarlo dejara la app sin buscar
-   * nada, mientras la UI prometía avisar.
+   * ADR-188: `init` se difiere hasta el primer mensaje del renderer en vez de
+   * llamarse acá. Motivo (ADR-188 §3): `setAutomaticChecks` fija
+   * `automaticallyChecksForUpdates`, que Sparkle **persiste** en las
+   * preferencias del usuario —las instalaciones actuales lo tienen en
+   * `true`—, y `init` no consulta de forma sincrónica: agenda la búsqueda en
+   * el run loop, que no corre hasta que este tick de JavaScript termina. Con
+   * `init` y `setAutomaticChecks(valor)` en el mismo tick, la preferencia real
+   * ya está aplicada para cuando esa consulta agendada se ejecuta.
    *
-   * **La política vive en el renderer**, donde está el setting del usuario:
-   * cuando llega una actualización descargada, decide si la instala sola o
-   * muestra el aviso. El main informa y ejecuta; no decide.
+   * `bridgeReady` guarda si `init` llegó a tener éxito: sin eso, "Buscar
+   * actualizaciones ahora" podría invocar al bridge antes de inicializarlo
+   * (renderer que nunca llega a mandar el mensaje) o después de que fallara
+   * (típicamente porque el `Info.plist` no tiene `SUPublicEDKey`, el caso
+   * normal de los E2E, que corren desempaquetados). En los dos casos la app
+   * sigue igual: Anonly anonimiza sin tocar la red, así que quedarse sin
+   * actualizarse es mucho menos grave que no abrir.
+   *
+   * La decisión de CUÁNDO corresponde `init` (primera vez) o solo
+   * `setAutomaticChecks` (después) sale a `update-check-policy.ts`, puro y
+   * testeable sin Electron.
    */
-  bridge.setAutomaticChecks(true);
+  const policy = createMacUpdateCheckPolicy();
+  let bridgeReady = false;
 
-  ipcMain.on("updater:check", () => bridge.checkForUpdates());
-  ipcMain.on("updater:install", () => bridge.installUpdateNow());
+  ipcMain.on("updater:set-automatic-checks", (_event, payload: unknown) => {
+    const action = policy.onPreference(payload);
+    if (action.kind === "ignore") return;
+
+    if (action.kind === "init-and-set") {
+      bridgeReady = bridge.init({ appcastUrl: APPCAST_URL, publicEdKey: "" });
+      if (!bridgeReady) {
+        anotar("[anonly] actualizador no arrancó (¿falta SUPublicEDKey?)");
+        return;
+      }
+    }
+    // `bridgeReady` de nuevo acá y no solo arriba: un mensaje `"set"` (no el
+    // primero) puede llegar después de que el `"init-and-set"` haya fallado
+    // —init nunca tuvo éxito—, y sin este guard llamaría al bridge sin
+    // inicializar.
+    if (bridgeReady) bridge.setAutomaticChecks(action.enabled);
+  });
+
+  ipcMain.on("updater:check", () => {
+    if (bridgeReady) bridge.checkForUpdates();
+  });
+  ipcMain.on("updater:install", () => {
+    if (bridgeReady) bridge.installUpdateNow();
+  });
 }
 
 /*
