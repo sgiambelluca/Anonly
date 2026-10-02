@@ -1,0 +1,94 @@
+Auditoría de artefactos precompilados (ADR-196 §2quater)
+=========================================================
+
+Fecha: 2026-10-02. Es el respaldo de `EMBEDDING_HOSTS` y de los avisos de
+artefacto en `scripts/third-party-licenses.ts`. Hay que repetirla cada vez que
+cambie la versión de un anfitrión (el build lo exige).
+
+Método, por artefacto: (a) archivos `*.LICENSE.txt` o `ThirdPartyNotices*`
+junto a él; (b) banners `@license` / `Copyright` dentro del artefacto; (c) el
+mapa de fuentes (`.map`) del artefacto, que lista los módulos que trae
+adentro; (d) las `dependencies` del anfitrión que no aparecen como módulos del
+bundle; (e) para los assets espejados, que el sha256 del instalado coincida con
+`assets.lock.json`.
+
+1. @huggingface/transformers 4.2.0, dist/transformers.web.js
+   Es el único dist de transformers que entra al bundle (los mapas del build
+   solo nombran este; `node`, `min` y `jsep` no se usan).
+   - (a) Sin archivos de avisos. (b) Sin banners de licencia.
+   - (c)/(comentarios `// ../../node_modules/.pnpm/...` del propio archivo):
+     embebe @huggingface/tokenizers 0.1.3 (Apache-2.0) y @huggingface/jinja
+     0.5.6 (MIT); ambas versiones salen de los comentarios del propio
+     artefacto (verificadas). El instalado como hermano es jinja 0.5.9: el texto de
+     licencia sale de ese, y la entrada lo aclara.
+   - (d) `onnxruntime-web` y `onnxruntime-common` se importan, no se embeben
+     (módulos propios del bundle). `onnxruntime-node` y `sharp` no se usan en
+     la web.
+   Resultado: 2 embebidos, en la tabla.
+
+2. tesseract.js 6.0.1, dist/worker.min.js (asset espejado `tesseract-worker`)
+   sha256 del instalado = el de assets.lock.json (38645599...b842).
+   - (a) worker.min.js.LICENSE.txt: nombra cuatro (buffer, ieee754,
+     regenerator-runtime, zlib.js). Va completo en la entrada de tesseract.js.
+   - (c) El mapa de fuentes lista nueve paquetes dentro del worker: base64-js
+     (dependencia de buffer, no de tesseract.js),
+     bmp-js, buffer, idb-keyval, ieee754, is-url, regenerator-runtime,
+     wasm-feature-detect y zlibjs. El archivo de avisos solo nombra cuatro.
+     Licencias: MIT (base64-js, bmp-js, buffer, is-url, regenerator-runtime,
+     zlibjs), BSD-3-Clause (ieee754) y Apache-2.0 (idb-keyval,
+     wasm-feature-detect).
+   - `buffer` e `ieee754` no están instalados: se acreditan con los LICENSE de
+     feross/buffer v6.0.3 y feross/ieee754 v1.2.1 (SOURCES.txt). Las versiones
+     se infieren: `buffer@^6.0.3` es devDependency de tesseract.js e
+     `ieee754@^1.2.1` dependencia de buffer 6.0.3. No hay forma de leerlas del
+     artefacto. base64-js se fija en 1.5.1 en la tabla (buffer 6.0.3 pide
+     ^1.3.1; 1.5.1 es la instalada, que no depende de tesseract.js sino de
+     otro paquete). Los otros seis: se usó la versión instalada (no se puede
+     verificar contra el artefacto).
+   - (d) `node-fetch` y `opencollective-postinstall` (dependencies) no figuran
+     en el mapa: no están en el worker.
+   - tesseract.min.js y tesseract.esm.min.js (el cliente del paquete) solo
+     traen regenerator-runtime; no se distribuyen (no entran a los mapas del
+     build), pero regenerator-runtime ya está acreditado por el worker.
+   Resultado: 9 embebidos, en la tabla.
+
+3. tesseract.js-core 6.1.2, tesseract-core*.wasm.js (assets espejados)
+   sha256 de tesseract-core.wasm.js = el de assets.lock.json (e66872f6...b955).
+   - (a) El paquete solo trae LICENSE (Apache-2.0). Sin avisos de terceros.
+   - (b) Sin banners. Las cadenas del .wasm nombran Leptonica, libjpeg
+     ("Corrupt JPEG", "JPEG parameter"), libtiff ("TIFFLib") y libwebp
+     ("WebP"), además de Tesseract.
+   Resultado: SIN RESOLVER. Hay código de terceros compilado adentro (al menos
+   Leptonica, libjpeg, libtiff y libwebp; probablemente zlib y libpng) que el
+   paquete no acredita y cuyas versiones y licencias no se pueden identificar
+   desde el artefacto. libjpeg suele ser IJG, que no está en la lista admitida.
+   Se reporta al planificador; no se agregó nada a la tabla.
+
+4. pdfjs-dist 4.10.38, build/pdf.worker.min.mjs y build/pdf.mjs
+   - (a) Sin archivos de avisos de artefacto. (b) Solo el banner de Mozilla.
+   - (c) Los mapas (pdf.mjs.map, pdf.worker.mjs.map) listan solo módulos de
+     pdf.js (webpack://pdf.js), sin node_modules.
+   - (d) La única dependencia es opcional (`@napi-rs/canvas`) y no se
+     distribuye. cmaps/ y standard_fonts/ van en la tabla de familias.
+   Resultado: sin embebidos.
+
+5. onnxruntime-web 1.26.0-dev.20260416-b7804b056c
+   - dist/ort.webgpu.bundle.min.mjs (lo que importa transformers): su mapa
+     lista 39 fuentes, todas de ONNX Runtime; sin protobufjs, flatbuffers,
+     long, guid-typescript ni platform (búsqueda de cadenas negativa). Esas
+     dependencias del paquete NO están embebidas, así que no hace falta
+     acreditarlas.
+   - ort-wasm-simd-threaded.asyncify.mjs y .wasm (assets espejados): sha256
+     igual al de assets.lock.json. El .wasm compila adentro el código de
+     terceros de ONNX Runtime, cubierto por su ThirdPartyNotices.txt (§2bis).
+   - Banner: "Copyright (c) Microsoft Corporation".
+   Resultado: sin embebidos nuevos; ThirdPartyNotices.txt ya incluido.
+
+6. pdf-lib 1.17.1
+   Entra como módulos ES individuales (`es/...`), junto con pako, @pdf-lib/upng
+   y @pdf-lib/standard-fonts, todos visibles en el bundle. Nada precompilado.
+   Resultado: sin embebidos.
+
+7. Resto de paquetes del bundle (React, Radix UI, floating-ui, Zustand, Lucide,
+   etc.): módulos ES de un solo paquete cada uno (los mapas del build no
+   muestran otro `dist` ya empaquetado además de los de arriba).

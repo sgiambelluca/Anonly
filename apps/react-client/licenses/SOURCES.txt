@@ -1,0 +1,51 @@
+Origen de los textos de licencia commiteados en esta carpeta (ADR-196 §2, §2bis, §2quater).
+Cada archivo se descargó sin editar de la URL indicada, fijada a un commit completo.
+sha256: del archivo commiteado. Auditoría de lo embebido: AUDITORIA-EMBEBIDOS.txt.
+
+AFL-3.0.txt
+  url:    https://raw.githubusercontent.com/spdx/license-list-data/31ba1a50e5397e00a304dbadc76531740e89ee48/text/AFL-3.0.txt
+  commit: 31ba1a50e5397e00a304dbadc76531740e89ee48
+  sha256: de0612c5780d0d21f9982d2cadfd715d2d3b7a0dfeb532a5023d42a1d4fdce5c
+  nota:   SPDX license-list-data, rama main al momento de fijar el commit. Modelo de NER (ADR-196 §2.3).
+
+MIT-standard.txt
+  url:    https://raw.githubusercontent.com/spdx/license-list-data/31ba1a50e5397e00a304dbadc76531740e89ee48/text/MIT.txt
+  commit: 31ba1a50e5397e00a304dbadc76531740e89ee48
+  sha256: b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5
+  nota:   Texto ESTÁNDAR, con año y titular sin completar: lo usa la fila de lazy-val@1.0.5 (ADR-196 §2ter), cuyo proyecto no publica texto propio.
+
+Sparkle-2.9.4-LICENSE.txt
+  url:    https://raw.githubusercontent.com/sparkle-project/Sparkle/b6496a74a087257ef5e6da1c5b29a447a60f5bd7/LICENSE
+  commit: b6496a74a087257ef5e6da1c5b29a447a60f5bd7
+  sha256: 389a4e4e9a32f059775b13a06e25a591445ba229d2838d26dd3e7c0c45127cfe
+  nota:   Tag 2.9.4 (la versión que fija fetch-sparkle.sh).
+
+onnxruntime-LICENSE.txt
+  url:    https://raw.githubusercontent.com/microsoft/onnxruntime/b7804b056c30aa35c1748f8e4e239d0e2ff25d6d/LICENSE
+  commit: b7804b056c30aa35c1748f8e4e239d0e2ff25d6d
+  sha256: 2f07c72751aed99790b8a4869cf2311df85a860b22ded05fa22803587a48922c
+  nota:   Commit de onnxruntime-web@1.26.0-dev.20260416-b7804b056c (su __commit.txt). También para onnxruntime-common@1.24.3.
+
+onnxruntime-ThirdPartyNotices.txt
+  url:    https://raw.githubusercontent.com/microsoft/onnxruntime/b7804b056c30aa35c1748f8e4e239d0e2ff25d6d/ThirdPartyNotices.txt
+  commit: b7804b056c30aa35c1748f8e4e239d0e2ff25d6d
+  sha256: 0e07b95f3a8d6230037707c5c4a2b554d12c4cb67369669ac255635528ffcee2
+  nota:   Mismo commit. Cubre lo compilado dentro de onnxruntime-web.
+
+react-remove-scroll-bar-LICENSE.txt
+  url:    https://raw.githubusercontent.com/theKashey/react-remove-scroll-bar/8ca9ba5ea52de03308fe8ced94f7b159a44d28ff/LICENSE
+  commit: 8ca9ba5ea52de03308fe8ced94f7b159a44d28ff
+  sha256: a79aae0c0f21990d9d963bb3c5a79cdcea9a46f8523ba55c58d7fe776b6ebc84
+  nota:   Excepción aceptada (ADR-196 §2bis): commit posterior a 2.3.8, que se publicó sin el archivo; el tag v2.3.8 no existe.
+
+buffer-6.0.3-LICENSE.txt
+  url:    https://raw.githubusercontent.com/feross/buffer/088fd9709e95f96b1f64d1c55ed3c50a19c73e9f/LICENSE
+  commit: 088fd9709e95f96b1f64d1c55ed3c50a19c73e9f
+  sha256: 06bafa45fdad2579ba0e43b0c9b2c6290287c99c4203c300254a462b38a307f6
+  nota:   Tag v6.0.3. Embebido en el worker.min.js de tesseract.js (ADR-196 §2quater); no está instalado.
+
+ieee754-1.2.1-LICENSE.txt
+  url:    https://raw.githubusercontent.com/feross/ieee754/b60d148be9cad718f9ff007c211c2427cdc180a4/LICENSE
+  commit: b60d148be9cad718f9ff007c211c2427cdc180a4
+  sha256: 18d45466ba3253deae04667e267a91ea8de8548f18c1125264d1c9db28194cc1
+  nota:   Tag v1.2.1 (dependencia de buffer 6.0.3). Embebido en el worker.min.js de tesseract.js; no está instalado.

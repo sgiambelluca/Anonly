@@ -4,6 +4,8 @@ import { fileURLToPath } from "node:url";
 import react from "@vitejs/plugin-react";
 import { defineConfig, type Plugin } from "vite";
 
+import { thirdPartyLicenses } from "./scripts/third-party-licenses-plugin.js";
+
 const POLYFILLS = fileURLToPath(new URL("./src/polyfills.ts", import.meta.url));
 
 /**
@@ -57,8 +59,15 @@ function readAppVersion(): string {
   return "";
 }
 
+/*
+ * ADR-196: el plugin de licencias necesita ver los módulos del bundle principal
+ * y de los workers, que se construyen aparte; por eso `main` y `worker` comparten
+ * el mismo registro.
+ */
+const licenses = thirdPartyLicenses();
+
 export default defineConfig({
-  plugins: [polyfillWorkers(), react()],
+  plugins: [polyfillWorkers(), react(), licenses.main],
   define: {
     __ANONLY_VERSION__: JSON.stringify(readAppVersion()),
   },
@@ -139,5 +148,6 @@ export default defineConfig({
   },
   worker: {
     format: "es",
+    plugins: licenses.worker,
   },
 });
