@@ -64,6 +64,8 @@ Se revisa si el proyecto pasa a tener una persona jurídica elegible para la exe
 
 ---
 
+> **Actualización en Windows (ADR-197 §5, versión 1.0.1).** Antes de instalar una actualización, el contenedor vuelve a verificar el instalador contra la firma del manifiesto y deja una entrada en `HKCU...RunOnce` que lo vuelve a correr si la instalación se corta. La interfaz le informa al contenedor si debe instalar al cerrar por el canal `updater:set-install-on-quit` (un booleano), y el contenedor le informa la plataforma por `window.anonlyDevice.platform`, de solo lectura. Esa entrada ejecuta un archivo de la caché del usuario sin volver a verificarlo en ese momento: quien pueda reemplazarlo ya puede escribir en `HKCU` y en la carpeta del usuario, así que no cruza ninguna frontera nueva. Riesgo aceptado.
+
 ## 3. Procesamiento 100% local
 
 ### 3.1 Reglas

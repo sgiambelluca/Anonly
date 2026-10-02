@@ -45,9 +45,42 @@ sin `allowPrerelease`) y `releases/latest/download/appcast.xml` en macOS
 (Sparkle). Hoy esa consulta no encuentra nada, porque no hay ninguna versión
 estable. Al publicar la 1.0.0 como estable, la encuentra y la instala desde la
 aplicación, verificando la firma con las mismas claves (ADR-131, ADR-137).
-Conserva la configuración del usuario. **No está probado de punta a punta**:
-no se puede probar sin publicar una versión estable. Se verifica con una
-instalación de la 0.9.2 apenas se publique la 1.0.0.
+Conserva la configuración del usuario.
+
+**Probado el 2026-10-02**, al publicar la 1.0.0: una 0.9.2 instalada en
+Windows la encontró, la bajó y se actualizó, después de corregir a mano el
+nombre del instalador en el release (ADR-198). En macOS no se probó.
+
+## 2bis. 1.0.1 — Actualizaciones
+
+Salió de publicar la 1.0.0 y actualizar una 0.9.2 de verdad.
+
+- **El instalador de Windows se publica con el nombre que dice su
+  manifiesto** (ADR-198). En la 1.0.0 la actualización desde la aplicación
+  fallaba por un nombre de archivo distinto; se arregló a mano en el release.
+- **Aviso de descarga con porcentaje, instalación sin asistente, y
+  «Instalar automáticamente» instala al cerrar la aplicación** (ADR-197).
+- **Recuperación si la instalación se corta** (ADR-197 §5): se vuelve a
+  verificar el instalador antes de usarlo, y Windows lo vuelve a correr en el
+  próximo inicio de sesión si no terminó.
+- **El test de fugas corre sus tres casos en paralelo en CI**, y su regla de
+  workers deja de depender de una sola muestra (ADR-185, enmienda del
+  2026-10-02).
+
+**Pendiente de decidir o de verificar**
+
+- macOS: «Instalar automáticamente» instala **al abrir** la aplicación, no
+  al cerrarla (ADR-197 §6, decisión del humano). Sin probar: hace falta una
+  Mac.
+- La instalación por los dos caminos (botón y cierre) se probó el
+  2026-10-02 en Windows con un build de prueba (ADR-197, «Cómo se
+  verifica»). Falta ver que el instalador de la 1.0.1 borre la entrada de
+  recuperación al terminar: eso recién se puede ver en la actualización
+  siguiente a la 1.0.1.
+- El corte real de una instalación no se probó (ADR-197, «Cómo se
+  verifica»): se hace a mano en una máquina virtual.
+- El comportamiento nuevo se estrena en la actualización **siguiente** a la
+  1.0.1: la de la 1.0.0 a la 1.0.1 la ejecuta el código de la 1.0.0.
 
 ## 3. 1.0.x — Confianza
 

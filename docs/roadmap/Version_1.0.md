@@ -125,7 +125,7 @@ Van en las notas de la versión. Cada una tiene su lugar en `Roadmap_1.x.md`.
 `major` en la branch `release/1.0.0`.
 
 Quien instaló la 0.9.2 recibe la 1.0.0 desde la aplicación, sin reinstalar:
-ver `Roadmap_1.x.md` §2.
+ver `Roadmap_1.x.md` §2. La 1.0.0 se publicó el 2026-10-02.
 
 ## 7. Referencias
 
