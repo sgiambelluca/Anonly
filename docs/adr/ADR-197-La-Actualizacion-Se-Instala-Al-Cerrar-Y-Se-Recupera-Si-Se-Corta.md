@@ -155,7 +155,14 @@ descarga pendiente, se registra en el log y se emite un evento propio,
 `update-rejected`, sin más datos que el tipo. La interfaz retira con él el
 aviso de «versión lista», que si no quedaría con un botón que ya no hace
 nada. No se reutiliza `error`: ese también llega por una búsqueda fallida, y
-la interfaz no podría distinguirlos. Esto cubre
+la interfaz no podría distinguirlos.
+
+El mismo evento se emite cuando el instalador **no llega a lanzarse** (falla
+en el momento, dentro de la llamada que lo lanza): la descarga queda dada de
+baja y el botón de la tarjeta ya no haría nada. Un `error` que llega después
+de lanzado el instalador no cuenta como fallo de lanzamiento: no se puede
+distinguir de uno de búsqueda o de descarga, así que la marca y la entrada
+de recuperación de §5.c **se conservan**. Esto cubre
 además la descarga reutilizada de la caché, que hoy no pasa por esa
 verificación.
 
