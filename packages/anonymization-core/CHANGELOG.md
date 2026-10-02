@@ -1,5 +1,19 @@
 # @anonly/anonymization-core
 
+## 1.0.0
+
+### Patch Changes
+
+- @anonly/event-system@1.0.0
+- @anonly/export-engine@1.0.0
+- @anonly/grouping-engine@1.0.0
+- @anonly/ner-engine@1.0.0
+- @anonly/ocr-engine@1.0.0
+- @anonly/pdf-engine@1.0.0
+- @anonly/regex-engine@1.0.0
+- @anonly/render-engine@1.0.0
+- @anonly/shared@1.0.0
+
 ## 0.9.2
 
 ### Patch Changes
