@@ -1,5 +1,11 @@
 # @anonly/desktop-shell
 
+## 1.0.1
+
+### Patch Changes
+
+- Las actualizaciones muestran el avance de la descarga en una tarjeta, se instalan sin asistente y, con «Instalar automáticamente», al cerrar Anonly (en macOS, al abrirlo). El instalador se vuelve a verificar antes de usarse y Windows lo vuelve a correr si la instalación se corta (ADR-197). El instalador de Windows se publica con el nombre que indica su manifiesto (ADR-198).
+
 ## 1.0.0
 
 ### Major Changes
