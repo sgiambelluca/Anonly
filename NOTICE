@@ -50,6 +50,34 @@ El script que lo genera, determinista y commiteado, es
 
 ---
 
+## Software y modelos de terceros
+
+El instalador distribuye el software y los modelos de esta lista (ADR-196).
+Los textos completos de sus licencias, y los de sus dependencias internas, se
+generan en cada build y viajan dentro del instalador, en
+`resources/renderer/licenses/THIRD_PARTY_LICENSES.txt`. Las licencias de
+Electron y de Chromium van aparte, en `LICENSE.electron.txt` y
+`LICENSES.chromium.html`, en la carpeta de instalación.
+
+- React — MIT
+- Radix UI — MIT
+- Lucide — ISC
+- Zustand — MIT
+- pdf.js — Apache-2.0 (sus cMaps, BSD-3-Clause; sus fuentes estándar,
+  BSD-3-Clause y SIL OFL 1.1)
+- pdf-lib — MIT
+- Tesseract (tesseract.js y tesseract.js-core) — Apache-2.0
+- Datos de idioma de Tesseract (tessdata: spa, eng, osd) — Apache-2.0
+- Transformers.js — Apache-2.0
+- ONNX Runtime — MIT
+- Modelo de NER bert-base-multilingual-cased-ner-hrl (Davlan), en su
+  conversión ONNX de Xenova — AFL-3.0
+- Electron — MIT
+- electron-updater — MIT
+- Sparkle (solo macOS) — MIT
+
+---
+
 Procedencia completa, con fecha de descarga y hash sha256 del artefacto
 generado en la corrida más reciente:
 `packages/anonymization-core/shared/assets/gender-lexicon.provenance.json`.

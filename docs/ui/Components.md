@@ -195,6 +195,12 @@ apps/react-client/src/components/
   título, titular, licencia, para qué se usa y cambios. `<section>` con encabezado visible por
   bloque; enlaces `<a>` nativos `target="_blank" rel="noopener noreferrer"`. El test de
   sincronización con `NOTICE` y el provenance (ADR-070 §5) **no cambia**.
+  Debajo va **«Software de terceros»** (ADR-196 §4): una lista compacta y de solo lectura, una
+  fila por componente principal de `thirdPartySoftware.ts` con nombre, para qué se usa y
+  licencia, **sin enlaces**. Al pie, una oración: los textos completos de todas las licencias
+  viajan con la aplicación instalada, en `resources/renderer/licenses/THIRD_PARTY_LICENSES.txt`
+  (en macOS, dentro de `Anonly.app/Contents/Resources/`).
+  Un test comprueba que cada componente figura en `NOTICE` con la misma licencia (ADR-196 §6).
 - **URLs externas navegables** (ADR-070 §3 extendido por ADR-168 §3): las dos del crédito
   (`sourceUrl`, `licenseUrl`) más `https://github.com/sgiambelluca/Anonly` (código fuente) y
   `https://github.com/sgiambelluca/Anonly/issues/new` ("Reportar un problema", en el pie y en
