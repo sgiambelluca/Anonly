@@ -1,6 +1,6 @@
 /**
  * `imagedata-profile-campaign.spec.ts` — campaña de medición real del
- * perfilado de ImageData (`docs/roadmap/ImageData_Perfilado_Handoff.md` §4).
+ * perfilado de ImageData (`docs/roadmap/memoria/ImageData_Perfilado_Handoff.md` §4).
  *
  * Separado de `imagedata-profile.spec.ts` (que solo tiene el caso de humo
  * del §2, corrido con la aplicación abierta sin medir memoria) porque este

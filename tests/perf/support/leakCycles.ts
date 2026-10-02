@@ -1,6 +1,6 @@
 /**
  * `support/leakCycles.ts` — instrumento de T-9
- * (`docs/roadmap/Ciclos_Y_Documentos_Reales_Plan.md` §2): diez open/close en
+ * (`docs/roadmap/memoria/Ciclos_Y_Documentos_Reales_Plan.md` §2): diez open/close en
  * una sola instancia de Electron, para saber si el reposo de la app sigue
  * subiendo después del primer documento.
  *

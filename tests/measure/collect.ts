@@ -64,7 +64,7 @@ export interface MeasuredDocument {
 /**
  * Los eventos que se cronometran, con su canal. Es la lista de hitos de
  * etapa del pipeline: de acá salen las duraciones que comparan un antes y un
- * después (`roadmap/Optimizacion_De_Rendimiento.md`).
+ * después (`roadmap/rendimiento/Optimizacion_De_Rendimiento.md`).
  */
 export const TIMED_EVENTS: ReadonlyArray<readonly [string, string]> = [
   ["pdf", "PAGE_PARSED"],

@@ -1,5 +1,5 @@
 /**
- * Paso 0 de T-8 (`docs/roadmap/AB_Intercalado_Plan.md` §2ter): ¿se puede leer
+ * Paso 0 de T-8 (`docs/roadmap/rendimiento/AB_Intercalado_Plan.md` §2ter): ¿se puede leer
  * el tamaño de la memoria lineal de WebAssembly sin preguntarle al sistema
  * operativo?
  *

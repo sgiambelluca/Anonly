@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=tests-perf | dependencias=adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-149-Un-Gate-Que-No-Ejecuta-Nada-Es-Rojo.md,adr/ADR-153-El-Gate-De-Tiempos-Se-Mide-Sobre-El-Producto.md,adr/ADR-159-La-Retencion-Se-Lee-Del-Heap-No-Del-RSS.md,roadmap/Optimizacion_De_Memoria_Plan.md,tests/e2e/README.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,adr/ADR-185-Gates-De-Leak-Y-Stress-En-Electron.md | audiencia=humanos+IA | fase=11 (gates Leak/Stress de ADR-185 implementados; CI pendiente) -->
+<!-- CONTEXT: scope=tests-perf | dependencias=adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-149-Un-Gate-Que-No-Ejecuta-Nada-Es-Rojo.md,adr/ADR-153-El-Gate-De-Tiempos-Se-Mide-Sobre-El-Producto.md,adr/ADR-159-La-Retencion-Se-Lee-Del-Heap-No-Del-RSS.md,roadmap/memoria/Optimizacion_De_Memoria_Plan.md,tests/e2e/README.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,adr/ADR-185-Gates-De-Leak-Y-Stress-En-Electron.md | audiencia=humanos+IA | fase=11 (gates Leak/Stress de ADR-185 implementados; CI pendiente) -->
 
 # `tests/perf/` — tiempos y memoria sobre el producto real
 
@@ -99,7 +99,7 @@ vacío en los reportes. Ver también `docs/roadmap/mediciones/transversal/Banco_
 en builds experimentales del shell Electron empaquetado. Los parches de una línea
 solo cambian `env.backends.onnx.wasm.numThreads` y se revierten antes de terminar;
 no se altera la configuración pública ni el default. El protocolo y los límites
-están en `docs/roadmap/Rendimiento_Experimentos_Plan.md` §1.
+están en `docs/roadmap/rendimiento/Rendimiento_Experimentos_Plan.md` §1.
 
 La campaña acepta P1 nativo, P2 escaneado y R1/R2 reales mediante
 `ANONLY_REAL_DOC_R1` y `ANONLY_REAL_DOC_R2`. Las rutas deben ser absolutas y
@@ -187,7 +187,7 @@ ANONLY_NER_BATCH_NO_BUILD=1 caffeinate -dimsu tests/perf/run-ner-batch-real.sh
 
 `ANONLY_NER_BATCH_NO_BUILD=1` usa las dos mitades ya compiladas del shell
 empaquetado. La campaña no recompila ni altera defaults. Repetido en Windows
-nativo el 2026-09-25 (ver `docs/roadmap/Lotes_NER_Factibilidad.md`
+nativo el 2026-09-25 (ver `docs/roadmap/rendimiento/Lotes_NER_Factibilidad.md`
 §"Repetición Windows nativo"): mismo bloqueo de adopción. Ese arnés
 (`tests/perf/ner-batch-real.mjs`) tenía un bug de portabilidad — un regex
 sensible a CRLF que rompía en un checkout Windows —, corregido en `45d07fd`.
@@ -279,7 +279,7 @@ en cada plataforma.
 ## Complemento opt-in NER: carga, panel e importaciones consecutivas
 
 `run-ner-gaps.sh` ejecuta el protocolo de
-`docs/roadmap/Rendimiento_Experimentos_Plan.md` §1.1. Compara A/4/6/8 en
+`docs/roadmap/rendimiento/Rendimiento_Experimentos_Plan.md` §1.1. Compara A/4/6/8 en
 tres bloques intercalados; cada instancia de Electron importa R1→R1→R2→R2.
 Antes corre controles P1/P2 y confirma hilos en una pasada separada. La
 selección automática del producto se conserva y los parches/builds se restauran.
@@ -381,7 +381,7 @@ tiempo, memoria y cancelación antes de marcar `summary.json` como completo.
 ### Fase `ultra`: seis reconocedores
 
 `ANONLY_OCR_POOL_PHASE=ultra` mide el perfil Ultra propuesto en
-`docs/roadmap/Perfiles_Rendimiento_Revision.md` (sección «Decisiones del humano
+`docs/roadmap/rendimiento/Perfiles_Rendimiento_Revision.md` (sección «Decisiones del humano
 y medición de Ultra»). Está aislada de las demás fases: `all`, `r2-time` y
 `memory-cancel` no cambian; `profiles-gap` gana la detección de suspensión, que
 antes era un no-op porque el script llamaba a `rg` (ausente en esta Mac) y ahora
@@ -701,7 +701,7 @@ Tab/GPU de OCR y pisos Tab/GPU de OCR. Los pisos se publican por corrida, sin
 promedio, y el residuo sigue rotulado “no atribuido (WASM + nativo)”. La decisión
 estructural/acotada/inconclusa y el cierre documental pertenecen al planificador;
 el implementador entrega el perfil y los reportes. La especificación completa
-vive en `docs/roadmap/Optimizacion_De_Memoria_Plan.md` §T-3.
+vive en `docs/roadmap/memoria/Optimizacion_De_Memoria_Plan.md` §T-3.
 
 > **Enmienda 2026-09-17 (ADR-146 §7ter) — leer antes de interpretar cualquier reporte.**
 >
@@ -816,7 +816,7 @@ Dos hipótesis más en el mismo archivo, cada una con una corrida exploratoria (
 
 ## T-8 — A/B intercalado: comparar dos versiones del código
 
-La sección de arriba retira **restar corridas separadas** como método. Esto es lo que se usa cuando la pregunta es inevitablemente de ese tipo: **¿la versión B consume distinto que la A?** —algo que por definición no se contesta dentro de una sola corrida—. Protocolo en `docs/roadmap/AB_Intercalado_Plan.md`, resultado de su primer uso (ADR-166 contra un temporizador de 15 s) en `docs/roadmap/mediciones/ner/AB_Intercalado_Medicion.md`.
+La sección de arriba retira **restar corridas separadas** como método. Esto es lo que se usa cuando la pregunta es inevitablemente de ese tipo: **¿la versión B consume distinto que la A?** —algo que por definición no se contesta dentro de una sola corrida—. Protocolo en `docs/roadmap/rendimiento/AB_Intercalado_Plan.md`, resultado de su primer uso (ADR-166 contra un temporizador de 15 s) en `docs/roadmap/mediciones/ner/AB_Intercalado_Medicion.md`.
 
 Qué lo separa del método retirado:
 
@@ -841,7 +841,7 @@ La etapa 2 reusa los `dist` que construyó la etapa 1 en `<dir>`: reconstruirlos
 
 ## T-9 — el ciclo de 10 open/close (¿hay una fuga?)
 
-Plan y criterio de lectura, escritos antes de medir: `docs/roadmap/Ciclos_Y_Documentos_Reales_Plan.md` §2. Es el perfil P3 de ADR-146 §4, **no el gate `test:leak`**: mide para que el umbral del gate se fije después.
+Plan y criterio de lectura, escritos antes de medir: `docs/roadmap/memoria/Ciclos_Y_Documentos_Reales_Plan.md` §2. Es el perfil P3 de ADR-146 §4, **no el gate `test:leak`**: mide para que el umbral del gate se fije después.
 
 `leak-cycles.spec.ts` abre y cierra el mismo documento diez veces en una sola instancia y, en cada ciclo, registra tres señales que ven fugas distintas: **workers vivos** (CDP, con los hijos), **heap de JS del hilo principal con GC forzado** (la única que la presión del sistema no mueve) y **RSS en reposo**, como mediana de una ventana fija tras el cierre. El veredicto de plan §2.5 se calcula adentro del reporte (`judgeLeak`, con tests en `support/leakCycles.test.ts`), para que nadie lo reinterprete después de ver los números.
 
@@ -857,7 +857,7 @@ Dos cosas que no son obvias:
 
 ## T-10 — documentos reales
 
-Plan: `docs/roadmap/Ciclos_Y_Documentos_Reales_Plan.md` §3. `real-docs.spec.ts` corre P1, P2 y dos documentos reales (R1 nativo, R2 escaneado) intercalados, tres rondas, con `measureProfile`.
+Plan: `docs/roadmap/memoria/Ciclos_Y_Documentos_Reales_Plan.md` §3. `real-docs.spec.ts` corre P1, P2 y dos documentos reales (R1 nativo, R2 escaneado) intercalados, tres rondas, con `measureProfile`.
 
 **Los documentos reales no entran al repo, ni sus nombres, ni nada que los identifique.** Las rutas se pasan por entorno y la app los recibe con un nombre neutro:
 
@@ -869,7 +869,7 @@ El colector corre con `captureOcrWords: false` en los cuatro perfiles: las palab
 
 ## T-11 — el heap de WASM por worker (ADR-159 §8)
 
-Plan: `docs/roadmap/Ciclos_Y_Documentos_Reales_Plan.md` §4. Convierte el "no atribuido (WASM + nativo)" que `memoryProfile.ts` reporta como una cota (ADR-159 §8) en una medición por worker: por CDP, en cada target, `Runtime.evaluate("WebAssembly.Memory.prototype")` → `Runtime.queryObjects` → `Runtime.callFunctionOn` (`returnByValue: true`, devuelve `{byteLength, shared}` por memoria) → `Runtime.releaseObjectGroup` **siempre**, en un `finally` — sin eso el inspector retiene las memorias que leyó y el instrumento se vuelve una fuga. `support/cdpHeap.ts` expone estos cuatro métodos nuevos en su `CdpMethodMap` y un `snapshotWasmByTarget()` sobre la MISMA conexión que ya usa el heap de JS (`connectCdpTargetSnapshotter`); `support/wasmMemory.ts` es todo lo demás: el sampler combinado (`startWasmHeapSampling`, WASM + heap de JS por target en la misma pasada, cada 1 s), el deduplicado de memoria compartida, la atribución por dueño y el Paso 0.
+Plan: `docs/roadmap/memoria/Ciclos_Y_Documentos_Reales_Plan.md` §4. Convierte el "no atribuido (WASM + nativo)" que `memoryProfile.ts` reporta como una cota (ADR-159 §8) en una medición por worker: por CDP, en cada target, `Runtime.evaluate("WebAssembly.Memory.prototype")` → `Runtime.queryObjects` → `Runtime.callFunctionOn` (`returnByValue: true`, devuelve `{byteLength, shared}` por memoria) → `Runtime.releaseObjectGroup` **siempre**, en un `finally` — sin eso el inspector retiene las memorias que leyó y el instrumento se vuelve una fuga. `support/cdpHeap.ts` expone estos cuatro métodos nuevos en su `CdpMethodMap` y un `snapshotWasmByTarget()` sobre la MISMA conexión que ya usa el heap de JS (`connectCdpTargetSnapshotter`); `support/wasmMemory.ts` es todo lo demás: el sampler combinado (`startWasmHeapSampling`, WASM + heap de JS por target en la misma pasada, cada 1 s), el deduplicado de memoria compartida, la atribución por dueño y el Paso 0.
 
 **La memoria compartida se cuenta una vez.** ONNX con hilos comparte un `SharedArrayBuffer` entre el worker de NER y cada uno de sus pthreads — la firma estructural es la misma que ya distingue `cdpHeap.ts` (`thread-pool-worker-*`/`unclassified-worker-*`: hijos que REPITEN la misma url de blob). Dentro de ese grupo, una memoria `shared: true` del mismo tamaño se deduplica; fuera de él (p. ej. entre el Tesseract LSTM y OSD de un mismo `ocr-worker-*`, que nunca comparten) cada target cuenta por separado aunque coincidiera el tamaño. Ver el docstring de `wasmMemory.ts` y `computeWasmMemoryTotal`.
 
@@ -886,7 +886,7 @@ Salida en `.measure/wasm/<sesión>/`: `wasm-step0.json`, `wasm-p2-run0.json`… 
 
 ## T-12 — opciones de sesión de NER sobre un documento real
 
-Plan: `docs/roadmap/Ciclos_Y_Documentos_Reales_Plan.md` §4bis. `run-ner-opciones.sh` usa el mecanismo de T-8: cada brazo es un parche de una línea sobre `ner-engine/src/worker/kernel.ts` (`support/ner-arm-*.patch`), se construye una vez, y el `dist` se intercambia verificando su digest. Mide con `wasm-attribution.spec.ts` (`ANONLY_WASM_RUN=r1|r2`, `ANONLY_WASM_LABEL` para el nombre del reporte), que además deja una **huella de lo que NER detectó**: un SHA-256 calculado dentro de la app sobre página, tipo y caja de cada ocurrencia. El texto no sale de la app.
+Plan: `docs/roadmap/memoria/Ciclos_Y_Documentos_Reales_Plan.md` §4bis. `run-ner-opciones.sh` usa el mecanismo de T-8: cada brazo es un parche de una línea sobre `ner-engine/src/worker/kernel.ts` (`support/ner-arm-*.patch`), se construye una vez, y el `dist` se intercambia verificando su digest. Mide con `wasm-attribution.spec.ts` (`ANONLY_WASM_RUN=r1|r2`, `ANONLY_WASM_LABEL` para el nombre del reporte), que además deja una **huella de lo que NER detectó**: un SHA-256 calculado dentro de la app sobre página, tipo y caja de cada ocurrencia. El texto no sale de la app.
 
 ```
 ANONLY_REAL_DOC_R1=/ruta/nativo.pdf ANONLY_REAL_DOC_R2=/ruta/escaneado.pdf ./tests/perf/run-ner-opciones.sh
@@ -896,7 +896,7 @@ Ojo al leer la memoria de WASM: **crece por escalones del 20 %**, así que un ah
 
 ## T-13 — tiempo real sobre documentos reales
 
-`real-docs-timing.spec.ts` mide importación → `Ready` por fase **sin ningún instrumento de memoria** (ni sampler de RSS ni CDP), dos veces por instancia: la primera importación y una reapertura a los 5 s. `run-tiempos-reales.sh` corre R1 y R2, tres rondas, orden alternado. Plan: `docs/roadmap/Ciclos_Y_Documentos_Reales_Plan.md` §4ter.
+`real-docs-timing.spec.ts` mide importación → `Ready` por fase **sin ningún instrumento de memoria** (ni sampler de RSS ni CDP), dos veces por instancia: la primera importación y una reapertura a los 5 s. `run-tiempos-reales.sh` corre R1 y R2, tres rondas, orden alternado. Plan: `docs/roadmap/memoria/Ciclos_Y_Documentos_Reales_Plan.md` §4ter.
 
 ```
 ANONLY_REAL_DOC_R1=/ruta/nativo.pdf ANONLY_REAL_DOC_R2=/ruta/escaneado.pdf ./tests/perf/run-tiempos-reales.sh
@@ -926,7 +926,7 @@ Antes de comparar dos versiones, verificar con `git diff <viejo> <nuevo> -- apps
 
 ## T-5 — Comparación OSD compartido (ADR-164)
 
-Protocolo normativo: `docs/roadmap/T5_OSD_Compartido_Handoff.md` §3.
+Protocolo normativo: `docs/roadmap/ocr/T5_OSD_Compartido_Handoff.md` §3.
 Nuevo arnés opt-in `osd-sharing.spec.ts` (implementación pendiente), fixture P2
 congelado por SHA-256, checkouts BEFORE/AFTER separados y seis sesiones en orden
 A1/B1, B2/A2, A3/B3, cada una frío/cerrar/caliente. Instrumento idéntico en ambos
@@ -984,7 +984,7 @@ quedan en el JSON para interpretar la resolución real.
 ## ADR-180 — PDFs pesados, render completo y exportación
 
 Banco de caracterización opt-in del punto 3 de
-`docs/roadmap/PDFs_Pesados_Y_Exportacion_Plan.md`. No forma parte de `pnpm
+`docs/roadmap/memoria/PDFs_Pesados_Y_Exportacion_Plan.md`. No forma parte de `pnpm
 test:perf` cotidiano. Requiere los assets de modelo locales fijados en
 `assets.lock.json`; antes del build, `pnpm assets:mirror` debe completar con
 hashes válidos. Los perfiles H1/H2 generan PDFs de 6 páginas A4 con imágenes
@@ -1049,7 +1049,7 @@ trazas ni artefactos de contenido.
 ## Memoria incremental del pool OCR en macOS (2/3/4)
 
 `bash tests/perf/run-ocr-memory.sh` ejecuta la comparación cerrada en
-`docs/roadmap/Perfiles_Rendimiento_Revision.md` §«Protocolo adicional macOS».
+`docs/roadmap/rendimiento/Perfiles_Rendimiento_Revision.md` §«Protocolo adicional macOS».
 Requiere `ANONLY_REAL_DOC_R2` con una entrada local legible; el nombre que
 recibe Electron es neutro. `ANONLY_OCR_POOL_OUTPUT_DIR` elige una carpeta
 nueva bajo `.measure/ocr-memory/`. No permite continuar ni sobrescribir una
@@ -1079,7 +1079,7 @@ resolución no se baja (`docs/roadmap/mediciones/ocr/DPI_Descendente_Fase1_Windo
 El arnés queda para una eventual reapertura, que pide una regla nueva con control de
 perturbación.
 
-Arnés de `docs/roadmap/OCR_DPI_Descendente_Campana_Plan.md`: ¿puede el OCR leer a 250
+Arnés de `docs/roadmap/ocr/OCR_DPI_Descendente_Campana_Plan.md`: ¿puede el OCR leer a 250
 o 200 dpi un escaneo de 300 dpi nativos sin perder detecciones, y cuánta memoria y
 tiempo ahorra? Dos fases, las dos en **Windows nativo (Git Bash)**, que es el banco que
 decide. En macOS el arnés solo sirve de humo: sus números no se informan ni se comparan

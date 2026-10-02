@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -uo pipefail
-# T-8 — A/B intercalado (docs/roadmap/AB_Intercalado_Plan.md).
+# T-8 — A/B intercalado (docs/roadmap/rendimiento/AB_Intercalado_Plan.md).
 #
 # Construye los dos brazos UNA vez y despues intercambia el `dist` ya construido
 # entre corrida y corrida (plan §4): reconstruir doce veces meteria al compilador

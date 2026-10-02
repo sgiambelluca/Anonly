@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -uo pipefail
-# T-9 — el ciclo de 10 open/close (docs/roadmap/Ciclos_Y_Documentos_Reales_Plan.md §2).
+# T-9 — el ciclo de 10 open/close (docs/roadmap/memoria/Ciclos_Y_Documentos_Reales_Plan.md §2).
 #
 # Tres corridas en serie, cada una en su propia instancia de Electron: L1 (P1
 # encadenado), L2 (P2 encadenado) y L3 (P1 con 90 s de reposo). Nunca dos a la

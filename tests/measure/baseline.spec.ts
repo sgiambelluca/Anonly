@@ -1,6 +1,6 @@
 /**
  * Harness de medición — la **línea de base** de
- * `roadmap/Optimizacion_De_Rendimiento.md`.
+ * `roadmap/rendimiento/Optimizacion_De_Rendimiento.md`.
  *
  * **Por qué corre en un browser y no en Node.** Los dos números que hacen
  * falta son inseparables del entorno real:

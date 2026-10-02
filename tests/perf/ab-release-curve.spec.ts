@@ -1,5 +1,5 @@
 /**
- * T-8 (`docs/roadmap/AB_Intercalado_Plan.md`): **una** corrida de la curva de
+ * T-8 (`docs/roadmap/rendimiento/AB_Intercalado_Plan.md`): **una** corrida de la curva de
  * base caliente por invocación, etiquetada con el brazo que se está midiendo.
  *
  * Una corrida por invocación, y no las doce en un solo `playwright test`, es el

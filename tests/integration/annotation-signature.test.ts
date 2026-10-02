@@ -3,7 +3,7 @@
  * de firma produce grupo de **Persona** y de **Fecha**, con el bbox dentro del
  * `rect` de la anotación — y con `rotation` intacta hasta el `Replacement`.
  *
- * Por qué existe: el handoff del hito (`roadmap/Hito10.8_Handoff.md` §4)
+ * Por qué existe: el handoff del hito (`roadmap/hitos/Hito10.8_Handoff.md` §4)
  * documenta que la pérdida de `rotation` en `mapSpanToWords` llegó a prueba
  * manual **con todos los tests unitarios en verde**, precisamente porque nada
  * cubría la cadena `Word.bbox.rotation → Occurrence → Replacement` de punta a

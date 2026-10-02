@@ -1,5 +1,5 @@
 /**
- * T-13 (`docs/roadmap/Ciclos_Y_Documentos_Reales_Plan.md` §4ter): el tiempo del
+ * T-13 (`docs/roadmap/memoria/Ciclos_Y_Documentos_Reales_Plan.md` §4ter): el tiempo del
  * producto sobre los documentos reales, **sin instrumento de memoria**. Los tiempos
  * de T-10 salieron con un GC forzado por segundo en cada target (ADR-159); acá no
  * hay sampler de RSS ni lecturas por CDP, solo los eventos de fase de la app.

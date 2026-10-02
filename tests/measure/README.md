@@ -1,8 +1,8 @@
-<!-- CONTEXT: scope=tests-measure | dependencias=roadmap/Optimizacion_De_Rendimiento.md,adr/ADR-095-La-Regla-De-Matcheo-Es-La-Metrica.md,tests/e2e/README.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=tests-measure | dependencias=roadmap/rendimiento/Optimizacion_De_Rendimiento.md,adr/ADR-095-La-Regla-De-Matcheo-Es-La-Metrica.md,tests/e2e/README.md | audiencia=humanos+IA | fase=11 -->
 
 # Harness de medición
 
-Mide **tiempo por etapa** y **calidad de detección** sobre el dataset de referencia, corriendo la app real en Chromium. Es el instrumento de "antes y después" del plan de `docs/roadmap/Optimizacion_De_Rendimiento.md`.
+Mide **tiempo por etapa** y **calidad de detección** sobre el dataset de referencia, corriendo la app real en Chromium. Es el instrumento de "antes y después" del plan de `docs/roadmap/rendimiento/Optimizacion_De_Rendimiento.md`.
 
 **No es un gate**: no afirma umbrales ni falla por un número. Mide, imprime y guarda.
 
@@ -67,6 +67,6 @@ MEASURE_FILES="/ruta/a.pdf,/ruta/b.pdf" pnpm test:measure real-docs
 
 **Nunca imprime contenido**: solo conteos, porcentajes y tiempos. Las entidades se reportan **por tipo** (`PERSON:98`), nunca por valor. Los errores se reportan por **clase** y no por mensaje, porque las librerías de PDF a veces incluyen texto del documento en la excepción.
 
-Existe porque hay preguntas que el dataset sintético no puede contestar —todos sus PDF salen de `pdf-lib`, que es amable— y las respuestas cambiaron conclusiones: la tasa de empalme de ADR-097 pasó de 100 % en los fixtures a **0,2-27 %** en documentos reales (`roadmap/Post_Hito10.8_Pendientes.md` §24), y la ganancia de ADR-101 pasó de −25 % a **−46 %** sobre un escaneo de verdad.
+Existe porque hay preguntas que el dataset sintético no puede contestar —todos sus PDF salen de `pdf-lib`, que es amable— y las respuestas cambiaron conclusiones: la tasa de empalme de ADR-097 pasó de 100 % en los fixtures a **0,2-27 %** en documentos reales (`roadmap/hitos/Post_Hito10.8_Pendientes.md` §24), y la ganancia de ADR-101 pasó de −25 % a **−46 %** sobre un escaneo de verdad.
 
 Sin `MEASURE_FILES` el test se saltea, así que vive en la suite sin pedir nada.

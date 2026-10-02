@@ -1,6 +1,6 @@
 /**
  * T-7 — de qué está hecha la base caliente
- * (`docs/roadmap/Perfilado_Base_Caliente_Plan.md`).
+ * (`docs/roadmap/rendimiento/Perfilado_Base_Caliente_Plan.md`).
  *
  * Es medición, no gate: no fija ningún umbral, mide y escribe a
  * `.measure/base-caliente/<timestamp>/` (o `ANONLY_HOT_BASELINE_OUTPUT_DIR`

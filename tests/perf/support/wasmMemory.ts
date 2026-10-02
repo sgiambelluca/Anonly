@@ -1,6 +1,6 @@
 /**
  * `support/wasmMemory.ts` — instrumento de T-11
- * (`docs/roadmap/Ciclos_Y_Documentos_Reales_Plan.md` §4): convierte el "no
+ * (`docs/roadmap/memoria/Ciclos_Y_Documentos_Reales_Plan.md` §4): convierte el "no
  * atribuido (WASM + nativo)" de ADR-159 §8 en una medición por worker, vía
  * CDP (`WebAssembly.Memory.prototype` → `queryObjects` → `callFunctionOn`),
  * reusando la conexión y la clasificación de targets de `cdpHeap.ts` — nunca

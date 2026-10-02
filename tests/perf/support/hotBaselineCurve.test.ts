@@ -1,6 +1,6 @@
 /**
  * `hotBaselineCurve.test.ts` — cubre las funciones puras de T-7
- * (`docs/roadmap/Perfilado_Base_Caliente_Plan.md`): el agregado por tipo de
+ * (`docs/roadmap/rendimiento/Perfilado_Base_Caliente_Plan.md`): el agregado por tipo de
  * proceso (C-2) y la extracción de la curva de checkpoints (C-1). No cubre
  * `measureHotBaselineCurve` (necesita una `Page`/`ElectronApplication`
  * reales — eso lo prueba la campaña de T-7 vía Playwright, no vitest).

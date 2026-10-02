@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -uo pipefail
 # T-13 — tiempo del producto sobre los documentos reales, sin instrumento de memoria
-# (docs/roadmap/Ciclos_Y_Documentos_Reales_Plan.md §4ter). Tres rondas, orden
+# (docs/roadmap/memoria/Ciclos_Y_Documentos_Reales_Plan.md §4ter). Tres rondas, orden
 # alternado. Las rutas de R1 y R2 llegan por entorno y no se escriben en ningún log.
 
 ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"

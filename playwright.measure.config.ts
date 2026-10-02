@@ -8,7 +8,7 @@ import { defineConfig, devices } from "@playwright/test";
  *
  * - `fullyParallel` falsearía los números. Dos documentos midiéndose a la vez
  *   compiten por los mismos núcleos, que es justo la variable bajo estudio
- *   (`roadmap/Optimizacion_De_Rendimiento.md`, puntos A/B/C).
+ *   (`roadmap/rendimiento/Optimizacion_De_Rendimiento.md`, puntos A/B/C).
  * - `retries` promediaría corridas frías y calientes.
  * - Medir tarda; la suite E2E es un gate y tiene que seguir siendo rápida.
  *

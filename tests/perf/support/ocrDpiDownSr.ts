@@ -1,5 +1,5 @@
 /**
- * Corpus `SR` (docs/roadmap/OCR_DPI_Descendente_Campana_Plan.md §4): veinte páginas A4 a 300 dpi
+ * Corpus `SR` (docs/roadmap/ocr/OCR_DPI_Descendente_Campana_Plan.md §4): veinte páginas A4 a 300 dpi
  * nativos con la forma de R2 (misma cantidad de palabras por página), texto inventado y
  * determinista, unas nueve entidades por página con su verdad. Copia la densidad de R2, no su
  * contenido: ningún dato sale de un documento real.

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -uo pipefail
-# T-11 — el instrumento de WASM por worker (docs/roadmap/Ciclos_Y_Documentos_Reales_Plan.md §4).
+# T-11 — el instrumento de WASM por worker (docs/roadmap/memoria/Ciclos_Y_Documentos_Reales_Plan.md §4).
 #
 # Paso 0 (plan §4.3) corre PRIMERO y sola: si falla, el script ABORTA antes de
 # tocar las cuatro corridas de §4.4 — es la condición de parada del plan, no

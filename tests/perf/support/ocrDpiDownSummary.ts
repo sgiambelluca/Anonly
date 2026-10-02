@@ -1,6 +1,6 @@
 /**
  * Agregador puro de la fase 1 (calidad) de la campaña de DPI descendente y su regla de decisión
- * (docs/roadmap/OCR_DPI_Descendente_Campana_Plan.md §6, reescrita tras la revisión). Sin
+ * (docs/roadmap/ocr/OCR_DPI_Descendente_Campana_Plan.md §6, reescrita tras la revisión). Sin
  * filesystem: quien lo llama inyecta la lectura de celdas.
  *
  * Principio: el arnés solo dice «pasa» cuando midió todo lo que la regla exige. Lo ausente, lo
@@ -996,7 +996,7 @@ export function summarizeDpiDown(input: DpiDownInput): DpiDownSummary {
   return {
     phase: "dpi-down-quality",
     decisionRule: {
-      source: "docs/roadmap/OCR_DPI_Descendente_Campana_Plan.md §6",
+      source: "docs/roadmap/ocr/OCR_DPI_Descendente_Campana_Plan.md §6",
       minCoverageRaw: threshold.raw,
       minCoverage,
       minCoverageOfficial: threshold.official,

@@ -1,6 +1,6 @@
 /**
  * `support/systemMemoryPressure.ts` — A-1
- * (`docs/roadmap/Instrumento_De_Memoria_Arreglo_Plan.md` §2): presión de
+ * (`docs/roadmap/memoria/Instrumento_De_Memoria_Arreglo_Plan.md` §2): presión de
  * memoria del SISTEMA, no del árbol de procesos de la app. `memorySampler.ts`
  * ya mide el RSS de la app; lo que faltaba es la variable que la
  * re-caracterización del 2026-09-17 encontró que mueve M2 un 53% entre dos

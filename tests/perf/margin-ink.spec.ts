@@ -1,6 +1,6 @@
 /**
  * `margin-ink.spec.ts` — análisis de tinta residual de márgenes
- * (`docs/roadmap/Margenes_Menos_Pixeles_Handoff.md`, M-1 + M-2).
+ * (`docs/roadmap/memoria/Margenes_Menos_Pixeles_Handoff.md`, M-1 + M-2).
  *
  * Este archivo hoy contiene solo el caso de humo del §2.1 del Handoff:
  * probar, con el fixture chico de qa-stamp (una página, no la campaña

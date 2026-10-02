@@ -1,6 +1,6 @@
 /**
  * Agregador puro de la fase 2 (tiempo y memoria) de la campaña de DPI descendente
- * (docs/roadmap/OCR_DPI_Descendente_Campana_Plan.md §5.2), sobre las corridas de `ocr-pool.spec.ts`
+ * (docs/roadmap/ocr/OCR_DPI_Descendente_Campana_Plan.md §5.2), sobre las corridas de `ocr-pool.spec.ts`
  * con DPI pedido. Mismo criterio que el de `ultra`: nada ausente se convierte en cero, y una
  * corrida sin DPI efectivo demostrado es inválida. Sin filesystem.
  */
