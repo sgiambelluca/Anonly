@@ -1,7 +1,7 @@
 # Code signing policy
 
-> **Status: application to SignPath Foundation pending.** Releases up to
-> v0.9.2 are **not** Authenticode-signed, and Windows shows them as coming
+> **Status: application to SignPath Foundation pending.** No release
+> published so far is Authenticode-signed, and Windows shows them as coming
 > from an unknown publisher. This policy applies from the first Windows
 > release signed through SignPath.
 
