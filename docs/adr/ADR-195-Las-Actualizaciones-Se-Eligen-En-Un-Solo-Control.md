@@ -2,6 +2,8 @@
 
 # ADR-195 — Las actualizaciones se eligen en un solo control
 
+> **Enmendado por ADR-197 (2026-10-02, versión 1.0.1).** `install` pasa a instalar **al cerrar la aplicación**, en silencio, y deja de cerrarla por su cuenta; los textos de §3 cambian. La preferencia de tres valores y su migración (§1 y §2) siguen igual.
+
 - **Estado**: Aceptado.
 - **Fecha**: 2026-10-01.
 - **Decidido por**: el humano, que pidió un único control en lugar de dos

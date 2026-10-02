@@ -87,6 +87,43 @@ antes de convertir el perfil en un gate; no se cambia el objetivo contractual.
    es que una fuga se detecta al mergear y no en el PR; antes de un merge
    grande conviene lanzarlos a mano. Cuando corren, rige igual ADR-149 §1.
 
+   **Enmienda (2026-10-02): la regla de workers y el reparto en CI.**
+
+   *Qué pasó.* La corrida de `main` sobre `c627108` falló en L2 con
+   «workers grew». La serie de workers de los ciclos 1 a 10 fue
+   `5, 4, 4, 4, 4, 4, 4, 4, 4, 5`. En las dos corridas anteriores de
+   `main` (`685c69b`, `c8f1ea2`) el mismo caso dio 5 en los diez ciclos.
+   No hay crecimiento: en el régimen encadenado el conteo se toma entre 2 y
+   6 s después de `Ready`, mientras las bajas de workers siguen en curso, y
+   una muestra cae de un lado o del otro. La regla del punto 2 compara **una**
+   muestra, la del ciclo 10, contra el máximo de tres. El job relanzado pasó.
+
+   *Regla nueva de `workersGrow`, que reemplaza a la del punto 2.* Hay
+   crecimiento si la **mediana de los tres últimos ciclos** (8, 9 y 10)
+   supera al **máximo de los ciclos 2 a 4**. Con eso:
+
+   | Serie de los ciclos 1 a 10 | Antes | Ahora |
+   |---|---|---|
+   | `5,4,4,4,4,4,4,4,4,5` (la corrida que falló) | falla | pasa |
+   | `5,5,5,5,5,5,5,5,5,5` | pasa | pasa |
+   | `4,4,5,6,7,8,9,10,11,12` (un worker por ciclo) | falla | falla |
+   | `4,4,4,4,4,5,5,5,5,5` (un worker que queda vivo desde el ciclo 6) | falla | falla |
+   | `4,4,4,4,4,4,4,4,4,5` (solo el último) | falla | pasa |
+
+   El último caso es lo que se resigna: un worker que queda vivo recién en
+   el ciclo 10 no se distingue de una muestra desafortunada. La exigencia de
+   L3 —cero workers tras cada reposo— no cambia, y sigue siendo la prueba
+   directa de que las bajas ocurren. `heapGrows` no cambia.
+
+   *Reparto en CI.* El job corre los tres casos **en paralelo**, uno por
+   runner, como las mitades de E2E. Cada caso corre solo en su máquina, así
+   que el protocolo de medición no cambia; lo que cambia es el tiempo total,
+   que pasa de la suma de los tres a la duración del más largo. El check
+   «Memory leak» sigue existiendo con ese nombre: es un job que junta los
+   tres resultados. Cada caso exige al menos un test ejecutado y ninguno
+   salteado (ADR-149 §1). `pnpm test:leak` en local sigue corriendo los
+   tres en fila.
+
 6. **Desviación acotada de R-11/P-8:** `playwright.leak.config.ts` y
    `playwright.stress.config.ts` exportan por defecto el objeto de configuración
    que carga Playwright, siguiendo los cuatro `playwright*.config.ts`
