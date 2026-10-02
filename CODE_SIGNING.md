@@ -34,11 +34,14 @@ passed CI, and only when the tag matches the version in
 by an approver (below).
 
 The installer bundles open source components published by their own projects
-(the Electron runtime, the Tesseract OCR engine, ONNX Runtime and a
-BERT-based named-entity model), unmodified. Their licenses are OSI-approved:
-MIT, Apache-2.0 and AFL-3.0. The only third-party data file, a first-name
-lexicon under CC-BY-2.5-AR, is credited in [`NOTICE`](./NOTICE) and inside
-the app.
+(among them the Electron runtime, the Tesseract OCR engine, pdf.js, ONNX
+Runtime and a BERT-based named-entity model), unmodified. There is no
+proprietary code. The main components and their licenses are listed in
+[`NOTICE`](./NOTICE) and in the app's _Acerca de_ (About) dialog, and the full
+license texts of every bundled component ship inside the installer, in
+`resources/renderer/licenses/THIRD_PARTY_LICENSES.txt`. The only third-party
+data file, a first-name lexicon under CC-BY-2.5-AR, is credited in `NOTICE`
+and inside the app.
 
 macOS releases are not covered by this policy: they are ad-hoc signed and not
 notarized. See

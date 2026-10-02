@@ -18,13 +18,26 @@ ADR cuando llegue la aprobación (§5).
 Fuente de las condiciones: [signpath.org/terms](https://signpath.org/terms),
 consultada el 2026-09-26.
 
+> **Estado al 2026-10-02.** Todo lo que dependía del repositorio está hecho; falta lo que solo puede hacer el humano.
+>
+> | Punto de §2 | Estado |
+> |---|---|
+> | 1. 2FA en GitHub | **acción del humano**. No se pudo comprobar desde la línea de comandos |
+> | 2. `CODE_SIGNING.md` y `PRIVACY.md` en `main` | hecho: entraron con el merge de `hardening/plan-2026-09` (2026-10-01). Las correcciones del 2026-10-02 (selector único de ADR-195, créditos de ADR-196) viajan en `docs/reestructura-roadmap-v1` y tienen que llegar a `main` antes de postular |
+> | 3. Apagado de la búsqueda de actualizaciones | implementado (ADR-188, ADR-195) y verificado sobre el binario empaquetado de Windows (`Version_1.0.md` §3). Se publica con la 1.0.0 |
+> | 4. `FileDescription` | hecho: `description` de `apps/desktop-shell/package.json` pasó a «Anonly — anonimización local de documentos». Según el revisor, ese campo alimenta la descripción del **instalador** NSIS; el ejecutable de la aplicación toma la suya de `productName` (Anonly) |
+> | 5. `CODE_OF_CONDUCT.md` | no se agregó (opcional) |
+> | Licencias de los componentes distribuidos | hecho: ADR-196. `NOTICE` lista los componentes y el instalador lleva los textos completos |
+>
+> Lo que queda, en orden: llevar la branch a `main`, activar 2FA, y completar y enviar el formulario de §3 con el campo *Reputation*. Conviene postular con la 1.0.0 publicada o a punto de salir (§2, punto 3).
+
 ## 1. Requisitos y cumplimiento
 
 | Condición de SignPath | Cómo la cumple Anonly | Estado |
 |---|---|---|
 | Sin malware ni software no deseado | App de anonimización local; sin telemetría ni instaladores de terceros | ✔ |
 | Licencia OSI, sin doble licencia comercial | MIT (`LICENSE`) | ✔ |
-| Sin código propietario | Dependencias OSS. Del instalador: Electron (MIT), Tesseract/tesseract.js (Apache-2.0), ONNX Runtime (MIT), modelo NER `Davlan/bert-base-multilingual-cased-ner-hrl` (AFL-3.0, OSI) en su conversión ONNX de `Xenova`. Datos: léxico de nombres CC-BY-2.5-AR, acreditado en `NOTICE` | ✔ — la conversión `Xenova` no declara licencia propia; hereda la del original. Mencionarlo si lo preguntan |
+| Sin código propietario | Dependencias OSS. Del instalador: Electron (MIT), Tesseract/tesseract.js (Apache-2.0), ONNX Runtime (MIT), modelo NER `Davlan/bert-base-multilingual-cased-ner-hrl` (AFL-3.0, OSI) en su conversión ONNX de `Xenova`. Datos: léxico de nombres CC-BY-2.5-AR, acreditado en `NOTICE`. Lista completa y textos de licencia: ADR-196 | ✔ — la conversión `Xenova` no declara licencia propia; hereda la del original. Mencionarlo si lo preguntan |
 | Mantenido activamente | Historial de commits continuo | ✔ |
 | **Ya publicado en la forma que se firma** | `v0.9.2` en GitHub Releases, con `Anonly.Setup.0.9.2.exe` (NSIS) | ✔ — marcado *Pre-release* |
 | Funcionalidad documentada en la página de descarga | README y notas de cada release | ✔ |
