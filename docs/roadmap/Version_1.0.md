@@ -1,124 +1,134 @@
-<!-- CONTEXT: scope=roadmap-v1 | dependencias=roadmap/MVP.md,00_Project_Vision.md | audiencia=humanos+IA | fase=5 -->
+<!-- CONTEXT: scope=roadmap-v1 | dependencias=roadmap/Roadmap_1.x.md,roadmap/MVP.md,00_Project_Vision.md,architecture/07_Performance_Strategy.md,architecture/08_Security_Model.md,adr/ADR-130-El-Contenedor-De-Escritorio-Fija-El-Motor.md,adr/ADR-190-Una-Pagina-Con-Tinta-No-Sale-Vacia-En-Silencio.md,adr/ADR-192-El-Pico-Total-De-Memoria-Tiene-Un-Techo-Medido-Por-Perfil.md,adr/ADR-194-Automatico-Elige-El-Perfil-De-Rendimiento-Segun-El-Equipo.md,adr/ADR-196-Las-Licencias-Del-Software-De-Terceros-Viajan-Con-El-Instalador.md | audiencia=humanos+IA | fase=12 -->
 
-# Anonly — Roadmap v1.0
+# Anonly — Versión 1.0
 
-> Mejoras sobre el MVP. v1.0 no cambia la arquitectura; agrega features que el MVP dejó fuera y refina UX/perf.
+> **Reescrito el 2026-10-02.** La versión anterior de este documento definía
+> la 1.0 como una lista de funciones a construir sobre el MVP. El humano
+> decidió que **el estado actual de `main` es la 1.0**, y que todo lo
+> pendiente se desarrolla en versiones 1.x (`Roadmap_1.x.md`). Este documento
+> describe qué es la 1.0. La lista anterior quedó repartida: lo ya hecho
+> figura en §1, lo que sigue está en `Roadmap_1.x.md`, y lo que se descartó
+> está en §5.
 
-**Versión objetivo**: 1.0.0
-**Criterio**: cumple todas las métricas v1.0 (más exigentes que MVP) + features listadas.
+**Versión**: 1.0.0. Es la primera versión estable. Las anteriores (0.9.x)
+fueron pre-releases.
 
----
+## 1. Qué trae
 
-## 1. Objetivo v1.0
+- **Entrada**: PDF con texto y PDF escaneado. El escaneado se lee con OCR
+  local, que detecta la orientación de la página y avisa cuando una página
+  con tinta no se pudo leer (ADR-190).
+- **Detección**: patrones para datos argentinos (DNI, CUIT/CUIL, teléfono,
+  email, IBAN, tarjeta, fecha, matrícula, patente, carátula) y un modelo
+  local para personas, organizaciones, direcciones y fechas escritas.
+- **Agrupación**: todas las apariciones de un mismo dato son una sola
+  entidad. Fusión, división y resolución de conflictos.
+- **Reemplazo**: cuatro modos (marcador, valor sintético, máscara y tachado),
+  elegibles por documento, por tipo y por entidad. Marcadores por género,
+  abreviados cuando no entran, y repintado del renglón.
+- **Corrección a mano**: agregar una entidad escribiéndola o seleccionándola
+  sobre el documento, cambiarle el tipo, editar su reemplazo, eliminarla, y
+  deshacer y rehacer.
+- **Revisión**: un visor con el conmutador `Original | Anonimizado`, buscador,
+  zoom, y tema claro y oscuro.
+- **Export**: un PDF nuevo, hecho de imágenes, sin el texto ni los metadatos
+  del original. Hoja de referencia de marcadores opcional.
+- **Rendimiento**: cinco perfiles; Automático elige según el equipo
+  (ADR-194).
+- **Distribución**: instaladores de Windows y de macOS (universal) por GitHub
+  Releases, con actualización automática verificada con clave propia, que se
+  puede apagar.
+- **Local**: el documento no sale de la computadora. La única conexión es la
+  búsqueda de actualizaciones.
 
-Producto pulido para uso profesional diario. Mejor calidad de detección, mejor UX, mejor perf, soporte para más casos de uso sin cambiar el Core arquitecturalmente.
+Equipo mínimo: 8 GB de RAM (ADR-192).
 
----
+## 2. Mediciones
 
-## 2. Features v1.0
+Sobre `685c69b` (el `main` del 2026-10-01), en Windows nativo, con la
+aplicación empaquetada. Suite corrida el 2026-10-02.
 
-### 2.1 Detección
+| Qué | Resultado | Límite |
+|---|---|---|
+| PDF de 10 páginas con texto, de la importación a `Ready` | 1967 ms | 8000 ms |
+| PDF de 10 páginas escaneado | 5970 ms | 60000 ms |
+| E2E | 44 pasan, 0 fallan, 1 salteado (`t5-orientation-pixel`, marcado `skip`) | — |
+| Fugas (`test:leak`) | 3 de 3 | — |
+| Estrés (`test:stress`) | 3 de 3 | — |
+| Pico total de memoria, P1 (medido el 2026-10-01 sobre `ebd030d`) | 1596,8 MB | 2,0 GB |
+| Pico total de memoria, P2 (ídem) | 2894,2 MB | 3,0 GB |
 
-- **Patrones Regex custom del usuario**: UI para crear/editar/eliminar patrones con validación (regex válida + `EntityType` válido + test en vivo sobre una muestra). Persistencia en `localStorage`. Ver `core/Regex_Engine.md` §6 (`addPattern`/`removePattern`).
-- **Mejora de NER**: opción de usar WebGPU si está disponible (fallback WASM). Reducción de tiempo NER de 5–15 s a 1–3 s por página en dispositivos con WebGPU.
-- **Agregado de tipos de entidad custom**: el usuario puede definir `EntityType.Custom` con su propio label, formato mask y sintetizador.
+El margen de P2 es de 106 MB, menor que el ruido de esa medición (~345 MB,
+ADR-146 §7): una corrida futura puede dar «no cumple» sin que nada haya
+cambiado.
 
-### 2.2 Pipeline
+Los tiempos dependen del equipo y del perfil. Las suites de medición fijan el
+perfil Intermedio (ADR-194 §8).
 
-- **Pausa/reanudación parcial**: el usuario puede pausar el pipeline en cualquier etapa y reanudar. Estado del pipeline persistente en sesión (no en disco).
-- **Reprocesamiento selectivo**: tras editar un grupo, el usuario puede re-ejecutar NER solo en las páginas con miembros de ese grupo, para detectar entidades que la primera pasada no encontró.
-- **Batch encolado**: el usuario puede encolar varios PDFs y procesarlos secuencialmente (no paralelo, para respetar memoria).
+## 3. Verificación previa al tag
 
-### 2.3 UX
-
-- **Modo oscuro**: tokens de diseño con variantes dark/light. Respeto de `prefers-color-scheme`.
-- **Multi-idioma UI**: inglés y español. Sistema de i18n (probable `react-i18next` con ADR específico).
-- **Atajos de teclado completos**: panel de ayuda `Cmd/Ctrl+?` con lista.
-- **Tooltips enriquecidos**: en highlights del visor, mostrar valor original + modo + tipo + conteo de ocurrencias.
-- **Filtros avanzados en el árbol**: por tipo, por modo, por conflicto, por habilitado.
-- **Búsqueda con regex en el árbol**: además de texto literal.
-- **Historial de acciones (undo/redo)**: hasta 50 acciones, con `Cmd/Ctrl+Z` / `Cmd/Ctrl+Shift+Z`.
-
-### 2.4 Export
-
-- **Marca de agua opcional**: "Anonimizado por Anonly" configurable en `ExportOptions` (default off).
-- **Export a imágenes (PNG por página)**: además de PDF.
-- **Export con DPI configurable en UI** (150/300/600).
-- **Estimación de tamaño pre-export más precisa**.
-
-### 2.5 Performance
-
-- **WebGPU para NER** cuando esté disponible.
-- ~~**SharedArrayBuffer para NER**~~ — **hecho en el producto de escritorio**: ONNX Runtime carga su variante WASM multihilo bajo `crossOriginIsolated` (ADR-100/130/132). Es independiente de tener más de un worker NER.
-- **Cache más agresiva**: snapshots de `EntityGroup[]` por `documentId` en sesión para reabrir rápido.
-- **Bundle inicial < 600 KB gz** (optimización de deps).
-
-### 2.6 Accesibilidad
-
-- Auditoría WCAG 2.1 AA completa.
-- Soporte para screen readers refinado ( VoiceOver, NVDA).
-- Navegación por teclado 100% (sin necesidad de mouse).
-
-### 2.7 PWA — ~~en alcance~~ **FUERA DE ALCANCE (ADR-130)**
-
-El 1.0 se entrega como **aplicación de escritorio empaquetada**, no como PWA, y el escritorio **reemplaza** al cliente web en vez de convivir con él.
-
-La PWA resolvía el modo offline, pero no los dos problemas que motivaron el cambio: (a) sigue necesitando una URL, y la promesa "100% local" es también perceptiva —ver ADR-130 §1—; (b) el motor de render lo sigue decidiendo el navegador desde el que se instala, que es de donde vino el bug de Safari de `polyfills.ts`. Y su modo offline es frágil: los ~202 MB viven en Cache Storage, que el navegador desaloja bajo presión de disco.
-
-Lo que la PWA prometía lo cubre el instalador, mejor: los assets viajan adentro del paquete (ADR-130) y las actualizaciones son automáticas (ADR-131).
-
-> **Si esto se reflota**, hay una cosa que hay que volver a prender: `ner-engine` tiene `env.useBrowserCache = false` desde ADR-132 §7, o sea que **no cachea el modelo**. En escritorio da igual —el modelo es un archivo local del instalador— pero en la web eso significa **re-descargar ~180 MB en cada visita**, y sin modo offline. No falla ni avisa: simplemente vuelve a bajar todo. La constante está en `configureTransformersEnv()` (`packages/anonymization-core/ner-engine/src/worker/kernel.ts`) y el razonamiento en `core/NER_Engine.md` §12.
-
-- ~~**Installable como PWA**: service worker para offline (assets estáticos cacheados).~~
-- ~~**Modo offline real**: tras primera carga, la app funciona sin red (modelos y wasm ya cacheados).~~
-
----
-
-## 3. Métricas v1.0 (más exigentes que MVP)
-
-| Métrica | Target v1.0 |
+| Qué | Estado |
 |---|---|
-| PDF 10p texto | < 5 s |
-| PDF 10p escaneado | < 40 s |
-| Pico memoria 50p (M1, ADR-146) | < 320 MB |
-| Pico total (M2, ADR-192) | bajar los techos del MVP (P1 2,0 GB, P2 3,0 GB) y revisar el equipo mínimo de 8 GB, para soportar equipos más chicos. El número se fija con mediciones, en el ADR que lo decida |
-| Bundle inicial | < 600 KB gz |
-| Recall NER | ≥ 88% |
-| Precision NER | ≥ 92% |
-| Delta render 1 grupo | < 100 ms |
-| First preview | < 1 s |
+| Suite pesada sobre el `HEAD` final, en Windows | hecha el 2026-10-02 (§2) |
+| La RAM del equipo llega a la aplicación en Windows (`window.anonlyDevice`) | verificado por el humano el 2026-10-02: Automático resuelve Ultra en su equipo |
+| Un PDF protegido pide la contraseña después de recrear el Core | verificado el 2026-10-02 sobre el binario empaquetado de Windows (`win-unpacked`), cambiando el perfil antes de cargar `protected.pdf` |
+| ADR-188/195: con «No buscar», la aplicación no se conecta al abrir | verificado el 2026-10-02 sobre el mismo binario, leyendo el registro de red de Chromium: por defecto consulta a `github.com`; con «No buscar» no hay ninguna conexión; «Buscar actualizaciones ahora» sí consulta |
+| Lo mismo en macOS | **sin verificar** |
+| Corrida de prueba de `release.yml` por `workflow_dispatch` | **pendiente**. La última es del 2026-09-09 y el workflow cambió después (sourcemaps) |
+| Créditos de licencias del software distribuido (ADR-196) | en implementación |
 
----
+Las dos comprobaciones sobre el binario se hicieron con un script que maneja
+la aplicación empaquetada por el puerto de depuración. No se hicieron sobre
+la aplicación ya instalada con el instalador NSIS.
 
-## 4. ADRs nuevos esperados en v1.0
+## 4. Limitaciones conocidas
 
-> Sin número reservado: la numeración se asigna al crear cada ADR, tomando el siguiente número libre en `docs/adr/`. Reservar números en roadmaps generó colisiones (los "ADR-013/014" reservados acá fueron tomados por decisiones reales del Hito 2).
+Van en las notas de la versión. Cada una tiene su lugar en `Roadmap_1.x.md`.
 
-- WebGPU NER — backend WebGPU con fallback WASM.
-- i18n — decisión de `react-i18next` u otra lib.
-- PWA Offline — service worker + COOP/COEP.
-- Undo/Redo — estrategia de historial de acciones.
-- Custom Entity Types — extensibilidad de tipos.
+- **Página escasa y girada.** En una página escaneada con muy poco texto, la
+  orientación se puede detectar mal y leerse basura con confianza alta: esa
+  página se exporta sin tapar y sin aviso. No apareció en el corpus medido.
+  Riesgo aceptado (ADR-190).
+- **Emails en escaneos de baja resolución.** Leyendo a menos de 300 dpi se
+  pierden emails. Un escaneo de unos 200 dpi se lee a esa resolución
+  (ADR-163). Causa sin investigar.
+- **Direcciones.** En la línea de base de calidad, las cuatro direcciones del
+  conjunto de referencia no se detectan.
+- **Nombres en formas poco comunes.** El modelo puede no reconocer un nombre
+  en mayúsculas o con el apellido primero. La red de contención es el
+  agregado manual.
+- **El número de expediente judicial** no tiene patrón.
+- **Nada verifica de forma automática el PDF exportado.** El gate que lo lee
+  con OCR (ADR-148) está decidido y sin implementar.
+- **Primera instalación en Windows**: sin firma Authenticode, Windows muestra
+  SmartScreen y un editor no verificado. La postulación a SignPath está
+  preparada y sin enviar.
+- **macOS**: la aplicación no está notarizada. Gatekeeper la bloquea la
+  primera vez. Riesgo aceptado (`08_Security_Model.md` §2.3).
+- **Memoria**: 8 GB como mínimo. El techo del perfil Bajo es provisorio.
+- **Accesibilidad**: sin auditar. El árbol de entidades tiene varios puntos
+  de tabulación por fila.
+- **Idioma**: la interfaz está solo en español.
 
----
+## 5. Lo que estaba previsto para la 1.0 y no se hace
 
-## 5. Hitos v1.0
+| Ítem | Decisión (humano, 2026-10-02) |
+|---|---|
+| PWA y modo offline | fuera de alcance desde ADR-130: el instalador lo reemplaza |
+| Export a imágenes PNG | descartado |
+| Marca de agua «Anonimizado por Anonly» | descartada |
+| Recall y precisión de NER como gate de release | no se exige para la 1.0; va en la 1.2 (`Roadmap_1.x.md` §5) |
 
-1. Patrones Regex custom + UI.
-2. Modo oscuro + tokens.
-3. Multi-idioma.
-4. WebGPU NER (con fallback).
-5. Pausa/reanudación.
-6. Undo/redo.
-7. PWA + offline.
-8. Export a imágenes + marca de agua.
-9. Auditoría accesibilidad.
-10. Hardening + release 1.0.0.
+## 6. Cómo se publica
 
----
+`RELEASING.md`. Para pasar de `0.9.2` a `1.0.0` hace falta un changeset de
+tipo `major`; el único pendiente hoy es `minor`.
 
-## 6. Referencias
+Quien instaló la 0.9.2 recibe la 1.0.0 desde la aplicación, sin reinstalar:
+ver `Roadmap_1.x.md` §2.
 
-- `roadmap/MVP.md` (qué se construye primero)
-- `roadmap/Version_2.0.md` (qué sigue)
-- `00_Project_Vision.md` §6 (alcance/no-alcance)
+## 7. Referencias
+
+- `roadmap/Roadmap_1.x.md`: qué sigue.
+- `roadmap/MVP.md`: cómo se llegó hasta acá. Registro histórico.
+- `roadmap/Version_2.0.md` y `roadmap/Future_Ideas.md`.

@@ -8,7 +8,7 @@
 
 ## 1. Objetivo
 
-Construir **Anonly**, una plataforma de **anonimización documental** que opera **100% en el cliente del usuario**, sin enviar jamás el contenido de los documentos a ningún servidor. El producto detecta, agrupa y reemplaza información personal y sensible dentro de un PDF, y produce un **PDF completamente nuevo** donde la información original no puede ser recuperada ni por inspección del archivo resultante.
+Construir **Anonly**, una plataforma de **anonimización documental** que opera **100% en la computadora del usuario**, como aplicación de escritorio (ADR-130), sin enviar jamás el contenido de los documentos a ningún servidor. El producto detecta, agrupa y reemplaza información personal y sensible dentro de un PDF, y produce un **PDF completamente nuevo** donde la información original no puede ser recuperada ni por inspección del archivo resultante.
 
 La unidad mínima de operación es el **grupo de ocurrencias**: todas las apariciones de un mismo dato sensible se tratan como una sola entidad de reemplazo. No se anonimiza ocurrencia por ocurrencia.
 
@@ -18,7 +18,7 @@ La unidad mínima de operación es el **grupo de ocurrencias**: todas las aparic
 
 | Principio | Implicación |
 |---|---|
-| **Local-first** | El procesamiento ocurre en el dispositivo del usuario. Ningún byte del documento sale del navegador. |
+| **Local-first** | El procesamiento ocurre en el dispositivo del usuario. Ningún byte del documento sale de la computadora. |
 | **Core desacoplado del cliente** | React es solo un cliente. El `anonymization-core` no conoce React ni ningún framework de UI. |
 | **Reconstrucción, no parche** | El PDF exportado se regenera desde cero (Canvas + pdf-lib). Nunca se redacta in-place sobre el original. |
 | **Agrupación obligatoria** | Toda operación de reemplazo se define a nivel de grupo, nunca de ocurrencia individual. |
@@ -40,7 +40,7 @@ Las soluciones existentes presentan una o más de estas limitaciones:
 - **Sin agrupación**: anonimizan cada aparición por separado, generando inconsistencias (un mismo DNI aparece como tres valores distintos).
 - **Sin vista previa del resultado**: el usuario no puede comparar el original y el resultado antes de exportar.
 
-Anonly resuelve todo esto en una sola herramienta web, local y con agrupación por defecto.
+Anonly resuelve todo esto en una sola aplicación de escritorio, local y con agrupación por defecto.
 
 ---
 
@@ -83,12 +83,12 @@ No es público objetivo: anonimización en volumen masivo (millones de documento
 - Panel de entidades agrupadas por tipo, con checkbox y contador de ocurrencias.
 - Panel de reglas a nivel grupo / tipo / global.
 - Exportación a **PDF nuevo** reconstruido (no redacción in-place).
-- Procesamiento 100% local en el navegador mediante Web Workers.
+- Procesamiento 100% local, dentro de la aplicación de escritorio, mediante Web Workers (ADR-130).
 - Soporte de cancelación en cualquier etapa del pipeline.
 
 ### 6.2 Fuera de alcance (MVP y v1.0)
 
-- Formatos distintos a PDF (Word, imágenes, Excel) — previstos para v2.0.
+- Formatos distintos a PDF (Word, imágenes, Excel, PowerPoint) — previstos para la 1.3 (`roadmap/Roadmap_1.x.md` §6).
 - Backend de procesamiento. No existe. Los datos no salen del dispositivo.
 - Persistencia de documentos en servidor. No se almacena nada remotamente.
 - Cuentas de usuario, autenticación ni multi-tenant en el MVP.
@@ -166,4 +166,6 @@ de reglas aparte. El detalle de `UX_Guidelines.md` y `ui/Components.md` define e
 | `adr/ADR-002-No-Backend.md` | Por qué no hay backend. |
 | `adr/ADR-011-Grouping-First.md` | Por qué la agrupación es obligatoria. |
 | `adr/ADR-012-Replacement-Modes.md` | Por qué hay 4 modos de reemplazo. |
-| `roadmap/MVP.md` | Qué entra exactamente en el primer release. |
+| `roadmap/Version_1.0.md` | Qué es la versión 1.0: qué trae, mediciones y limitaciones conocidas. |
+| `roadmap/Roadmap_1.x.md` | Qué sigue después de la 1.0 y en qué orden. |
+| `roadmap/MVP.md` | Registro histórico de cómo se llegó a la 1.0. |

@@ -710,6 +710,8 @@ Hallazgos de la revisión de ADR-194 que quedaron corregidos en el lote:
 - Un cambio de perfil con un documento abierto regía recién al reiniciar la
   aplicación, no «al próximo documento».
 
+> **Actualización del 2026-10-02.** Los dos primeros puntos quedaron verificados en Windows, y ADR-188/195 también: detalle en `Version_1.0.md` §3. El tercero sigue sin correr.
+
 Sin verificar en la aplicación empaquetada, al cierre de este registro:
 
 - que `window.anonlyDevice` llegue en Windows (se comprobó en macOS);
