@@ -1,47 +1,36 @@
 # Changelog
 
-Todos los cambios notables de este proyecto se documentan en este archivo por paquete.
+Anonly se versiona como **un solo producto**: todos los paquetes `@anonly/*` se mueven juntos (`fixed` en `.changeset/config.json`), y la versión que manda es la de `apps/desktop-shell/package.json`. Cómo se publica: [`RELEASING.md`](./RELEASING.md).
 
-El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/) y el versionado [Semantic Versioning](https://semver.org/lang/es/).
+El versionado sigue [Semantic Versioning](https://semver.org/lang/es/).
 
-Los cambios se generan automáticamente vía [Changesets](./.changeset/README.md) a partir de los Conventional Commits del repo.
+Este archivo es un índice. Los cambios de cada versión no se escriben a mano acá: los genera [Changesets](./.changeset/README.md) en el `CHANGELOG.md` de cada paquete al correr `pnpm version`.
 
----
+## Dónde leer qué cambió
 
-## Paquetes
+- **Para un usuario**: las notas de cada versión en [GitHub Releases](https://github.com/sgiambelluca/Anonly/releases).
+- **Por paquete**:
 
-| Paquete                      | Descripción                                   | Primera versión |
-| ---------------------------- | --------------------------------------------- | --------------- |
-| `@anonly/shared`             | Tipos, contratos, error codes del Core        | 0.1.0           |
-| `@anonly/event-system`       | Event Bus tipado propio                       | 0.1.0           |
-| `@anonly/pdf-engine`         | Extracción de PDF                             | 0.1.0           |
-| `@anonly/ocr-engine`         | OCR con Tesseract.js                          | 0.1.0           |
-| `@anonly/regex-engine`       | Patrones determinísticos AR                   | 0.1.0           |
-| `@anonly/ner-engine`         | NER local con Transformers.js + ONNX          | 0.1.0           |
-| `@anonly/grouping-engine`    | Agrupación, conflictos, reglas                | 0.1.0           |
-| `@anonly/render-engine`      | Render + preview                              | 0.1.0           |
-| `@anonly/export-engine`      | Reconstrucción PDF nuevo                      | 0.1.0           |
-| `@anonly/anonymization-core` | API pública del Core (composición de engines) | 0.1.0           |
-| `@anonly/react-client`       | App web (no publicable a npm)                 | –               |
+| Paquete                      | Qué es                                            | Changelog                                                                                                |
+| ---------------------------- | ------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `@anonly/desktop-shell`      | Contenedor de escritorio (Electron) y actualizador | [`apps/desktop-shell/CHANGELOG.md`](./apps/desktop-shell/CHANGELOG.md)                                   |
+| `@anonly/react-client`       | La interfaz que carga el contenedor               | [`apps/react-client/CHANGELOG.md`](./apps/react-client/CHANGELOG.md)                                     |
+| `@anonly/anonymization-core` | Façade y Orchestrator del Core                    | [`packages/anonymization-core/CHANGELOG.md`](./packages/anonymization-core/CHANGELOG.md)                 |
+| `@anonly/shared`             | Tipos, contratos y error codes                    | [`shared/CHANGELOG.md`](./packages/anonymization-core/shared/CHANGELOG.md)                               |
+| `@anonly/event-system`       | Event Bus tipado                                  | [`event-system/CHANGELOG.md`](./packages/anonymization-core/event-system/CHANGELOG.md)                   |
+| `@anonly/pdf-engine`         | Extracción de PDF                                 | [`pdf-engine/CHANGELOG.md`](./packages/anonymization-core/pdf-engine/CHANGELOG.md)                       |
+| `@anonly/ocr-engine`         | OCR con Tesseract.js                              | [`ocr-engine/CHANGELOG.md`](./packages/anonymization-core/ocr-engine/CHANGELOG.md)                       |
+| `@anonly/regex-engine`       | Patrones determinísticos                          | [`regex-engine/CHANGELOG.md`](./packages/anonymization-core/regex-engine/CHANGELOG.md)                   |
+| `@anonly/ner-engine`         | NER local con Transformers.js + ONNX              | [`ner-engine/CHANGELOG.md`](./packages/anonymization-core/ner-engine/CHANGELOG.md)                       |
+| `@anonly/grouping-engine`    | Agrupación, conflictos y reglas                   | [`grouping-engine/CHANGELOG.md`](./packages/anonymization-core/grouping-engine/CHANGELOG.md)             |
+| `@anonly/render-engine`      | Render y vista previa                             | [`render-engine/CHANGELOG.md`](./packages/anonymization-core/render-engine/CHANGELOG.md)                 |
+| `@anonly/export-engine`      | Reconstrucción del PDF nuevo                      | [`export-engine/CHANGELOG.md`](./packages/anonymization-core/export-engine/CHANGELOG.md)                 |
 
----
+## Versiones publicadas
 
-## [Unreleased]
+| Versión | Fecha      | Notas                                                                |
+| ------- | ---------- | -------------------------------------------------------------------- |
+| 0.9.2   | 2026-09-05 | Pre-release. Instalador universal de macOS y un único appcast.       |
+| 0.9.1   | 2026-09-05 | El release no llegó a publicarse: el workflow falló en el empaquetado. |
 
-### Added
-
-- Hito 1 — Fundación del monorepo: pnpm workspaces, tsconfig base, ESLint, Prettier, Vitest, Playwright.
-- CI con GitHub Actions: gates de lint, typecheck, tests, audit.
-- Commitlint con Conventional Commits.
-- Changesets para versionado semver + CHANGELOG automático.
-- Estructura de directorios `apps/` y `packages/anonymization-core/`.
-- Hito 2 — `@anonly/pdf-engine` (PRs #6, #7): ejecución inline en host thread con `pdfjs-dist`. Implementa `IEngine` con `process`, `fuseOcrPage`, `dispose`; emite `PAGE_PARSED`, `DOCUMENT_PARSED`, `PDF_PASSWORD_REQUIRED`, `PDF_INVALID`; errores `PdfPasswordRequiredError`, `PdfInvalidError`, `PdfCorruptedError`, `PdfTimeoutError`; configuración `PdfEngineConfig.maxPageCount` integrada en `EngineConfig.pdf`. Tests: `contract.test.ts`, `unit.test.ts`, `edge.test.ts`, `snapshot.test.ts`. Pendiente: migración a `PdfPool` (Hito 9) y tests stress/cancel (Hito 11).
-
-### Changed
-
-- `@anonly/shared`: `EngineConfig` ahora incluye `readonly pdf: PdfEngineConfig` (requerido por ADR-013). Source of truth de `PdfEngineConfig` movida a `core/Contracts.md` §6.
-
-### Notes
-
-- Las versiones `0.x.y` son pre-release del MVP. Cambios `minor` pueden ser breaking sin bump `major` hasta `1.0.0` (convención SemVer pre-1.0).
-- Las features del MVP se documentarán acá a medida que se implementen los hitos 2–12 de `docs/roadmap/MVP.md`.
+Ningún paquete se publica a npm.

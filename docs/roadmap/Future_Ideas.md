@@ -2,6 +2,8 @@
 
 # Anonly — Future Ideas
 
+> **Nota del 2026-10-02.** Varias ideas de este documento ya tienen lugar: las que entraron a la línea 1.x están en `Roadmap_1.x.md` (incluidas las «por decidir» de su §8) y las de la 2.0 en `Version_2.0.md`. Las guías de cumplimiento (§3.1) siguen acá, como idea futura, por decisión del humano.
+
 > Ideas a largo plazo, sin compromiso de versión. Requieren investigación, ADRs propios y validación de producto. Algunas pueden descartarse al evaluarlas.
 
 ---
@@ -55,6 +57,8 @@ La segunda fuente que ADR-060 §9 había previsto ([Gender by Name — UCI](http
 
 ### 1.6 Créditos de las licencias de código del stack
 
+> **Cerrado por ADR-196 (2026-10-02)**, con un límite aceptado: las librerías nativas dentro de `tesseract.js-core` (ADR-196 §2quinquies). El texto de abajo se conserva como registro.
+
 **Deuda conocida, anotada al construir la superficie de créditos (ADR-070, Contexto §4), no descubierta después.**
 
 ADR-070 resolvió la atribución de **datos** de terceros —hoy una sola entrada, el léxico de género— con la sección "Acerca de" del `SettingsDialog` y `thirdPartyCredits.ts` como módulo de datos. Lo que **no** cubrió: las licencias del código que la app ya distribuye. `pdf.js`, Tesseract y `onnxruntime-web` son Apache-2.0, que exige propagar el `NOTICE` del proyecto original; Radix y el resto del stack, MIT, que exige conservar el aviso de copyright.
@@ -87,6 +91,8 @@ Servicio server-side para batch masivo (millones de documentos), dirigido a empr
 Procesar PDFs abiertos en VS Code sin salir del editor.
 
 ### 2.5 Migración Electron → Tauri después del hardening
+
+> **Ubicada en la 2.0 por el humano el 2026-10-02** (`Version_2.0.md` §1.1).
 
 **Intención del humano registrada el 2026-09-14:** migrar el contenedor de
 escritorio a Tauri una vez terminada la campaña actual de hardening, buscando
@@ -202,6 +208,8 @@ que no persigue los dos.
 
 ### 3.2 Auditoría
 
+> **2026-10-02.** El humano descartó el registro de auditoría. El reporte de anonimización se considera cubierto por la hoja de referencia de marcadores (ADR-059).
+
 - **Audit log**: registro inmutable de acciones del usuario (qué grupo editó, qué modo aplicó, qué exportó). Sin datos del documento, solo metadatos. Persistencia opcional en `localStorage`.
 - **Reporte de anonimización**: PDF adjunto al export con resumen de qué se anonimizó (tipo, conteo, modo aplicado). Útil para compliance.
 
@@ -225,6 +233,8 @@ Si alguna vez hace falta —reproducir una entrega concreta para una auditoría,
 Co-edición de reglas y grupos entre varios usuarios sobre el mismo documento. Requiere signaling server (WebRTC) pero el documento sigue sin salir del dispositivo de cada usuario (cada uno lo procesa local y solo se sincronizan las decisiones). Riesgo: complejidad alta, valor de producto medio.
 
 ### 4.2 Compartir plantillas
+
+> **Plantillas de reglas (2026-10-02).** Antes de compartirlas hay que tenerlas: guardar una configuración de reemplazo (qué modo por tipo, qué patrones) y reutilizarla en otros documentos. Estaba en la 2.0; el humano la dejó como idea posible, sin versión asignada.
 
 Marketplace opcional de plantillas de reglas (ej. "Plantilla legal AR", "Plantilla médica HIPAA"). Sin datos del usuario, solo configuración.
 
@@ -257,6 +267,8 @@ Cuando se retome, el candidato natural es reusar el mismo Levenshtein normalizad
 Buscar texto en el PDF anonimizado (sobre la imagen, con OCR en vivo) para validar que un dato específico fue reemplazado.
 
 ### 5.3 Modo "validar muestra"
+
+> **Ubicado en la 1.0.x el 2026-10-02** (`Roadmap_1.x.md` §3).
 
 Tras exportar, cargar el PDF resultante de vuelta y verificar que ningún valor original aparece (auto-validación post-export).
 

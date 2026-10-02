@@ -315,15 +315,18 @@ El léxico de género usado para inferir `personGender` sobre entidades `Person`
 
 ## Roadmap
 
-Vive en [`docs/roadmap/`](./docs/roadmap). El punto de entrada es [`MVP.md`](./docs/roadmap/MVP.md): su §4 lleva el estado real de los hitos, hito por hito, y es la fuente de verdad sobre qué está cerrado y qué sigue.
+Vive en [`docs/roadmap/`](./docs/roadmap):
 
-Ahí mismo están los alcances de las versiones posteriores (`Version_1.0.md`, `Version_2.0.md`, `Future_Ideas.md`) y los documentos de trabajo vivos: informes de campo, inventarios de deuda y listas de pendientes abiertos con su motivo.
+- [`Version_1.0.md`](./docs/roadmap/Version_1.0.md): qué es la versión 1.0, con sus mediciones y sus limitaciones conocidas.
+- [`Roadmap_1.x.md`](./docs/roadmap/Roadmap_1.x.md): qué sigue y en qué orden. Es la fuente de verdad sobre lo que viene.
+- [`Version_2.0.md`](./docs/roadmap/Version_2.0.md) y [`Future_Ideas.md`](./docs/roadmap/Future_Ideas.md): lo que queda más lejos.
+- [`MVP.md`](./docs/roadmap/MVP.md): el registro histórico de cómo se llegó a la 1.0, hito por hito.
+
+En la misma carpeta están los documentos de trabajo: informes de campo, mediciones, inventarios de deuda y listas de pendientes con su motivo.
 
 ## Estado
 
-**En desarrollo (MVP)**, en el Hito 11 (hardening). Los siete motores del Core, el Orchestrator y el cliente React están implementados y con tests; los hitos anteriores están cerrados, cada uno con lo que dejó abierto **a propósito** anotado en su propia sección.
-
-El estado real, hito por hito, está en [`docs/roadmap/MVP.md`](./docs/roadmap/MVP.md) §4 — y esa es la fuente de verdad, no este README, que se desactualiza más rápido.
+**Versión 1.0 en preparación.** La última versión publicada es la 0.9.2, una pre-release. El estado de `main` es el que se va a publicar como 1.0: qué trae y qué limitaciones conocidas tiene está en [`docs/roadmap/Version_1.0.md`](./docs/roadmap/Version_1.0.md), y lo que sigue en [`docs/roadmap/Roadmap_1.x.md`](./docs/roadmap/Roadmap_1.x.md). Esos dos documentos son la fuente de verdad, no este README, que se desactualiza más rápido.
 
 ## Contribuir
 

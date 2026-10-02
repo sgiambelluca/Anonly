@@ -17,8 +17,9 @@ Aplicación de escritorio (Electron, ADR-130) de anonimización documental **100
 
 Dónde está el estado real:
 
-- Avance por hito: `docs/roadmap/MVP.md` §4.
-- Mientras la branch `hardening/plan-2026-09` no esté en `main`, su revisión por rondas se lleva en `docs/roadmap/Revision_Por_Bloques_Hardening.md`, que es plan y registro a la vez.
+- Qué es la 1.0, con sus mediciones y limitaciones conocidas: `docs/roadmap/Version_1.0.md`.
+- Qué sigue y en qué orden: `docs/roadmap/Roadmap_1.x.md`. Es el documento que manda para planificar.
+- Cómo se llegó hasta la 1.0, hito por hito: `docs/roadmap/MVP.md` §4 y `docs/roadmap/Revision_Por_Bloques_Hardening.md`. Son registro histórico.
 - Mediciones: `docs/roadmap/mediciones/<motor>/`. Cómo correr los arneses: `tests/perf/README.md`.
 
 ## Reglas duras (violarlas = PR rechazado)
