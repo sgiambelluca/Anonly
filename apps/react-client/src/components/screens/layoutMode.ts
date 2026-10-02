@@ -7,7 +7,7 @@
  * lo retiró —con razón: con un solo visor no hay dos paneles que alternar— y
  * no lo reemplazó por nada, así que el panel de trabajo quedó siendo una barra
  * lateral de ancho fijo más el visor, sin ningún breakpoint
- * (`roadmap/Post_Hito10.8_Pendientes.md` §19).
+ * (`roadmap/hitos/Post_Hito10.8_Pendientes.md` §19).
  *
  * El mecanismo del defecto es una sola regla de `App.tsx`:
  * `w-1/3 min-w-[340px]`. Por debajo de ~1020 px el tercio cae por debajo del

@@ -24,7 +24,7 @@
  * roving tabindex es sobre los `treeitem`, no sobre toda la fila: cada fila
  * tiene además su casilla, su selector de modo, su género y su menú, con tab
  * stop propio — desvío conocido del patrón WAI-ARIA de tree, anotado en
- * `roadmap/Post_Hito10.8_Pendientes.md` §22 con `treegrid` como destino.
+ * `roadmap/hitos/Post_Hito10.8_Pendientes.md` §22 con `treegrid` como destino.
  *
  * Dos reglas que arreglan bugs medidos:
  *
