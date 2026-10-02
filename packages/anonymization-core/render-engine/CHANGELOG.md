@@ -1,5 +1,11 @@
 # @anonly/render-engine
 
+## 1.0.1
+
+### Patch Changes
+
+- @anonly/shared@1.0.1
+
 ## 1.0.0
 
 ### Patch Changes

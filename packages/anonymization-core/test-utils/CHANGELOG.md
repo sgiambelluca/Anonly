@@ -1,5 +1,12 @@
 # @anonly/test-utils
 
+## 1.0.1
+
+### Patch Changes
+
+- @anonly/event-system@1.0.1
+- @anonly/shared@1.0.1
+
 ## 1.0.0
 
 ### Patch Changes
