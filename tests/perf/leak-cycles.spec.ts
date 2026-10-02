@@ -1,5 +1,5 @@
 /**
- * T-9 (`docs/roadmap/Ciclos_Y_Documentos_Reales_Plan.md` §2): diez open/close en
+ * T-9 (`docs/roadmap/memoria/Ciclos_Y_Documentos_Reales_Plan.md` §2): diez open/close en
  * una sola instancia de Electron — el perfil P3 de ADR-146 §4.
  *
  * **No es el gate `test:leak`**: no afirma umbrales de memoria. Mide, escribe el

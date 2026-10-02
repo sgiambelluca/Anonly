@@ -1,5 +1,5 @@
 /**
- * Pre-vuelo de T-8 (`docs/roadmap/AB_Intercalado_Plan.md` §4.1): demuestra que
+ * Pre-vuelo de T-8 (`docs/roadmap/rendimiento/AB_Intercalado_Plan.md` §4.1): demuestra que
  * el brazo que el script dice estar corriendo es el que realmente está corriendo.
  *
  * Hace falta porque la campaña intercambia el `dist` ya construido en vez de

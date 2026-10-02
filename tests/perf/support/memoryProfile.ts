@@ -55,7 +55,7 @@ const OUT_DIR = resolve(HERE, "../../../.measure");
 export const SAMPLE_INTERVAL_MS = 150;
 /** Gracia tras `PIPELINE_READY` antes de tomar el pico (ADR-146 §15.3 punto 8: el seed/precalentado de ADR-151 sigue corriendo un instante más). */
 /**
- * Exportado desde T-7 (`docs/roadmap/Perfilado_Base_Caliente_Plan.md`):
+ * Exportado desde T-7 (`docs/roadmap/rendimiento/Perfilado_Base_Caliente_Plan.md`):
  * `support/hotBaselineCurve.ts` reusa esta misma gracia post-`Ready`, en vez
  * de un valor propio que pudiera divergir de la corrida estándar.
  */
@@ -1182,7 +1182,7 @@ export interface ProfileReport {
  * — no se descarta, pero queda marcada.
  */
 /**
- * Exportada para T-7 (`docs/roadmap/Perfilado_Base_Caliente_Plan.md`): la
+ * Exportada para T-7 (`docs/roadmap/rendimiento/Perfilado_Base_Caliente_Plan.md`): la
  * curva extendida de liberación reusa **esta misma función**, sin
  * reimplementarla, para que `standardBaselineBytes` comparta
  * exactamente la definición de `RunReport.baselineBytes` — incluido el techo

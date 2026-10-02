@@ -1,6 +1,6 @@
 /**
  * `support/imageDataProfile.ts` — tipado, colector y agregador del perfilado
- * de ImageData (`docs/roadmap/ImageData_Perfilado_Handoff.md` §2). El
+ * de ImageData (`docs/roadmap/memoria/ImageData_Perfilado_Handoff.md` §2). El
  * instrumento que PRODUCE los registros crudos vive en un patch descartable
  * sobre `ocr-engine/src/worker/kernel.ts` + `ocr.engine.ts`
  * (`instrument.patch`, nunca commiteado); este módulo es la única pieza

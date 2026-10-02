@@ -1,6 +1,6 @@
 /**
  * `support/hotBaselineCurve.ts` — instrumento de T-7
- * (`docs/roadmap/Perfilado_Base_Caliente_Plan.md`): de qué está hecha la
+ * (`docs/roadmap/rendimiento/Perfilado_Base_Caliente_Plan.md`): de qué está hecha la
  * base caliente que `memory.spec.ts`/`memory-attribution.spec.ts` ya miden.
  *
  * No reemplaza ni redefine `RunReport.baselineBytes` (`support/memoryProfile.ts`):

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -uo pipefail
 # T-12 — configurar el modelo de NER sin cambiarlo
-# (docs/roadmap/Ciclos_Y_Documentos_Reales_Plan.md §4bis).
+# (docs/roadmap/memoria/Ciclos_Y_Documentos_Reales_Plan.md §4bis).
 #
 # Mismo mecanismo que run-ab-intercalado.sh (T-8): cada brazo es un parche de
 # una línea, se construye una vez, y entre corrida y corrida se intercambia el

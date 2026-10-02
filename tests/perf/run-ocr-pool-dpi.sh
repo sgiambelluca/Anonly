@@ -3,7 +3,7 @@ set -uo pipefail
 export LC_ALL=C LANG=C
 
 # Fase 2 (tiempo y memoria) de la campaña de DPI descendente:
-# docs/roadmap/OCR_DPI_Descendente_Campana_Plan.md §5.2. Es la fase `ultra` de run-ocr-pool.sh con una
+# docs/roadmap/ocr/OCR_DPI_Descendente_Campana_Plan.md §5.2. Es la fase `ultra` de run-ocr-pool.sh con una
 # dimensión de DPI (`ANONLY_OCR_POOL_PHASE=ultra-dpi ./tests/perf/run-ocr-pool.sh` llega acá). La fase
 # `ultra` y las demás no cambian. Corre en Windows nativo (Git Bash), el banco que decide; en macOS
 # solo sirve de humo. Una instancia fría por corrida, serial.

@@ -1,5 +1,5 @@
 /**
- * Corpus de la campaña de DPI descendente (docs/roadmap/OCR_DPI_Descendente_Campana_Plan.md §4).
+ * Corpus de la campaña de DPI descendente (docs/roadmap/ocr/OCR_DPI_Descendente_Campana_Plan.md §4).
  *
  * Los sintéticos se arman en Node con pdf-lib (texto vectorial, Helvetica) y llevan su verdad: el
  * texto de cada renglón y las entidades con su tipo, su valor y la caja del renglón en puntos. El

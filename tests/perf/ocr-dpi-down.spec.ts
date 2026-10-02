@@ -1,6 +1,6 @@
 /**
  * Fase 1 (calidad) de la campaña de DPI descendente
- * (docs/roadmap/OCR_DPI_Descendente_Campana_Plan.md §5.1). Opt-in: la lanza
+ * (docs/roadmap/ocr/OCR_DPI_Descendente_Campana_Plan.md §5.1). Opt-in: la lanza
  * `run-ocr-dpi-down.sh`. Una instancia fría de Electron por celda (corpus x brazo de DPI), un
  * reconocedor, NER activado. Los datos de los corpus reales no salen de este proceso: los
  * registros llevan conteos por tipo, distribuciones y huellas, nunca texto ni valores.

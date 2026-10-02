@@ -51,7 +51,7 @@ import { getOrGenerateScannedFixture } from "./support/scannedFixtureCache.js";
 test.setTimeout(300_000);
 
 /**
- * A-3 (`docs/roadmap/Instrumento_De_Memoria_Arreglo_Plan.md` §4): P1 es el
+ * A-3 (`docs/roadmap/memoria/Instrumento_De_Memoria_Arreglo_Plan.md` §4): P1 es el
  * único perfil cuyo pipeline caliente entero (441-509 ms) es más corto que
  * unas pocas cadencias del default de 150 ms — sus fases individuales duran
  * 9-17 ms. Una cadencia más fina no garantiza cubrir cada fase (el costo de

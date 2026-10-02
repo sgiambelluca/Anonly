@@ -1,7 +1,7 @@
 /**
  * Integración — las tres fugas de detección de `qa-stamp.pdf`
- * (`roadmap/Post_Hito10.8_Pendientes.md` §23a/§23b/§23c, análisis en
- * `roadmap/Calidad_De_Deteccion_Informe.md`).
+ * (`roadmap/hitos/Post_Hito10.8_Pendientes.md` §23a/§23b/§23c, análisis en
+ * `roadmap/hitos/Calidad_De_Deteccion_Informe.md`).
  *
  * **Por qué este archivo existe**: el gate manual encontró que el PDF
  * exportado de este fixture sigue conteniendo nombres legibles, y ninguna

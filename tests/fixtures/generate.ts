@@ -417,7 +417,7 @@ export function buildText50pNeutralParagraph(pageNumber: number): string {
  * `CanvasFactory`. Ese es exactamente el camino que ningún fixture del repo
  * ejercitaba, y por el que un defecto real —pdf.js tocando `document` dentro
  * de un Worker— convivió con 57 tests de unidad en verde mientras cualquier
- * PDF con imágenes fallaba entero (`roadmap/Post_Hito10.8_Pendientes.md` §21).
+ * PDF con imágenes fallaba entero (`roadmap/hitos/Post_Hito10.8_Pendientes.md` §21).
  *
  * Literal y no generado: son 8×8 px, y una dependencia nueva para dibujarlo
  * necesitaría ADR (R-12) por un fixture de 100 bytes.

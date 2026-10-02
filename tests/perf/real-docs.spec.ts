@@ -1,5 +1,5 @@
 /**
- * T-10 (`docs/roadmap/Ciclos_Y_Documentos_Reales_Plan.md` §3): dos documentos
+ * T-10 (`docs/roadmap/memoria/Ciclos_Y_Documentos_Reales_Plan.md` §3): dos documentos
  * reales contra sus fixtures, intercalados en una sola sesión por
  * `run-documentos-reales.sh`. Una invocación = un perfil, una ronda.
  *

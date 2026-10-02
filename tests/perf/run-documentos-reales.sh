@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -uo pipefail
 # T-10 — dos documentos reales contra sus fixtures
-# (docs/roadmap/Ciclos_Y_Documentos_Reales_Plan.md §3).
+# (docs/roadmap/memoria/Ciclos_Y_Documentos_Reales_Plan.md §3).
 #
 # Cuatro perfiles (P1, P2, R1, R2), tres rondas, intercalados en una sola
 # sesion y con el orden alternado para que ninguno quede siempre primero.

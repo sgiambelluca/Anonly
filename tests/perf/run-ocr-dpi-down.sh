@@ -3,7 +3,7 @@ set -uo pipefail
 export LC_ALL=C LANG=C
 
 # Fase 1 (calidad) de la campaña de DPI descendente:
-# docs/roadmap/OCR_DPI_Descendente_Campana_Plan.md §5.1. Corre en Windows nativo (Git Bash), que es
+# docs/roadmap/ocr/OCR_DPI_Descendente_Campana_Plan.md §5.1. Corre en Windows nativo (Git Bash), que es
 # el banco que decide; en macOS solo sirve de humo. Una instancia fría de Electron por celda.
 ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT_DIR"

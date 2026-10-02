@@ -5,7 +5,7 @@ Fixtures (PDFs de prueba) para los tests del Core de Anonly.
 > Fuente de verdad de la suite base: `docs/architecture/07_Performance_Strategy.md`
 > §11.2. Los fixtures exclusivos de una campaña de medición se especifican en
 > su plan; `text-200p.pdf` depende de
-> `docs/roadmap/Optimizacion_De_Memoria_Plan.md` §T-3.
+> `docs/roadmap/memoria/Optimizacion_De_Memoria_Plan.md` §T-3.
 
 ---
 
@@ -28,7 +28,7 @@ Fixtures (PDFs de prueba) para los tests del Core de Anonly.
 
 **Todos los demás fixtures son texto plano generado con `pdf-lib`.** Ninguno tiene una imagen, una transparencia ni un patrón, así que ninguno ejercitaba el camino por el que pdf.js pide **canvas auxiliares** a su `CanvasFactory` (grupos de transparencia, soft masks, patrones de mosaico, fuentes Type3).
 
-Ese hueco dejó pasar un defecto real: al kernel de render le faltaba pasarle una `CanvasFactory` propia a `getDocument()`, así que pdf.js caía a su `DOMCanvasFactory` y hacía `document.createElement` **dentro de un Worker**, donde `document` no existe. El resultado era que **todas** las páginas de cualquier PDF con imágenes fallaban con `RENDER_PAGE_FAILED` y el visor quedaba gris — mientras el motor tenía 57 tests de unidad en verde. Se descubrió con un expediente real, no con los tests (`roadmap/Post_Hito10.8_Pendientes.md` §21).
+Ese hueco dejó pasar un defecto real: al kernel de render le faltaba pasarle una `CanvasFactory` propia a `getDocument()`, así que pdf.js caía a su `DOMCanvasFactory` y hacía `document.createElement` **dentro de un Worker**, donde `document` no existe. El resultado era que **todas** las páginas de cualquier PDF con imágenes fallaban con `RENDER_PAGE_FAILED` y el visor quedaba gris — mientras el motor tenía 57 tests de unidad en verde. Se descubrió con un expediente real, no con los tests (`roadmap/hitos/Post_Hito10.8_Pendientes.md` §21).
 
 ### ⚠️ Este fixture NO reproduce ese defecto, y hay que decirlo
 
@@ -136,7 +136,7 @@ El perfil de memoria transforma esta fuente con
 `getOrGenerateScannedFixture("p2-scanned-200p", ...)` en un Chromium separado,
 cerrado antes de abrir el Electron medido. El resultado vive únicamente en
 `.measure/fixtures/`, que está ignorado por git. Fuente normativa y criterios de
-cierre: `docs/roadmap/Optimizacion_De_Memoria_Plan.md` §T-3.
+cierre: `docs/roadmap/memoria/Optimizacion_De_Memoria_Plan.md` §T-3.
 
 ### Pendientes (requieren tools externos)
 
@@ -275,7 +275,7 @@ juzgar si las líneas repintadas se distinguen de las que no se tocaron. Ninguna
 juzgar **eso**: el juicio sobre si la costura del repintado se ve sigue siendo a ojo y a mano.
 
 **`qa-stamp.pdf` sí lo consume una suite, desde 2026-08-22**, pero por otra cosa. El gate manual
-encontró en él tres fugas de dato —§23a/§23b/§23c de `roadmap/Post_Hito10.8_Pendientes.md`— y
+encontró en él tres fugas de dato —§23a/§23b/§23c de `roadmap/hitos/Post_Hito10.8_Pendientes.md`— y
 `tests/integration/qa-stamp-detection.test.ts` las reproduce con el pipeline real: `pdfjs-dist`
 **sin mockear** (es el único test del repo que ve un `Word` rotado de verdad; todos los demás
 mockean `getDocument`), Regex/NER/Grouping reales, y la inferencia replayeada desde los tokens
@@ -290,7 +290,7 @@ ese archivo son las tres fugas: pasan mientras el defecto existe y fallan el dí
 **Son sintéticos, y eso acota qué se puede concluir de ellos.** Reproducen el régimen, no la suciedad
 de un expediente real: un PDF de procesador de texto trae kerning por par de glifos y fuentes
 subseteadas, y un sello escaneado es una imagen y no texto. Sirven para decidir que **hay** defectos
-—de hecho encontraron ocho, cuatro de ellos fugas de dato, ver `roadmap/Post_Hito10.8_Pendientes.md`
+—de hecho encontraron ocho, cuatro de ellos fugas de dato, ver `roadmap/hitos/Post_Hito10.8_Pendientes.md`
 §23— pero **no** para declarar que no hay otros. El día que haya un expediente real, el gate se
 vuelve a correr sobre él.
 

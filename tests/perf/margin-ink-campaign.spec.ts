@@ -1,6 +1,6 @@
 /**
  * `margin-ink-campaign.spec.ts` — campaña de medición real de M-1 + M-2
- * (`docs/roadmap/Margenes_Menos_Pixeles_Handoff.md` §4).
+ * (`docs/roadmap/memoria/Margenes_Menos_Pixeles_Handoff.md` §4).
  *
  * Separado de `margin-ink.spec.ts` (que solo tiene el caso de humo del §2.1,
  * una página, sin ciclo frío/caliente) porque este archivo reusa

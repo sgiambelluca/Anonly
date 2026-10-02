@@ -1,7 +1,7 @@
 /**
  * `support/marginInk.ts` — tipado, colector, invariantes y agregación del
  * análisis de tinta residual de márgenes
- * (`docs/roadmap/Margenes_Menos_Pixeles_Handoff.md` §2). El instrumento que
+ * (`docs/roadmap/memoria/Margenes_Menos_Pixeles_Handoff.md` §2). El instrumento que
  * PRODUCE los registros crudos vive en un patch descartable sobre
  * `ocr-engine/src/worker/kernel.ts` + `ocr.engine.ts` (`instrument.patch`,
  * nunca commiteado, revertido al terminar la campaña); este módulo es la

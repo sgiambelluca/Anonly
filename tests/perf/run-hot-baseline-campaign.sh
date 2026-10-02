@@ -6,7 +6,7 @@ set -uo pipefail
 # El código de salida del script sigue reflejando el de Playwright al final.
 
 # Campaña T-7 — de qué está hecha la línea de base caliente
-# (docs/roadmap/Perfilado_Base_Caliente_Plan.md). Un solo script para las
+# (docs/roadmap/rendimiento/Perfilado_Base_Caliente_Plan.md). Un solo script para las
 # doce corridas (P1/P2 × NER on/off × 3, alternadas): espera a que el banco
 # no esté en un pico, construye el producto empaquetado, corre la campaña
 # serial y agrega al final — pensado para lanzarse en background

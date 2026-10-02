@@ -1,6 +1,6 @@
 /**
  * `imagedata-profile.spec.ts` — perfilado de ImageData
- * (`docs/roadmap/ImageData_Perfilado_Handoff.md`, pasos 1-4).
+ * (`docs/roadmap/memoria/ImageData_Perfilado_Handoff.md`, pasos 1-4).
  *
  * Este archivo hoy contiene solo el caso de humo del §2 del Handoff: probar,
  * con un fixture chico (no P2 completo), que el registro crudo por página

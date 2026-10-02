@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Campaña literal de docs/roadmap/Margenes_Menos_Pixeles_Implementacion_Handoff.md §2.2.
+# Campaña literal de docs/roadmap/memoria/Margenes_Menos_Pixeles_Implementacion_Handoff.md §2.2.
 # Cada sesión tiene su build.log, playwright.log, manifest.json y session.json.
 ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT_DIR"

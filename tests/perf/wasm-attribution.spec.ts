@@ -1,5 +1,5 @@
 /**
- * T-11 (`docs/roadmap/Ciclos_Y_Documentos_Reales_Plan.md` §4): el heap de
+ * T-11 (`docs/roadmap/memoria/Ciclos_Y_Documentos_Reales_Plan.md` §4): el heap de
  * WASM por worker, vía CDP. Cada corrida es una instancia nueva de Electron
  * (plan §4.4: "una importación en frío por instancia") — `run-wasm.sh` las
  * lanza una por vez, seleccionando con `ANONLY_WASM_RUN`.
