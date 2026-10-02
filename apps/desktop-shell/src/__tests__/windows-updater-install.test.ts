@@ -249,7 +249,7 @@ describe("el instalador no se lanza (ADR-197 §5.c)", () => {
     await vi.waitFor(() =>
       expect(mocks.clearRecovery).toHaveBeenCalledWith("datos", expect.any(Function)),
     );
-    expect(quit).toHaveBeenCalled();
+    expect(quit).toHaveBeenCalledTimes(1);
     // `installing` volvió a false y la descarga se dio de baja: el próximo cierre no reintenta.
     const next = { preventDefault: vi.fn() };
     updater.onBeforeQuit(next);
@@ -277,7 +277,7 @@ describe("el instalador no se lanza (ADR-197 §5.c)", () => {
 
     updater.onBeforeQuit({ preventDefault: vi.fn() });
 
-    await vi.waitFor(() => expect(quit).toHaveBeenCalled());
+    await vi.waitFor(() => expect(quit).toHaveBeenCalledTimes(1));
     expect(mocks.clearRecovery).toHaveBeenCalledTimes(1);
   });
 
@@ -293,7 +293,7 @@ describe("el instalador no se lanza (ADR-197 §5.c)", () => {
 
     updater.onBeforeQuit({ preventDefault: vi.fn() });
 
-    await vi.waitFor(() => expect(quit).toHaveBeenCalled());
+    await vi.waitFor(() => expect(quit).toHaveBeenCalledTimes(1));
     expect(mocks.autoUpdater.quitAndInstall).not.toHaveBeenCalled();
   });
 
@@ -352,5 +352,171 @@ describe("lo verificado es lo que se lanza (ADR-197 §5.b)", () => {
     );
     expect(nsis).toMatch(/const installerPath = this\.installerPath;/);
     expect(nsis).toMatch(/this\.spawnLog\(installerPath, args\)/);
+  });
+});
+
+/** Deja correr lo pendiente: un segundo `quit` tardío tiene que alcanzar a verse. */
+/** Tipos de los eventos emitidos a la interfaz, en orden. */
+const emitted = (): string[] =>
+  emit.mock.calls.map(([payload]) => (payload as { type: string }).type);
+
+const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 20));
+
+describe("el cierre se retoma exactamente una vez por intento en modo quit (ronda 5)", () => {
+  async function quitAttempt(): Promise<void> {
+    updater.setInstallOnQuit(true);
+    downloaded();
+    updater.onBeforeQuit({ preventDefault: vi.fn() });
+    // Primero la primera llamada a `quit` (hay I/O real de por medio), recién
+    // después la espera corta para descartar una segunda.
+    await vi.waitFor(() => expect(quit).toHaveBeenCalled());
+    await settle();
+  }
+
+  it("camino feliz: una vez", async () => {
+    await quitAttempt();
+    expect(mocks.autoUpdater.quitAndInstall).toHaveBeenCalledTimes(1);
+    expect(quit).toHaveBeenCalledTimes(1);
+  });
+
+  it("fallo síncrono de quitAndInstall (error dispatchado): una vez, y limpia la recuperación", async () => {
+    mocks.autoUpdater.quitAndInstall.mockImplementation(() => {
+      listener("error")(new Error("No update filepath provided"));
+    });
+    await quitAttempt();
+    expect(quit).toHaveBeenCalledTimes(1);
+    expect(mocks.clearRecovery).toHaveBeenCalledTimes(1);
+  });
+
+  it("quitAndInstall tira: una vez, y limpia la recuperación", async () => {
+    mocks.autoUpdater.quitAndInstall.mockImplementation(() => {
+      throw new Error("boom");
+    });
+    await quitAttempt();
+    expect(quit).toHaveBeenCalledTimes(1);
+    expect(mocks.clearRecovery).toHaveBeenCalledTimes(1);
+  });
+
+  it("la verificación tira (se trata como rechazo): una vez", async () => {
+    mocks.verifyOwnSignature.mockImplementation(async () => {
+      throw new Error("EBUSY");
+    });
+    await quitAttempt();
+    expect(quit).toHaveBeenCalledTimes(1);
+    expect(mocks.autoUpdater.quitAndInstall).not.toHaveBeenCalled();
+    expect(emitted()).toContain("update-rejected");
+  });
+
+  it("la verificación rechaza la descarga: una vez", async () => {
+    mocks.verifyOwnSignature.mockResolvedValue("firma inválida");
+    await quitAttempt();
+    expect(quit).toHaveBeenCalledTimes(1);
+  });
+
+  it("en modo restart no se llama a quit: camino feliz", async () => {
+    downloaded();
+    updater.installNow();
+    await vi.waitFor(() => expect(mocks.autoUpdater.quitAndInstall).toHaveBeenCalledTimes(1));
+    await settle();
+    expect(quit).not.toHaveBeenCalled();
+  });
+
+  it("en modo restart no se llama a quit: fallo síncrono", async () => {
+    mocks.autoUpdater.quitAndInstall.mockImplementation(() => {
+      listener("error")(new Error("sync"));
+    });
+    downloaded();
+    updater.installNow();
+    await vi.waitFor(() => expect(mocks.clearRecovery).toHaveBeenCalledTimes(1));
+    await settle();
+    expect(quit).not.toHaveBeenCalled();
+  });
+
+  it("en modo restart no se llama a quit: excepción", async () => {
+    mocks.autoUpdater.quitAndInstall.mockImplementation(() => {
+      throw new Error("boom");
+    });
+    downloaded();
+    updater.installNow();
+    await vi.waitFor(() => expect(mocks.clearRecovery).toHaveBeenCalledTimes(1));
+    await settle();
+    expect(quit).not.toHaveBeenCalled();
+  });
+});
+
+describe("el instalador no se lanzó: la interfaz retira la tarjeta (ADR-197 §5.b)", () => {
+  it("un fallo síncrono del lanzamiento emite update-rejected además de dar de baja la descarga", async () => {
+    mocks.autoUpdater.quitAndInstall.mockImplementation(() => {
+      listener("error")(new Error("No update filepath provided"));
+    });
+    downloaded();
+    emit.mockClear();
+
+    updater.installNow();
+
+    await vi.waitFor(() => expect(emitted()).toContain("update-rejected"));
+    expect(mocks.clearRecovery).toHaveBeenCalledTimes(1);
+    // La descarga se dio de baja: un segundo pedido no hace nada.
+    mocks.autoUpdater.quitAndInstall.mockClear();
+    updater.installNow();
+    await settle();
+    expect(mocks.autoUpdater.quitAndInstall).not.toHaveBeenCalled();
+  });
+
+  it("si quitAndInstall tira, también", async () => {
+    mocks.autoUpdater.quitAndInstall.mockImplementation(() => {
+      throw new Error("boom");
+    });
+    downloaded();
+    emit.mockClear();
+    updater.installNow();
+    await vi.waitFor(() => expect(emitted()).toContain("update-rejected"));
+  });
+
+  it("un error posterior al lanzamiento NO emite update-rejected: sigue siendo error", async () => {
+    downloaded();
+    updater.installNow();
+    await vi.waitFor(() => expect(mocks.autoUpdater.quitAndInstall).toHaveBeenCalled());
+    emit.mockClear();
+    listener("error")(new Error("spawn EACCES"));
+    await settle();
+    expect(emitted()).toEqual(["error"]);
+    expect(mocks.clearRecovery).not.toHaveBeenCalled();
+  });
+});
+
+describe("un error ajeno durante el lanzamiento no borra la recuperación (ronda 5)", () => {
+  it("un error de búsqueda después de que quitAndInstall volvió sin tirar no limpia", async () => {
+    updater.setInstallOnQuit(true);
+    downloaded();
+    updater.onBeforeQuit({ preventDefault: vi.fn() });
+    await vi.waitFor(() => expect(mocks.autoUpdater.quitAndInstall).toHaveBeenCalled());
+    await settle();
+
+    // Una búsqueda (o el `spawn` asíncrono, indistinguible) falla antes de salir.
+    listener("error")(new Error("net::ERR_INTERNET_DISCONNECTED"));
+    await settle();
+
+    expect(mocks.clearRecovery).not.toHaveBeenCalled();
+    expect(mocks.registerRunOnce).toHaveBeenCalledTimes(1);
+    expect(quit).toHaveBeenCalledTimes(1);
+  });
+
+  it("lo mismo en modo restart", async () => {
+    downloaded();
+    updater.installNow();
+    await vi.waitFor(() => expect(mocks.autoUpdater.quitAndInstall).toHaveBeenCalled());
+    listener("error")(new Error("search failed"));
+    await settle();
+    expect(mocks.clearRecovery).not.toHaveBeenCalled();
+  });
+
+  it("un fallo síncrono del lanzamiento sí limpia", async () => {
+    mocks.autoUpdater.quitAndInstall.mockImplementation(() => {
+      listener("error")(new Error("No update filepath provided"));
+    });
+    downloaded();
+    updater.installNow();
+    await vi.waitFor(() => expect(mocks.clearRecovery).toHaveBeenCalledTimes(1));
   });
 });

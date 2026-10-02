@@ -111,6 +111,9 @@ export interface WindowsUpdaterHandle {
   onBeforeQuit(event: CancelableEvent): void;
 }
 
+/** Desenlace de un intento: `failed` = el instalador no se lanzó (limpia la recuperación). */
+type InstallOutcome = "launched" | "rejected" | "failed";
+
 export function startWindowsUpdater(
   emit: Emit,
   log: (message: string) => void,
@@ -169,8 +172,9 @@ export function startWindowsUpdater(
 
   // Hay una descarga en curso: entre `update-available` y `update-downloaded`.
   let downloading = false;
-  // Hay un instalador lanzándose por `quitAndInstall`, y en qué modo.
-  let launching: "restart" | "quit" | null = null;
+  // `true` solo mientras corre, de forma síncrona, `quitAndInstall`; ver el handler de `error`.
+  let inQuitAndInstall = false;
+  let launchError: Error | null = null;
 
   autoUpdater.on("checking-for-update", () => {
     // Una búsqueda que se solapa con una descarga en curso NO reinicia la
@@ -212,27 +216,22 @@ export function startWindowsUpdater(
     // por lista blanca (ADR-131 §5) y acá se registra sin adornarlo.
     log(`[anonly] updater: ${error.message}`);
     downloading = false;
-    // `electron-updater` informa por `error` que no pudo lanzar el instalador
-    // (de forma síncrona si no hay archivo; después si el `spawn` falla).
-    if (launching !== null) abortLaunch(error);
+    /*
+     * Un `error` NO se toma como «el instalador no se lanzó» salvo dentro de la
+     * llamada síncrona a `quitAndInstall`. En `BaseUpdater`/`NsisUpdater` los
+     * fallos de lanzamiento llegan por `dispatchError`: síncronos si no hay
+     * archivo o ya se había llamado (`install` devuelve `false`), y asíncronos si
+     * el `spawn` falla (`spawnLog` rechaza, y de ahí el reintento con
+     * `elevate.exe` o `shell.openPath`). Un `error` asíncrono es indistinguible
+     * del de una búsqueda o una descarga que falla por su cuenta. La regla
+     * segura: pasada la llamada síncrona no se borra la recuperación. Una entrada
+     * `RunOnce` de más solo reintenta la instalación en el próximo inicio de
+     * sesión (y la marca se limpia al arrancar); una de menos deja sin red a
+     * quien se quedó con una instalación a medias.
+     */
+    if (inQuitAndInstall) launchError = error;
     emit(toUpdateEventPayload({ type: "error" }));
   });
-
-  /**
-   * El instalador no llegó a lanzarse (ADR-197 §5.c): se retiran la marca y la
-   * entrada `RunOnce`, `installing` vuelve a `false` y, si el cierre ya había
-   * empezado, se retoma. Si el error llega cuando la aplicación ya salió, no
-   * hay quien lo atienda: queda la entrada, que reintenta la instalación en el
-   * próximo inicio de sesión, y la marca se limpia al arrancar.
-   */
-  function abortLaunch(error: Error): void {
-    const mode = launching;
-    launching = null;
-    log(`[anonly] updater: el instalador no se lanzó: ${error.message}`);
-    clearInstallRecovery(options.userDataDir, log);
-    installPolicy.onInstallFailed();
-    if (mode === "quit") options.quit();
-  }
 
   /*
    * ADR-188: ninguna consulta automática hasta que el renderer diga qué
@@ -248,7 +247,10 @@ export function startWindowsUpdater(
    * pedido del usuario, la aplicación se reabre sola. `quit`: instalación al
    * cerrar, sin reabrir.
    */
-  async function install(update: DownloadedUpdate, mode: "restart" | "quit"): Promise<void> {
+  async function install(
+    update: DownloadedUpdate,
+    mode: "restart" | "quit",
+  ): Promise<InstallOutcome> {
     const preparation = await prepareVerifiedInstall(
       {
         verify: async (filePath) => {
@@ -274,7 +276,7 @@ export function startWindowsUpdater(
       // más campos: el motivo queda en el log (ADR-131 §5).
       emit(toUpdateEventPayload({ type: "update-rejected" }));
       // El cierre ya había empezado: `runInstall` lo retoma, sin instalar nada.
-      return;
+      return "rejected";
     }
 
     /*
@@ -285,29 +287,39 @@ export function startWindowsUpdater(
      * `downloadedUpdateHelper.file`, que es esa ruta. Un test estático lee el
      * código de `electron-updater` y falla si dejan de coincidir.
      */
-    launching = mode;
-    autoUpdater.quitAndInstall(true, mode === "restart");
-    // `quitAndInstall` cierra la aplicación solo si el instalador se lanzó. En
-    // el cierre ya pedido por el usuario no puede quedar un proceso sin
-    // ventanas: se repite el pedido (el segundo `before-quit` pasa de largo).
-    if (mode === "quit" && launching !== null) options.quit();
+    inQuitAndInstall = true;
+    launchError = null;
+    try {
+      autoUpdater.quitAndInstall(true, mode === "restart");
+    } finally {
+      inQuitAndInstall = false;
+    }
+    return launchError === null ? "launched" : "failed";
   }
 
   /**
    * `install` nunca rechaza hacia afuera: cualquier excepción inesperada se
-   * trata como un instalador que no se lanzó. En modo `quit` el cierre se
-   * retoma SIEMPRE, para que no quede un proceso vivo sin ventanas.
+   * trata como un instalador que no se lanzó (se retiran marca y entrada, y la
+   * política vuelve a «sin instalación»). En modo `quit` el cierre se retoma
+   * EXACTAMENTE una vez por intento, en cualquier desenlace, para que no quede
+   * un proceso vivo sin ventanas; en modo `restart` nunca.
    */
   async function runInstall(update: DownloadedUpdate, mode: "restart" | "quit"): Promise<void> {
+    let outcome: InstallOutcome;
     try {
-      await install(update, mode);
+      outcome = await install(update, mode);
     } catch (error) {
-      launching = mode;
-      abortLaunch(error instanceof Error ? error : new Error(String(error)));
-      emit(toUpdateEventPayload({ type: "error" }));
-    } finally {
-      if (mode === "quit" && launching === null) options.quit();
+      log(`[anonly] updater: la instalación falló: ${String(error)}`);
+      outcome = "failed";
     }
+    if (outcome === "failed") {
+      clearInstallRecovery(options.userDataDir, log);
+      installPolicy.onInstallFailed();
+      // ADR-197 §5.b: el instalador no se lanzó; la descarga se dio de baja y la
+      // interfaz retira la tarjeta (si no quedaría con un botón que ya no hace nada).
+      emit(toUpdateEventPayload({ type: "update-rejected" }));
+    }
+    if (mode === "quit") options.quit();
   }
 
   return {
