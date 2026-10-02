@@ -337,13 +337,21 @@ jobs:
       - name: Assert perf tests actually ran (ADR-149 §1)
         run: node scripts/ci/assert-min-tests.mjs --report perf-report.json --min 4 --format playwright
 
-  test-leak:
-    name: Memory leak
+  # Los tres casos de fuga corren en paralelo, uno por runner, como las mitades
+  # de E2E (ADR-185, enmienda del 2026-10-02): cada caso mide solo en su
+  # máquina, así que el protocolo de medición no cambia y el tiempo total es el
+  # del caso más largo. `fail-fast: false` para ver los tres resultados.
+  test-leak-case:
+    name: Memory leak ${{ matrix.case }}
     needs: install
     # No corre en cada push de un PR (tarda entre 15 y 30 minutos): corre al
     # mergear a `main` y cuando se lo lanza a mano (ADR-185, enmienda del
     # 2026-10-01).
     if: github.event_name != 'pull_request'
+    strategy:
+      fail-fast: false
+      matrix:
+        case: [L1, L2, L3]
     runs-on: macos-latest
     timeout-minutes: 90
     steps:
@@ -376,14 +384,32 @@ jobs:
         run: pnpm assets:mirror
       - name: Install Playwright Chromium
         run: pnpm exec playwright install chromium
-      - name: Run leak tests
+      # El caso se elige por el título del test (`L1 — ...`). Un caso que no
+      # matchee ningún test hace fallar a Playwright ("No tests found"), no pasa
+      # vacío; además el assert de abajo exige al menos 1 ejecutado y 0 salteados.
+      - name: Run leak case ${{ matrix.case }}
         env:
           PLAYWRIGHT_JSON_OUTPUT_NAME: leak-report.json
-        run: pnpm test:leak
-      # El mínimo (3) es el número de tests que tiene hoy `tests/leak/leak.spec.ts`
-      # (L1, L2, L3): se sube a mano cuando se agreguen más.
-      - name: Assert leak tests actually ran (ADR-149 §1)
-        run: node scripts/ci/assert-min-tests.mjs --report leak-report.json --min 3 --format playwright
+        run: pnpm test:leak --grep "${{ matrix.case }} "
+      - name: Assert the leak case actually ran (ADR-149 §1)
+        run: node scripts/ci/assert-min-tests.mjs --report leak-report.json --min 1 --format playwright
+
+  test-leak:
+    name: Memory leak
+    needs: test-leak-case
+    # `always()` para juntar el resultado aunque un caso falle; la condición de
+    # evento es la misma que la de los casos, para que en un PR no corra.
+    if: always() && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Los tres casos de fuga pasaron
+        env:
+          CASES_RESULT: ${{ needs.test-leak-case.result }}
+        run: |
+          if [ "$CASES_RESULT" != "success" ]; then
+            echo "::error::La fuga de memoria no pasó (resultado de los casos: $CASES_RESULT)."
+            exit 1
+          fi
 
   test-cancel:
     name: Cancellation SLA
