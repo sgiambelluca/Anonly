@@ -5,8 +5,8 @@ import { contextBridge, ipcRenderer } from "electron";
  * ADR-194, `anonlyDevice`, un dato de solo lectura (más abajo).
  *
  * Volvió a existir —ADR-132 §3 anticipaba que el actualizador traería el
- * primer canal real— y es lo más chica que resuelve el caso: **tres mensajes
- * salientes y un suscriptor**. Nada de `invoke` genérico, ningún acceso a
+ * primer canal real— y es lo más chica que resuelve el caso: **cuatro mensajes
+ * salientes (el cuarto, `setInstallOnQuit`, lo agregó ADR-197) y un suscriptor**. Nada de `invoke` genérico, ningún acceso a
  * `ipcRenderer` crudo, ninguna capacidad de leer o escribir del sistema.
  *
  * La política de si se pregunta o se instala solo vive en el renderer, porque
@@ -48,6 +48,15 @@ contextBridge.exposeInMainWorld("anonlyUpdater", {
   setAutomaticChecks(enabled: boolean): void {
     ipcRenderer.send("updater:set-automatic-checks", enabled);
   },
+  /**
+   * Informa si el usuario quiere que la actualización se instale al cerrar la
+   * aplicación (ADR-197 §3): `true` solo con `updateMode === "install"`. Hasta
+   * que llega, el contenedor no instala al cerrar. Un valor que no sea
+   * `boolean` se ignora. En macOS se recibe y no tiene efecto.
+   */
+  setInstallOnQuit(enabled: boolean): void {
+    ipcRenderer.send("updater:set-install-on-quit", enabled);
+  },
 });
 
 /*
@@ -67,7 +76,26 @@ function readTotalMemoryBytes(argv: ReadonlyArray<string>): number | null {
   return Number.isSafeInteger(value) && value > 0 ? value : null;
 }
 
+/*
+ * `platform` (ADR-197 §6): `"windows"`, `"macos"` u `"other"`, por el mismo
+ * camino (`--anonly-platform=<valor>`). Cualquier otro valor se descarta. El
+ * preload sandboxeado no puede importar `device-platform.ts`, así que la lista
+ * se repite acá.
+ */
+const PLATFORM_ARG = "--anonly-platform=";
+
+function readPlatform(argv: ReadonlyArray<string>): "windows" | "macos" | "other" | null {
+  const arg = argv.find((entry) => entry.startsWith(PLATFORM_ARG));
+  if (arg === undefined) return null;
+  const raw = arg.slice(PLATFORM_ARG.length);
+  return raw === "windows" || raw === "macos" || raw === "other" ? raw : null;
+}
+
 const totalMemoryBytes = readTotalMemoryBytes(process.argv);
-if (totalMemoryBytes !== null) {
-  contextBridge.exposeInMainWorld("anonlyDevice", { totalMemoryBytes });
+const platform = readPlatform(process.argv);
+if (totalMemoryBytes !== null || platform !== null) {
+  contextBridge.exposeInMainWorld("anonlyDevice", {
+    ...(totalMemoryBytes === null ? {} : { totalMemoryBytes }),
+    ...(platform === null ? {} : { platform }),
+  });
 }

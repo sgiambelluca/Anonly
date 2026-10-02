@@ -12,6 +12,8 @@ import { readFile } from "node:fs/promises";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { toDevicePlatform } from "../device-platform";
+
 import { desdeLaRaiz } from "./repoRoot";
 import { sinComentarios } from "./sourceText";
 
@@ -71,6 +73,54 @@ describe("preload: anonlyDevice (ADR-194 §4)", () => {
   });
 });
 
+describe("preload: anonlyDevice.platform (ADR-197 §6)", () => {
+  afterEach(() => {
+    process.argv = ORIGINAL_ARGV;
+  });
+
+  it.each(["windows", "macos", "other"])(
+    "expone platform=%s y ningún otro campo",
+    async (valor) => {
+      const exposed = await runPreload([`--anonly-platform=${valor}`]);
+      expect(exposed.get("anonlyDevice")).toEqual({ platform: valor });
+    },
+  );
+
+  it("con RAM y plataforma expone los dos campos y ningún otro", async () => {
+    const exposed = await runPreload([
+      "--anonly-total-memory-bytes=17179869184",
+      "--anonly-platform=macos",
+    ]);
+    expect(Object.keys(exposed.get("anonlyDevice") as object).sort()).toEqual([
+      "platform",
+      "totalMemoryBytes",
+    ]);
+  });
+
+  it.each(["", "linux", "win32", "darwin", "WINDOWS", "windows ", "__proto__"])(
+    "un valor inválido (%j) no se expone",
+    async (valor) => {
+      const exposed = await runPreload([`--anonly-platform=${valor}`]);
+      expect(exposed.has("anonlyDevice")).toBe(false);
+    },
+  );
+
+  it("un valor inválido no impide exponer la RAM", async () => {
+    const exposed = await runPreload([
+      "--anonly-total-memory-bytes=17179869184",
+      "--anonly-platform=linux",
+    ]);
+    expect(exposed.get("anonlyDevice")).toEqual({ totalMemoryBytes: 17179869184 });
+  });
+
+  it("process.platform se traduce a windows, macos u other", () => {
+    expect(toDevicePlatform("win32")).toBe("windows");
+    expect(toDevicePlatform("darwin")).toBe("macos");
+    for (const otra of ["linux", "freebsd", "", "WIN32"])
+      expect(toDevicePlatform(otra)).toBe("other");
+  });
+});
+
 describe("main: la RAM va por argumento, sin IPC nuevo (ADR-194 §4)", () => {
   const leer = async (archivo: string) =>
     sinComentarios(await readFile(desdeLaRaiz("apps/desktop-shell/src", archivo), "utf8"));
@@ -78,11 +128,28 @@ describe("main: la RAM va por argumento, sin IPC nuevo (ADR-194 §4)", () => {
   it("pasa os.totalmem() en webPreferences.additionalArguments", async () => {
     const main = await leer("main.ts");
     expect(main).toMatch(
-      /additionalArguments:\s*\[`--anonly-total-memory-bytes=\$\{.*totalmem\(\).*\}`\]/,
+      /additionalArguments:\s*\[\s*`--anonly-total-memory-bytes=\$\{.*totalmem\(\).*\}`,/,
     );
   });
 
-  it("los únicos canales de IPC son los tres del actualizador", async () => {
+  it("pasa la plataforma en additionalArguments, traducida por toDevicePlatform (ADR-197 §6)", async () => {
+    const main = await leer("main.ts");
+    expect(main).toContain("`${PLATFORM_ARG}${toDevicePlatform(process.platform)}`");
+    expect(main).not.toMatch(/userAgent/);
+  });
+
+  it("el preload y device-platform.ts coinciden en el argumento y en los tres valores", async () => {
+    const preload = await leer("preload.ts");
+    const modulo = await leer("device-platform.ts");
+    expect(modulo).toContain('PLATFORM_ARG = "--anonly-platform="');
+    expect(preload).toContain('PLATFORM_ARG = "--anonly-platform="');
+    for (const valor of ["windows", "macos", "other"]) {
+      expect(preload).toContain(`raw === "${valor}"`);
+      expect(modulo).toContain(`"${valor}"`);
+    }
+  });
+
+  it("los únicos canales de IPC son los del actualizador (ADR-197 agregó set-install-on-quit)", async () => {
     const canales = new Set<string>();
     for (const archivo of ["main.ts", "preload.ts"]) {
       const fuente = await leer(archivo);
@@ -97,6 +164,7 @@ describe("main: la RAM va por argumento, sin IPC nuevo (ADR-194 §4)", () => {
       "updater:event",
       "updater:install",
       "updater:set-automatic-checks",
+      "updater:set-install-on-quit",
     ]);
   });
 });

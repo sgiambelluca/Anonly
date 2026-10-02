@@ -74,7 +74,7 @@ beforeAll(async () => {
   fuente = await readFile(FUENTE, "utf8");
 
   mocks.autoUpdater.verifyUpdateCodeSignature = mocks.verifyAuthenticode;
-  startWindowsUpdater(vi.fn(), vi.fn());
+  startWindowsUpdater(vi.fn(), vi.fn(), { userDataDir: "datos", quit: vi.fn() });
 });
 
 beforeEach(() => {
