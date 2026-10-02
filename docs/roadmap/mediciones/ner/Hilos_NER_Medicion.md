@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap-medicion | dependencias=roadmap/Rendimiento_Experimentos_Plan.md,roadmap/Optimizacion_De_Rendimiento.md,roadmap/Ciclos_Y_Documentos_Reales_Plan.md,core/NER_Engine.md,tests/perf/README.md | audiencia=humanos+IA | fase=11 (punto 1, curvas macOS 2026-09-23/24 y Windows nativo 2026-09-25 cerradas; ampliación de carga/panel/secuencia cerrada en macOS y Windows 2026-09-26) -->
+<!-- CONTEXT: scope=roadmap-medicion | dependencias=roadmap/rendimiento/Rendimiento_Experimentos_Plan.md,roadmap/rendimiento/Optimizacion_De_Rendimiento.md,roadmap/memoria/Ciclos_Y_Documentos_Reales_Plan.md,core/NER_Engine.md,tests/perf/README.md | audiencia=humanos+IA | fase=11 (punto 1, curvas macOS 2026-09-23/24 y Windows nativo 2026-09-25 cerradas; ampliación de carga/panel/secuencia cerrada en macOS y Windows 2026-09-26) -->
 
 # Hilos internos de ONNX para NER — medición macOS y Windows nativo
 

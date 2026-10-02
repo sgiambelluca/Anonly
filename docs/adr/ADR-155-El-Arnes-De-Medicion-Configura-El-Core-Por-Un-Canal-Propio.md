@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=adr | dependencias=ui/React_Client.md,core/Contracts.md,07_Performance_Strategy.md,adr/ADR-039-NerConfig-WasmPaths-Overrides-Parciales.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-153-El-Gate-De-Tiempos-Se-Mide-Sobre-El-Producto.md,adr/ADR-154-La-Memoria-No-Se-Compra-Bajando-El-Paralelismo.md,roadmap/Post_Hito10.8_Pendientes.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=adr | dependencias=ui/React_Client.md,core/Contracts.md,07_Performance_Strategy.md,adr/ADR-039-NerConfig-WasmPaths-Overrides-Parciales.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-153-El-Gate-De-Tiempos-Se-Mide-Sobre-El-Producto.md,adr/ADR-154-La-Memoria-No-Se-Compra-Bajando-El-Paralelismo.md,roadmap/hitos/Post_Hito10.8_Pendientes.md | audiencia=humanos+IA | fase=11 -->
 
 # ADR-155 — El arnés de medición configura el Core por un canal propio
 

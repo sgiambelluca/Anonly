@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=adr | dependencias=core/Contracts.md,architecture/03_Data_Model.md,core/PDF_Engine.md,core/Orchestrator.md,core/OCR_Engine.md,adr/ADR-064-Palabras-De-OCR-En-Puntos.md,adr/ADR-143-Las-Imagenes-De-OCR-Se-Producen-Cuando-Hay-Lugar.md,roadmap/Optimizacion_De_Memoria_Plan.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=adr | dependencias=core/Contracts.md,architecture/03_Data_Model.md,core/PDF_Engine.md,core/Orchestrator.md,core/OCR_Engine.md,adr/ADR-064-Palabras-De-OCR-En-Puntos.md,adr/ADR-143-Las-Imagenes-De-OCR-Se-Producen-Cuando-Hay-Lugar.md,roadmap/memoria/Optimizacion_De_Memoria_Plan.md | audiencia=humanos+IA | fase=11 -->
 
 # ADR-163 — El DPI de OCR no supera al ráster fuente
 

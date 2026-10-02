@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=adr | dependencias=core/NER_Engine.md,core/Contracts.md,core/Grouping_Engine.md,adr/ADR-115-La-Puntuacion-Pegada-No-Es-Parte-Del-Valor.md,adr/ADR-073-Matcheo-Difuso-Solo-Para-Texto-Libre.md,adr/ADR-060-Lexico-De-Genero.md,roadmap/OCR_Escaneos_Handoff.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=adr | dependencias=core/NER_Engine.md,core/Contracts.md,core/Grouping_Engine.md,adr/ADR-115-La-Puntuacion-Pegada-No-Es-Parte-Del-Valor.md,adr/ADR-073-Matcheo-Difuso-Solo-Para-Texto-Libre.md,adr/ADR-060-Lexico-De-Genero.md,roadmap/hitos/OCR_Escaneos_Handoff.md | audiencia=humanos+IA | fase=11 -->
 
 # ADR-118 — La clave de agrupado tiene una sola definición
 

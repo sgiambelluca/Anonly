@@ -4,7 +4,7 @@
 
 - **Estado**: Accepted
 - **Fecha**: 2026-08-19
-- **Decidido por**: El humano, al revisar las observaciones no bloqueantes del Hito 10 (`roadmap/Hito10_Observaciones_Plan_De_Resolucion.md` §6.3 punto J).
+- **Decidido por**: El humano, al revisar las observaciones no bloqueantes del Hito 10 (`roadmap/hitos/Hito10_Observaciones_Plan_De_Resolucion.md` §6.3 punto J).
 - **Relacionado con**: **ADR-043/045/046/047**, que sacaron los cuatro pools pesados del `WorkerPoolManager` y, sin notarlo, los dejaron sin idle-dispose. `05_Worker_Architecture.md` §8 (la regla de los 60 s), el gate **`test:leak`** del Hito 11.
 - **Parte de**: cierre de las observaciones del Hito 10.
 

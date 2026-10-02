@@ -1,10 +1,10 @@
-<!-- CONTEXT: scope=adr | dependencias=roadmap/Optimizacion_De_Memoria_Plan.md,roadmap/PDFs_Pesados_Y_Exportacion_Plan.md,roadmap/mediciones/transversal/PDFs_Pesados_Y_Exportacion_Medicion.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-148-Un-Export-Se-Verifica-Leyendo-El-PDF-Exportado.md,core/Contracts.md,core/Render_Engine.md,core/Export_Engine.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=adr | dependencias=roadmap/memoria/Optimizacion_De_Memoria_Plan.md,roadmap/memoria/PDFs_Pesados_Y_Exportacion_Plan.md,roadmap/mediciones/transversal/PDFs_Pesados_Y_Exportacion_Medicion.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-148-Un-Export-Se-Verifica-Leyendo-El-PDF-Exportado.md,core/Contracts.md,core/Render_Engine.md,core/Export_Engine.md | audiencia=humanos+IA | fase=11 -->
 
 # ADR-180 — Los PDFs pesados se miden hasta el archivo exportado
 
 - **Estado**: Accepted; banco opt-in implementado y caracterización local completada el 2026-09-23.
 - **Fecha**: 2026-09-23.
-- **Decidido por**: El planificador, para el punto 3 de `roadmap/Optimizacion_De_Memoria_Plan.md` §2ter.
+- **Decidido por**: El planificador, para el punto 3 de `roadmap/memoria/Optimizacion_De_Memoria_Plan.md` §2ter.
 - **Numeración**: ADR-168 a ADR-178 pertenecen a la otra rama de UI. Este ADR continúa la numeración de esta campaña desde ADR-179.
 - **Relacionado con**: ADR-146 (M1/M2), ADR-148 (verificación del export), ADR-153 (Electron empaquetado), ADR-159 (retención del renderer).
 
@@ -26,7 +26,7 @@ El renderer, los workers y pdf-lib pueden mantener copias y rásters que las API
 
 ## Condición de implementación
 
-`roadmap/PDFs_Pesados_Y_Exportacion_Plan.md` fija perfiles, fases, campos y aceptación del banco. El implementador puede construir el instrumento y entregar datos, pero no modificar specs de motores ni convertir un hallazgo en cambio de contrato o presupuesto. Si falta una API pública para una medición exacta, informa el límite como “no observable”; no agrega instrumentación de producto por inferencia.
+`roadmap/memoria/PDFs_Pesados_Y_Exportacion_Plan.md` fija perfiles, fases, campos y aceptación del banco. El implementador puede construir el instrumento y entregar datos, pero no modificar specs de motores ni convertir un hallazgo en cambio de contrato o presupuesto. Si falta una API pública para una medición exacta, informa el límite como “no observable”; no agrega instrumentación de producto por inferencia.
 
 La ejecución local y sus límites están en `roadmap/mediciones/transversal/PDFs_Pesados_Y_Exportacion_Medicion.md`: nueve corridas intercaladas y una cancelación ejercitada, con calidad estructural/visual del export verificada. No se derivó un cambio de presupuesto ni una optimización del producto.
 

@@ -1,8 +1,8 @@
-<!-- CONTEXT: scope=adr | dependencias=core/Contracts.md,core/OCR_Engine.md,core/Orchestrator.md,architecture/05_Worker_Architecture.md,adr/ADR-119-La-Orientacion-Se-Detecta-Con-El-Motor-Que-La-Sabe-Leer.md,adr/ADR-143-Las-Imagenes-De-OCR-Se-Producen-Cuando-Hay-Lugar.md,adr/ADR-154-La-Memoria-No-Se-Compra-Bajando-El-Paralelismo.md,adr/ADR-157-El-Pool-De-OCR-Se-Da-De-Baja-Al-Terminar-Su-Etapa.md,adr/ADR-160-El-Worker-De-OCR-No-Decodifica-La-Pagina.md,roadmap/T5_OSD_Compartido_Handoff.md | audiencia=planificador+implementador+revisor | fase=11 -->
+<!-- CONTEXT: scope=adr | dependencias=core/Contracts.md,core/OCR_Engine.md,core/Orchestrator.md,architecture/05_Worker_Architecture.md,adr/ADR-119-La-Orientacion-Se-Detecta-Con-El-Motor-Que-La-Sabe-Leer.md,adr/ADR-143-Las-Imagenes-De-OCR-Se-Producen-Cuando-Hay-Lugar.md,adr/ADR-154-La-Memoria-No-Se-Compra-Bajando-El-Paralelismo.md,adr/ADR-157-El-Pool-De-OCR-Se-Da-De-Baja-Al-Terminar-Su-Etapa.md,adr/ADR-160-El-Worker-De-OCR-No-Decodifica-La-Pagina.md,roadmap/ocr/T5_OSD_Compartido_Handoff.md | audiencia=planificador+implementador+revisor | fase=11 -->
 
 # ADR-164 — Un OSD compartido por Core
 
-- **Estado**: Accepted, implementado y validado; T5 cerrada el 2026-09-15. Ver `roadmap/T5_OSD_Compartido_Cierre_Final.md` para aceptación, datos y límites. ImageData se evalúa por separado.
+- **Estado**: Accepted, implementado y validado; T5 cerrada el 2026-09-15. Ver `roadmap/ocr/T5_OSD_Compartido_Cierre_Final.md` para aceptación, datos y límites. ImageData se evalúa por separado.
 - **Fecha**: 2026-09-13.
 - **Decidido por**: el humano autoriza documentar, implementar con un subagente Luna y comparar el diseño actual con dos reconocedores que comparten OSD.
 - **Parte de**: T-5, campaña de optimización de memoria. Autoriza una campaña de varios módulos, separados por responsabilidad (ADR-124); no autoriza commits ni push.
@@ -11,7 +11,7 @@
 > **Revisión de planificación, 2026-09-15:** el humano autoriza continuar con
 > el mismo implementador Luna. §2.3 formaliza la página adicional elegida el
 > 2026-09-14 y sustituye el límite inicial sin adelanto. El diagnóstico de
-> `roadmap/T5_OSD_Investigacion_Scheduling.md` justifica esta evolución; no es
+> `roadmap/ocr/T5_OSD_Investigacion_Scheduling.md` justifica esta evolución; no es
 > aceptación funcional ni demostración de ahorro RSS. El handoff incluye las
 > correcciones de la revisión r4 y una nueva comparación contra el control.
 
@@ -347,7 +347,7 @@ diff como cambio funcional separado del scheduling. Restaurar el candidato
 completo al finalizar; aceptación y cualquier regresión temporal quedan para
 el planificador/humano, no para el implementador.
 
-Protocolo ejecutable en `roadmap/T5_OSD_Compartido_Handoff.md` §3.
+Protocolo ejecutable en `roadmap/ocr/T5_OSD_Compartido_Handoff.md` §3.
 BEFORE = 2 LSTM + 2 OSD y dos consumidores; AFTER = 2 LSTM + 1 OSD y hasta tres
 consumidores bajo el mismo presupuesto. Un mismo fixture congelado, build
 fresco por condición y versión idéntica del instrumento. La mejora diagnóstica

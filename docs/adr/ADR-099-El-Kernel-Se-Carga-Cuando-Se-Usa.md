@@ -1,10 +1,10 @@
-<!-- CONTEXT: scope=adr | dependencias=architecture/07_Performance_Strategy.md,core/OCR_Engine.md,core/NER_Engine.md,core/Export_Engine.md,adr/ADR-045-Ocr-Kernel-Puerto-Interno.md,adr/ADR-046-Reparto-Host-Kernel-NER.md,adr/ADR-047-Ensamblado-Incremental-Export.md,roadmap/Optimizacion_De_Rendimiento.md,ai/AI_Development_Guide.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=adr | dependencias=architecture/07_Performance_Strategy.md,core/OCR_Engine.md,core/NER_Engine.md,core/Export_Engine.md,adr/ADR-045-Ocr-Kernel-Puerto-Interno.md,adr/ADR-046-Reparto-Host-Kernel-NER.md,adr/ADR-047-Ensamblado-Incremental-Export.md,roadmap/rendimiento/Optimizacion_De_Rendimiento.md,ai/AI_Development_Guide.md | audiencia=humanos+IA | fase=11 -->
 
 # ADR-099 — El kernel se carga cuando se usa
 
 - **Estado**: Accepted
 - **Fecha**: 2026-08-27
-- **Decidido por**: El humano, punto D1 del plan de `roadmap/Optimizacion_De_Rendimiento.md`.
+- **Decidido por**: El humano, punto D1 del plan de `roadmap/rendimiento/Optimizacion_De_Rendimiento.md`.
 - **Relacionado con**: ADR-045 (kernel de OCR), ADR-046 (kernel de NER), ADR-047 (ensamblador de export), `07_Performance_Strategy.md` §2.1
 - **Parte de**: Hito 11, optimización
 

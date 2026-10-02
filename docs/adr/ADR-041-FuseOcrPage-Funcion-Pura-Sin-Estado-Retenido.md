@@ -4,7 +4,7 @@
 
 - **Estado**: Accepted (la decisión pre-PR13 que §5 dejó asignada al planificador — reparto host/worker del estado de `render-engine` — quedó tomada en ADR-043, 2026-07-22. La auditoría de §5 recibió un **matiz** en ADR-046 §9, 2026-07-24: mira estado retenido por documento, no el reparto de eventos/retry a través de la frontera — ver la nota de la tabla)
 - **Fecha**: 2026-07-22
-- **Decidido por**: El humano, sobre el informe de ambigüedad bloqueante que el implementador levantó al arrancar PR12 (PdfWorker) — se detuvo sin tocar archivos por la regla de `ai/AI_Development_Guide.md` §5. El registro completo del informe está en `roadmap/Hito10_Observaciones_Revision.md`, entrada "PR12".
+- **Decidido por**: El humano, sobre el informe de ambigüedad bloqueante que el implementador levantó al arrancar PR12 (PdfWorker) — se detuvo sin tocar archivos por la regla de `ai/AI_Development_Guide.md` §5. El registro completo del informe está en `roadmap/hitos/Hito10_Observaciones_Revision.md`, entrada "PR12".
 - **Relacionado con**: ADR-013 (envolver `process()` en worker), ADR-014 (fusión OCR→PDF mediada por el Orchestrator — la mediación se **preserva**, cambia la forma de la invocación), ADR-020 (§6 guard de `requiresOCR` — se preserva en la función pura; **§7 `releaseDocument` superseded** por este ADR), ADR-021 (§7 wiring `DOCUMENT_CLOSED`→`releaseDocument` — superseded en lo que respecta a Pdf), ADR-035 (pools in-process), ADR-036 (§4 `WorkerJobType` sin cambios — este ADR lo **ratifica**), ADR-038 (§8 tabla de PRs: PR12–16; contexto item 5: re-fusión idempotente — se preserva)
 
 ## Contexto
@@ -91,7 +91,7 @@ El handler de `OCR_PAGE_FINISHED` lee las `Word[]` de `ctx.cache` (ADR-014, sin 
 - `core/OCR_Engine.md` v1.1.1: §2 y §10 (menciones de la invocación).
 - `architecture/04_Event_System.md`: filas `OCR_PAGE_FINISHED` y `DOCUMENT_CLOSED`.
 - `adr/ADR-020` y `adr/ADR-021`: nota de supersede parcial en su línea de Estado.
-- `roadmap/MVP.md` (Hito 10) y `roadmap/Hito10_Observaciones_Revision.md` (entrada "PR12", registro del informe).
+- `roadmap/MVP.md` (Hito 10) y `roadmap/hitos/Hito10_Observaciones_Revision.md` (entrada "PR12", registro del informe).
 
 ## Validación
 

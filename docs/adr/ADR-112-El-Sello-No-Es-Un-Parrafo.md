@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=adr | dependencias=core/OCR_Engine.md,core/Contracts.md,adr/ADR-064-Palabras-De-OCR-En-Puntos.md,adr/ADR-065-OCR-Por-Region.md,adr/ADR-090-La-Orientacion-De-Un-Escaneo-Se-Detecta.md,adr/ADR-110-El-Renglon-Es-Un-Grupo-No-Una-Coordenada.md,roadmap/OCR_Escaneos_Handoff.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=adr | dependencias=core/OCR_Engine.md,core/Contracts.md,adr/ADR-064-Palabras-De-OCR-En-Puntos.md,adr/ADR-065-OCR-Por-Region.md,adr/ADR-090-La-Orientacion-De-Un-Escaneo-Se-Detecta.md,adr/ADR-110-El-Renglon-Es-Un-Grupo-No-Una-Coordenada.md,roadmap/hitos/OCR_Escaneos_Handoff.md | audiencia=humanos+IA | fase=11 -->
 
 # ADR-112 — El sello no es un párrafo
 

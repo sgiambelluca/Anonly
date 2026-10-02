@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=adr | dependencias=core/Render_Engine.md,core/Orchestrator.md,core/Contracts.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-044-Preview-Grupos-Mediacion-Orchestrator.md,adr/ADR-056-RenderRequested-Kind-Por-Panel.md,adr/ADR-144-El-Input-Se-Registra-Ya-El-Trabajo-Se-Planifica.md,adr/ADR-151-La-Primera-Pagina-Ya-Esta-Dibujada-Cuando-Se-Abre-El-Panel.md,roadmap/Revision_Por_Bloques_Hardening.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=adr | dependencias=core/Render_Engine.md,core/Orchestrator.md,core/Contracts.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-044-Preview-Grupos-Mediacion-Orchestrator.md,adr/ADR-056-RenderRequested-Kind-Por-Panel.md,adr/ADR-144-El-Input-Se-Registra-Ya-El-Trabajo-Se-Planifica.md,adr/ADR-151-La-Primera-Pagina-Ya-Esta-Dibujada-Cuando-Se-Abre-El-Panel.md,roadmap/hardening/Revision_Por_Bloques_Hardening.md | audiencia=humanos+IA | fase=11 -->
 
 # ADR-189 — El preview se redibuja a la escala que se ve
 

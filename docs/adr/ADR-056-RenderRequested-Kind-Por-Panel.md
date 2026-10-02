@@ -161,7 +161,7 @@ Browser real, no headless, con el mismo criterio de ADR-054 §9 y ADR-053 §8: l
 - `ui/React_Client.md` §2.3 (firma de `requestRender`) y §7.
 - `ui/Components.md` §5.2 (`PdfViewer`) y §5.4 (`PageCanvas`).
 - `adr/ADR-054` §7 — errata: sí cambia un contrato del Core.
-- `roadmap/MVP.md` §4 (PRs E1/E2) y `roadmap/Hito10_Observaciones_Revision.md` (cierre de la entrada de blob URLs revocados).
+- `roadmap/MVP.md` §4 (PRs E1/E2) y `roadmap/hitos/Hito10_Observaciones_Revision.md` (cierre de la entrada de blob URLs revocados).
 
 ## Validación
 

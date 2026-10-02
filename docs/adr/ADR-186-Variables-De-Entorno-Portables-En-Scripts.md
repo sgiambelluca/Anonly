@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=adr | dependencias=ai/AI_Development_Guide.md,architecture/07_Performance_Strategy.md,roadmap/Gates_Leak_Stress_Plan.md,adr/ADR-185-Gates-De-Leak-Y-Stress-En-Electron.md,tests/perf/README.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=adr | dependencias=ai/AI_Development_Guide.md,architecture/07_Performance_Strategy.md,roadmap/hardening/Gates_Leak_Stress_Plan.md,adr/ADR-185-Gates-De-Leak-Y-Stress-En-Electron.md,tests/perf/README.md | audiencia=humanos+IA | fase=11 -->
 
 # ADR-186 — Variables de entorno portables en los scripts de `package.json`
 

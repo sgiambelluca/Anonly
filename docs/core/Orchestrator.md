@@ -456,7 +456,7 @@ Los tests de contract/unit/edge mockean los motores (interfaces de `Contracts.md
 - [x] 28. (ADR-164, T-5-F) Conectar orientationPool size 1 según §6; nuevos
   defaults de config y PoolKey/ManagedPoolKey; dispose de ambos pools y pruebas
   de §14. Sin cambio en runOcrStage ni en los otros motores. Scopes/medición en
-  `roadmap/T5_OSD_Compartido_Handoff.md`.
+  `roadmap/ocr/T5_OSD_Compartido_Handoff.md`.
 
 - [ ] 1. Definir `types.ts` con `IAnonymizationCore`, `IPipelineOrchestrator`, `ImportDocumentInput`, reflejados en `core/Contracts.md` §3.5 (ADR-034 §7: sí se comparten — la UI los importa).
 - [ ] 2. Implementar `EngineContext` real: bus, logger, cache LRU, abortSignal, config mergeada con defaults.

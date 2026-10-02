@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=adr | dependencias=adr/ADR-131-El-Actualizador-Es-La-Primera-Salida-De-Red.md,adr/ADR-132-El-Shell-Tiene-Su-Propio-Modelo-De-Seguridad.md,adr/ADR-137-Windows-Verifica-Actualizaciones-Con-Clave-Ed25519-Propia.md,architecture/08_Security_Model.md,ui/Components.md,PRIVACY.md,roadmap/SignPath_Postulacion.md | audiencia=humanos+IA | fase=11.5 -->
+<!-- CONTEXT: scope=adr | dependencias=adr/ADR-131-El-Actualizador-Es-La-Primera-Salida-De-Red.md,adr/ADR-132-El-Shell-Tiene-Su-Propio-Modelo-De-Seguridad.md,adr/ADR-137-Windows-Verifica-Actualizaciones-Con-Clave-Ed25519-Propia.md,architecture/08_Security_Model.md,ui/Components.md,PRIVACY.md,roadmap/distribucion/SignPath_Postulacion.md | audiencia=humanos+IA | fase=11.5 -->
 
 # ADR-188 — La búsqueda de actualizaciones se puede apagar
 
@@ -35,7 +35,7 @@ registrara.
 
 Ahora hace falta por dos motivos. Primero, lo que la documentación promete
 no es lo que hace la app. Segundo, la política de privacidad que pide
-SignPath (`PRIVACY.md`, `roadmap/SignPath_Postulacion.md` §2) queda más clara
+SignPath (`PRIVACY.md`, `roadmap/distribucion/SignPath_Postulacion.md` §2) queda más clara
 si el usuario puede cortar la única conexión.
 
 ## Decisión

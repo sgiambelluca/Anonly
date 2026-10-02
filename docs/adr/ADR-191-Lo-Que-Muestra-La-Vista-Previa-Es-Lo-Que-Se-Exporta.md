@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=adr | dependencias=core/Grouping_Engine.md,core/Contracts.md,ui/React_Client.md,adr/ADR-057-Escalera-Abreviaturas-Placeholder-Por-Grupo.md,adr/ADR-072-Sintetico-Sembrado-Por-Identidad-De-Grupo.md,adr/ADR-170-Las-Vistas-Previas-De-Edicion-Las-Calcula-El-Core.md,adr/ADR-172-Deshacer-Y-Rehacer-Exactos.md,adr/ADR-175-Un-Choque-Manual-No-Queda-Colgado.md,roadmap/Revision_Por_Bloques_Hardening.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=adr | dependencias=core/Grouping_Engine.md,core/Contracts.md,ui/React_Client.md,adr/ADR-057-Escalera-Abreviaturas-Placeholder-Por-Grupo.md,adr/ADR-072-Sintetico-Sembrado-Por-Identidad-De-Grupo.md,adr/ADR-170-Las-Vistas-Previas-De-Edicion-Las-Calcula-El-Core.md,adr/ADR-172-Deshacer-Y-Rehacer-Exactos.md,adr/ADR-175-Un-Choque-Manual-No-Queda-Colgado.md,roadmap/hardening/Revision_Por_Bloques_Hardening.md | audiencia=humanos+IA | fase=11 -->
 
 # ADR-191 — Lo que muestra la vista previa es lo que se exporta
 

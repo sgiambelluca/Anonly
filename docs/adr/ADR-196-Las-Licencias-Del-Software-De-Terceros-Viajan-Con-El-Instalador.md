@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=adr | dependencias=ui/Components.md,adr/ADR-018-First-Party-Assets.md,adr/ADR-060-Reemplazo-Por-Genero.md,adr/ADR-070-Atribucion-Visible-En-El-Producto.md,adr/ADR-130-El-Contenedor-De-Escritorio-Fija-El-Motor.md,adr/ADR-168-Pantallas-De-Carga-Y-Escaneo-Tras-Pruebas-De-Usuario.md,roadmap/Future_Ideas.md,roadmap/SignPath_Postulacion.md | audiencia=humanos+IA | fase=12 -->
+<!-- CONTEXT: scope=adr | dependencias=ui/Components.md,adr/ADR-018-First-Party-Assets.md,adr/ADR-060-Reemplazo-Por-Genero.md,adr/ADR-070-Atribucion-Visible-En-El-Producto.md,adr/ADR-130-El-Contenedor-De-Escritorio-Fija-El-Motor.md,adr/ADR-168-Pantallas-De-Carga-Y-Escaneo-Tras-Pruebas-De-Usuario.md,roadmap/Future_Ideas.md,roadmap/distribucion/SignPath_Postulacion.md | audiencia=humanos+IA | fase=12 -->
 
 # ADR-196 — Las licencias del software de terceros viajan con el instalador
 

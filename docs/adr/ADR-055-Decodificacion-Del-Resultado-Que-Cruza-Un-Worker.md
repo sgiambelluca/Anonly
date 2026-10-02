@@ -191,7 +191,7 @@ class NerDispatchDecodeFailure extends Error {
 - `architecture/05_Worker_Architecture.md`: el invariante de §1 junto a la descripción de `COMPLETED`.
 - `ai/Code_Standards.md`: la regla de §3 (un decoder nunca devuelve un default en silencio) junto a las de manejo de errores.
 - `adr/ADR-042`: nota de que su `unknown` de transporte tiene ahora una obligación correspondiente del lado del consumidor.
-- `roadmap/MVP.md` y `roadmap/Hito10_Observaciones_Revision.md`: los PRs de §9.
+- `roadmap/MVP.md` y `roadmap/hitos/Hito10_Observaciones_Revision.md`: los PRs de §9.
 
 Sumados por la enmienda de §10 (2026-08-05):
 

@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=adr | dependencias=core/OCR_Engine.md,core/Contracts.md,adr/ADR-090-La-Orientacion-De-Un-Escaneo-Se-Detecta.md,adr/ADR-119-La-Orientacion-Se-Detecta-Con-El-Motor-Que-La-Sabe-Leer.md,adr/ADR-112-El-Sello-No-Es-Un-Parrafo.md,adr/ADR-067-Orden-De-Lectura-Por-Runs-Rotados.md,adr/ADR-088-El-Texto-Que-Recibe-El-NER.md,roadmap/OCR_Escaneos_Handoff.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=adr | dependencias=core/OCR_Engine.md,core/Contracts.md,adr/ADR-090-La-Orientacion-De-Un-Escaneo-Se-Detecta.md,adr/ADR-119-La-Orientacion-Se-Detecta-Con-El-Motor-Que-La-Sabe-Leer.md,adr/ADR-112-El-Sello-No-Es-Un-Parrafo.md,adr/ADR-067-Orden-De-Lectura-Por-Runs-Rotados.md,adr/ADR-088-El-Texto-Que-Recibe-El-NER.md,roadmap/hitos/OCR_Escaneos_Handoff.md | audiencia=humanos+IA | fase=11 -->
 
 # ADR-121 — El sello rotado vive en el margen
 

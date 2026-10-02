@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=adr | dependencias=core/PDF_Engine.md,core/Contracts.md,adr/ADR-067-Orden-De-Lectura-Por-Runs-Rotados.md,adr/ADR-090-La-Orientacion-De-Un-Escaneo-Se-Detecta.md,adr/ADR-110-El-Renglon-Es-Un-Grupo-No-Una-Coordenada.md,adr/ADR-113-El-Renglon-Se-Corta-Donde-Hay-Una-Columna.md,adr/ADR-119-La-Orientacion-Se-Detecta-Con-El-Motor-Que-La-Sabe-Leer.md,roadmap/OCR_Escaneos_Handoff.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=adr | dependencias=core/PDF_Engine.md,core/Contracts.md,adr/ADR-067-Orden-De-Lectura-Por-Runs-Rotados.md,adr/ADR-090-La-Orientacion-De-Un-Escaneo-Se-Detecta.md,adr/ADR-110-El-Renglon-Es-Un-Grupo-No-Una-Coordenada.md,adr/ADR-113-El-Renglon-Se-Corta-Donde-Hay-Una-Columna.md,adr/ADR-119-La-Orientacion-Se-Detecta-Con-El-Motor-Que-La-Sabe-Leer.md,roadmap/hitos/OCR_Escaneos_Handoff.md | audiencia=humanos+IA | fase=11 -->
 
 # ADR-120 — Una hoja torcida se lee enderezada
 

@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=adr | dependencias=core/PDF_Engine.md,core/OCR_Engine.md,architecture/03_Data_Model.md,adr/ADR-064-Palabras-De-OCR-En-Puntos.md,adr/ADR-065-OCR-Por-Region.md,adr/ADR-067-Orden-De-Lectura-Por-Runs-Rotados.md,adr/ADR-041-FuseOcrPage-Funcion-Pura-Sin-Estado-Retenido.md,adr/ADR-109-La-Caja-De-Una-Palabra-Es-Su-Caja-De-Tinta.md,roadmap/Post_Hito10.8_Pendientes.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=adr | dependencias=core/PDF_Engine.md,core/OCR_Engine.md,architecture/03_Data_Model.md,adr/ADR-064-Palabras-De-OCR-En-Puntos.md,adr/ADR-065-OCR-Por-Region.md,adr/ADR-067-Orden-De-Lectura-Por-Runs-Rotados.md,adr/ADR-041-FuseOcrPage-Funcion-Pura-Sin-Estado-Retenido.md,adr/ADR-109-La-Caja-De-Una-Palabra-Es-Su-Caja-De-Tinta.md,roadmap/hitos/Post_Hito10.8_Pendientes.md | audiencia=humanos+IA | fase=11 -->
 
 # ADR-110 — El renglón es un grupo, no una coordenada
 

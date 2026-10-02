@@ -1,10 +1,10 @@
-<!-- CONTEXT: scope=adr | dependencias=architecture/07_Performance_Strategy.md,architecture/08_Security_Model.md,adr/ADR-002-No-Backend.md,adr/ADR-018-First-Party-Assets.md,adr/ADR-039-Wasm-Paths-Inyectados.md,roadmap/Optimizacion_De_Rendimiento.md,ai/AI_Development_Guide.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=adr | dependencias=architecture/07_Performance_Strategy.md,architecture/08_Security_Model.md,adr/ADR-002-No-Backend.md,adr/ADR-018-First-Party-Assets.md,adr/ADR-039-Wasm-Paths-Inyectados.md,roadmap/rendimiento/Optimizacion_De_Rendimiento.md,ai/AI_Development_Guide.md | audiencia=humanos+IA | fase=11 -->
 
 # ADR-100 — El aislamiento de origen cruzado condiciona el hosting
 
 - **Estado**: Accepted
 - **Fecha**: 2026-08-27
-- **Decidido por**: El humano, punto A del plan de `roadmap/Optimizacion_De_Rendimiento.md`, tras ver la medición.
+- **Decidido por**: El humano, punto A del plan de `roadmap/rendimiento/Optimizacion_De_Rendimiento.md`, tras ver la medición.
 - **Relacionado con**: ADR-002 (no hay backend; el despliegue es un CDN estático), ADR-039 (los paths de wasm inyectados), `07_Performance_Strategy.md` §1
 - **Parte de**: Hito 11, optimización
 

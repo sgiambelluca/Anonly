@@ -113,7 +113,7 @@ El precedente de `shared` viajando con el PR que lo consume es ADR-034/ADR-047.
 - `architecture/08_Security_Model.md` §6: la enmienda de §3 (§6.1.3, §6.1.4, §6.1.6, excepción enumerada del grep de §6.3).
 - `core/Orchestrator.md` v1.5.3: `retryWithPassword` persiste el input con password; `ensureRenderDocumentLoaded` lo propaga (§13 caso 3, §14, §15).
 - `roadmap/MVP.md` y `adr/ADR-038` §8: PRs 17.4 y 17.5.
-- `roadmap/Hito10_Observaciones_Revision.md`: entrada del bug + tarea de seguimiento.
+- `roadmap/hitos/Hito10_Observaciones_Revision.md`: entrada del bug + tarea de seguimiento.
 
 ## Validación
 

@@ -87,7 +87,7 @@ La función es pura (grupos → `Replacement[]` por página, filtrando `enabled 
 - `core/Orchestrator.md` v1.5.0: §2 (responsabilidad nueva), §8 (suscripciones `ENTITY_GROUP_*` + nota final), §13 casos 26–27, §14 (tests nuevos), §15 (item 8b).
 - `core/Render_Engine.md` v1.5.0: §2, §6 (retiro de `requestDeltaRender`), §8 (solo `RENDER_REQUESTED`), §12, §13 (casos 11/16/21 ajustados), §14 (tests de delta reemplazados), §15 (items 11/14 marcados retirados).
 - `architecture/04_Event_System.md`: §6 (receptores), §11 (matriz e invariante).
-- `roadmap/Hito10_Observaciones_Revision.md`: entrada del bug + seguimiento.
+- `roadmap/hitos/Hito10_Observaciones_Revision.md`: entrada del bug + seguimiento.
 
 ## Validación
 

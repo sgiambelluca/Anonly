@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap-future | dependencias=roadmap/Version_2.0.md,00_Project_Vision.md,roadmap/T5_OSD_Investigacion_Scheduling.md | audiencia=humanos | fase=5 (§5.6-§5.9 en fase 10.9; §2.5 intención posterior al hardening registrada el 2026-09-14) -->
+<!-- CONTEXT: scope=roadmap-future | dependencias=roadmap/Version_2.0.md,00_Project_Vision.md,roadmap/ocr/T5_OSD_Investigacion_Scheduling.md | audiencia=humanos | fase=5 (§5.6-§5.9 en fase 10.9; §2.5 intención posterior al hardening registrada el 2026-09-14) -->
 
 # Anonly — Future Ideas
 

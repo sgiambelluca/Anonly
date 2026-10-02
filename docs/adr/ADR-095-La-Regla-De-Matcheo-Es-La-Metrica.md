@@ -6,7 +6,7 @@
 - **Fecha**: 2026-08-26
 - **Decidido por**: El humano, al aceptar el dataset de referencia en el plan y pedir que el evaluador se decida antes de escribirlo.
 - **Relacionado con**: `00_Project_Vision.md` §7 (el gate que declara recall ≥ 90 % en Regex y ≥ 85 % en NER **sobre dataset de referencia**), `tests/fixtures/README.md` ("Dataset de referencia"), ADR-094 (los grupos sugeridos, que esta decisión tiene que contar aparte)
-- **Parte de**: la campaña de calidad de detección abierta por `roadmap/Calidad_De_Deteccion_Informe.md`
+- **Parte de**: la campaña de calidad de detección abierta por `roadmap/hitos/Calidad_De_Deteccion_Informe.md`
 
 > Convención de citas: `ADR-095 §N` refiere a **Decisión §N**.
 
@@ -150,5 +150,5 @@ Ese 77 % es lo que el Hito 11 necesitaba: un número contra el cual medir si el 
 - `tests/fixtures/README.md` ("Dataset de referencia", y la advertencia sobre lo sintético)
 - `core/Contracts.md` §6 (`normalizeForComparison`)
 - `adr/ADR-094-Lo-Que-El-Detector-Duda-No-Se-Tira-En-Silencio.md` §1 (los grupos sugeridos)
-- `roadmap/Post_Hito10.8_Pendientes.md` §24 (por qué la métrica no se ata a la geometría)
+- `roadmap/hitos/Post_Hito10.8_Pendientes.md` §24 (por qué la métrica no se ata a la geometría)
 - `ai/AI_Development_Guide.md` R-13, R-18, R-21

@@ -70,7 +70,7 @@ Interfaz pública de `OCR_Engine.md` §6 (solo se agrega el constructor opcional
 
 - `core/OCR_Engine.md` v1.2.0: nota de cabecera, §2, §6 (constructor `pool?`), §12, §14 (tests nuevos), §15 (items 19–21 de PR14).
 - `architecture/05_Worker_Architecture.md` §7.2 (ciclo de vida reescrito como kernel) y nota del patrón de §1 en la cabecera (segunda excepción).
-- `roadmap/Hito10_Observaciones_Revision.md`: entrada PR14 (fork resuelto).
+- `roadmap/hitos/Hito10_Observaciones_Revision.md`: entrada PR14 (fork resuelto).
 
 ## Validación
 

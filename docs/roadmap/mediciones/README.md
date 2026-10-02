@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap-indice | dependencias=roadmap/Optimizacion_De_Rendimiento.md,roadmap/Optimizacion_De_Memoria_Plan.md,tests/perf/README.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=roadmap-indice | dependencias=roadmap/rendimiento/Optimizacion_De_Rendimiento.md,roadmap/memoria/Optimizacion_De_Memoria_Plan.md,tests/perf/README.md | audiencia=humanos+IA | fase=11 -->
 
 # Mediciones
 

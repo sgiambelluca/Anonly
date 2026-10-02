@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=adr | dependencias=core/PDF_Engine.md,core/Contracts.md,adr/ADR-020-PdfEngine-Word-Granularity-Hardening.md,adr/ADR-068-Origen-De-Run-Corrido-Por-Word-Spacing.md,adr/ADR-097-El-Avance-Real-De-Cada-Glifo-Reemplaza-Al-Promedio.md,adr/ADR-102-El-Flujo-De-Glifos-Es-Continuo-Por-Pagina.md,roadmap/Post_Hito10.8_Pendientes.md,ai/AI_Development_Guide.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=adr | dependencias=core/PDF_Engine.md,core/Contracts.md,adr/ADR-020-PdfEngine-Word-Granularity-Hardening.md,adr/ADR-068-Origen-De-Run-Corrido-Por-Word-Spacing.md,adr/ADR-097-El-Avance-Real-De-Cada-Glifo-Reemplaza-Al-Promedio.md,adr/ADR-102-El-Flujo-De-Glifos-Es-Continuo-Por-Pagina.md,roadmap/hitos/Post_Hito10.8_Pendientes.md,ai/AI_Development_Guide.md | audiencia=humanos+IA | fase=11 -->
 
 # ADR-108 — El avance de un espacio incluye el word spacing
 

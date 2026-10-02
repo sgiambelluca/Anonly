@@ -860,7 +860,7 @@ export interface ExportConfig {
 >
 > Residuo por documento: dentro de ±3 % en todo el corpus salvo la fuente de cuerpo de una de las pericias (`ascent + |descent| = 0,906`, un `/Ascent` de tipo *typo ascender*), donde el token queda ~17 % más chico.
 >
-> **Lo que esta recalibración NO decide** es si el token debería dibujarse del tamaño del texto que lo rodea — hoy sale ~30 % más chico por construcción. Eso es `roadmap/Post_Hito10.8_Pendientes.md` §25 (§23g) y sigue abierto: mezclarlo acá haría imposible saber cuál de los dos cambios movió qué.
+> **Lo que esta recalibración NO decide** es si el token debería dibujarse del tamaño del texto que lo rodea — hoy sale ~30 % más chico por construcción. Eso es `roadmap/hitos/Post_Hito10.8_Pendientes.md` §25 (§23g) y sigue abierto: mezclarlo acá haría imposible saber cuál de los dos cambios movió qué.
 
 > **Qué mide `DEGRADED_FONT_RATIO`, y por qué cambió** (ADR-086). Un reemplazo que no entra se aprieta de dos formas: se achica la fuente (vertical) y, cuando la fuente ya no puede achicarse más, `fillText(..., maxWidth)` aplasta los glifos a lo ancho (horizontal). El criterio original de ADR-058 §7 medía **solo la vertical**, y esa es justamente la que en una caja de cuerpo de texto no puede ocurrir: `tamañoNatural` y `tamañoEfectivo` chocaban contra el mismo piso de fuente mínima, así que el cociente daba 1,00 por construcción y el aviso era inalcanzable fuera de titulares. Ahora se mide la razón de **anchos**, que es la compresión total: el producto de las dos se simplifica exactamente a ella, porque el tamaño final se cancela.
 >

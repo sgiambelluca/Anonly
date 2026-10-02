@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=adr | dependencias=roadmap/mediciones/grouping/Agrupacion_Difusa_Medicion.md,roadmap/Rendimiento_Experimentos_Plan.md,core/Grouping_Engine.md,core/Contracts.md,adr/ADR-073-Difuso-Solo-Para-Tipos-De-Texto-Libre.md,adr/ADR-085-Un-Cambio-De-Tipo-Se-Recuerda-Por-Valor.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=adr | dependencias=roadmap/mediciones/grouping/Agrupacion_Difusa_Medicion.md,roadmap/rendimiento/Rendimiento_Experimentos_Plan.md,core/Grouping_Engine.md,core/Contracts.md,adr/ADR-073-Difuso-Solo-Para-Tipos-De-Texto-Libre.md,adr/ADR-085-Un-Cambio-De-Tipo-Se-Recuerda-Por-Valor.md | audiencia=humanos+IA | fase=11 -->
 
 # ADR-182 — Descartar distancias imposibles antes de completar Levenshtein
 

@@ -6,7 +6,7 @@
 - **Fecha**: 2026-08-26
 - **Decidido por**: El humano, sobre el hallazgo que salió de construir el dataset de referencia.
 - **Relacionado con**: ADR-022 (que fijó los `\b` de este mismo patrón y no tocó la cantidad de dígitos), ADR-075 §2 (la guarda de corrida, que sigue aplicando)
-- **Parte de**: la campaña de calidad de detección abierta por `roadmap/Calidad_De_Deteccion_Informe.md`
+- **Parte de**: la campaña de calidad de detección abierta por `roadmap/hitos/Calidad_De_Deteccion_Informe.md`
 
 > Convención de citas: `ADR-093 §N` refiere a **Decisión §N**.
 

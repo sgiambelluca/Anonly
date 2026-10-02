@@ -4,7 +4,7 @@
 
 - **Estado**: Accepted
 - **Fecha**: 2026-08-15
-- **Decidido por**: El humano, al tomar los puntos 1, 2, 4, 4bis y 10 de `roadmap/Post_Hito10.8_Pendientes.md` como Hito 10.9. El defecto se encontró al planificar ADR-072 (2026-08-14) y se difirió por no pertenecer al Hito 10.6.
+- **Decidido por**: El humano, al tomar los puntos 1, 2, 4, 4bis y 10 de `roadmap/hitos/Post_Hito10.8_Pendientes.md` como Hito 10.9. El defecto se encontró al planificar ADR-072 (2026-08-14) y se difirió por no pertenecer al Hito 10.6.
 - **Relacionado con**: **ADR-057 §7** (que promete en negrita lo que el motor no cumple), **ADR-028** (la renumeración canónica, cuya guarda de "el índice no cambió" es hoy lo único que hace sobrevivir una edición manual, por accidente), **ADR-069 §5** (`personGenderUserSet`: el mismo patrón, por el mismo motivo, ya implementado y mergeado), **ADR-072 §4** (que decidió **no** levantar la guarda de la renumeración justamente para no ensanchar este defecto), ADR-058 §4 y ADR-062 (que le ofrecen al usuario editar el valor a mano como remedio del reemplazo degradado), ADR-061 (el agregado manual, que renumera y por lo tanto dispara el defecto de rutina), ADR-074 §6 (que en este mismo hito hace que la marca de degradación se encienda en más casos)
 - **Parte de**: Hito 10.9, PRs 14 y 15
 
@@ -190,7 +190,7 @@ Tests del PR 15:
 - `adr/ADR-057-Escalera-Abreviaturas-Placeholder-Por-Grupo.md` §7 — nota de que la promesa se implementa acá y que el test que la cubría no la ejercitaba.
 - `ui/UX_Guidelines.md` — qué pasa con un valor escrito a mano y cómo se vuelve al automático (§5).
 - `roadmap/MVP.md` §4 — bloque del Hito 10.9.
-- `roadmap/Post_Hito10.8_Pendientes.md` §10 — pasa de pendiente a adoptado.
+- `roadmap/hitos/Post_Hito10.8_Pendientes.md` §10 — pasa de pendiente a adoptado.
 - `roadmap/Future_Ideas.md` — la afordancia explícita de "restaurar valor automático" (§5).
 
 `core/Contracts.md` **no** se toca: el flag es interno y no hay tipo, evento ni error code nuevo.
@@ -206,5 +206,5 @@ Tests del PR 15:
 
 - `core/Grouping_Engine.md` §13 casos 17, 21, 30, §"Resolución de modo", §"Escalera de abreviaturas" — `core/Contracts.md` §8 — `architecture/04_Event_System.md` §10
 - `adr/ADR-012` — `adr/ADR-028` — `adr/ADR-038` §2 — `adr/ADR-057` §7 — `adr/ADR-058` §4, §7 — `adr/ADR-061` — `adr/ADR-062` — `adr/ADR-069` §4, §5, §6 — `adr/ADR-071` §6 — `adr/ADR-072` §1, §4 — `adr/ADR-074` §6
-- `roadmap/Post_Hito10.8_Pendientes.md` §10 (el reporte original y su segundo camino)
+- `roadmap/hitos/Post_Hito10.8_Pendientes.md` §10 (el reporte original y su segundo camino)
 - Código: `packages/anonymization-core/grouping-engine/src/grouping.engine.ts` (`computeReplacementValue` y sus once call sites; `renumberGroupsCanonically`, `inferGendersOnFinish`, `applyGroupUpdate`, `recomputeAllGroupModes`)

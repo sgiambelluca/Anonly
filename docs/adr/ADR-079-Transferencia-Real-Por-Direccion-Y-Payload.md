@@ -4,7 +4,7 @@
 
 - **Estado**: Accepted
 - **Fecha**: 2026-08-19
-- **Decidido por**: El humano, al revisar las observaciones no bloqueantes del Hito 10 (`roadmap/Hito10_Observaciones_Plan_De_Resolucion.md` §6.3 punto H, observación del revisor de PR16).
+- **Decidido por**: El humano, al revisar las observaciones no bloqueantes del Hito 10 (`roadmap/hitos/Hito10_Observaciones_Plan_De_Resolucion.md` §6.3 punto H, observación del revisor de PR16).
 - **Relacionado con**: **el bug #6 del PR10** (buffer detachment en `runExport` — la razón por la que esto no puede aplicarse a ciegas), **ADR-043 §5** (broadcast `load-document`, el caso donde transferir es imposible), ADR-045/047 (que dicen "transferido" en su prosa), **ADR-036 §2/§3** (el transporte).
 - **Parte de**: cierre de las observaciones del Hito 10.
 

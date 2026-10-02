@@ -1,10 +1,10 @@
-<!-- CONTEXT: scope=adr | dependencias=ai/Code_Standards.md,core/Contracts.md,roadmap/Duplicacion_De_Logica.md,adr/ADR-128-El-Esqueleto-De-Un-Worker-Se-Escribe-Una-Vez.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=adr | dependencias=ai/Code_Standards.md,core/Contracts.md,roadmap/hardening/Duplicacion_De_Logica.md,adr/ADR-128-El-Esqueleto-De-Un-Worker-Se-Escribe-Una-Vez.md | audiencia=humanos+IA | fase=11 -->
 
 # ADR-129 — Los dobles de test del Core viven en un paquete
 
 - **Estado**: Accepted
 - **Fecha**: 2026-09-03
-- **Decidido por**: El humano, que pidió cerrar el inventario de `roadmap/Duplicacion_De_Logica.md` dejando afuera solo §2, por falta de forma de medirlo.
+- **Decidido por**: El humano, que pidió cerrar el inventario de `roadmap/hardening/Duplicacion_De_Logica.md` dejando afuera solo §2, por falta de forma de medirlo.
 - **Relacionado con**: `Duplicacion_De_Logica.md` §5, ADR-128 (el ítem anterior del mismo inventario), `ai/Code_Standards.md` §5
 - **Parte de**: Hito 11
 

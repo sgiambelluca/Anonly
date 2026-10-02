@@ -119,7 +119,7 @@ Con esto, los ocho escenarios de PR17 quedan sin bloqueo: ninguno arranca en `fi
 - `architecture/07_Performance_Strategy.md`: §11.3 (notas de los escenarios 2, 3, 7 y 8), §11.4 (prerequisito `assets:mirror` en la fila del gate E2E).
 - `tests/fixtures/README.md`: qué fixture se genera dónde (Node/browser) y `protected.pdf` como único fixture commiteado, con su comando de reproducción.
 - `ui/React_Client.md` §3.7: el mapeo settings → `EngineConfig` pasa a cubrir también el **bootstrap** (alcance de PR16.5).
-- `roadmap/Hito10_Observaciones_Revision.md`: entradas PR16/PR16.5/PR17 + tareas de seguimiento.
+- `roadmap/hitos/Hito10_Observaciones_Revision.md`: entradas PR16/PR16.5/PR17 + tareas de seguimiento.
 - `roadmap/MVP.md` (Hito 10) y `adr/ADR-038` §8: PR16.5 insertado en la tabla de PRs.
 - `.github/workflows/ci.yml` y `tests/e2e/` (README/tsconfig): los aplica PR17, no el planificador.
 

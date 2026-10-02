@@ -145,7 +145,7 @@ Un solo PR, `apps/react-client` (visor + `viewer.store` + `settings.store` + `Se
 - `ui/React_Client.md` §3.5 (estado del visor por panel; el flag nuevo en `settings`) y §7 (deja de decir "Lado a lado sincronizado: scroll vertical compartido vía `viewer.currentPageIndex`").
 - `ui/Components.md` §5.1 (`SideBySideViewer` deja de describir "scroll sincronizado" como propiedad; el control nuevo en la barra del visor), §5.3 (`PageVirtualizer` sin `scrollToPageIndex`) y el catálogo, por el componente nuevo.
 - `architecture/07_Performance_Strategy.md` §3.1 (deja de decir "dos virtualizers sincronizados vía estado Zustand").
-- `roadmap/MVP.md` y `roadmap/Hito10_Observaciones_Revision.md`: el PR de §10 y el cierre de la entrada del bug.
+- `roadmap/MVP.md` y `roadmap/hitos/Hito10_Observaciones_Revision.md`: el PR de §10 y el cierre de la entrada del bug.
 
 ## Validación
 

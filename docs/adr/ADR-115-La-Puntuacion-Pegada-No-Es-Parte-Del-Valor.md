@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=adr | dependencias=core/Contracts.md,core/Regex_Engine.md,core/Grouping_Engine.md,adr/ADR-061-Entidad-Manual-Y-Busqueda-Literal.md,adr/ADR-089-Buscar-No-Es-Agregar.md,adr/ADR-060-Lexico-De-Genero.md,adr/ADR-111-El-Token-Que-No-Es-Entidad-Tambien-Entra-Al-Agregador.md,roadmap/OCR_Escaneos_Handoff.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=adr | dependencias=core/Contracts.md,core/Regex_Engine.md,core/Grouping_Engine.md,adr/ADR-061-Entidad-Manual-Y-Busqueda-Literal.md,adr/ADR-089-Buscar-No-Es-Agregar.md,adr/ADR-060-Lexico-De-Genero.md,adr/ADR-111-El-Token-Que-No-Es-Entidad-Tambien-Entra-Al-Agregador.md,roadmap/hitos/OCR_Escaneos_Handoff.md | audiencia=humanos+IA | fase=11 -->
 
 # ADR-115 — La puntuación pegada no es parte del valor
 

@@ -4,9 +4,9 @@
 
 - **Estado**: Accepted
 - **Fecha**: 2026-08-22
-- **Decidido por**: El humano, sobre la reproducción de las tres fugas del gate manual (`roadmap/Post_Hito10.8_Pendientes.md` §23) en `tests/integration/qa-stamp-detection.test.ts`.
+- **Decidido por**: El humano, sobre la reproducción de las tres fugas del gate manual (`roadmap/hitos/Post_Hito10.8_Pendientes.md` §23) en `tests/integration/qa-stamp-detection.test.ts`.
 - **Relacionado con**: ADR-067 §4 (el orden que concatena los runs rotados, y que este ADR asume intacto), ADR-024 §2 (`batchSize` en palabras), ADR-046 §2/§3 (un despacho por batch), ADR-066 §6 (`rotation` en `BoundingBox`, la señal que este ADR consume), ADR-063 (el bbox rotado, que ya andaba y no alcanzaba)
-- **Parte de**: la campaña de calidad de detección abierta por `roadmap/Calidad_De_Deteccion_Informe.md`
+- **Parte de**: la campaña de calidad de detección abierta por `roadmap/hitos/Calidad_De_Deteccion_Informe.md`
 
 > Convención de citas: `ADR-088 §N` refiere a **Decisión §N**; el contexto se cita como `ADR-088, Contexto §N`.
 
@@ -129,8 +129,8 @@ Medido sobre `qa-stamp.pdf` con las dos condiciones puestas: el sello devuelve `
 
 ## Referencias
 
-- `roadmap/Post_Hito10.8_Pendientes.md` §23 (los hallazgos del gate manual)
-- `roadmap/Calidad_De_Deteccion_Informe.md` (el informe que ordenó el trabajo; sus hipótesis para §23a/§23b quedan corregidas por este ADR)
+- `roadmap/hitos/Post_Hito10.8_Pendientes.md` §23 (los hallazgos del gate manual)
+- `roadmap/hitos/Calidad_De_Deteccion_Informe.md` (el informe que ordenó el trabajo; sus hipótesis para §23a/§23b quedan corregidas por este ADR)
 - `core/NER_Engine.md` §12 (batches y cancelación), §15 (checklist)
 - `core/Contracts.md` §5 (`BoundingBox.rotation`, ausente ≡ 0), §6 (`normalizeForComparison`)
 - `adr/ADR-024-NerStarted-ModelLoading-BatchSize.md` §2 (`batchSize` en palabras)

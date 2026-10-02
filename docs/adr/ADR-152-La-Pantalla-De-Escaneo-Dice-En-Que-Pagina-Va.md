@@ -154,7 +154,7 @@ de esta pantalla, no un detalle de layout.
   Cada afirmación es cierta y el total es el que el usuario reconoce, que es lo
   que §2 protege; pero el salto no está probado con usuarios y es lo que hay que
   mirar en la próxima ronda — anotado como pendiente de validación en
-  `roadmap/Post_Hito10.8_Pendientes.md` §32, con el fixture a usar y las dos
+  `roadmap/hitos/Post_Hito10.8_Pendientes.md` §32, con el fixture a usar y las dos
   salidas si molesta. En un documento **enteramente escaneado** —el caso
   frecuente— no hay salto: cuenta 1, 2, 3… de 20.
 - La UI pasa a escuchar `OCR_PAGE_FINISHED` para saber por cuál página va. Es

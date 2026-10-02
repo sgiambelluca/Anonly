@@ -78,7 +78,7 @@ Un solo PR de `apps/react-client` (**PR 17.7**): componente nuevo + su render en
 - `ui/React_Client.md`: §2 (árbol de `components/toolbar/`) y la tabla de señales→acción UI.
 - `architecture/07_Performance_Strategy.md` §11.3 item 7: dependencia de este ADR.
 - `roadmap/MVP.md` y `adr/ADR-038` §8: PR 17.7.
-- `roadmap/Hito10_Observaciones_Revision.md`: cierre de la decisión abierta.
+- `roadmap/hitos/Hito10_Observaciones_Revision.md`: cierre de la decisión abierta.
 
 ## Validación
 

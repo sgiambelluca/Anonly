@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=adr | dependencias=core/Contracts.md,architecture/03_Data_Model.md,core/Grouping_Engine.md,ui/Components.md,adr/ADR-074-Una-Entidad-Partida-En-Varias-Lineas.md,adr/ADR-084-Ver-Ocurrencias-Escribe-En-El-Buscador.md,roadmap/Post_Hito10.8_Pendientes.md,ai/AI_Development_Guide.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=adr | dependencias=core/Contracts.md,architecture/03_Data_Model.md,core/Grouping_Engine.md,ui/Components.md,adr/ADR-074-Una-Entidad-Partida-En-Varias-Lineas.md,adr/ADR-084-Ver-Ocurrencias-Escribe-En-El-Buscador.md,roadmap/hitos/Post_Hito10.8_Pendientes.md,ai/AI_Development_Guide.md | audiencia=humanos+IA | fase=11 -->
 
 # ADR-104 — La referencia lleva el valor que la UI muestra
 

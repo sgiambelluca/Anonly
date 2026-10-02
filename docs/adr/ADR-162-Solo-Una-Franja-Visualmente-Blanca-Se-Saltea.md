@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=adr | dependencias=core/OCR_Engine.md,adr/ADR-121-El-Sello-Rotado-Vive-En-El-Margen.md,adr/ADR-147-Perder-Un-Identificador-Cubierto-Es-Una-Regresion.md,adr/ADR-149-Un-Gate-Que-No-Ejecuta-Nada-Es-Rojo.md,adr/ADR-161-Una-Franja-Sin-Tinta-No-Se-Reconoce.md,roadmap/Optimizacion_De_Memoria_Plan.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=adr | dependencias=core/OCR_Engine.md,adr/ADR-121-El-Sello-Rotado-Vive-En-El-Margen.md,adr/ADR-147-Perder-Un-Identificador-Cubierto-Es-Una-Regresion.md,adr/ADR-149-Un-Gate-Que-No-Ejecuta-Nada-Es-Rojo.md,adr/ADR-161-Una-Franja-Sin-Tinta-No-Se-Reconoce.md,roadmap/memoria/Optimizacion_De_Memoria_Plan.md | audiencia=humanos+IA | fase=11 -->
 
 # ADR-162 — Solo una franja visualmente blanca se saltea
 

@@ -4,7 +4,7 @@
 
 - **Estado**: Accepted
 - **Fecha**: 2026-07-22
-- **Decidido por**: El planificador, a partir del diagnóstico del bug #3 del Escenario 1 E2E (Hito 10 PR10, `roadmap/Hito10_Observaciones_Revision.md` entrada "PR10")
+- **Decidido por**: El planificador, a partir del diagnóstico del bug #3 del Escenario 1 E2E (Hito 10 PR10, `roadmap/hitos/Hito10_Observaciones_Revision.md` entrada "PR10")
 - **Relacionado con**: ADR-018 (assets first-party), ADR-025 (migración a `@huggingface/transformers`, destino de los wasm), ADR-036 §2 (patrón de inyección desde la app: la app es la única capa con bundler)
 
 ## Contexto
@@ -18,7 +18,7 @@ por diseño** importar módulos desde `public/` ("This file is in /public and wi
 during build without going through the plugin transforms, and therefore should not be imported
 from source code"). Descartados empíricamente: headers COOP/COEP (el fallo ocurre antes de
 necesitar `SharedArrayBuffer`) y `optimizeDeps.exclude` (el `import()` problemático no depende del
-pre-bundling). Diagnóstico completo en `roadmap/Hito10_Observaciones_Revision.md`.
+pre-bundling). Diagnóstico completo en `roadmap/hitos/Hito10_Observaciones_Revision.md`.
 
 El fix requiere que la app importe esos archivos vía `?url` (mismo patrón que el fix de
 `GlobalWorkerOptions.workerSrc` de pdfjs-dist) y le pase las URLs resultantes al motor. Pero hoy
@@ -131,6 +131,6 @@ se `fetch()`ea → `public/`".
 ## Referencias
 
 - `core/Contracts.md` §3.5, §6 — `core/NER_Engine.md` §6, notas de cabecera
-- `roadmap/Hito10_Observaciones_Revision.md` — entradas "PR10" (diagnóstico completo) y "PR5" (gap de `initCore`)
+- `roadmap/hitos/Hito10_Observaciones_Revision.md` — entradas "PR10" (diagnóstico completo) y "PR5" (gap de `initCore`)
 - `adr/ADR-018-First-Party-Assets.md` — `adr/ADR-025-Migracion-Huggingface-Transformers.md` punto 3 — `adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md` §2
 - Issue [#3](https://github.com/sgiambelluca/Anonly/issues/3) — commits `779b2f1` (bugs #1/#2), `dbe533c` (diagnóstico)

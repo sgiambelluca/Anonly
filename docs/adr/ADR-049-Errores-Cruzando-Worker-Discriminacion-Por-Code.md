@@ -58,7 +58,7 @@ Conclusión del barrido: hoy hay **exactamente dos** `instanceof` de subclase co
 >
 > **Salvedad sobre `pdf-engine`**, que no tiene pool ni puerto propio y por eso no participa de esto (`ai/Code_Standards.md` §7 lo nombra como el único caso, vía ADR-055 §10): sus dos `instanceof` de subclase (`pdf.engine.ts:1425` y `:1894`) capturan errores lanzados **en el mismo contexto**, así que el prototipo sobrevive y hoy no son este bug. Eso vale **solo mientras no tenga puerto**: el día que lo gane, los dos se convierten exactamente en esto, y los encontraría el mismo punto ciego.
 >
-> El costo fue exactamente el que este ADR predice en §6: el `instanceof` daba `false` para **todo** fallo de render de producción, así que el reintento de `core/Render_Engine.md` §11 nunca corría y el batch se abortaba por la rama "no recuperable" sin emitir `PREVIEW_PAGE_FAILED` — la UI no se enteraba de nada y el visor quedaba gris para siempre. Se corrigió por `code`, con un test que inyecta el error **deserializado** (§6) y que se verificó fallando contra el código viejo. Rastro medido en `roadmap/Post_Hito10.8_Pendientes.md` §21.
+> El costo fue exactamente el que este ADR predice en §6: el `instanceof` daba `false` para **todo** fallo de render de producción, así que el reintento de `core/Render_Engine.md` §11 nunca corría y el batch se abortaba por la rama "no recuperable" sin emitir `PREVIEW_PAGE_FAILED` — la UI no se enteraba de nada y el visor quedaba gris para siempre. Se corrigió por `code`, con un test que inyecta el error **deserializado** (§6) y que se verificó fallando contra el código viejo. Rastro medido en `roadmap/hitos/Post_Hito10.8_Pendientes.md` §21.
 
 ## Decisión
 
@@ -148,7 +148,7 @@ El des-`fixme` del Escenario 3 viaja en el PR 17.2 —y no en el PR17— porque 
 - `core/PDF_Engine.md` §11: la nota del flag `retryable` deja de decir "va en un PR chico posterior al Hito 9" y pasa a citar el PR 17.1 de este ADR.
 - `architecture/05_Worker_Architecture.md` §5: bullet nuevo sobre la pérdida de identidad de clase en el camino `FAILED`, y por qué `CANCELLED` no la sufre.
 - `roadmap/MVP.md` (Hito 9 pendiente, Hito 10 narrativa y tabla de PRs) y `adr/ADR-038` §8: PRs 17.1 y 17.2 insertados.
-- `roadmap/Hito10_Observaciones_Revision.md`: entrada del bug + tarea de seguimiento.
+- `roadmap/hitos/Hito10_Observaciones_Revision.md`: entrada del bug + tarea de seguimiento.
 
 ## Validación
 

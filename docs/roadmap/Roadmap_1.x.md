@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap-1.x | dependencias=roadmap/Version_1.0.md,roadmap/Version_2.0.md,roadmap/Future_Ideas.md,roadmap/Post_Hito10.8_Pendientes.md,RELEASING.md,00_Project_Vision.md,architecture/08_Security_Model.md,adr/ADR-009-Export-Strategy.md,adr/ADR-059-Leyenda-Opcional-De-Marcadores.md,adr/ADR-148-Un-Export-Se-Verifica-Leyendo-El-PDF-Exportado.md,adr/ADR-190-Una-Pagina-Con-Tinta-No-Sale-Vacia-En-Silencio.md | audiencia=humanos+IA | fase=12 -->
+<!-- CONTEXT: scope=roadmap-1.x | dependencias=roadmap/Version_1.0.md,roadmap/Version_2.0.md,roadmap/Future_Ideas.md,roadmap/hitos/Post_Hito10.8_Pendientes.md,RELEASING.md,00_Project_Vision.md,architecture/08_Security_Model.md,adr/ADR-009-Export-Strategy.md,adr/ADR-059-Leyenda-Opcional-De-Marcadores.md,adr/ADR-148-Un-Export-Se-Verifica-Leyendo-El-PDF-Exportado.md,adr/ADR-190-Una-Pagina-Con-Tinta-No-Sale-Vacia-En-Silencio.md | audiencia=humanos+IA | fase=12 -->
 
 # Anonly — Roadmap 1.x
 
@@ -288,6 +288,9 @@ asignada.
 - PDF con rotación de página declarada (`/Rotate ≠ 0`), sin medir (§8).
 - Censura sobre texto superpuesto, como un sello que pisa el cuerpo (§7).
 - Variantes de operaciones de imagen de pdf.js sin cubrir (§9).
+- Dos nombres en un mismo renglón separados por mucho espacio, como una
+  línea de firmas, se detectan como una sola persona. Visto el 2026-10-02 al
+  armar las capturas del README, con un documento ficticio; sin diagnosticar.
 - Cobertura de tests del contenedor Electron, que pide su ADR (`MVP.md`,
   Hito 11.5).
 - Navegación por teclado del árbol de entidades y auditoría de accesibilidad

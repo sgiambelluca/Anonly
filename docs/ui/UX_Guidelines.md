@@ -755,7 +755,7 @@ La animación y el archivo van en una caja; la barra de progreso y `Cancelar`, e
 >
 > **Pendiente de validar con usuarios**: en un documento mixto, el número de página del OCR salta
 > (va por la 3 y después por la 12, porque las del medio ya tenían texto). Cada afirmación es
-> cierta, pero el salto en sí no está probado — `roadmap/Post_Hito10.8_Pendientes.md` §32 tiene el
+> cierta, pero el salto en sí no está probado — `roadmap/hitos/Post_Hito10.8_Pendientes.md` §32 tiene el
 > plan y las dos salidas si molesta. En un documento enteramente escaneado, el caso frecuente, no
 > hay salto.
 
@@ -937,7 +937,7 @@ Un conflicto sin resolver **no** es una confirmación: bloquea antes de llegar a
 >   y foco gestionado, y no implementaba **nada**; éste implementa todo salvo el tab stop único, y
 >   retirarlo perdería además la estructura (nivel, expandido, tamaño del conjunto) que el lector de
 >   pantalla sí aprovecha. El desvío queda anotado como pendiente en
->   `roadmap/Post_Hito10.8_Pendientes.md` §22, con `treegrid` como destino.
+>   `roadmap/hitos/Post_Hito10.8_Pendientes.md` §22, con `treegrid` como destino.
 
 Atajos de teclado:
 

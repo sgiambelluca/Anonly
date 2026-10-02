@@ -4,7 +4,7 @@
 
 - **Estado**: Accepted (amenda la precondición de stage de ADR-038)
 - **Fecha**: 2026-07-22
-- **Decidido por**: El humano, sobre el gap latente destapado por el bug #7 del Escenario 1 E2E (Hito 10 PR10, `roadmap/Hito10_Observaciones_Revision.md`)
+- **Decidido por**: El humano, sobre el gap latente destapado por el bug #7 del Escenario 1 E2E (Hito 10 PR10, `roadmap/hitos/Hito10_Observaciones_Revision.md`)
 - **Relacionado con**: ADR-038 (precondición `stage ∈ {Ready, Failed}` de `reanalyze`), `Orchestrator.md` §8/§13.21
 
 ## Contexto
@@ -68,4 +68,4 @@ los fixes de los bugs #6/#7 (R-1). Spec: `Orchestrator.md` v1.3.0 (§13.21, §14
 ## Referencias
 
 - `core/Orchestrator.md` §8, §13.21, §14 — `adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md` "Precondiciones"
-- `ui/Components.md` §2.1/§2.5 (reconciliación del bug #7) — `roadmap/Hito10_Observaciones_Revision.md` (gap y bug #7)
+- `ui/Components.md` §2.1/§2.5 (reconciliación del bug #7) — `roadmap/hitos/Hito10_Observaciones_Revision.md` (gap y bug #7)
