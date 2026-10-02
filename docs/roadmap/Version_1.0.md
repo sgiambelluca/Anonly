@@ -74,8 +74,8 @@ perfil Intermedio (ADR-194 §8).
 | Un PDF protegido pide la contraseña después de recrear el Core | verificado el 2026-10-02 sobre el binario empaquetado de Windows (`win-unpacked`), cambiando el perfil antes de cargar `protected.pdf` |
 | ADR-188/195: con «No buscar», la aplicación no se conecta al abrir | verificado el 2026-10-02 sobre el mismo binario, leyendo el registro de red de Chromium: por defecto consulta a `github.com`; con «No buscar» no hay ninguna conexión; «Buscar actualizaciones ahora» sí consulta |
 | Lo mismo en macOS | **sin verificar** |
-| Corrida de prueba de `release.yml` por `workflow_dispatch` | **pendiente**. La última es del 2026-09-09 y el workflow cambió después (sourcemaps) |
-| Créditos de licencias del software distribuido (ADR-196) | en implementación |
+| Corrida de prueba de `release.yml` por `workflow_dispatch` | hecha el 2026-10-02 sobre `c8f1ea2` (`main`, con CI completa en verde): validación, instalador de macOS e instalador de Windows en verde, con sus firmas y el smoke test; el job de publicación no corre en una ejecución manual |
+| Créditos de licencias del software distribuido (ADR-196) | hecho, en `main` desde el 2026-10-02 |
 
 Las dos comprobaciones sobre el binario se hicieron con un script que maneja
 la aplicación empaquetada por el puerto de depuración. No se hicieron sobre
@@ -121,8 +121,8 @@ Van en las notas de la versión. Cada una tiene su lugar en `Roadmap_1.x.md`.
 
 ## 6. Cómo se publica
 
-`RELEASING.md`. Para pasar de `0.9.2` a `1.0.0` hace falta un changeset de
-tipo `major`; el único pendiente hoy es `minor`.
+`RELEASING.md`. El paso de `0.9.2` a `1.0.0` se hizo con un changeset de tipo
+`major` en la branch `release/1.0.0`.
 
 Quien instaló la 0.9.2 recibe la 1.0.0 desde la aplicación, sin reinstalar:
 ver `Roadmap_1.x.md` §2.

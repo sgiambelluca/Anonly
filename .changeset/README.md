@@ -19,7 +19,7 @@ Este proyecto usa [Changesets](https://github.com/changesets/changesets) para ge
 3. Cuando se quiere liberar una nueva versión, ejecutá:
 
    ```bash
-   pnpm version
+   pnpm run version
    ```
 
    Changesets consume todos los `.changeset/*.md` pendientes, actualiza los `package.json` de los paquetes afectados, actualiza sus `CHANGELOG.md` y remueve los archivos consumidos.

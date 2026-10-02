@@ -35,8 +35,11 @@ changesets sin que ningún usuario reciba una actualización.
 **3. Cuando querés publicar**, aplicás los changesets acumulados:
 
 ```bash
-pnpm version   # sube las versiones y escribe los CHANGELOG
+pnpm run version   # sube las versiones y escribe los CHANGELOG
 ```
+
+Tiene que ser `pnpm run version`: `pnpm version` a secas es un comando propio
+de pnpm, que imprime versiones y no toca nada.
 
 **4. Esperás CI verde en `main` y tageás ese commit.** El tag debe coincidir exactamente con `v` + la versión de `apps/desktop-shell/package.json`. La validación del release rechaza un commit fuera de `main`, un tag que no coincide o un SHA sin CI exitosa. El tag dispara el release:
 

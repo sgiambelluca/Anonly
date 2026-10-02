@@ -326,7 +326,7 @@ En la misma carpeta están los documentos de trabajo: informes de campo, medicio
 
 ## Estado
 
-**Versión 1.0 en preparación.** La última versión publicada es la 0.9.2, una pre-release. El estado de `main` es el que se va a publicar como 1.0: qué trae y qué limitaciones conocidas tiene está en [`docs/roadmap/Version_1.0.md`](./docs/roadmap/Version_1.0.md), y lo que sigue en [`docs/roadmap/Roadmap_1.x.md`](./docs/roadmap/Roadmap_1.x.md). Esos dos documentos son la fuente de verdad, no este README, que se desactualiza más rápido.
+**Versión 1.0.** Es la primera versión estable; las 0.9.x fueron pre-releases. Qué trae y qué limitaciones conocidas tiene está en [`docs/roadmap/Version_1.0.md`](./docs/roadmap/Version_1.0.md), y lo que sigue en [`docs/roadmap/Roadmap_1.x.md`](./docs/roadmap/Roadmap_1.x.md). Esos dos documentos son la fuente de verdad, no este README, que se desactualiza más rápido.
 
 ## Contribuir
 
