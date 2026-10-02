@@ -149,7 +149,7 @@ function renderPhase(phase: AppPhase): ReactNode {
 
 /**
  * Panel de trabajo, en las tres formas que decide `layoutMode.ts` (§19 de
- * `roadmap/Post_Hito10.8_Pendientes.md` explica qué se rompió y por qué son
+ * `roadmap/hitos/Post_Hito10.8_Pendientes.md` explica qué se rompió y por qué son
  * tres y no dos).
  *
  * El cajón se cierra solo al pasar a `wide`: si no, quedaría un overlay

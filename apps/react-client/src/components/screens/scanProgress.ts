@@ -20,7 +20,7 @@
  *   cambio, sí usa `current`/`total` de `pipeline.store` (el tamaño real del
  *   trabajo de OCR, `textlessPages.length + ocrRegions.length`): avanza
  *   pareja aunque los números de página salten (documento mixto, pendiente
- *   de validación con usuarios — `roadmap/Post_Hito10.8_Pendientes.md` §32).
+ *   de validación con usuarios — `roadmap/hitos/Post_Hito10.8_Pendientes.md` §32).
  * - `Detecting` con el modelo cargando: indeterminado — preparar el
  *   detector. Gana sobre el stage: sin esto, `current/total` reporta 1/1
  *   durante la descarga y el contador afirmaría "1 de 1" con el documento
