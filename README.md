@@ -1,359 +1,222 @@
 # Anonly
 
-> Plataforma de **anonimización documental 100% local**. Detecta, agrupa y reemplaza información sensible en archivos PDF y produce un PDF completamente nuevo donde la información original no es recuperable. Ningún byte del documento sale de la máquina del usuario.
+**Español** · [English](#anonly-english)
 
-**Anonly se entrega como aplicación de escritorio** para macOS y Windows (ADR-130). **Equipo mínimo soportado: 8 GB de RAM** (ADR-192): un documento escaneado largo puede usar hasta unos 3 GB mientras se procesa. Se baja el instalador una vez y desde ahí funciona sin conexión: el modelo de detección de nombres y los binarios de OCR viajan adentro del paquete, así que no se descarga nada en el primer uso.
+> Anonimizá documentos PDF sin que salgan de tu computadora.
 
-### Lo único que la app le pide a internet
+Anonly es una aplicación de escritorio, libre y gratuita, para Windows y macOS. Encuentra los datos personales de un PDF —nombres, DNI, CUIT, direcciones, teléfonos, emails—, te deja revisar cada reemplazo y exporta un PDF nuevo en el que el dato original no se puede recuperar. Todo el análisis corre en tu equipo: no hay cuenta, ni servidor, ni telemetría.
 
-Buscar si hay una versión nueva. Como en cualquier conexión, GitHub ve desde dónde llega la consulta (tu IP) y qué versión tenés instalada — nada más: nunca el contenido, el nombre ni ningún metadato de un documento, y la búsqueda automática se puede apagar desde Configuración (ADR-188; a partir de la versión siguiente a la 0.9.2).
+[**Descargar la última versión**](https://github.com/sgiambelluca/Anonly/releases/latest) · Windows: `Anonly-Setup-<versión>.exe` · macOS: `Anonly-<versión>-universal.dmg`
 
-Vale la pena decirlo con precisión: **el Core nunca habla con la red** —hay un gate de CI que lo verifica sobre el código— y el contenedor solo lo hace para consultar versiones y bajar actualizaciones. En macOS y Windows cada actualización se valida con una clave Ed25519 propia antes de instalarse. Esto no firma la primera instalación: Windows seguirá mostrando un editor no verificado hasta integrar Authenticode.
+![Pantalla inicial de Anonly, con la zona para cargar un PDF y los tres pasos del proceso](./docs/assets/screenshots/01-inicio.png)
 
-Los instaladores se construyen en CI con logs públicos, y cada release publica el sha256 de cada archivo más una atestación que ata el binario a un commit de este repositorio. Cualquiera puede verificar que lo que bajó salió de este código.
+## Para quién es
 
-Qué sale de tu computadora, qué queda y cómo borrarlo: [`PRIVACY.md`](./PRIVACY.md). Cómo se firma el instalador de Windows y cómo verificarlo: [`CODE_SIGNING.md`](./CODE_SIGNING.md).
+Para quien trabaja con documentos confidenciales y necesita compartirlos sin exponer a las personas que nombran: estudios jurídicos, peritos, personal de salud, recursos humanos, auditoría, periodismo, docencia. También para quien quiere usar un documento con una herramienta de IA sin entregarle los datos reales.
 
----
+Los servicios en línea obligan a subir el documento a un servidor. Tapar con un rectángulo negro deja el texto adentro del archivo. Anonly no hace ninguna de las dos cosas.
 
-## Empezar
+## Cómo funciona
 
-**Requisitos**: Node ≥ 22 y pnpm ≥ 9 (el repo fija `pnpm@9.12.0` en `packageManager`).
+1. **Cargás el PDF.** Con texto o escaneado: si es una imagen, lo lee con OCR en tu computadora.
+2. **Revisás lo detectado.** Las apariciones de un mismo dato se agrupan en una sola entidad. Elegís cómo reemplazar cada una —un marcador como `[PERSONA 01]`, un valor ficticio, una máscara o un tachado—, corregís lo que haga falta y agregás a mano lo que se haya escapado.
+3. **Exportás la copia.** Un PDF nuevo, reconstruido desde cero como imagen, sin el texto ni los metadatos del original.
+
+| Original | Anonimizado |
+|---|---|
+| ![El documento original en el visor](./docs/assets/screenshots/02-revisar-original.png) | ![El mismo documento con los datos reemplazados por marcadores](./docs/assets/screenshots/03-revisar-anonimizado.png) |
+
+Las capturas usan un documento ficticio.
+
+## Privacidad
+
+- **Tus documentos no salen de tu computadora.** Se procesan en memoria y no se guardan copias. El único archivo que la aplicación escribe es el PDF anonimizado, donde vos elegís.
+- **Una sola conexión a internet**: preguntarle a GitHub si hay una versión nueva. GitHub ve tu IP y la versión que tenés instalada, nada más. Se puede apagar desde Configuración → Actualizaciones → «No buscar».
+- **El motor de anonimización no tiene acceso a la red**, y un control automático del proyecto lo verifica sobre el código en cada cambio.
+- **Las actualizaciones se verifican** con una clave propia del proyecto antes de instalarse.
+
+El detalle está en [`PRIVACY.md`](./PRIVACY.md).
+
+## Instalación
+
+**Requisitos**: Windows 10 u 11 de 64 bits, o macOS (Apple Silicon o Intel). **8 GB de RAM** como mínimo: un documento escaneado largo puede usar unos 3 GB mientras se procesa. El instalador pesa entre 250 y 370 MB, según el sistema, porque lleva adentro los modelos de detección; después de instalar, la aplicación funciona sin conexión.
+
+La primera vez, el sistema operativo va a mostrar una advertencia, porque la aplicación todavía no tiene certificados comerciales de firma:
+
+- **Windows** muestra «editor desconocido» (SmartScreen). Elegí «Más información» y después «Ejecutar de todas formas».
+- **macOS** bloquea la primera apertura. Permitila desde Ajustes del Sistema → Privacidad y seguridad.
+
+Cada versión publica el SHA-256 de sus archivos y una atestación que ata cada instalador al commit que lo construyó. Cómo verificarlos: [`CODE_SIGNING.md`](./CODE_SIGNING.md).
+
+## Limitaciones conocidas
+
+Ninguna herramienta automática encuentra todo. **Revisá siempre el documento anonimizado antes de compartirlo.**
+
+- En una página escaneada con muy poco texto y girada, la lectura puede fallar sin aviso.
+- En escaneos de baja resolución se pueden escapar direcciones de email.
+- Las direcciones postales y los nombres en formas poco comunes (todo en mayúsculas, apellido primero) pueden no detectarse.
+- El número de expediente judicial no se detecta automáticamente.
+- Solo PDF, por ahora. La interfaz está solo en español.
+
+La lista completa está en [`docs/roadmap/Version_1.0.md`](./docs/roadmap/Version_1.0.md), y lo que viene en [`docs/roadmap/Roadmap_1.x.md`](./docs/roadmap/Roadmap_1.x.md).
+
+## Para desarrollar
+
+**Requisitos**: Node ≥ 22 y pnpm ≥ 9. Funciona nativo en Windows, macOS y Linux.
 
 ```bash
 pnpm install
 ```
 
-Los modelos de IA y los binarios wasm **no se commitean** (~110 MB, ADR-018): se bajan de sus orígenes pinneados y se verifican por hash contra `assets.lock.json`. Sin este paso la app arranca pero no detecta nombres ni lee escaneados:
+Los modelos y los binarios de OCR no se versionan: se bajan de sus orígenes fijados y se verifican por hash contra `assets.lock.json`. Sin este paso la aplicación arranca pero no detecta nombres ni lee escaneados.
 
 ```bash
 pnpm assets:mirror
 ```
 
-Levantar la app en desarrollo (http://localhost:5173):
+```bash
+pnpm dev
+```
+
+Antes de abrir un PR:
+
+```bash
+pnpm lint && pnpm typecheck && pnpm test && pnpm test:contract && pnpm format:check
+```
+
+El repositorio es un monorepo de pnpm con tres partes: `packages/anonymization-core/` (el motor: siete módulos independientes que se comunican por eventos), `apps/react-client/` (la interfaz) y `apps/desktop-shell/` (el contenedor Electron y el actualizador). La tabla completa de comandos y gates está en [`docs/architecture/07_Performance_Strategy.md`](./docs/architecture/07_Performance_Strategy.md) §11.4.
+
+### Contribuir
+
+Los cambios llegan por pull request desde un fork, y los revisa y mergea el mantenedor. Las reglas del proyecto son estrictas a propósito; las principales:
+
+- Un commit toca un solo módulo.
+- Los contratos públicos de `docs/core/Contracts.md` no se rompen, y una decisión técnica no trivial se escribe como ADR antes de implementarse.
+- TypeScript estricto, y todo cambio trae sus tests.
+- Nunca se commitean datos de un documento real.
+
+El detalle está en [`docs/ai/AI_Development_Guide.md`](./docs/ai/AI_Development_Guide.md) y [`docs/ai/Code_Standards.md`](./docs/ai/Code_Standards.md). El proyecto se desarrolla con asistencia de IA bajo un esquema de planificador, implementador y revisor: [`CLAUDE.md`](./CLAUDE.md).
+
+Para reportar una vulnerabilidad: [`SECURITY.md`](./SECURITY.md).
+
+## Documentación
+
+| Tema | Dónde |
+|---|---|
+| Visión del producto | [`docs/00_Project_Vision.md`](./docs/00_Project_Vision.md) |
+| Arquitectura, pipeline y modelo de seguridad | [`docs/architecture/`](./docs/architecture/) |
+| Contratos y especificación de cada motor | [`docs/core/`](./docs/core/) |
+| Interfaz | [`docs/ui/`](./docs/ui/) |
+| Decisiones (ADR) | [`docs/adr/`](./docs/adr/) |
+| Roadmap | [`docs/roadmap/`](./docs/roadmap/README.md) |
+
+## Licencia y créditos
+
+Anonly es software libre bajo licencia [MIT](./LICENSE).
+
+El léxico usado para sugerir el género de los reemplazos de personas incorpora datos derivados de «Nombres» (Buenos Aires Data, CC-BY-2.5-AR). La atribución completa, y la lista del software y los modelos de terceros que el instalador distribuye, están en [`NOTICE`](./NOTICE) y en el diálogo «Acerca de» de la aplicación.
+
+---
+
+# Anonly (English)
+
+[Español](#anonly) · **English**
+
+> Anonymize PDF documents without them ever leaving your computer.
+
+Anonly is a free, open source desktop application for Windows and macOS. It finds the personal data in a PDF (names, national ID and tax numbers, addresses, phone numbers, emails), lets you review every replacement, and exports a new PDF in which the original data cannot be recovered. All the analysis runs on your machine: there is no account, no server and no telemetry.
+
+[**Download the latest version**](https://github.com/sgiambelluca/Anonly/releases/latest) · Windows: `Anonly-Setup-<version>.exe` · macOS: `Anonly-<version>-universal.dmg`
+
+**The interface is in Spanish only for now**, and the built-in patterns target Argentine document formats (DNI, CUIT, local phone numbers and license plates).
+
+## Who it is for
+
+People who handle confidential documents and need to share them without exposing the individuals they name: law firms, court experts, health staff, HR, auditing, journalism, teaching. It also helps when you want to use a document with an AI tool without handing over the real data.
+
+Online services require uploading the document to a server. Covering text with a black rectangle leaves it inside the file. Anonly does neither.
+
+## How it works
+
+1. **Load the PDF.** Text-based or scanned: images are read with OCR on your computer.
+2. **Review what was found.** Every occurrence of the same value is grouped into one entity. You choose how to replace each one (a marker such as `[PERSONA 01]`, a fictitious value, a mask or a redaction), correct what needs correcting, and add by hand anything that was missed.
+3. **Export the copy.** A new PDF, rebuilt from scratch as images, without the text or the metadata of the original.
+
+See the screenshots [above](#cómo-funciona); they use a fictitious document.
+
+## Privacy
+
+- **Your documents never leave your computer.** They are processed in memory and no copies are kept. The only file the application writes is the anonymized PDF, wherever you choose.
+- **A single internet connection**: asking GitHub whether a new version exists. GitHub sees your IP address and the version you have installed, nothing else. You can turn it off under Configuración → Actualizaciones → «No buscar».
+- **The anonymization engine has no network access**, and an automated project check enforces that on the code with every change.
+- **Updates are verified** with a project key before they are installed.
+
+Details: [`PRIVACY.md`](./PRIVACY.md).
+
+## Installation
+
+**Requirements**: 64-bit Windows 10 or 11, or macOS (Apple Silicon or Intel). At least **8 GB of RAM**: a long scanned document can use around 3 GB while it is processed. The installer is between 250 and 370 MB, depending on the system, because it bundles the detection models; once installed, the application works offline.
+
+On first launch the operating system shows a warning, because the application does not have commercial signing certificates yet:
+
+- **Windows** shows an "unknown publisher" notice (SmartScreen). Choose "More info", then "Run anyway".
+- **macOS** blocks the first launch. Allow it under System Settings → Privacy & Security.
+
+Every release publishes the SHA-256 of its files and a build attestation that ties each installer to the commit that produced it. How to verify them: [`CODE_SIGNING.md`](./CODE_SIGNING.md).
+
+## Known limitations
+
+No automated tool finds everything. **Always review the anonymized document before sharing it.**
+
+- On a scanned page with very little text that is also rotated, reading can fail without a warning.
+- Email addresses can be missed in low-resolution scans.
+- Postal addresses and names in uncommon forms (all capitals, surname first) may go undetected.
+- Court case numbers are not detected automatically.
+- PDF only, for now.
+
+The full list is in [`docs/roadmap/Version_1.0.md`](./docs/roadmap/Version_1.0.md) and what comes next in [`docs/roadmap/Roadmap_1.x.md`](./docs/roadmap/Roadmap_1.x.md) (both in Spanish).
+
+## Development
+
+**Requirements**: Node ≥ 22 and pnpm ≥ 9. Runs natively on Windows, macOS and Linux.
+
+```bash
+pnpm install
+```
+
+Models and OCR binaries are not versioned: they are downloaded from pinned sources and verified by hash against `assets.lock.json`. Without this step the application starts but does not detect names or read scans.
+
+```bash
+pnpm assets:mirror
+```
 
 ```bash
 pnpm dev
 ```
 
-Antes de abrir un PR, el subset mínimo de gates:
+Before opening a pull request:
 
 ```bash
 pnpm lint && pnpm typecheck && pnpm test && pnpm test:contract && pnpm format:check
 ```
 
-<details>
-<summary>Otros comandos útiles</summary>
+The repository is a pnpm monorepo with three parts: `packages/anonymization-core/` (the engine: seven independent modules that communicate through events), `apps/react-client/` (the interface) and `apps/desktop-shell/` (the Electron container and the updater).
 
-| Comando | Qué hace |
-|---|---|
-| `pnpm build` | Compila los paquetes del Core. |
-| `pnpm test:e2e` | Playwright sobre la **app de escritorio empaquetada**: construye el renderer y el shell y corre los escenarios dentro de Electron (ADR-130). |
-| `pnpm test:integration` | Tests que cruzan varios motores. |
-| `pnpm test:quality` | Recall y precisión sobre el dataset de referencia. Reporta, no falla por número bajo (ADR-095). |
-| `pnpm test:security` | Gates de no-recuperabilidad y de origen de los assets. |
-| `pnpm test:coverage` | Cobertura con los thresholds por paquete de `vitest.config.ts`. |
-| `pnpm fixtures:generate` | Regenera los PDF de prueba y el dataset de referencia. |
-| `pnpm format` | Prettier sobre todo el repo. |
+### Contributing
 
-La tabla canónica y completa de gates vive en [`docs/architecture/07_Performance_Strategy.md`](./docs/architecture/07_Performance_Strategy.md) §11.4.
+Changes arrive as pull requests from a fork and are reviewed and merged by the maintainer. The project rules are strict on purpose. The main ones:
 
-</details>
+- A commit touches a single module.
+- The public contracts in `docs/core/Contracts.md` are not broken, and any non-trivial technical decision is written as an ADR before it is implemented.
+- Strict TypeScript, and every change comes with its tests.
+- Data from a real document is never committed.
 
-<details>
-<summary>Windows</summary>
+Details are in [`docs/ai/AI_Development_Guide.md`](./docs/ai/AI_Development_Guide.md) and [`docs/ai/Code_Standards.md`](./docs/ai/Code_Standards.md). The documentation is written in Spanish. The project is developed with AI assistance under a planner, implementer and reviewer scheme: [`CLAUDE.md`](./CLAUDE.md).
 
-El desarrollo pasa por **WSL Ubuntu**: los binarios de `node_modules` son Linux y no son ejecutables desde Windows nativo.
+To report a vulnerability: [`SECURITY.md`](./SECURITY.md).
 
-```bash
-wsl -d Ubuntu -- bash -c "cd /mnt/c/<ruta-del-repo> && source ~/.nvm/nvm.sh && <comando>"
-```
+## License and credits
 
-El `cd` va **dentro** del `bash -c`; el flag `--cd` de `wsl.exe` no es confiable en todos los entornos. Excepción: `git push` no depende de `pnpm` y corre directo desde Windows; solo `git commit` necesita WSL, por los hooks de `lint-staged`.
+Anonly is free software under the [MIT](./LICENSE) license.
 
-</details>
-
----
-
-## Tabla de contenidos
-
-- [Empezar](#empezar)
-- [Qué es](#qué-es)
-- [Filosofía](#filosofía)
-- [Características](#características)
-- [Arquitectura](#arquitectura)
-- [Stack](#stack)
-- [Estructura del repositorio](#estructura-del-repositorio)
-- [Documentación](#documentación)
-- [Roadmap](#roadmap)
-- [Estado](#estado)
-- [Contribuir](#contribuir)
-
----
-
-## Qué es
-
-Anonly es una herramienta web para anonimizar documentos PDF que contienen datos personales o sensibles (DNI, CUIT, nombres, direcciones, teléfonos, cuentas, etc.) antes de compartirlos, publicarlos, usarlos en demos, entrenar modelos o cumplir con requisitos de compliance.
-
-A diferencia de otras soluciones, Anonly:
-
-- **No envía el documento a ningún servidor**. Todo el procesamiento ocurre en el navegador del usuario mediante Web Workers.
-- **No redacta el PDF original**. El PDF exportado se reconstruye desde cero (Canvas + pdf-lib), garantizando que el texto sensible no quede embebido y recuperable.
-- **Opera por grupos, no por ocurrencias individuales**. Todas las apariciones de un mismo dato se tratan como una sola entidad de reemplazo, garantizando coherencia.
-- **Deja revisar antes de exportar**: el visor conmuta entre el documento original y el anonimizado, y el árbol de entidades muestra qué se detectó y con qué se va a reemplazar.
-
-## Filosofía
-
-| Principio | Implicación |
-|---|---|
-| **Local-first** | El procesamiento ocurre en el dispositivo. Ningún byte sale del navegador. |
-| **Core desacoplado del cliente** | React es solo un cliente. El `anonymization-core` no conoce React. |
-| **Reconstrucción, no parche** | El PDF exportado se regenera desde cero. Nunca se redacta in-place. |
-| **Agrupación obligatoria** | Toda operación de reemplazo se define a nivel de grupo, nunca de ocurrencia. |
-| **Transparencia incremental** | El usuario ve resultados a medida que se procesan, no al final. |
-| **Un fallo se dice, no se disimula** | Si un detector no corrió, la herramienta lo avisa antes de exportar. Un documento que llega a "Listo" con datos sin detectar es el peor resultado posible. |
-| **Determinismo donde sea posible** | Regex y agrupación son deterministas; NER y síntesis con seed configurable. |
-| **Documentación como contrato** | Cada motor está definido por un spec autocontenido. Un modelo económico puede implementarlo leyendo solo ese archivo + `core/Contracts.md`. |
-
-## Características
-
-### Detección
-
-- **Regex determinístico** con patrones argentinos: DNI, CUIT/CUIL, teléfono, email, IBAN, tarjeta, fecha, matrícula, patente, carátula judicial.
-- **NER local** (Transformers.js + ONNX Runtime Web) para personas, organizaciones y direcciones. Siempre activo: no es una preferencia del usuario.
-- **OCR** (Tesseract.js) para PDFs escaneados sin texto extraíble, con detección de orientación, lectura de sellos rotados en los márgenes y segmentación de texto disperso.
-- **Lo dudoso se sugiere, no se descarta**: una detección por debajo del umbral entra al árbol apagada y marcada para revisar, en vez de desaparecer en silencio.
-
-### Agrupación
-
-Todas las ocurrencias del mismo dato se agrupan automáticamente (exacto, o difuso con Levenshtein para tipos de texto libre). El usuario puede fusionar varios grupos en una sola pasada o dividirlos. Cada grupo tiene un `indexInType` estable (`[DNI 01]`, `[DNI 02]`, `[PERSONA 01]`).
-
-### Modos de reemplazo (por grupo)
-
-| Modo | Ejemplo | Uso |
-|---|---|---|
-| `placeholder` | `[DNI 01]` | default, informativo para revisión |
-| `mask` | `XX.XXX.XXX` | censura conservando formato |
-| `synthetic` | `39.123.456` | valor plausible determinista por seed |
-| `redact` | bloque negro | censura visual total |
-
-El modo se decide a tres niveles —documento, categoría y grupo—, y el más específico gana.
-
-### Interfaz
-
-- **Tres momentos, no cuatro paneles** (ADR-087): cargar, escanear, revisar. Cada uno muestra solo lo que sirve en ese momento.
-- Un visor que conmuta entre **original** y **anonimizado**, con zoom y búsqueda.
-- Árbol de entidades agrupadas por tipo, con checkbox cascade, contador de ocurrencias y selector de modo inline.
-- Resolución de conflictos entre detectores (overlap, disagree, low confidence, ambiguous canonical).
-- Agregado manual de entidades que el detector no encontró, por diálogo, por selección sobre el documento o desde el buscador.
-- Virtualización de páginas, preview incremental y cancelación en cualquier etapa.
-
-### Seguridad
-
-- 100% local. Sin backend de procesamiento. Sin persistencia remota.
-- CSP estricta, sin `unsafe-eval`. Los modelos y binarios wasm se sirven **first-party** desde el propio origen, nunca desde un CDN de terceros en runtime (ADR-018), con URL, revisión y `sha256` pinneados en `assets.lock.json` y verificados al mirrorearlos.
-- El PDF exportado no contiene capas de texto, bookmarks, JavaScript, forms ni XMP del original.
-- Metadata sensible (author, creator, XMP) descartada en el PDF Engine.
-- Passwords de PDFs protegidos nunca se loguean ni persisten.
-
-### Export
-
-- PDF nuevo reconstruido desde cero con pdf-lib.
-- Formato de imagen (PNG/JPEG), DPI (150/300) y calidad JPEG configurables.
-- Metadata propia mínima (`producer: "Anonly"`). Nunca copia del original.
-- No-recuperabilidad verificada por test: buscar el texto original en el export da cero resultados.
-
-## Arquitectura
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│ apps/react-client   (UI: React + Tailwind + Radix + Zustand) │
-└──────────────────────────┬──────────────────────────────────┘
-                           │ eventos tipados + store
-┌──────────────────────────┴──────────────────────────────────┐
-│ packages/anonymization-core                                  │
-│   ├─ shared              (tipos, contratos, error codes)     │
-│   ├─ event-system        (Event Bus tipado)                  │
-│   ├─ pdf-engine          (extracción)                        │
-│   ├─ ocr-engine          (OCR fallback)                      │
-│   ├─ regex-engine        (patrones determinísticos)          │
-│   ├─ ner-engine          (NER local, Transformers + ONNX)    │
-│   ├─ grouping-engine     (agrupación obligatoria)            │
-│   ├─ render-engine       (highlight + preview)               │
-│   └─ export-engine       (reconstrucción PDF nuevo)          │
-└──────────────────────────┬──────────────────────────────────┘
-                           │ postMessage + Transferable
-┌──────────────────────────┴──────────────────────────────────┐
-│ Web Workers (pool por tipo de engine)                        │
-└─────────────────────────────────────────────────────────────┘
-```
-
-### Pipeline
-
-```
-PDF → PDF Engine → OCR (si falta texto) → Normalización → Regex → NER
-    → Grouping → Conflictos → Vista previa → Edición → Render → Export
-```
-
-- Incremental: las entidades aparecen en vivo a medida que se detectan.
-- Cancelable en cualquier etapa.
-- Comunicación motor↔motor y motor↔UI únicamente por eventos tipados.
-
-### Principios arquitecturales
-
-- Toda la lógica vive en el Core. Los clientes nunca procesan documentos.
-- Los motores nunca conocen React ni la UI.
-- Los motores nunca se importan entre sí. Comunicación solo por eventos y tipos de `@anonly/shared`.
-- Cada motor es reemplazable sin modificar el resto.
-- Toda la información es inmutable (`readonly`, `ReadonlyArray`).
-- Todo procesamiento pesado ocurre en Web Workers (pools por tipo).
-
-## Stack
-
-| Capa | Tecnología |
-|---|---|
-| Cliente | React, TypeScript, Vite, Tailwind CSS, Radix UI, Zustand |
-| PDF | PDF.js (extracción), pdf-lib (export) |
-| OCR | Tesseract.js |
-| NER | Transformers.js + ONNX Runtime Web |
-| Render | Canvas / OffscreenCanvas |
-| Infra | Web Workers con pools por tipo, Event Bus tipado propio |
-| Testing | Vitest, Playwright |
-| Monorepo | pnpm workspaces |
-
-## Estructura del repositorio
-
-```
-Anonly/
-├── apps/
-│   └── react-client/             # UI (React)
-├── packages/
-│   └── anonymization-core/       # Core reutilizable
-│       ├── shared/               # tipos, contratos, error codes
-│       ├── event-system/         # Event Bus tipado
-│       ├── pdf-engine/
-│       ├── ocr-engine/
-│       ├── regex-engine/
-│       ├── ner-engine/
-│       ├── grouping-engine/
-│       ├── render-engine/
-│       └── export-engine/
-├── docs/                         # documentación técnica (ver abajo)
-├── scripts/                      # mirror de assets, build del léxico
-└── tests/                        # e2e, integration, invariants, quality,
-                                  # measure, security, fixtures
-```
-
-Cada motor tiene sus tests unitarios dentro de su propio paquete (`src/__tests__/`); en `tests/` viven los que cruzan varios motores o la app entera.
-
-## Documentación
-
-Toda la documentación técnica vive en [`docs/`](./docs) y está optimizada para consumo humano y de IA. Cada archivo empieza con un bloque `<!-- CONTEXT -->` que declara su scope, dependencias y audiencia.
-
-### Visión y arquitectura
-
-| Documento | Contenido |
-|---|---|
-| [`docs/00_Project_Vision.md`](./docs/00_Project_Vision.md) | Visión de producto, casos de uso, alcance, métricas. |
-| [`docs/architecture/01_Technical_Architecture_Document.md`](./docs/architecture/01_Technical_Architecture_Document.md) | TAD maestro: bloques 1–3 + índice ejecutivo de los 12 bloques. |
-| [`docs/architecture/02_System_Diagrams.md`](./docs/architecture/02_System_Diagrams.md) | Diagramas Mermaid + ASCII (capas, pipeline, eventos, workers, datos, despliegue). |
-| [`docs/architecture/03_Data_Model.md`](./docs/architecture/03_Data_Model.md) | Modelos: `Document`, `Page`, `Word`, `EntityGroup`, `Rule`, `Conflict`, etc. |
-| [`docs/architecture/04_Event_System.md`](./docs/architecture/04_Event_System.md) | Tabla exhaustiva de eventos: emisor, receptores, payload, timing. |
-| [`docs/architecture/05_Worker_Architecture.md`](./docs/architecture/05_Worker_Architecture.md) | Pools por tipo, mensajes, timeouts, cancelación, reintentos, colas. |
-| [`docs/architecture/06_Pipeline.md`](./docs/architecture/06_Pipeline.md) | 11 etapas: entra, sale, eventos, errores, cancelación. |
-| [`docs/architecture/07_Performance_Strategy.md`](./docs/architecture/07_Performance_Strategy.md) | Virtualización, lazy loading, cache, memoria, y la tabla canónica de gates (§11.4). |
-| [`docs/architecture/08_Security_Model.md`](./docs/architecture/08_Security_Model.md) | 100% local, CSP, no-recuperabilidad, metadata strip, supply chain. |
-
-### Decisiones (ADRs)
-
-Todas viven en [`docs/adr/`](./docs/adr), una por archivo, con el formato `ADR-NNN-Titulo-En-Kebab.md` y numeración correlativa por orden de decisión.
-
-**No hay índice acá a propósito**: son más de cien y una lista en el README se desactualiza al segundo ADR nuevo. Cómo encontrar la que buscás:
-
-- **Por tema**: cada spec de motor y cada documento de arquitectura declara en su bloque `<!-- CONTEXT -->` los ADR que lo gobiernan, y cita el que corresponde en cada sección.
-- **Por texto**: `grep -ril "<tema>" docs/adr/`. Los títulos son frases completas en castellano, no siglas.
-- **Por estado**: cada ADR abre con `Estado`, `Fecha`, `Decidido por` y `Relacionado con`. Una decisión revertida o precisada lo dice en el ADR original, con el número del que la supersede.
-
-Un ADR se escribe **antes** del código cuando la decisión toca un contrato público, agrega una dependencia o cambia una regla de trabajo.
-
-### Core (contratos y specs de motores)
-
-| Documento | Motor |
-|---|---|
-| [`docs/core/Contracts.md`](./docs/core/Contracts.md) | Tipos base, interfaces, enums, error codes, glosario |
-| [`docs/core/Orchestrator.md`](./docs/core/Orchestrator.md) | Componente host: secuenciación del pipeline, pools, façade `createCore` |
-| [`docs/core/PDF_Engine.md`](./docs/core/PDF_Engine.md) | Extracción de texto y posiciones |
-| [`docs/core/OCR_Engine.md`](./docs/core/OCR_Engine.md) | OCR para páginas sin texto |
-| [`docs/core/Regex_Engine.md`](./docs/core/Regex_Engine.md) | Patrones determinísticos AR |
-| [`docs/core/NER_Engine.md`](./docs/core/NER_Engine.md) | NER local para persona/org/dirección |
-| [`docs/core/Grouping_Engine.md`](./docs/core/Grouping_Engine.md) | Agrupación, conflictos, reglas |
-| [`docs/core/Render_Engine.md`](./docs/core/Render_Engine.md) | Render + preview |
-| [`docs/core/Export_Engine.md`](./docs/core/Export_Engine.md) | Reconstrucción del PDF final |
-
-Cada spec de motor sigue la plantilla canónica de 15 secciones (Objetivo → Checklist de implementación), de modo que un modelo económico puede implementarlo leyendo solo ese archivo + `Contracts.md`.
-
-### UI
-
-| Documento | Contenido |
-|---|---|
-| [`docs/ui/React_Client.md`](./docs/ui/React_Client.md) | UI Contract (cómo el cliente consume el Core, independiente de framework) |
-| [`docs/ui/UX_Guidelines.md`](./docs/ui/UX_Guidelines.md) | Patrones UX: los tres momentos, árbol de entidades, conflictos, export, accesibilidad |
-| [`docs/ui/Components.md`](./docs/ui/Components.md) | Catálogo de componentes (Radix + Tailwind) y mapeo al Core |
-
-### Guías para desarrollo con IA
-
-| Documento | Contenido |
-|---|---|
-| [`docs/ai/Code_Standards.md`](./docs/ai/Code_Standards.md) | Reglas de TypeScript estricto, estructura de paquetes, prohibiciones |
-| [`docs/ai/Module_Specification_Template.md`](./docs/ai/Module_Specification_Template.md) | Plantilla canónica de 15 secciones para specs de motor |
-| [`docs/ai/AI_Development_Guide.md`](./docs/ai/AI_Development_Guide.md) | Reglas de trabajo R-1..R-22: un commit = un módulo, no romper contratos, etc. |
-| [`docs/ai/Prompting_Guide.md`](./docs/ai/Prompting_Guide.md) | Prompts base: implementar motor, escribir tests, revisar, refactor, ADR |
-
-## Atribución de datos de terceros
-
-El léxico de género usado para inferir `personGender` sobre entidades `Person` incorpora datos derivados de "Nombres" (Buenos Aires Data, CC-BY-2.5-AR). Atribución completa, licencia y procedencia (URL, fecha de descarga, hash del artefacto) en [`NOTICE`](./NOTICE) y en `packages/anonymization-core/shared/assets/gender-lexicon.provenance.json`.
-
-## Roadmap
-
-Vive en [`docs/roadmap/`](./docs/roadmap):
-
-- [`Version_1.0.md`](./docs/roadmap/Version_1.0.md): qué es la versión 1.0, con sus mediciones y sus limitaciones conocidas.
-- [`Roadmap_1.x.md`](./docs/roadmap/Roadmap_1.x.md): qué sigue y en qué orden. Es la fuente de verdad sobre lo que viene.
-- [`Version_2.0.md`](./docs/roadmap/Version_2.0.md) y [`Future_Ideas.md`](./docs/roadmap/Future_Ideas.md): lo que queda más lejos.
-- [`MVP.md`](./docs/roadmap/MVP.md): el registro histórico de cómo se llegó a la 1.0, hito por hito.
-
-En la misma carpeta están los documentos de trabajo: informes de campo, mediciones, inventarios de deuda y listas de pendientes con su motivo.
-
-## Estado
-
-**Versión 1.0.** Es la primera versión estable; las 0.9.x fueron pre-releases. Qué trae y qué limitaciones conocidas tiene está en [`docs/roadmap/Version_1.0.md`](./docs/roadmap/Version_1.0.md), y lo que sigue en [`docs/roadmap/Roadmap_1.x.md`](./docs/roadmap/Roadmap_1.x.md). Esos dos documentos son la fuente de verdad, no este README, que se desactualiza más rápido.
-
-## Contribuir
-
-El proyecto se desarrolla bajo un modelo **planificador + implementador + revisor** con asistencia de IA. Las reglas obligatorias para cualquier contribución (humana o de IA) están en:
-
-- [`docs/ai/AI_Development_Guide.md`](./docs/ai/AI_Development_Guide.md) — reglas de trabajo.
-- [`docs/ai/Code_Standards.md`](./docs/ai/Code_Standards.md) — estándares de código.
-- [`docs/ai/Prompting_Guide.md`](./docs/ai/Prompting_Guide.md) — prompts base reutilizables.
-
-Con **Claude Code** (herramienta principal): [`CLAUDE.md`](./CLAUDE.md) se carga automáticamente en toda sesión, y los roles implementador (Sonnet) / revisor (Opus) están definidos como subagentes en [`.claude/agents/`](./.claude/agents/).
-
-Resumen de reglas clave:
-
-- **Un commit = un módulo**, no un PR (ADR-124). Nunca modificar más de un motor en el mismo commit. Un PR **sí** puede tocar varios: hay cambios en un motor que no se pueden evaluar hasta verlos funcionando en otro, y partirlos en PRs separados obliga a revisar a ciegas. El gate de alcance se audita recorriendo commits (`git show --stat`), no el diff acumulado del PR.
-- La excepción es el commit que **cambia un contrato**: toca por definición a sus consumidores, y se acepta si existe el ADR que lo autoriza y no lleva nada más.
-- La **higiene de datos** —sacar nombres, números de expediente o cualquier dato de un documento real— va en su propio commit, nunca escondida dentro de uno funcional.
-- Nunca romper contratos públicos definidos en `docs/core/Contracts.md`.
-- Nunca crear dependencias entre motores. Comunicación solo por eventos.
-- Nunca acceder a React ni a librerías de UI desde `packages/`.
-- Todo el código es TypeScript estricto. Sin `any`, sin `@ts-ignore` sin issue.
-- Todo PR incluye tests (contract + unit + edge, y snapshot si aplica).
-- Toda decisión técnica no trivial va en un ADR antes de implementarse.
-
-Antes de abrir un PR, ejecutar:
-
-```bash
-pnpm lint && pnpm typecheck && pnpm test && pnpm test:contract && pnpm format:check
-```
-
-Todos los gates deben pasar (ver [`docs/architecture/07_Performance_Strategy.md`](./docs/architecture/07_Performance_Strategy.md) §11.4 para la lista completa).
+The lexicon used to suggest the gender of person replacements includes data derived from "Nombres" (Buenos Aires Data, CC-BY-2.5-AR). Full attribution, and the list of third-party software and models the installer distributes, are in [`NOTICE`](./NOTICE) and in the application's «Acerca de» (About) dialog.
