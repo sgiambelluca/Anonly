@@ -30,26 +30,26 @@ beforeEach(() => {
 
 describe("startWindowsUpdater — búsqueda automática (ADR-188)", () => {
   it("no busca al iniciar: crear el actualizador no llama a checkForUpdates", () => {
-    startWindowsUpdater(vi.fn(), vi.fn());
+    startWindowsUpdater(vi.fn(), vi.fn(), { userDataDir: "datos", quit: vi.fn() });
     expect(mocks.autoUpdater.checkForUpdates).not.toHaveBeenCalled();
   });
 
   it("busca una sola vez con el primer true", () => {
-    const handle = startWindowsUpdater(vi.fn(), vi.fn());
+    const handle = startWindowsUpdater(vi.fn(), vi.fn(), { userDataDir: "datos", quit: vi.fn() });
 
     handle.setAutomaticChecks(true);
     expect(mocks.autoUpdater.checkForUpdates).toHaveBeenCalledTimes(1);
   });
 
   it("no busca con false", () => {
-    const handle = startWindowsUpdater(vi.fn(), vi.fn());
+    const handle = startWindowsUpdater(vi.fn(), vi.fn(), { userDataDir: "datos", quit: vi.fn() });
 
     handle.setAutomaticChecks(false);
     expect(mocks.autoUpdater.checkForUpdates).not.toHaveBeenCalled();
   });
 
   it("un true después de una búsqueda ya hecha no repite", () => {
-    const handle = startWindowsUpdater(vi.fn(), vi.fn());
+    const handle = startWindowsUpdater(vi.fn(), vi.fn(), { userDataDir: "datos", quit: vi.fn() });
 
     handle.setAutomaticChecks(true);
     handle.setAutomaticChecks(true);
@@ -58,7 +58,7 @@ describe("startWindowsUpdater — búsqueda automática (ADR-188)", () => {
   });
 
   it("un payload no booleano se ignora", () => {
-    const handle = startWindowsUpdater(vi.fn(), vi.fn());
+    const handle = startWindowsUpdater(vi.fn(), vi.fn(), { userDataDir: "datos", quit: vi.fn() });
 
     for (const impostor of [null, undefined, "true", 1, {}, []]) {
       handle.setAutomaticChecks(impostor);
@@ -72,7 +72,7 @@ describe("startWindowsUpdater — búsqueda automática (ADR-188)", () => {
   });
 
   it("la búsqueda manual funciona con la preferencia apagada", () => {
-    const handle = startWindowsUpdater(vi.fn(), vi.fn());
+    const handle = startWindowsUpdater(vi.fn(), vi.fn(), { userDataDir: "datos", quit: vi.fn() });
 
     handle.setAutomaticChecks(false);
     expect(mocks.autoUpdater.checkForUpdates).not.toHaveBeenCalled();

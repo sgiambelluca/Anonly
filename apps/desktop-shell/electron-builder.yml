@@ -118,6 +118,9 @@ nsis:
   createDesktopShortcut: true
   createStartMenuShortcut: true
   shortcutName: Anonly
+  # ADR-197 §5.c: el script define `customInstall`, que borra la entrada
+  # `RunOnce` de recuperación cuando la instalación termina bien.
+  include: assets/installer.nsh
 
 # El updater lee de acá: los releases del repo, sin hosting propio
 # (ADR-131 §1). `electron-updater` en Windows; macOS va por Sparkle.

@@ -5,11 +5,13 @@ import { pathToFileURL } from "node:url";
 
 import { app, BrowserWindow, ipcMain, net, protocol, shell } from "electron";
 
+import { PLATFORM_ARG, toDevicePlatform } from "./device-platform";
 import { rendererRoot, resolveAssetPath } from "./paths";
 import { headersFor } from "./security";
 import { createMacUpdateCheckPolicy } from "./update-check-policy";
 import { loadBridge, toUpdateEventPayload, type UpdateEventPayload } from "./updater";
-import { checkWindowsUpdates, installWindowsUpdate, startWindowsUpdater } from "./windows-updater";
+import { cleanupInstallRecovery } from "./windows-install-recovery";
+import { checkWindowsUpdates, startWindowsUpdater } from "./windows-updater";
 
 const SCHEME = "app";
 const ORIGIN = `${SCHEME}://local`;
@@ -157,7 +159,7 @@ function createWindow(): BrowserWindow {
     backgroundColor: "#ffffff",
     title: "Anonly",
     /*
-     * El `preload` expone tres mensajes salientes y un suscriptor del
+     * El `preload` expone cuatro mensajes salientes y un suscriptor del
      * actualizador (ver `preload.ts`; el tercer saliente, `setAutomaticChecks`,
      * lo agregó ADR-188) y un dato de solo lectura, `anonlyDevice` (ADR-194
      * §4). `contextIsolation` y `sandbox` siguen puestos: el preload corre aislado y no le da al
@@ -168,9 +170,14 @@ function createWindow(): BrowserWindow {
       /*
        * La RAM instalada llega al preload como argumento, sin canal de IPC
        * (ADR-194 §4): es un valor fijo del equipo y el perfil Automático lo
-       * necesita porque `navigator.deviceMemory` no informa más de 8 GB.
+       * necesita porque `navigator.deviceMemory` no informa más de 8 GB. La
+       * plataforma viaja igual (ADR-197 §6): la interfaz la necesita para saber
+       * cuándo se instala una actualización, sin leer `navigator.userAgent`.
        */
-      additionalArguments: [`--anonly-total-memory-bytes=${Math.trunc(totalmem())}`],
+      additionalArguments: [
+        `--anonly-total-memory-bytes=${Math.trunc(totalmem())}`,
+        `${PLATFORM_ARG}${toDevicePlatform(process.platform)}`,
+      ],
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
@@ -260,13 +267,30 @@ function startUpdater(window: BrowserWindow): void {
    * el aviso, el toggle y `UpdateNotice` son los mismos en los dos sistemas.
    */
   if (process.platform === "win32") {
+    /*
+     * ADR-197 §5.c: si una instalación anterior dejó marca y entrada
+     * `RunOnce`, se limpian ahora, sea cual sea la versión que arrancó. Nunca
+     * tira (`windows-install-recovery.ts`).
+     */
+    cleanupInstallRecovery(app.getPath("userData"), app.getVersion(), anotar);
+
+    const windowsUpdater = startWindowsUpdater(emitir, anotar, {
+      userDataDir: app.getPath("userData"),
+      quit: () => app.quit(),
+    });
     ipcMain.on("updater:check", () => checkWindowsUpdates());
-    ipcMain.on("updater:install", () => installWindowsUpdate());
-    const windowsUpdater = startWindowsUpdater(emitir, anotar);
+    // ADR-197: el usuario aceptó el aviso. Verifica, instala en silencio y reabre.
+    ipcMain.on("updater:install", () => windowsUpdater.installNow());
     // ADR-188: el main no busca nada hasta que este mensaje llegue.
     ipcMain.on("updater:set-automatic-checks", (_event, payload: unknown) => {
       windowsUpdater.setAutomaticChecks(payload);
     });
+    // ADR-197 §3: sin este mensaje el contenedor no instala al cerrar.
+    ipcMain.on("updater:set-install-on-quit", (_event, payload: unknown) => {
+      windowsUpdater.setInstallOnQuit(payload);
+    });
+    // ADR-197 §1: instalar al cerrar. Cancela el cierre, verifica, instala y cierra.
+    app.on("before-quit", (event) => windowsUpdater.onBeforeQuit(event));
     return;
   }
 
@@ -324,6 +348,10 @@ function startUpdater(window: BrowserWindow): void {
     // inicializar.
     if (bridgeReady) bridge.setAutomaticChecks(action.enabled);
   });
+
+  // ADR-197 §6: en macOS la instalación es al abrir y la decide la interfaz.
+  // El mensaje se recibe y se ignora.
+  ipcMain.on("updater:set-install-on-quit", () => undefined);
 
   ipcMain.on("updater:check", () => {
     if (bridgeReady) bridge.checkForUpdates();
