@@ -28,6 +28,7 @@ describe("getShellUpdater", () => {
       check: () => undefined,
       install: () => undefined,
       setAutomaticChecks: () => undefined,
+      setInstallOnQuit: () => undefined,
     };
     setWindow({ anonlyUpdater: bridge });
     expect(getShellUpdater()).toBe(bridge);
@@ -38,7 +39,7 @@ describe("getShellUpdater", () => {
     expect(getShellUpdater()).toBeNull();
   });
 
-  it("devuelve null si falta cualquiera de los cuatro métodos", () => {
+  it("devuelve null si falta cualquiera de los cinco métodos", () => {
     // Un puente a medias es peor que ninguno: la UI mostraría controles de
     // actualización que revientan al usarse.
     const complete = {
@@ -46,8 +47,15 @@ describe("getShellUpdater", () => {
       check: () => undefined,
       install: () => undefined,
       setAutomaticChecks: () => undefined,
+      setInstallOnQuit: () => undefined,
     };
-    for (const missing of ["onEvent", "check", "install", "setAutomaticChecks"] as const) {
+    for (const missing of [
+      "onEvent",
+      "check",
+      "install",
+      "setAutomaticChecks",
+      "setInstallOnQuit",
+    ] as const) {
       const partial: Record<string, unknown> = { ...complete };
       delete partial[missing];
       setWindow({ anonlyUpdater: partial });
@@ -72,6 +80,7 @@ describe("sendAutomaticChecksPreference (ADR-188 §2)", () => {
         check: () => undefined,
         install: () => undefined,
         setAutomaticChecks,
+        setInstallOnQuit: () => undefined,
       },
     });
 

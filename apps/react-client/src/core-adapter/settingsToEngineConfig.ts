@@ -192,3 +192,20 @@ export function sameEngineConfigOverrides(
 
   return true;
 }
+
+/**
+ * La plataforma del contenedor (ADR-197 §6), de `window.anonlyDevice.platform`.
+ * Sin dato —fuera del shell, o con un valor que no es uno de los tres— es
+ * `"other"`: la interfaz avisa y espera, y no instala sola nunca. No se lee
+ * `navigator.userAgent`.
+ */
+export type ShellPlatform = "windows" | "macos" | "other";
+
+export function readShellPlatform(): ShellPlatform {
+  const device: unknown = typeof window === "undefined" ? undefined : window.anonlyDevice;
+  const platform =
+    typeof device === "object" && device !== null
+      ? (device as { readonly platform?: unknown }).platform
+      : undefined;
+  return platform === "windows" || platform === "macos" ? platform : "other";
+}

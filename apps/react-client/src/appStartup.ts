@@ -19,6 +19,10 @@ export interface SettingsBootstrapDeps {
   readonly getCheckUpdates: () => boolean;
   /** `sendAutomaticChecksPreference` real, o un doble en los tests. */
   readonly sendAutomaticChecksPreference: (enabled: boolean) => void;
+  /** Si el modo es instalar al cerrar (`updateMode === "install"`, ADR-197 §3). Se llama DESPUÉS de `load()`. */
+  readonly getInstallOnQuit: () => boolean;
+  /** `sendInstallOnQuitPreference` real, o un doble en los tests. */
+  readonly sendInstallOnQuitPreference: (enabled: boolean) => void;
 }
 
 /**
@@ -30,4 +34,6 @@ export interface SettingsBootstrapDeps {
 export function bootstrapAutomaticChecksPreference(deps: SettingsBootstrapDeps): void {
   deps.load();
   deps.sendAutomaticChecksPreference(deps.getCheckUpdates());
+  // ADR-197 §3: el contenedor no instala al cerrar hasta recibir este mensaje.
+  deps.sendInstallOnQuitPreference(deps.getInstallOnQuit());
 }

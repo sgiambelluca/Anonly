@@ -112,7 +112,7 @@ export function ToastHost() {
           </RadixToast.Close>
         </RadixToast.Root>
       ) : null}
-      <RadixToast.Viewport className="fixed bottom-5 right-5 z-[100] flex max-w-[calc(100vw-2.5rem)] flex-col outline-none" />
+      <RadixToast.Viewport className="fixed bottom-[var(--anonly-toast-bottom,1.25rem)] right-5 z-[100] flex max-w-[calc(100vw-2.5rem)] flex-col outline-none" />
     </RadixToast.Provider>
   );
 }
