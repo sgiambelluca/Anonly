@@ -21,16 +21,20 @@ por día. También podés pedirlo a mano desde _Configuración → Actualizacion
   El motor de anonimización no tiene acceso a la red, y un control automático
   del proyecto lo verifica sobre el código en cada cambio.
 - Cada actualización se verifica con una clave propia del proyecto antes de
-  instalarse. Con _Actualizar automáticamente_ desactivado, la app te avisa y
-  vos decidís cuándo instalarla.
+  instalarse.
 
-La búsqueda automática se apaga en _Configuración → Actualizaciones →
-Buscar actualizaciones automáticamente_. Apagada, Anonly no se conecta a
-internet salvo que toques _Buscar actualizaciones ahora_; todo lo demás
-funciona sin conexión. Ese control existe a partir de la versión siguiente a
-la 0.9.2: en la 0.9.2 y anteriores la consulta no se puede apagar desde la
-app, y la única forma de cortarla es bloquear Anonly en el firewall del
-sistema.
+En _Configuración → Actualizaciones_ elegís una de tres opciones:
+
+- _Instalar automáticamente_: busca versiones nuevas y las instala al
+  reiniciar.
+- _Avisarme_ (la opción inicial): busca versiones nuevas y te avisa; vos
+  decidís cuándo instalarlas.
+- _No buscar_: Anonly no se conecta a internet salvo que toques _Buscar
+  actualizaciones ahora_; todo lo demás funciona sin conexión.
+
+Ese control existe a partir de la versión 1.0.0: en la 0.9.2 y anteriores la
+consulta no se puede apagar desde la app, y la única forma de cortarla es
+bloquear Anonly en el firewall del sistema.
 
 Al abrir un enlace externo desde la app (por ejemplo, el repositorio), se abre
 en tu navegador, fuera de Anonly.
@@ -85,17 +89,21 @@ updates now_).
 - The content, name or metadata of a document is **never** sent. The
   anonymization engine has no network access, and an automated project check
   enforces that on the code with every change.
-- Every update is verified with a project key before it is installed. With
-  _Actualizar automáticamente_ (update automatically) turned off, the app notifies you and you decide when
-  to install it.
+- Every update is verified with a project key before it is installed.
 
-Automatic checking is turned off in _Configuración → Actualizaciones →
-Buscar actualizaciones automáticamente_ (check for updates automatically).
-When it is off, Anonly does not connect to the internet unless you press
-_Buscar actualizaciones ahora_; everything else works offline. That control
-exists from the version after 0.9.2 onwards: in 0.9.2 and earlier the check
-cannot be turned off from the app, and the only way to stop it is to block
-Anonly in your system firewall.
+Under _Configuración → Actualizaciones_ (Settings → Updates) you choose one
+of three options:
+
+- _Instalar automáticamente_ (install automatically): checks for new
+  versions and installs them on restart.
+- _Avisarme_ (notify me, the initial option): checks for new versions and
+  notifies you; you decide when to install them.
+- _No buscar_ (do not check): Anonly does not connect to the internet unless
+  you press _Buscar actualizaciones ahora_; everything else works offline.
+
+That control exists from version 1.0.0 onwards: in 0.9.2 and earlier the
+check cannot be turned off from the app, and the only way to stop it is to
+block Anonly in your system firewall.
 
 Links opened from the app (for example, to the repository) open in your web
 browser, outside Anonly.
