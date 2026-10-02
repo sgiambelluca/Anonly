@@ -311,10 +311,14 @@ export function judgeLeak(
 
   const workersAt = (cycles: ReadonlyArray<number>): ReadonlyArray<number> =>
     records.filter((r) => cycles.includes(r.cycle)).map((r) => r.heap.workerCount);
+  // ADR-185, enmienda del 2026-10-02: la mediana de los tres últimos ciclos contra el
+  // máximo de los ciclos 2 a 4. Una sola muestra del ciclo 10 caía a uno u otro lado
+  // de una baja de workers todavía en curso y daba un falso positivo.
   const early = workersAt([2, 3, 4]);
-  const last = workersAt([LEAK_CYCLE_COUNT]);
-  const lastCount = last[0];
-  const workersGrow = early.length > 0 && lastCount !== undefined && lastCount > Math.max(...early);
+  const late = workersAt([LEAK_CYCLE_COUNT - 2, LEAK_CYCLE_COUNT - 1, LEAK_CYCLE_COUNT]);
+  const lateMedian = median(late);
+  const workersGrow =
+    early.length > 0 && late.length === 3 && lateMedian !== null && lateMedian > Math.max(...early);
 
   const heapTrend = trendOf("heapPageUsedBytes");
   const heapSpan = LEAK_CYCLE_COUNT - TREND_FIRST_CYCLE;

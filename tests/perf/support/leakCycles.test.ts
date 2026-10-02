@@ -217,11 +217,27 @@ describe("judgeLeak — los criterios de plan §2.5", () => {
     expect(judgeLeak(noisy, computeTrends(noisy)).rssGrows).toBe(false);
   });
 
-  it("un pool que llega a su tamaño en los primeros ciclos no es una fuga; un worker de más al final sí", () => {
+  it("un pool que llega a su tamaño en los primeros ciclos no es una fuga", () => {
     const warming = series((cycle) => ({ workers: cycle < 3 ? 2 : 4 }));
     expect(judgeLeak(warming, computeTrends(warming)).workersGrow).toBe(false);
-    const leaking = series((cycle) => ({ workers: cycle === 10 ? 5 : 4 }));
-    expect(judgeLeak(leaking, computeTrends(leaking)).workersGrow).toBe(true);
+  });
+
+  // ADR-185, enmienda del 2026-10-02: mediana de los ciclos 8 a 10 contra el máximo de los
+  // ciclos 2 a 4. Las series son los ciclos 1 a 10; el baseline (ciclo 0) no cuenta.
+  it.each([
+    ["la corrida que falló en main (5,4,...,4,5)", [5, 4, 4, 4, 4, 4, 4, 4, 4, 5], false],
+    ["cinco constante", [5, 5, 5, 5, 5, 5, 5, 5, 5, 5], false],
+    ["un worker más por ciclo", [4, 4, 5, 6, 7, 8, 9, 10, 11, 12], true],
+    ["un worker que queda vivo desde el ciclo 6", [4, 4, 4, 4, 4, 5, 5, 5, 5, 5], true],
+    ["solo el último ciclo, que se resigna", [4, 4, 4, 4, 4, 4, 4, 4, 4, 5], false],
+  ] as const)("workersGrow, %s", (_name, workers, expected) => {
+    const records = series((cycle) => ({ workers: workers[Math.max(cycle, 1) - 1] ?? 0 }));
+    expect(judgeLeak(records, computeTrends(records)).workersGrow).toBe(expected);
+  });
+
+  it("sin los ciclos 8 a 10 completos no se declara crecimiento de workers", () => {
+    const records = series((cycle) => ({ workers: 4 + cycle })).filter((r) => r.cycle < 10);
+    expect(judgeLeak(records, computeTrends(records)).workersGrow).toBe(false);
   });
 
   it("si el compresor se mueve más de 500 MB entre el primer y el último ciclo, el RSS queda confundido", () => {
