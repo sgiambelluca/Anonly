@@ -21,11 +21,22 @@ describe("bootstrapAutomaticChecksPreference (ADR-188 §2)", () => {
         return true;
       },
       sendAutomaticChecksPreference: (enabled) => calls.push(`send:${enabled}`),
+      getInstallOnQuit: () => {
+        calls.push("getInstallOnQuit");
+        return true;
+      },
+      sendInstallOnQuitPreference: (enabled) => calls.push(`sendInstallOnQuit:${enabled}`),
     });
 
     // El orden es la propiedad que importa: invertirlo mandaría el default
     // del store en vez del valor de una sesión anterior.
-    expect(calls).toEqual(["load", "getCheckUpdates", "send:true"]);
+    expect(calls).toEqual([
+      "load",
+      "getCheckUpdates",
+      "send:true",
+      "getInstallOnQuit",
+      "sendInstallOnQuit:true",
+    ]);
   });
 
   it("envía lo que getCheckUpdates devuelve DESPUÉS de cargar, no un valor fijo", () => {
@@ -35,6 +46,8 @@ describe("bootstrapAutomaticChecksPreference (ADR-188 §2)", () => {
       load: () => undefined,
       getCheckUpdates: () => false,
       sendAutomaticChecksPreference,
+      getInstallOnQuit: () => false,
+      sendInstallOnQuitPreference: () => undefined,
     });
 
     expect(sendAutomaticChecksPreference).toHaveBeenCalledTimes(1);
@@ -48,8 +61,25 @@ describe("bootstrapAutomaticChecksPreference (ADR-188 §2)", () => {
       load,
       getCheckUpdates: () => true,
       sendAutomaticChecksPreference: () => undefined,
+      getInstallOnQuit: () => false,
+      sendInstallOnQuitPreference: () => undefined,
     });
 
     expect(load).toHaveBeenCalledTimes(1);
+  });
+
+  it("avisa al contenedor si se instala al cerrar con el valor leído DESPUÉS de cargar (ADR-197 §3)", () => {
+    const sendInstallOnQuitPreference = vi.fn();
+
+    bootstrapAutomaticChecksPreference({
+      load: () => undefined,
+      getCheckUpdates: () => true,
+      sendAutomaticChecksPreference: () => undefined,
+      getInstallOnQuit: () => true,
+      sendInstallOnQuitPreference,
+    });
+
+    expect(sendInstallOnQuitPreference).toHaveBeenCalledTimes(1);
+    expect(sendInstallOnQuitPreference).toHaveBeenCalledWith(true);
   });
 });

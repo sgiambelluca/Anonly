@@ -31,7 +31,7 @@ function sinComentarios(codigo: string): string {
   return codigo.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
 }
 
-describe("sección «Actualizaciones» de SettingsDialog (ADR-195 §3)", () => {
+describe("sección «Actualizaciones» de SettingsDialog (ADR-195 §3, textos por ADR-197 §4)", () => {
   const fuente = sinComentarios(readFileSync(SETTINGS_DIALOG_PATH, "utf8"));
 
   it("las tres opciones van en el orden del ADR, con sus nombres", () => {
@@ -45,8 +45,8 @@ describe("sección «Actualizaciones» de SettingsDialog (ADR-195 §3)", () => {
 
   it("las descripciones son las del ADR", () => {
     expect(UPDATE_MODE_DESCRIPTION).toEqual({
-      install: "Busca versiones nuevas y las instala al reiniciar.",
-      notify: "Busca versiones nuevas y te avisa antes de instalar.",
+      install: "Busca versiones nuevas y las instala al cerrar Anonly.",
+      notify: "Busca versiones nuevas y te avisa cuando están listas.",
       off: "No se conecta a internet. Podés buscar con el botón de abajo.",
     });
   });
@@ -67,7 +67,7 @@ describe("sección «Actualizaciones» de SettingsDialog (ADR-195 §3)", () => {
 
   it("la descripción ocupa un renglón de alto fijo", () => {
     expect(fuente).toMatch(
-      /<p className="h-5 truncate [^"]*">\s*\{UPDATE_MODE_DESCRIPTION\[updateMode\]\}/,
+      /<p className="h-5 truncate [^"]*">\s*\{updateModeDescription\(updateMode, platform\)\}/,
     );
   });
 

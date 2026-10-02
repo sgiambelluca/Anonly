@@ -56,9 +56,13 @@ import { ZoomControls } from "./components/viewer/ZoomControls.js";
 import { initCore } from "./core-adapter/index.js";
 import { deriveEngineConfigOverrides } from "./core-adapter/settingsToEngineConfig.js";
 import { useEntitiesStore } from "./store/entities.store.js";
-import { searchesAutomatically, useSettingsStore } from "./store/settings.store.js";
+import {
+  installsWithoutAsking,
+  searchesAutomatically,
+  useSettingsStore,
+} from "./store/settings.store.js";
 import { applyTheme } from "./theme.js";
-import { sendAutomaticChecksPreference } from "./updater/index.js";
+import { sendAutomaticChecksPreference, sendInstallOnQuitPreference } from "./updater/index.js";
 
 export function App() {
   useEffect(() => {
@@ -80,6 +84,8 @@ export function App() {
       load: () => useSettingsStore.getState().load(),
       getCheckUpdates: () => searchesAutomatically(useSettingsStore.getState().updateMode),
       sendAutomaticChecksPreference,
+      getInstallOnQuit: () => installsWithoutAsking(useSettingsStore.getState().updateMode),
+      sendInstallOnQuitPreference,
     });
     // Después de hidratar y antes del primer render con contenido: si se
     // aplicara más tarde, la app parpadearía en claro antes de pasar a oscuro.

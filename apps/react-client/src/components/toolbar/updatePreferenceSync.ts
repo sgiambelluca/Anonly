@@ -31,3 +31,17 @@ export function syncAutomaticChecksPreference(
   deps.persist();
   if (nextCheckUpdates !== previousCheckUpdates) deps.send(nextCheckUpdates);
 }
+
+/**
+ * Avisa al shell si la actualización se instala al cerrar (ADR-197 §3), solo
+ * si cambió. A diferencia de la búsqueda, acá SÍ importa pasar de "Avisarme"
+ * a "Instalar": es justo el cambio que el shell necesita conocer. No persiste:
+ * de eso se encarga `syncAutomaticChecksPreference`, que corre antes.
+ */
+export function syncInstallOnQuitPreference(
+  previousInstallOnQuit: boolean,
+  nextInstallOnQuit: boolean,
+  send: (enabled: boolean) => void,
+): void {
+  if (nextInstallOnQuit !== previousInstallOnQuit) send(nextInstallOnQuit);
+}

@@ -7,7 +7,10 @@
 
 import { describe, expect, it, vi } from "vitest";
 
-import { syncAutomaticChecksPreference } from "../components/toolbar/updatePreferenceSync.js";
+import {
+  syncAutomaticChecksPreference,
+  syncInstallOnQuitPreference,
+} from "../components/toolbar/updatePreferenceSync.js";
 
 describe("syncAutomaticChecksPreference (ADR-188 §2)", () => {
   it("persiste antes de avisar, cuando cambió que se busque o no", () => {
@@ -43,5 +46,21 @@ describe("syncAutomaticChecksPreference (ADR-188 §2)", () => {
     syncAutomaticChecksPreference(false, true, { persist: () => undefined, send });
 
     expect(send).toHaveBeenCalledWith(true);
+  });
+});
+
+describe("syncInstallOnQuitPreference (ADR-197 §3)", () => {
+  it("avisa con el valor nuevo cuando cambió, en los dos sentidos", () => {
+    const send = vi.fn();
+    syncInstallOnQuitPreference(false, true, send);
+    syncInstallOnQuitPreference(true, false, send);
+    expect(send.mock.calls).toEqual([[true], [false]]);
+  });
+
+  it("no avisa si no cambió", () => {
+    const send = vi.fn();
+    syncInstallOnQuitPreference(true, true, send);
+    syncInstallOnQuitPreference(false, false, send);
+    expect(send).not.toHaveBeenCalled();
   });
 });

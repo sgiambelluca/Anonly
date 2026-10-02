@@ -16,6 +16,7 @@ import {
   type DeviceSignals,
   type PerformanceLevel,
 } from "../../core-adapter/settingsToEngineConfig.js";
+import type { ShellPlatform } from "../../core-adapter/settingsToEngineConfig.js";
 import type { PerformancePreset, Theme, UpdateMode } from "../../store/settings.store.js";
 
 /** Nombre en la UI de cada nivel (ADR-194 §1). */
@@ -106,11 +107,29 @@ export const UPDATE_MODE_LABEL: Readonly<Record<UpdateMode, string>> = {
   off: "No buscar",
 };
 
+/** ADR-197 §4 (reemplaza a ADR-195 §3). Son los textos de Windows. */
 export const UPDATE_MODE_DESCRIPTION: Readonly<Record<UpdateMode, string>> = {
-  install: "Busca versiones nuevas y las instala al reiniciar.",
-  notify: "Busca versiones nuevas y te avisa antes de instalar.",
+  install: "Busca versiones nuevas y las instala al cerrar Anonly.",
+  notify: "Busca versiones nuevas y te avisa cuando están listas.",
   off: "No se conecta a internet. Podés buscar con el botón de abajo.",
 };
+
+/**
+ * ADR-197 §6: en macOS la instalación es al abrir, no al cerrar. Es el único
+ * texto de Configuración que cambia con la plataforma.
+ */
+export const UPDATE_INSTALL_DESCRIPTION_MAC =
+  "Busca versiones nuevas y las instala al abrir Anonly.";
+
+/**
+ * La descripción del modo según la plataforma (ADR-197 §6): en macOS `install`
+ * es «al abrir»; fuera de Windows y macOS, o sin dato, `install` se comporta
+ * como `notify` y dice lo mismo.
+ */
+export function updateModeDescription(mode: UpdateMode, platform: ShellPlatform): string {
+  if (mode === "install" && platform === "macos") return UPDATE_INSTALL_DESCRIPTION_MAC;
+  return UPDATE_MODE_DESCRIPTION[mode === "install" && platform === "other" ? "notify" : mode];
+}
 
 /** Qué muestra la ranura fija bajo "Idiomas del documento". */
 export type OcrLanguagesSlot = "idle" | "empty" | "reanalyze";

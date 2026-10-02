@@ -33,6 +33,8 @@ export interface ShellUpdater {
   install(): void;
   /** ADR-188 §2: informa si el usuario quiere que la app busque sola. */
   setAutomaticChecks(enabled: boolean): void;
+  /** ADR-197 §3: informa si la actualización se instala al cerrar la aplicación. */
+  setInstallOnQuit(enabled: boolean): void;
 }
 
 /*
@@ -57,7 +59,8 @@ function isShellUpdater(value: unknown): value is ShellUpdater {
     typeof candidate["onEvent"] === "function" &&
     typeof candidate["check"] === "function" &&
     typeof candidate["install"] === "function" &&
-    typeof candidate["setAutomaticChecks"] === "function"
+    typeof candidate["setAutomaticChecks"] === "function" &&
+    typeof candidate["setInstallOnQuit"] === "function"
   );
 }
 
@@ -86,4 +89,15 @@ export function getShellUpdater(): ShellUpdater | null {
  */
 export function sendAutomaticChecksPreference(enabled: boolean): void {
   getShellUpdater()?.setAutomaticChecks(enabled);
+}
+
+/**
+ * Envía al shell si la actualización se instala al cerrar la aplicación
+ * (ADR-197 §3). Vale `true` solo con `updateMode === "install"`. Se llama por
+ * la misma vía que `sendAutomaticChecksPreference`: una vez al iniciar, después
+ * de leer la configuración persistida, y cada vez que `updateMode` cambia. En
+ * macOS el shell lo recibe y lo ignora (ADR-197 §6).
+ */
+export function sendInstallOnQuitPreference(enabled: boolean): void {
+  getShellUpdater()?.setInstallOnQuit(enabled);
 }

@@ -52,10 +52,12 @@ import { recreateCore } from "../../core-adapter/index.js";
 import {
   deriveEngineConfigOverrides,
   readDeviceSignals,
+  readShellPlatform,
   sameEngineConfigOverrides,
 } from "../../core-adapter/settingsToEngineConfig.js";
 import { useDocumentStore } from "../../store/document.store.js";
 import {
+  installsWithoutAsking,
   searchesAutomatically,
   useSettingsStore,
   type Language,
@@ -65,7 +67,11 @@ import {
 } from "../../store/settings.store.js";
 import { useViewerStore } from "../../store/viewer.store.js";
 import { applyTheme } from "../../theme.js";
-import { getShellUpdater, sendAutomaticChecksPreference } from "../../updater/index.js";
+import {
+  getShellUpdater,
+  sendAutomaticChecksPreference,
+  sendInstallOnQuitPreference,
+} from "../../updater/index.js";
 import { Button } from "../common/Button.js";
 import { Checkbox } from "../common/Checkbox.js";
 import { ConfirmDialog } from "../common/ConfirmDialog.js";
@@ -90,15 +96,18 @@ import {
   resolveSaveErrorSlot,
   THEME_LABEL,
   THEME_ORDER,
-  UPDATE_MODE_DESCRIPTION,
   UPDATE_MODE_LABEL,
   UPDATE_MODE_ORDER,
   UPDATE_NETWORK_NOTICE,
   UPDATE_NETWORK_NOTICE_CHECK_OFF,
   UPDATE_NETWORK_NOTICE_EMPHASIS,
   UPDATE_SECTION_SUBTITLE,
+  updateModeDescription,
 } from "./settingsCopy.js";
-import { syncAutomaticChecksPreference } from "./updatePreferenceSync.js";
+import {
+  syncAutomaticChecksPreference,
+  syncInstallOnQuitPreference,
+} from "./updatePreferenceSync.js";
 
 // Vuelve junto con la sección "Idioma de la interfaz", comentada más abajo.
 // const LANGUAGE_OPTIONS: ReadonlyArray<SelectOption<Language>> = [
@@ -169,6 +178,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
    */
   const [theme, setTheme] = useState<Theme>(() => useSettingsStore.getState().theme);
   const [shellUpdater] = useState(() => getShellUpdater());
+  const [platform] = useState(() => readShellPlatform());
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -193,7 +203,8 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
     updateMode: UpdateMode;
     theme: Theme;
   }): void {
-    const previousSearches = searchesAutomatically(useSettingsStore.getState().updateMode);
+    const previousMode = useSettingsStore.getState().updateMode;
+    const previousSearches = searchesAutomatically(previousMode);
     useSettingsStore.setState(next);
     /*
      * ADR-188 §2: el otro de los dos momentos en que el renderer avisa la
@@ -208,6 +219,12 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
       persist: () => useSettingsStore.getState().persist(),
       send: sendAutomaticChecksPreference,
     });
+    // ADR-197 §3: el contenedor también necesita saber si se instala al cerrar.
+    syncInstallOnQuitPreference(
+      installsWithoutAsking(previousMode),
+      installsWithoutAsking(next.updateMode),
+      sendInstallOnQuitPreference,
+    );
     // El tema se aplica al guardar y no al elegir: el diálogo es atómico, y si
     // el usuario cancela nada tiene que haber cambiado. La vista previa es lo
     // que da la devolución inmediata, que es para lo que existe.
@@ -535,7 +552,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                 </div>
                 {/* Un renglón de alto fijo para las tres opciones (UX-10). */}
                 <p className="h-5 truncate text-sm text-text-secondary">
-                  {UPDATE_MODE_DESCRIPTION[updateMode]}
+                  {updateModeDescription(updateMode, platform)}
                 </p>
               </div>
               {/*
