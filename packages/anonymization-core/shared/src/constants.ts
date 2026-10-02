@@ -50,7 +50,7 @@ export const PREVIEW_CACHE_MAX_BYTES = 200 * 1024 * 1024; // 200 MB
  *
  * No es una decisión tipográfica. Si el token debería medir lo mismo que el
  * texto que lo rodea —hoy sale ~30 % más chico por construcción— sigue abierto
- * en `roadmap/Post_Hito10.8_Pendientes.md` §25.
+ * en `roadmap/hitos/Post_Hito10.8_Pendientes.md` §25.
  */
 export const REPLACEMENT_FONT_HEIGHT_RATIO = 0.64;
 
