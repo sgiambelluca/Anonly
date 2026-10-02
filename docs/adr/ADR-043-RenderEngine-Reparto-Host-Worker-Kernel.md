@@ -74,7 +74,7 @@ La interfaz pública completa de `Render_Engine.md` §6 (`loadDocument`/`unloadD
 - `architecture/05_Worker_Architecture.md` §7.4: `unload-document` en el ciclo de vida, wire shape de los controles, re-priming.
 - `architecture/03_Data_Model.md` §18: `UnloadDocumentPayload` + wire shape.
 - `adr/ADR-041`: nota en Estado (la decisión pre-PR13 de §5 queda tomada acá).
-- `roadmap/MVP.md` (Hito 10) y `roadmap/Hito10_Observaciones_Revision.md` (tarea de seguimiento resuelta).
+- `roadmap/MVP.md` (Hito 10) y `roadmap/hitos/Hito10_Observaciones_Revision.md` (tarea de seguimiento resuelta).
 
 ## Validación
 

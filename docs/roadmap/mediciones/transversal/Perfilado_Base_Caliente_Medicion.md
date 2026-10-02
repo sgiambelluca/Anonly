@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap-medicion | tarea=T-7 | dependencias=roadmap/Perfilado_Base_Caliente_Plan.md,roadmap/Optimizacion_De_Memoria_Plan.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-080-Idle-Dispose-En-El-Pool-No-En-El-Manager.md,adr/ADR-155-El-Arnes-De-Medicion-Configura-El-Core-Por-Un-Canal-Propio.md,adr/ADR-154-La-Memoria-No-Se-Compra-Bajando-El-Paralelismo.md,tests/perf/README.md | audiencia=planificador+humano | fase=11 -->
+<!-- CONTEXT: scope=roadmap-medicion | tarea=T-7 | dependencias=roadmap/rendimiento/Perfilado_Base_Caliente_Plan.md,roadmap/memoria/Optimizacion_De_Memoria_Plan.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-080-Idle-Dispose-En-El-Pool-No-En-El-Manager.md,adr/ADR-155-El-Arnes-De-Medicion-Configura-El-Core-Por-Un-Canal-Propio.md,adr/ADR-154-La-Memoria-No-Se-Compra-Bajando-El-Paralelismo.md,tests/perf/README.md | audiencia=planificador+humano | fase=11 -->
 
 # T-7 — Medición: de qué está hecha la línea de base caliente
 

@@ -4,7 +4,7 @@
 
 - **Estado**: Accepted
 - **Fecha**: 2026-07-22
-- **Decidido por**: El humano, sobre el segundo informe de ambigüedad de PR12 (levantado por el implementador al terminar el entry-point del PdfWorker y confirmado por el revisor como bloqueante y transversal a los 5 PRs de worker). El registro del informe está en `roadmap/Hito10_Observaciones_Revision.md`, entrada "PR12".
+- **Decidido por**: El humano, sobre el segundo informe de ambigüedad de PR12 (levantado por el implementador al terminar el entry-point del PdfWorker y confirmado por el revisor como bloqueante y transversal a los 5 PRs de worker). El registro del informe está en `roadmap/hitos/Hito10_Observaciones_Revision.md`, entrada "PR12".
 - **Relacionado con**: ADR-019 (`INIT.config`/`RUN.payload` tipados `unknown` a nivel de transporte — este ADR aplica la misma regla en la dirección de vuelta), ADR-031 (§4: única excepción vigente de `as unknown as` en producción — este ADR evita crear una segunda), ADR-036 (§3: variante `EVENT` con `payload: unknown` — segundo precedente de la misma regla), ADR-041 (PR12; su §5 previó auditar sorpresas transversales antes de repetirlas motor por motor — mismo espíritu acá)
 
 ## Contexto
@@ -70,7 +70,7 @@ Los entry-points de Render/Ocr/Ner/Export replican el patrón sin volver a levan
 ## Docs actualizados por este ADR
 
 - `architecture/05_Worker_Architecture.md` §2.2: fila `COMPLETED` (`result: unknown`) + párrafo introductorio con la regla y el porqué de que `partial`/`meta` no cambien.
-- `roadmap/Hito10_Observaciones_Revision.md`: entrada "PR12", registro del informe y el veredicto.
+- `roadmap/hitos/Hito10_Observaciones_Revision.md`: entrada "PR12", registro del informe y el veredicto.
 
 ## Validación
 

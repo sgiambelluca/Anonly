@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=adr | dependencias=07_Performance_Strategy.md,00_Project_Vision.md,roadmap/MVP.md,roadmap/Version_1.0.md,roadmap/Future_Ideas.md,roadmap/H-10_Bitacora_De_Memoria.md,roadmap/mediciones/transversal/Banco_Windows_Comparativa_Medicion.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-154-La-Memoria-No-Se-Compra-Bajando-El-Paralelismo.md,adr/ADR-190-Una-Pagina-Con-Tinta-No-Sale-Vacia-En-Silencio.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=adr | dependencias=07_Performance_Strategy.md,00_Project_Vision.md,roadmap/MVP.md,roadmap/Version_1.0.md,roadmap/Future_Ideas.md,roadmap/memoria/H-10_Bitacora_De_Memoria.md,roadmap/mediciones/transversal/Banco_Windows_Comparativa_Medicion.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-154-La-Memoria-No-Se-Compra-Bajando-El-Paralelismo.md,adr/ADR-190-Una-Pagina-Con-Tinta-No-Sale-Vacia-En-Silencio.md | audiencia=humanos+IA | fase=11 -->
 
 # ADR-192 — El pico total de memoria tiene un techo medido por perfil
 

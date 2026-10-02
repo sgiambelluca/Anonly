@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=adr | dependencias=core/Regex_Engine.md,core/Contracts.md,adr/ADR-092-La-Caratula-Es-Un-Patron-No-Un-Caso-De-Modelo.md,adr/ADR-103-La-Caratula-Se-Reconoce-Por-Su-Contexto.md,adr/ADR-112-El-Sello-No-Es-Un-Parrafo.md,adr/ADR-117-Una-Ocurrencia-Contenida-No-Aporta-Tinta.md,adr/ADR-091-El-Lexico-De-Nombres-No-Es-De-Un-Motor.md,roadmap/OCR_Escaneos_Handoff.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=adr | dependencias=core/Regex_Engine.md,core/Contracts.md,adr/ADR-092-La-Caratula-Es-Un-Patron-No-Un-Caso-De-Modelo.md,adr/ADR-103-La-Caratula-Se-Reconoce-Por-Su-Contexto.md,adr/ADR-112-El-Sello-No-Es-Un-Parrafo.md,adr/ADR-117-Una-Ocurrencia-Contenida-No-Aporta-Tinta.md,adr/ADR-091-El-Lexico-De-Nombres-No-Es-De-Un-Motor.md,roadmap/hitos/OCR_Escaneos_Handoff.md | audiencia=humanos+IA | fase=11 -->
 
 # ADR-122 — Una carátula se escribe en mayúsculas
 

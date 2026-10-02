@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=adr | dependencias=architecture/07_Performance_Strategy.md,roadmap/Ciclos_Y_Documentos_Reales_Plan.md,roadmap/mediciones/transversal/Ciclos_Y_Documentos_Reales_Medicion.md,roadmap/Optimizacion_De_Memoria_Plan.md,roadmap/Gates_Leak_Stress_Plan.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-153-El-Gate-De-Tiempos-Se-Mide-Sobre-El-Producto.md,adr/ADR-159-La-Retencion-Se-Lee-Del-Heap-No-Del-RSS.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=adr | dependencias=architecture/07_Performance_Strategy.md,roadmap/memoria/Ciclos_Y_Documentos_Reales_Plan.md,roadmap/mediciones/transversal/Ciclos_Y_Documentos_Reales_Medicion.md,roadmap/memoria/Optimizacion_De_Memoria_Plan.md,roadmap/hardening/Gates_Leak_Stress_Plan.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-153-El-Gate-De-Tiempos-Se-Mide-Sobre-El-Producto.md,adr/ADR-159-La-Retencion-Se-Lee-Del-Heap-No-Del-RSS.md | audiencia=humanos+IA | fase=11 -->
 
 # ADR-185 — Gates de fuga y estrés sobre Electron empaquetado
 
@@ -138,5 +138,5 @@ El gate de fuga prueba señales que T-9 mostró estables sin prometer una
 medición total de memoria. El gate de estrés detecta fallo/OOM, pérdida de
 trabajo y crecimiento desproporcionado en un documento largo sin convertir el
 RSS de una Mac en un límite universal. Ambos cuestan minutos de CI y se
-ejecutan en jobs separados del test unitario. `roadmap/Gates_Leak_Stress_Plan.md`
+ejecutan en jobs separados del test unitario. `roadmap/hardening/Gates_Leak_Stress_Plan.md`
 fija las aserciones, artefactos y puertas de implementación.

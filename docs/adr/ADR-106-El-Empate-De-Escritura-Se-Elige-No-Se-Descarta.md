@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=adr | dependencias=ui/Components.md,core/Grouping_Engine.md,core/Contracts.md,adr/ADR-083-El-Conflicto-Se-Resuelve-Eligiendo-El-Tipo.md,roadmap/Post_Hito10.8_Pendientes.md,ai/AI_Development_Guide.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=adr | dependencias=ui/Components.md,core/Grouping_Engine.md,core/Contracts.md,adr/ADR-083-El-Conflicto-Se-Resuelve-Eligiendo-El-Tipo.md,roadmap/hitos/Post_Hito10.8_Pendientes.md,ai/AI_Development_Guide.md | audiencia=humanos+IA | fase=11 -->
 
 # ADR-106 — El empate de escritura se elige, no se descarta
 

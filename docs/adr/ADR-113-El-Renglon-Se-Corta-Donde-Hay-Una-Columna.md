@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=adr | dependencias=core/PDF_Engine.md,core/Contracts.md,adr/ADR-110-El-Renglon-Es-Un-Grupo-No-Una-Coordenada.md,adr/ADR-112-El-Sello-No-Es-Un-Parrafo.md,adr/ADR-067-Orden-De-Lectura-Por-Runs-Rotados.md,adr/ADR-074-Una-Entidad-Partida-En-Varias-Lineas.md,roadmap/OCR_Escaneos_Handoff.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=adr | dependencias=core/PDF_Engine.md,core/Contracts.md,adr/ADR-110-El-Renglon-Es-Un-Grupo-No-Una-Coordenada.md,adr/ADR-112-El-Sello-No-Es-Un-Parrafo.md,adr/ADR-067-Orden-De-Lectura-Por-Runs-Rotados.md,adr/ADR-074-Una-Entidad-Partida-En-Varias-Lineas.md,roadmap/hitos/OCR_Escaneos_Handoff.md | audiencia=humanos+IA | fase=11 -->
 
 # ADR-113 — El renglón se corta donde hay una columna
 

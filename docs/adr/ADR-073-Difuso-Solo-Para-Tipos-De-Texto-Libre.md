@@ -4,7 +4,7 @@
 
 - **Estado**: Accepted
 - **Fecha**: 2026-08-15
-- **Decidido por**: El humano, al tomar los puntos 1, 2, 4, 4bis y 10 de `roadmap/Post_Hito10.8_Pendientes.md` como Hito 10.9. El defecto salió de la prueba manual sobre la pericia judicial real durante el Hito 10.8 y quedó anotado como **el más grave** de esa lista.
+- **Decidido por**: El humano, al tomar los puntos 1, 2, 4, 4bis y 10 de `roadmap/hitos/Post_Hito10.8_Pendientes.md` como Hito 10.9. El defecto salió de la prueba manual sobre la pericia judicial real durante el Hito 10.8 y quedó anotado como **el más grave** de esa lista.
 - **Relacionado con**: **ADR-011** (grouping first: este motor es el que decide qué es "la misma entidad"), **ADR-026** (`GroupingConfig.similarityThreshold`, cuyo default 0.88 es el número que dispara el defecto), ADR-028 (la numeración canónica, que cuenta grupos y por lo tanto hereda el error), ADR-038 §3 (el dedup por identidad, que es exacto y no se toca)
 - **Parte de**: Hito 10.9, PR 1
 
@@ -161,7 +161,7 @@ Tests del PR 2 (`grouping-engine`):
 
 - `core/Grouping_Engine.md` → v1.6.0: §2 (la responsabilidad de matchear "exacto o fuzzy" pasa a decir para qué tipos), §13 caso 4 (que hoy usa `"J. Pérez"`/`"Juan Pérez"` para ilustrar el difuso y sigue valiendo, ahora explícitamente sobre `Person`), §13 caso nuevo (dos identificadores estructurados que difieren en un carácter no se fusionan), §14 (los tests de §7), §15 (ítem de checklist), y §"Algoritmos clave" > "Matching", que es donde vive el pseudocódigo de los dos pases.
 - `roadmap/MVP.md` §4 — bloque nuevo del Hito 10.9 y la frase del Hito 10.8 que dejaba esto anotado como pendiente sin ADR.
-- `roadmap/Post_Hito10.8_Pendientes.md` §1 — pasa de pendiente a adoptado, con el ADR que lo cierra.
+- `roadmap/hitos/Post_Hito10.8_Pendientes.md` §1 — pasa de pendiente a adoptado, con el ADR que lo cierra.
 
 `core/Contracts.md` **no** se toca: no hay tipo, evento ni error code nuevo, y `GroupingConfig` queda idéntico.
 
@@ -176,5 +176,5 @@ Tests del PR 2 (`grouping-engine`):
 
 - `core/Grouping_Engine.md` §2, §12, §13 casos 3-5, §"Algoritmos clave" — `core/Contracts.md` §6 (`GroupingConfig`) — `architecture/03_Data_Model.md` §9 (`aliases`, `canonicalValue`)
 - `adr/ADR-011` — `adr/ADR-012` (invariante de un `replacementValue` por grupo) — `adr/ADR-026` — `adr/ADR-028` — `adr/ADR-038` §3 — `adr/ADR-057` §4
-- `roadmap/Post_Hito10.8_Pendientes.md` §1 (el reporte original, con la medición)
+- `roadmap/hitos/Post_Hito10.8_Pendientes.md` §1 (el reporte original, con la medición)
 - Código: `packages/anonymization-core/grouping-engine/src/grouping.engine.ts` (`findMatchingGroup`), `packages/anonymization-core/grouping-engine/src/levenshtein.ts`

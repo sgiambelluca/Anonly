@@ -116,7 +116,7 @@ La interfaz pública de `Export_Engine.md` §6 salvo el constructor; el flujo de
 - `core/Export_Engine.md` v1.2.0: nota de cabecera, §2, §6 (constructor `pool?` + semántica del despacho), §12, §13 (casos 18–20), §14 (tests nuevos), §15 (items 21–25 de PR16).
 - `architecture/05_Worker_Architecture.md` §7.5 (ciclo de vida del ensamblador, idempotencia, reset por documento) + §1.1 (nota de la fila del ExportWorker) + §1 cabecera (cuarta excepción).
 - `architecture/03_Data_Model.md` §18: `ExportPagePayload` completo, `metadata` en `ExportSavePayload`.
-- `roadmap/Hito10_Observaciones_Revision.md`: entrada PR16 + tareas de seguimiento.
+- `roadmap/hitos/Hito10_Observaciones_Revision.md`: entrada PR16 + tareas de seguimiento.
 
 ## Validación
 

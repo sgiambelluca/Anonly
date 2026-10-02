@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=adr | dependencias=core/PDF_Engine.md,core/Contracts.md,adr/ADR-102-El-Flujo-De-Glifos-Es-Continuo-Por-Pagina.md,adr/ADR-097-El-Avance-Real-De-Cada-Glifo-Reemplaza-Al-Promedio.md,adr/ADR-108-El-Avance-De-Un-Espacio-Incluye-El-Word-Spacing.md,adr/ADR-109-La-Caja-De-Una-Palabra-Es-Su-Caja-De-Tinta.md,adr/ADR-113-El-Renglon-Se-Corta-Donde-Hay-Una-Columna.md,roadmap/Post_Hito10.8_Pendientes.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=adr | dependencias=core/PDF_Engine.md,core/Contracts.md,adr/ADR-102-El-Flujo-De-Glifos-Es-Continuo-Por-Pagina.md,adr/ADR-097-El-Avance-Real-De-Cada-Glifo-Reemplaza-Al-Promedio.md,adr/ADR-108-El-Avance-De-Un-Espacio-Incluye-El-Word-Spacing.md,adr/ADR-109-La-Caja-De-Una-Palabra-Es-Su-Caja-De-Tinta.md,adr/ADR-113-El-Renglon-Se-Corta-Donde-Hay-Una-Columna.md,roadmap/hitos/Post_Hito10.8_Pendientes.md | audiencia=humanos+IA | fase=11 -->
 
 # ADR-142 — Una palabra partida entre dos items sigue siendo una palabra
 

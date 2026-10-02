@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap-medicion | tarea=punto-1-memoria | dependencias=roadmap/Optimizacion_De_Memoria_Plan.md,adr/ADR-179-El-Empaquetado-De-NER-Se-Evalua-Sin-Cambiar-El-Modelo.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-147-Perder-Un-Identificador-Cubierto-Es-Una-Regresion.md,tests/perf/README.md | audiencia=planificador+humano | fase=11 -->
+<!-- CONTEXT: scope=roadmap-medicion | tarea=punto-1-memoria | dependencias=roadmap/memoria/Optimizacion_De_Memoria_Plan.md,adr/ADR-179-El-Empaquetado-De-NER-Se-Evalua-Sin-Cambiar-El-Modelo.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-147-Perder-Un-Identificador-Cubierto-Es-Una-Regresion.md,tests/perf/README.md | audiencia=planificador+humano | fase=11 -->
 
 # Punto 1 de memoria — evaluación del empaquetado de NER
 

@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=adr | dependencias=core/NER_Engine.md,core/Contracts.md,adr/ADR-024-Ner-Batching.md,adr/ADR-046-Reparto-Host-Kernel-NER.md,adr/ADR-088-Runs-Rotados-Y-Caja-Alta.md,roadmap/Optimizacion_De_Rendimiento.md,ai/AI_Development_Guide.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=adr | dependencias=core/NER_Engine.md,core/Contracts.md,adr/ADR-024-Ner-Batching.md,adr/ADR-046-Reparto-Host-Kernel-NER.md,adr/ADR-088-Runs-Rotados-Y-Caja-Alta.md,roadmap/rendimiento/Optimizacion_De_Rendimiento.md,ai/AI_Development_Guide.md | audiencia=humanos+IA | fase=11 -->
 
 # ADR-098 — El lote se corta en tokens, no en palabras
 

@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=adr | dependencias=core/Contracts.md,architecture/03_Data_Model.md,core/Regex_Engine.md,core/NER_Engine.md,ui/Components.md,adr/ADR-104-La-Referencia-Lleva-El-Valor-Que-La-UI-Muestra.md,roadmap/Post_Hito10.8_Pendientes.md,ai/AI_Development_Guide.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=adr | dependencias=core/Contracts.md,architecture/03_Data_Model.md,core/Regex_Engine.md,core/NER_Engine.md,ui/Components.md,adr/ADR-104-La-Referencia-Lleva-El-Valor-Que-La-UI-Muestra.md,roadmap/hitos/Post_Hito10.8_Pendientes.md,ai/AI_Development_Guide.md | audiencia=humanos+IA | fase=11 -->
 
 # ADR-105 — El contexto viaja con la ocurrencia
 
@@ -38,7 +38,7 @@ Los **detectores** sí. `regex-engine` trabaja sobre `page.text` y su `RawMatch`
 
 `buildOccurrenceContext(text, startIndex, endIndexExclusive)` se declara en `Contracts.md` §6 y vive en `@anonly/shared`.
 
-**Es lo que evita el problema que el repo acaba de documentar**: dos motores que no pueden importarse entre sí (P-1/P-2) necesitan la misma lógica, y la salida es una sola implementación compartida — mismo criterio y mismo lugar que `sharesVerticalBand` y `normalizeForComparison` (ADR-061 §2 errata). Duplicarla sería inaugurar la entrada número siete de `roadmap/Duplicacion_De_Logica.md` el mismo día que se escribió.
+**Es lo que evita el problema que el repo acaba de documentar**: dos motores que no pueden importarse entre sí (P-1/P-2) necesitan la misma lógica, y la salida es una sola implementación compartida — mismo criterio y mismo lugar que `sharesVerticalBand` y `normalizeForComparison` (ADR-061 §2 errata). Duplicarla sería inaugurar la entrada número siete de `roadmap/hardening/Duplicacion_De_Logica.md` el mismo día que se escribió.
 
 ### 2. Dos cadenas, no una con offsets
 

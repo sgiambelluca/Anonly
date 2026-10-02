@@ -13,7 +13,7 @@
 >
 > No se notó antes porque pdf.js pide canvas auxiliares **solo** cuando la página los necesita: grupos de transparencia, soft masks, patrones de mosaico y fuentes Type3. Ninguna página de texto y vectores los pide, y todos los fixtures del repo son texto plano generado con `pdf-lib`. El motor pasó con 57 tests de unidad en verde mientras cualquier PDF salido de un convertidor real fallaba en **todas** sus páginas.
 >
-> La omisión se cerró midiendo el fallo real en el navegador; el rastro completo está en `roadmap/Post_Hito10.8_Pendientes.md` §21, y `core/Render_Engine.md` §6 ya dice "seis opciones y tres factories". La lección que este ADR ya traía —"aparecen clases nuevas por kernel que existen solo para esquivar una limitación de terceros"— se extiende a la tercera.
+> La omisión se cerró midiendo el fallo real en el navegador; el rastro completo está en `roadmap/hitos/Post_Hito10.8_Pendientes.md` §21, y `core/Render_Engine.md` §6 ya dice "seis opciones y tres factories". La lección que este ADR ya traía —"aparecen clases nuevas por kernel que existen solo para esquivar una limitación de terceros"— se extiende a la tercera.
 
 ## Contexto
 
@@ -173,7 +173,7 @@ El 1 va primero: sin assets servidos, el 2 y el 3 apuntan a un 404. El 2 y el 3 
 - `adr/ADR-018`: nota de que un asset que viene de una dependencia npm pinneada se sirve first-party sin pasar por `assets.lock.json`.
 - `ai/Code_Standards.md`: excepción a P-7 con la misma forma que la de P-6/ADR-021 §6, para las factories de CMap/standard-fonts same-origin.
 - `architecture/08_Security_Model.md`: nota en el gate `no-network-from-core` para las mismas factories.
-- `roadmap/MVP.md` y `roadmap/Hito10_Observaciones_Revision.md`: los tres PRs de §9.
+- `roadmap/MVP.md` y `roadmap/hitos/Hito10_Observaciones_Revision.md`: los tres PRs de §9.
 
 ## Validación
 

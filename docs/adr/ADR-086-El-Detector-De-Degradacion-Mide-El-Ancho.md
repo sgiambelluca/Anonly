@@ -4,7 +4,7 @@
 
 - **Estado**: Accepted
 - **Fecha**: 2026-08-20
-- **Decidido por**: El humano, sobre las tres opciones que dejó abiertas `roadmap/Post_Hito10.8_Pendientes.md` §16. Eligió la **A** (medir la compresión horizontal) y la **C** (que el piso de dibujo escale), descartando la B por insuficiente.
+- **Decidido por**: El humano, sobre las tres opciones que dejó abiertas `roadmap/hitos/Post_Hito10.8_Pendientes.md` §16. Eligió la **A** (medir la compresión horizontal) y la **C** (que el piso de dibujo escale), descartando la B por insuficiente.
 - **Relacionado con**: **ADR-058 §7** (que definió el veredicto y su umbral, y es lo que este ADR corrige), **ADR-062** (que llevó el veredicto hasta la UI y cuya §"renderFull" queda con errata acá), **ADR-057** (la escalera de abreviaturas, que es la que evita que el caso común llegue a este detector), **ADR-076** (la edición manual, que es el camino por el que el caso común sí llega).
 - **Parte de**: lo que destapó verificar en un browser la marca de ADR-062.
 
@@ -199,10 +199,10 @@ Queda como **errata** en ADR-062 y en el comentario de `kernel.ts`, no como camb
 - `core/Render_Engine.md` §2, §13 casos 25 y 28, §14 y §15 — el criterio, el piso escalado y sus once tests.
 - `adr/ADR-058` — errata en §7: el veredicto pasa a medir el ancho. El resto del ADR (shrink-to-fit, repintado de línea, leyenda) queda intacto.
 - `adr/ADR-062` — errata en §"renderFull": la invariancia que se invoca no se cumplía; se cumple recién con este ADR.
-- `roadmap/Post_Hito10.8_Pendientes.md` §16 — pasa de "necesita ADR" a "decidido acá".
+- `roadmap/hitos/Post_Hito10.8_Pendientes.md` §16 — pasa de "necesita ADR" a "decidido acá".
 
 ## Referencias
 
 - `core/Contracts.md` §6 — `core/Render_Engine.md` §13 caso 28, §14
 - `adr/ADR-057` (la escalera que evita el caso común) — `adr/ADR-058` §1, §7, §11 — `adr/ADR-062` (el transporte, que no se toca) — `adr/ADR-076` (el aviso "de antes", que sí mide anchos)
-- `roadmap/Post_Hito10.8_Pendientes.md` §16 (las dos tablas de medición originales)
+- `roadmap/hitos/Post_Hito10.8_Pendientes.md` §16 (las dos tablas de medición originales)

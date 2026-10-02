@@ -1,10 +1,10 @@
-<!-- CONTEXT: scope=adr | dependencias=core/Contracts.md,architecture/05_Worker_Architecture.md,roadmap/Duplicacion_De_Logica.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-127-El-Solapamiento-De-Dos-Rectangulos-Se-Escribe-Una-Vez.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=adr | dependencias=core/Contracts.md,architecture/05_Worker_Architecture.md,roadmap/hardening/Duplicacion_De_Logica.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-127-El-Solapamiento-De-Dos-Rectangulos-Se-Escribe-Una-Vez.md | audiencia=humanos+IA | fase=11 -->
 
 # ADR-128 — El esqueleto de un worker se escribe una vez
 
 - **Estado**: Accepted
 - **Fecha**: 2026-09-03
-- **Decidido por**: El humano, que pidió eliminar código y lógica repetida a partir del inventario de `roadmap/Duplicacion_De_Logica.md`, priorizando por riesgo.
+- **Decidido por**: El humano, que pidió eliminar código y lógica repetida a partir del inventario de `roadmap/hardening/Duplicacion_De_Logica.md`, priorizando por riesgo.
 - **Relacionado con**: `Duplicacion_De_Logica.md` §1 (el ítem de mayor riesgo de la lista), ADR-036 §2 (transporte de workers reales), ADR-127 (el precedente inmediato: una primitiva duplicada se promueve a `shared`)
 - **Parte de**: Hito 11
 

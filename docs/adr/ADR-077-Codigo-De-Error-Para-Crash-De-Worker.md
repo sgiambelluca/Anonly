@@ -4,7 +4,7 @@
 
 - **Estado**: Accepted
 - **Fecha**: 2026-08-19
-- **Decidido por**: El humano, al revisar las observaciones no bloqueantes del Hito 10 (`roadmap/Hito10_Observaciones_Plan_De_Resolucion.md` §6.1 punto F).
+- **Decidido por**: El humano, al revisar las observaciones no bloqueantes del Hito 10 (`roadmap/hitos/Hito10_Observaciones_Plan_De_Resolucion.md` §6.1 punto F).
 - **Relacionado con**: **PR11 del Hito 10**, donde el revisor marcó esto como bloqueante y el humano eligió **diferirlo a los PR12-16** ("recién ahí hay un worker real contra el cual un reintento tiene sentido de verdad"). Los PR12-16 ya cerraron: los cinco workers son reales. **ADR-035 §3** (pools in-process retryables), **ADR-043 §5** (re-priming de workers nuevos), **ADR-049** (discriminación por `code`, no por subclase).
 - **Parte de**: cierre de las observaciones del Hito 10.
 

@@ -119,7 +119,7 @@ La fila decía "Ninguno por documento… **Libre**", y es correcta *en lo que au
 - `architecture/05_Worker_Architecture.md`: §7.3 reescrito como kernel, nota de excepciones de §1 (tercera), §2.2 (enrutamiento de `PROGRESS` vía `onProgress`).
 - `architecture/03_Data_Model.md` §18: `NerPagePayload` (batch, `quantization`, `wasmPaths?`) + `NerKernelSpan`/`NerKernelProgress` como formas de wire.
 - `adr/ADR-041` §5: matiz de la fila `ner-engine` (ver §9) y nota en Estado.
-- `roadmap/MVP.md` (Hito 10) y `roadmap/Hito10_Observaciones_Revision.md`: entrada PR15 + tarea de seguimiento resuelta.
+- `roadmap/MVP.md` (Hito 10) y `roadmap/hitos/Hito10_Observaciones_Revision.md`: entrada PR15 + tarea de seguimiento resuelta.
 
 ## Validación
 

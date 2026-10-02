@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=adr | dependencias=core/Grouping_Engine.md,core/Contracts.md,adr/ADR-094-Lo-Que-El-Detector-Duda-No-Se-Tira-En-Silencio.md,adr/ADR-073-Matcheo-Difuso-Solo-Para-Texto-Libre.md,adr/ADR-085-Memoria-De-Reclasificacion.md,adr/ADR-115-La-Puntuacion-Pegada-No-Es-Parte-Del-Valor.md,roadmap/OCR_Escaneos_Handoff.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=adr | dependencias=core/Grouping_Engine.md,core/Contracts.md,adr/ADR-094-Lo-Que-El-Detector-Duda-No-Se-Tira-En-Silencio.md,adr/ADR-073-Matcheo-Difuso-Solo-Para-Texto-Libre.md,adr/ADR-085-Memoria-De-Reclasificacion.md,adr/ADR-115-La-Puntuacion-Pegada-No-Es-Parte-Del-Valor.md,roadmap/hitos/OCR_Escaneos_Handoff.md | audiencia=humanos+IA | fase=11 -->
 
 # ADR-116 — Un valor que el documento ya confirmó no se descarta
 

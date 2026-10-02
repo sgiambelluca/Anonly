@@ -6,7 +6,7 @@
 - **Fecha**: 2026-08-26
 - **Decidido por**: El humano, sobre un reporte de campo (una tabla escaneada dada vuelta que el OCR leía en horizontal y de la que salían "números detectados") y sobre las mediciones de Contexto §2, que descartaron la primera propuesta.
 - **Relacionado con**: ADR-018 (assets first-party mirroreados — este ADR cambia el pin de dos y agrega uno), ADR-045 §2/§3 (kernel de OCR sin estado por documento), ADR-064 §2 (el orden se calcula en píxeles y la conversión a puntos va después), ADR-066 §6/§7 (`BoundingBox.rotation` y el pintado rotado), ADR-067 §5 (que anticipó exactamente esto: *"si algún día `ocr-engine` aprendiera a reconocer texto rotado, poblar `rotation` bastaría"*)
-- **Parte de**: la campaña de calidad de detección abierta por `roadmap/Calidad_De_Deteccion_Informe.md` §2.1
+- **Parte de**: la campaña de calidad de detección abierta por `roadmap/hitos/Calidad_De_Deteccion_Informe.md` §2.1
 
 > Convención de citas: `ADR-090 §N` refiere a **Decisión §N**; el contexto se cita como `ADR-090, Contexto §N`.
 
@@ -159,7 +159,7 @@ Esto es exactamente lo que ADR-067 §5 dejó anticipado: con `rotation` poblado,
 
 ## Referencias
 
-- `roadmap/Calidad_De_Deteccion_Informe.md` §2.1 (el reporte de campo), §2.2 (el DPI adaptativo, que queda afuera)
+- `roadmap/hitos/Calidad_De_Deteccion_Informe.md` §2.1 (el reporte de campo), §2.2 (el DPI adaptativo, que queda afuera)
 - `core/OCR_Engine.md` §9, §10, §12, §13, §14, §15
 - `core/Contracts.md` §5 (`BoundingBox.rotation`, ausente ≡ 0)
 - `adr/ADR-018-First-Party-Assets.md` (los pines que este ADR cambia)

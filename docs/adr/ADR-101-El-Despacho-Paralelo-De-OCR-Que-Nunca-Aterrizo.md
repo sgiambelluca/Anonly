@@ -1,10 +1,10 @@
-<!-- CONTEXT: scope=adr | dependencias=core/OCR_Engine.md,core/Orchestrator.md,architecture/05_Worker_Architecture.md,adr/ADR-045-Ocr-Kernel-Puerto-Interno.md,roadmap/Optimizacion_De_Rendimiento.md,ai/AI_Development_Guide.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=adr | dependencias=core/OCR_Engine.md,core/Orchestrator.md,architecture/05_Worker_Architecture.md,adr/ADR-045-Ocr-Kernel-Puerto-Interno.md,roadmap/rendimiento/Optimizacion_De_Rendimiento.md,ai/AI_Development_Guide.md | audiencia=humanos+IA | fase=11 -->
 
 # ADR-101 — El despacho paralelo de OCR que nunca aterrizó
 
 - **Estado**: Accepted
 - **Fecha**: 2026-08-27
-- **Decidido por**: El humano, punto B del plan de `roadmap/Optimizacion_De_Rendimiento.md` ("activemos la concurrencia si la computadora permite y tiene los núcleos").
+- **Decidido por**: El humano, punto B del plan de `roadmap/rendimiento/Optimizacion_De_Rendimiento.md` ("activemos la concurrencia si la computadora permite y tiene los núcleos").
 - **Relacionado con**: ADR-045 (el kernel de OCR y el reparto host/worker), `OCR_Engine.md` §15 item 7, `Orchestrator.md`
 - **Parte de**: Hito 11, optimización
 

@@ -1,9 +1,9 @@
-<!-- CONTEXT: scope=roadmap-medicion | tarea=T-9,T-10,T-11,T-12,T-13 | dependencias=roadmap/Ciclos_Y_Documentos_Reales_Plan.md,roadmap/Optimizacion_De_Memoria_Plan.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-159-La-Retencion-Se-Lee-Del-Heap-No-Del-RSS.md,adr/ADR-167-El-Modelo-De-NER-Se-Libera-A-Los-15-s-De-Inactividad.md,tests/perf/README.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=roadmap-medicion | tarea=T-9,T-10,T-11,T-12,T-13 | dependencias=roadmap/memoria/Ciclos_Y_Documentos_Reales_Plan.md,roadmap/memoria/Optimizacion_De_Memoria_Plan.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-159-La-Retencion-Se-Lee-Del-Heap-No-Del-RSS.md,adr/ADR-167-El-Modelo-De-NER-Se-Libera-A-Los-15-s-De-Inactividad.md,tests/perf/README.md | audiencia=humanos+IA | fase=11 -->
 
 # T-9 a T-13 — Medición: fuga, documentos reales, memoria de WASM, configuración de NER y tiempos reales
 
 > Protocolo y criterio de lectura, fijados antes de medir:
-> [`Ciclos_Y_Documentos_Reales_Plan.md`](../../Ciclos_Y_Documentos_Reales_Plan.md).
+> [`Ciclos_Y_Documentos_Reales_Plan.md`](../../memoria/Ciclos_Y_Documentos_Reales_Plan.md).
 > Medido el 2026-09-18 sobre el commit `a03b565`, en el M1 de 8 GB, con el producto
 > empaquetado.
 
@@ -362,7 +362,7 @@ fixtures de ~20 palabras por página, no ve el costo de NER sobre texto real**.
 
 ## 5. T-11 — la memoria de WASM por worker
 
-Protocolo: [`Ciclos_Y_Documentos_Reales_Plan.md`](../../Ciclos_Y_Documentos_Reales_Plan.md)
+Protocolo: [`Ciclos_Y_Documentos_Reales_Plan.md`](../../memoria/Ciclos_Y_Documentos_Reales_Plan.md)
 §4. Medido el 2026-09-19 sobre `0ab098f`, con el mismo banco. Todo sobre fixtures,
 sin documentos reales.
 
@@ -437,7 +437,7 @@ su altura con documentos reales no está medida (§4, punto 8).
 > Las afirmaciones de atribución del texto original debajo no deben usarse para
 > prometer ahorro ni descartar efectos de medición. Se conservan datos y lectura
 > histórica; el criterio vigente está en
-> [MemoryInfra: corrección de la premisa](../../Memory_Infra_Viabilidad.md).
+> [MemoryInfra: corrección de la premisa](../../memoria/Memory_Infra_Viabilidad.md).
 
 Memoria del proceso del renderer (Tab), contra lo que el instrumento atribuye. Una
 lectura **parcial** no se usa para concluir nada:
@@ -506,7 +506,7 @@ después del GC a los 6 s. No es retención, y queda con prioridad baja.
 
 ## 6. T-12 — configurar el modelo de NER sin cambiarlo
 
-Protocolo: [`Ciclos_Y_Documentos_Reales_Plan.md`](../../Ciclos_Y_Documentos_Reales_Plan.md)
+Protocolo: [`Ciclos_Y_Documentos_Reales_Plan.md`](../../memoria/Ciclos_Y_Documentos_Reales_Plan.md)
 §4bis. Sesión `.measure/ner-opciones/20260919T051758Z/`: cuatro brazos intercalados
 sobre R1, tres rondas, trece corridas `ok`, binarios distintos por digest y el árbol del
 producto limpio al terminar. Mismas reglas de confidencialidad que T-10: la huella de
@@ -595,7 +595,7 @@ Con el build de control, una corrida sobre R2:
 
 ## 7. T-13 — el tiempo real del producto
 
-Protocolo: [`Ciclos_Y_Documentos_Reales_Plan.md`](../../Ciclos_Y_Documentos_Reales_Plan.md)
+Protocolo: [`Ciclos_Y_Documentos_Reales_Plan.md`](../../memoria/Ciclos_Y_Documentos_Reales_Plan.md)
 §4ter. Sesión `.measure/tiempos-reales/20260919T054313Z/`, doce importaciones `ok`,
 **sin ningún instrumento de memoria**: solo los eventos de fase de la app.
 

@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=adr | dependencias=core/NER_Engine.md,core/Contracts.md,adr/ADR-046-NerEngine-Pool-Propia-Kernel-Puro.md,adr/ADR-088-El-Texto-Que-Recibe-El-NER.md,adr/ADR-098-El-Lote-Se-Corta-En-Tokens-No-En-Palabras.md,adr/ADR-074-Una-Entidad-Partida-En-Varias-Lineas.md,roadmap/OCR_Escaneos_Handoff.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=adr | dependencias=core/NER_Engine.md,core/Contracts.md,adr/ADR-046-NerEngine-Pool-Propia-Kernel-Puro.md,adr/ADR-088-El-Texto-Que-Recibe-El-NER.md,adr/ADR-098-El-Lote-Se-Corta-En-Tokens-No-En-Palabras.md,adr/ADR-074-Una-Entidad-Partida-En-Varias-Lineas.md,roadmap/hitos/OCR_Escaneos_Handoff.md | audiencia=humanos+IA | fase=11 -->
 
 # ADR-111 — El token que no es entidad también entra al agregador
 

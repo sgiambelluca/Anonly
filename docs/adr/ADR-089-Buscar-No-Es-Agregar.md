@@ -4,9 +4,9 @@
 
 - **Estado**: Accepted
 - **Fecha**: 2026-08-22
-- **Decidido por**: El humano, sobre el reporte de campo de `roadmap/Calidad_De_Deteccion_Informe.md` §2.3 ("Ver ocurrencias muchas veces no trae nada") y la corrección de que `addManualEntity` **barre el documento entero** (`ui/Components.md` §5.4c), que el reporte no tenía en cuenta.
+- **Decidido por**: El humano, sobre el reporte de campo de `roadmap/hitos/Calidad_De_Deteccion_Informe.md` §2.3 ("Ver ocurrencias muchas veces no trae nada") y la corrección de que `addManualEntity` **barre el documento entero** (`ui/Components.md` §5.4c), que el reporte no tenía en cuenta.
 - **Relacionado con**: ADR-061 §2 (la normalización compartida y las dos erratas de puntuación), ADR-061 §8 errata (`searchText` como primitiva de solo lectura), ADR-084 §2/§3 ("Ver ocurrencias" empuja el `canonicalValue` al buscador)
-- **Parte de**: la campaña de calidad de detección abierta por `roadmap/Calidad_De_Deteccion_Informe.md`
+- **Parte de**: la campaña de calidad de detección abierta por `roadmap/hitos/Calidad_De_Deteccion_Informe.md`
 
 > Convención de citas: `ADR-089 §N` refiere a **Decisión §N**.
 
@@ -108,7 +108,7 @@ Consecuencia concreta y deliberada: agregar a mano `20-12345678` sobre un docume
 
 ## Referencias
 
-- `roadmap/Calidad_De_Deteccion_Informe.md` §2.3 (el reporte de campo y su tabla medida)
+- `roadmap/hitos/Calidad_De_Deteccion_Informe.md` §2.3 (el reporte de campo y su tabla medida)
 - `core/Regex_Engine.md` §6, §13 casos 20-25, §14
 - `ui/Components.md` §5.4c ("Agrega todas las apariciones del valor"), §3.5 ("Ver ocurrencias")
 - `adr/ADR-061-Agregado-Manual-De-Entidades.md` §2 (normalización compartida), §8 errata (`searchText`)

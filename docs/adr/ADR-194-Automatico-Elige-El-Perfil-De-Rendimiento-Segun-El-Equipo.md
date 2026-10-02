@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=adr | dependencias=ui/React_Client.md,ui/Components.md,core/Contracts.md,architecture/05_Worker_Architecture.md,roadmap/Perfiles_Rendimiento_Revision.md,roadmap/mediciones/ocr/DPI_Descendente_Fase1_Windows_2026-10-01.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-125-La-Configuracion-Se-Toca-Antes-Del-Primer-Documento.md,adr/ADR-132-El-Shell-Tiene-Su-Propio-Modelo-De-Seguridad.md,adr/ADR-143-Las-Imagenes-De-OCR-Se-Producen-Cuando-Hay-Lugar.md,adr/ADR-154-La-Memoria-No-Se-Compra-Bajando-El-Paralelismo.md,adr/ADR-169-La-Pantalla-De-Trabajo-Tras-Pruebas-De-Usuario.md,adr/ADR-192-El-Pico-Total-De-Memoria-Tiene-Un-Techo-Medido-Por-Perfil.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=adr | dependencias=ui/React_Client.md,ui/Components.md,core/Contracts.md,architecture/05_Worker_Architecture.md,roadmap/rendimiento/Perfiles_Rendimiento_Revision.md,roadmap/mediciones/ocr/DPI_Descendente_Fase1_Windows_2026-10-01.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-125-La-Configuracion-Se-Toca-Antes-Del-Primer-Documento.md,adr/ADR-132-El-Shell-Tiene-Su-Propio-Modelo-De-Seguridad.md,adr/ADR-143-Las-Imagenes-De-OCR-Se-Producen-Cuando-Hay-Lugar.md,adr/ADR-154-La-Memoria-No-Se-Compra-Bajando-El-Paralelismo.md,adr/ADR-169-La-Pantalla-De-Trabajo-Tras-Pruebas-De-Usuario.md,adr/ADR-192-El-Pico-Total-De-Memoria-Tiene-Un-Techo-Medido-Por-Perfil.md | audiencia=humanos+IA | fase=11 -->
 
 # ADR-194 — Automático elige el perfil de rendimiento según el equipo
 
@@ -9,7 +9,7 @@
   regla de Automático, la fuente de la RAM, la migración, los topes de
   imágenes, los techos de memoria y que Configuración muestre el nivel
   resuelto. El registro de cada decisión y sus mediciones está en
-  `roadmap/Perfiles_Rendimiento_Revision.md`.
+  `roadmap/rendimiento/Perfiles_Rendimiento_Revision.md`.
 - **Alcance**: `apps/react-client` (settings, derivación de overrides,
   diálogo de Configuración, recreación del Core) y `apps/desktop-shell` (un
   dato nuevo hacia el renderer). También norma las suites de medición de

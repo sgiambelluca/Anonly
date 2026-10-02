@@ -1,9 +1,9 @@
-<!-- CONTEXT: scope=reporte-de-ejecucion | dependencias=roadmap/Margenes_Menos_Pixeles_Handoff.md,roadmap/Margenes_Menos_Pixeles_Plan.md,roadmap/mediciones/ocr/ImageData_Perfilado_Resultados.md,adr/ADR-121-El-Sello-Rotado-Vive-En-El-Margen.md,adr/ADR-162-Solo-Una-Franja-Visualmente-Blanca-Se-Saltea.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md | audiencia=planificador+humano | fase=11 -->
+<!-- CONTEXT: scope=reporte-de-ejecucion | dependencias=roadmap/memoria/Margenes_Menos_Pixeles_Handoff.md,roadmap/memoria/Margenes_Menos_Pixeles_Plan.md,roadmap/mediciones/ocr/ImageData_Perfilado_Resultados.md,adr/ADR-121-El-Sello-Rotado-Vive-En-El-Margen.md,adr/ADR-162-Solo-Una-Franja-Visualmente-Blanca-Se-Saltea.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md | audiencia=planificador+humano | fase=11 -->
 
 # Márgenes — resultados de M-1 + M-2 + M-1b (tinta residual y su caja)
 
 Fecha: 2026-09-16. Ejecutado por el implementador según
-[`Margenes_Menos_Pixeles_Handoff.md`](../../Margenes_Menos_Pixeles_Handoff.md),
+[`Margenes_Menos_Pixeles_Handoff.md`](../../memoria/Margenes_Menos_Pixeles_Handoff.md),
 incluido su §8 (M-1b, agregado el mismo día). Este es un **reporte de
 ejecución**: mide y describe, no elige entre I-1/I-2/I-3 ni recomienda una
 optimización — esa decisión es del planificador, con este análisis en la

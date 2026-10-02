@@ -6,7 +6,7 @@
 - **Fecha**: 2026-08-26
 - **Decidido por**: El humano, al ver que la carátula `Apellido, Nombre` (§23c) necesita una compuerta de nombres propios y que la única que existe está encerrada en `grouping-engine`.
 - **Relacionado con**: ADR-069 §1/§2 (fuente única y artefacto generado), ADR-060 §4 (la inferencia que lo consume hoy), ADR-070 (la atribución CC-BY, que no cambia), ADR-061 §2 errata (**el precedente exacto**: dos primitivas promovidas a `shared` por no tener dónde vivir)
-- **Parte de**: la campaña de calidad de detección abierta por `roadmap/Calidad_De_Deteccion_Informe.md`
+- **Parte de**: la campaña de calidad de detección abierta por `roadmap/hitos/Calidad_De_Deteccion_Informe.md`
 
 > Convención de citas: `ADR-091 §N` refiere a **Decisión §N**.
 

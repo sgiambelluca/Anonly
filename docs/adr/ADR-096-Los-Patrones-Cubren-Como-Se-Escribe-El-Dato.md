@@ -6,7 +6,7 @@
 - **Fecha**: 2026-08-26
 - **Decidido por**: El humano, sobre los cuatro huecos que destapó la categoría `forms` del dataset de referencia, y con las formas de patente y matrícula que aportó.
 - **Relacionado con**: ADR-095 §7 (la regla de provenance y la categoría `forms`, que produjeron estos hallazgos), ADR-093 (el mismo defecto en `phone-mobile-ar`, arreglado antes), ADR-029 §2 (las dos variantes de patente), ADR-075 §2 (la guarda de corrida, intacta)
-- **Parte de**: la campaña de calidad de detección abierta por `roadmap/Calidad_De_Deteccion_Informe.md`
+- **Parte de**: la campaña de calidad de detección abierta por `roadmap/hitos/Calidad_De_Deteccion_Informe.md`
 
 > Convención de citas: `ADR-096 §N` refiere a **Decisión §N**.
 

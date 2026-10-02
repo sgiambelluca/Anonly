@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=adr | dependencias=roadmap/mediciones/regex/Patron_Email_Regex_Medicion.md,roadmap/Rendimiento_Experimentos_Plan.md,core/Regex_Engine.md,core/Contracts.md,ai/AI_Development_Guide.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=adr | dependencias=roadmap/mediciones/regex/Patron_Email_Regex_Medicion.md,roadmap/rendimiento/Rendimiento_Experimentos_Plan.md,core/Regex_Engine.md,core/Contracts.md,ai/AI_Development_Guide.md | audiencia=humanos+IA | fase=11 -->
 
 # ADR-181 — El email default se busca con un escáner lineal
 

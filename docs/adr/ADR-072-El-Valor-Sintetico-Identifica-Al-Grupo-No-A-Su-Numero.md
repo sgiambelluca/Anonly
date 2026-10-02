@@ -52,7 +52,7 @@ Consecuencia práctica: **no se puede regresionar un valor que ya es aleatorio e
 
 ### 4. El defecto vecino que **no** se toca, y por qué importa acá
 
-La cabecera de `grouping.engine.ts` (nota 12) documenta que la supervivencia de un `replacementValue` editado a mano frente a un `finishSession` es **incidental**: depende del `if (newIndex === group.indexInType) return;` de ADR-028. Si el índice sí cambia, la edición manual se pierde — aunque ADR-057 §7 promete en negrita lo contrario. Es preexistente, no pertenece a este hito, y queda registrado como pendiente con su diagnóstico completo en `roadmap/Post_Hito10.8_Pendientes.md` §10.
+La cabecera de `grouping.engine.ts` (nota 12) documenta que la supervivencia de un `replacementValue` editado a mano frente a un `finishSession` es **incidental**: depende del `if (newIndex === group.indexInType) return;` de ADR-028. Si el índice sí cambia, la edición manual se pierde — aunque ADR-057 §7 promete en negrita lo contrario. Es preexistente, no pertenece a este hito, y queda registrado como pendiente con su diagnóstico completo en `roadmap/hitos/Post_Hito10.8_Pendientes.md` §10.
 
 Importa acá porque condiciona la solución: **levantar la guarda de `placeholder` en `renumberGroupsCanonically` —el arreglo más obvio— ampliaría ese defecto** de "se pierden las ediciones manuales de grupos en `placeholder` renumerados" a "se pierden en los cuatro modos". Arreglar un bug ensanchando otro no es arreglarlo.
 
@@ -173,7 +173,7 @@ Tests de este ADR (PR 14a/14b):
 - `core/Grouping_Engine.md` → v1.5.0: §"`replacementValue` por modo" (la fila `synthetic` y la corrección de "delegado a `shared` o `export-engine`"), §13 (caso nuevo: el valor sintético sobrevive a la renumeración), §14 (los tests de §8), §15 (checklist).
 - `core/Export_Engine.md` §4 y §"Sintetizadores (referencia)" — **no estaba previsto y hay que tocarlo**: declara la firma vieja de `synthesize` y afirma que Export la consume "para consistencia visual". No la consume, y no debe: el valor llega ya resuelto en `Replacement.replacementValue`, y recomputarlo sería una segunda fuente de verdad capaz de discrepar del preview. Es la contracara del error simétrico en `Grouping_Engine.md` ("delegado a `shared` o `export-engine`").
 - `roadmap/MVP.md` §4 — bloque del Hito 10.6: los PRs 14a/14b/14c y el estado de la branch.
-- `roadmap/Post_Hito10.8_Pendientes.md` §10 — las ediciones manuales de `replacementValue` que una renumeración pisa (Contexto §4). Va ahí y **no** a `Future_Ideas.md` porque no es una idea a evaluar: es un defecto contra una promesa escrita de ADR-057 §7, diferido por no pertenecer a este hito.
+- `roadmap/hitos/Post_Hito10.8_Pendientes.md` §10 — las ediciones manuales de `replacementValue` que una renumeración pisa (Contexto §4). Va ahí y **no** a `Future_Ideas.md` porque no es una idea a evaluar: es un defecto contra una promesa escrita de ADR-057 §7, diferido por no pertenecer a este hito.
 - `roadmap/Future_Ideas.md` — dos anotaciones, ésas sí son ideas: el `Custom` sintético que no sigue su índice (§3) y los exports reproducibles con seed configurable (§5).
 
 ## Validación

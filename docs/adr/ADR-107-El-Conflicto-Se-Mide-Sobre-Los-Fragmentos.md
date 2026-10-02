@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=adr | dependencias=core/Grouping_Engine.md,core/Contracts.md,architecture/03_Data_Model.md,adr/ADR-074-Una-Entidad-Partida-En-Varias-Lineas.md,adr/ADR-083-El-Conflicto-Se-Resuelve-Eligiendo-El-Tipo.md,roadmap/Post_Hito10.8_Pendientes.md,ai/AI_Development_Guide.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=adr | dependencias=core/Grouping_Engine.md,core/Contracts.md,architecture/03_Data_Model.md,adr/ADR-074-Una-Entidad-Partida-En-Varias-Lineas.md,adr/ADR-083-El-Conflicto-Se-Resuelve-Eligiendo-El-Tipo.md,roadmap/hitos/Post_Hito10.8_Pendientes.md,ai/AI_Development_Guide.md | audiencia=humanos+IA | fase=11 -->
 
 # ADR-107 — El conflicto se mide sobre los fragmentos, no sobre la envolvente
 

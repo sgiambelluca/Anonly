@@ -61,7 +61,7 @@ necesita su propio ADR y una razón que no sea "así entra en el presupuesto".
 > toca paralelismo (§1), no toca el DPI (lever 6), y no tiene dimensión de
 > calidad** (el PNG es sin pérdida y los píxeles que llegan al core son bit a
 > bit los mismos). El orden completo de ejecución está en
-> `roadmap/Optimizacion_De_Memoria_Plan.md` §2.
+> `roadmap/memoria/Optimizacion_De_Memoria_Plan.md` §2.
 
 1. **Duplicación que no compra nada.**
 

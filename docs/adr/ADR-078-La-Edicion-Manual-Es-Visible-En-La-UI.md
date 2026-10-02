@@ -4,7 +4,7 @@
 
 - **Estado**: Accepted
 - **Fecha**: 2026-08-19
-- **Decidido por**: El humano, al revisar las observaciones no bloqueantes del Hito 10 (`roadmap/Hito10_Observaciones_Plan_De_Resolucion.md` §6.1 punto C).
+- **Decidido por**: El humano, al revisar las observaciones no bloqueantes del Hito 10 (`roadmap/hitos/Hito10_Observaciones_Plan_De_Resolucion.md` §6.1 punto C).
 - **Relacionado con**: **ADR-076** (que creó `replacementValueUserSet` como bookkeeping interno y lo consulta en todos los puntos de recálculo), **ADR-069 §5** (`personGenderUserSet`, el mismo patrón de flag interno, que este ADR deliberadamente **no** expone), `UX_Guidelines.md` §3.3 (el indicador que promete y que hoy no existe), **ADR-058 §4** y **ADR-062** (que le ofrecen al usuario editar el valor a mano como remedio del reemplazo degradado).
 - **Parte de**: cierre de las observaciones del Hito 10.
 

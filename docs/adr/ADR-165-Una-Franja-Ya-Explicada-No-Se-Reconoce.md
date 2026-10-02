@@ -1,11 +1,11 @@
-<!-- CONTEXT: scope=adr | dependencias=core/OCR_Engine.md,adr/ADR-121-El-Sello-Rotado-Vive-En-El-Margen.md,adr/ADR-162-Solo-Una-Franja-Visualmente-Blanca-Se-Saltea.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,adr/ADR-149-El-Test-Que-No-Ve-El-Rojo-No-Mide.md,roadmap/Margenes_Menos_Pixeles_Plan.md,roadmap/mediciones/ocr/Margenes_Menos_Pixeles_Resultados.md,roadmap/mediciones/ocr/ImageData_Perfilado_Resultados.md | audiencia=planificador+implementador+revisor | fase=11 -->
+<!-- CONTEXT: scope=adr | dependencias=core/OCR_Engine.md,adr/ADR-121-El-Sello-Rotado-Vive-En-El-Margen.md,adr/ADR-162-Solo-Una-Franja-Visualmente-Blanca-Se-Saltea.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,adr/ADR-149-El-Test-Que-No-Ve-El-Rojo-No-Mide.md,roadmap/memoria/Margenes_Menos_Pixeles_Plan.md,roadmap/mediciones/ocr/Margenes_Menos_Pixeles_Resultados.md,roadmap/mediciones/ocr/ImageData_Perfilado_Resultados.md | audiencia=planificador+implementador+revisor | fase=11 -->
 
 # ADR-165 — Una franja ya explicada no se reconoce
 
 - **Estado**: Accepted; implementado en `b76d18c` y conservado tras la medición A/B del 2026-09-17 (§7).
 - **Fecha**: 2026-09-16.
 - **Decidido por**: el humano autoriza implementar y medir, con la secuencia documentar → medir → implementar → medir → conservar o revertir.
-- **Parte de**: campaña de márgenes, `roadmap/Margenes_Menos_Pixeles_Plan.md` §8.
+- **Parte de**: campaña de márgenes, `roadmap/memoria/Margenes_Menos_Pixeles_Plan.md` §8.
 - **Control BEFORE**: `3650ce7`, que ya incluye la errata v1.16.1 de `OCR_Engine.md`. No comparar contra commits anteriores: tocan la misma función.
 
 ## 1. Problema, medido

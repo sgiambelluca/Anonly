@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap-medicion | dependencias=roadmap/Rendimiento_Experimentos_Plan.md,roadmap/Optimizacion_De_Rendimiento.md,core/Regex_Engine.md,tests/perf/README.md | audiencia=humanos+IA | fase=11 (punto 4a, línea base macOS 2026-09-24 y confirmación Windows 2026-09-25; cerrado) -->
+<!-- CONTEXT: scope=roadmap-medicion | dependencias=roadmap/rendimiento/Rendimiento_Experimentos_Plan.md,roadmap/rendimiento/Optimizacion_De_Rendimiento.md,core/Regex_Engine.md,tests/perf/README.md | audiencia=humanos+IA | fase=11 (punto 4a, línea base macOS 2026-09-24 y confirmación Windows 2026-09-25; cerrado) -->
 
 # Patrón email de Regex — antes y después en macOS, confirmado en Windows
 

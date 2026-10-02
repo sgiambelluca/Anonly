@@ -4,7 +4,7 @@
 
 - **Estado**: Accepted
 - **Fecha**: 2026-08-15
-- **Decidido por**: El humano, al tomar los puntos 1, 2, 4, 4bis y 10 de `roadmap/Post_Hito10.8_Pendientes.md` como Hito 10.9. Los dos hallazgos salieron de la prueba manual sobre la pericia judicial real durante el Hito 10.8, y el propio reporte pide tratarlos juntos: *"Conviene revisarlo junto con el punto 4, que toca la misma tabla y ya requiere ADR"*.
+- **Decidido por**: El humano, al tomar los puntos 1, 2, 4, 4bis y 10 de `roadmap/hitos/Post_Hito10.8_Pendientes.md` como Hito 10.9. Los dos hallazgos salieron de la prueba manual sobre la pericia judicial real durante el Hito 10.8, y el propio reporte pide tratarlos juntos: *"Conviene revisarlo junto con el punto 4, que toca la misma tabla y ya requiere ADR"*.
 - **Relacionado con**: **ADR-022** (el precedente de este ADR: corregir un patrón de `default-ar.ts` porque rompía un caso límite), ADR-012 (`maskFormat` por tipo), ADR-029 (`maskFormat` por ocurrencia, que es cómo un patrón nuevo declara el suyo), ADR-061 (el agregado manual, que es la red de contención de todo falso negativo), ADR-073 (el otro ADR del hito que toca a `Date`, por el lado de la agrupación)
 - **Parte de**: Hito 10.9, PRs 12 y 13
 
@@ -195,7 +195,7 @@ De la guarda (§2):
 
 - `core/Regex_Engine.md` → v1.6.0: §2 (la responsabilidad de descartar un match que es tramo de un identificador), §6 (la semántica de la guarda, junto a la de `findLiteral`), §13 (casos nuevos: la fecha textual, la guarda, y el residuo de §5), §14 (los tests de §6), §15 (ítem de checklist), y la tabla de §"Patrones default (especificación exacta)", que es contrato literal y donde entra la fila `date-textual-ar`.
 - `roadmap/MVP.md` §4 — bloque del Hito 10.9.
-- `roadmap/Post_Hito10.8_Pendientes.md` §4 y §4bis — pasan de pendientes a adoptados.
+- `roadmap/hitos/Post_Hito10.8_Pendientes.md` §4 y §4bis — pasan de pendientes a adoptados.
 - `roadmap/Future_Ideas.md` — tres anotaciones: la fecha sin día (`"julio de 2026"`), el opt-out de la guarda por patrón custom (§4) y el mes en números romanos, que aparece en algunos sellos.
 
 ## Validación
@@ -210,5 +210,5 @@ De la guarda (§2):
 
 - `core/Regex_Engine.md` §2, §6, §12, §13 caso 10, §"Patrones default (especificación exacta)" — `core/NER_Engine.md` §2 — `core/Contracts.md` §5 (`EntityType`)
 - `adr/ADR-012` — `adr/ADR-022` — `adr/ADR-029` §2 — `adr/ADR-061` §1, §2 — `adr/ADR-073` §2
-- `roadmap/Post_Hito10.8_Pendientes.md` §4, §4bis (los reportes originales) — `roadmap/MVP.md` §5
+- `roadmap/hitos/Post_Hito10.8_Pendientes.md` §4, §4bis (los reportes originales) — `roadmap/MVP.md` §5
 - Código: `packages/anonymization-core/regex-engine/src/patterns/default-ar.ts`, `packages/anonymization-core/regex-engine/src/regex.engine.ts` (`runPattern`, `buildOccurrence`)

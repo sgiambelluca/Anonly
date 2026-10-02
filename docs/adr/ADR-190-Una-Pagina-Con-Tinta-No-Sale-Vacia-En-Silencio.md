@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=adr | dependencias=core/OCR_Engine.md,core/Export_Engine.md,core/Contracts.md,architecture/04_Event_System.md,ui/Components.md,ui/React_Client.md,adr/ADR-090-La-Orientacion-De-Un-Escaneo-Se-Detecta.md,adr/ADR-119-La-Orientacion-Se-Detecta-Con-El-Motor-Que-La-Sabe-Leer.md,adr/ADR-121-El-Sello-Rotado-Vive-En-El-Margen.md,adr/ADR-154-La-Memoria-No-Se-Compra-Bajando-El-Paralelismo.md,adr/ADR-160-El-Worker-De-OCR-No-Decodifica-La-Pagina.md,adr/ADR-161-Una-Franja-Sin-Tinta-No-Se-Reconoce.md,adr/ADR-162-Solo-Una-Franja-Visualmente-Blanca-Se-Saltea.md,adr/ADR-163-El-DPI-De-OCR-No-Supera-Al-Raster-Fuente.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,adr/ADR-176-Un-Choque-Pendiente-Bloquea-El-Export.md,roadmap/Revision_Por_Bloques_Hardening.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=adr | dependencias=core/OCR_Engine.md,core/Export_Engine.md,core/Contracts.md,architecture/04_Event_System.md,ui/Components.md,ui/React_Client.md,adr/ADR-090-La-Orientacion-De-Un-Escaneo-Se-Detecta.md,adr/ADR-119-La-Orientacion-Se-Detecta-Con-El-Motor-Que-La-Sabe-Leer.md,adr/ADR-121-El-Sello-Rotado-Vive-En-El-Margen.md,adr/ADR-154-La-Memoria-No-Se-Compra-Bajando-El-Paralelismo.md,adr/ADR-160-El-Worker-De-OCR-No-Decodifica-La-Pagina.md,adr/ADR-161-Una-Franja-Sin-Tinta-No-Se-Reconoce.md,adr/ADR-162-Solo-Una-Franja-Visualmente-Blanca-Se-Saltea.md,adr/ADR-163-El-DPI-De-OCR-No-Supera-Al-Raster-Fuente.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,adr/ADR-176-Un-Choque-Pendiente-Bloquea-El-Export.md,roadmap/hardening/Revision_Por_Bloques_Hardening.md | audiencia=humanos+IA | fase=11 -->
 
 # ADR-190 — Una página con tinta no sale vacía en silencio
 
@@ -261,7 +261,7 @@ región) que tiene tinta, `OCR_PAGE_FINISHED` lleva `unreadableInk: true`
 ### 7. Después de implementar se mide, y recién ahí se decide sobre ADR-163
 
 El protocolo de ejecución y controles está en
-`roadmap/ADR190_DPI_Campana_Plan.md`. La campaña ejecutada y sus límites
+`roadmap/ocr/ADR190_DPI_Campana_Plan.md`. La campaña ejecutada y sus límites
 están en `roadmap/mediciones/ocr/ADR190_DPI_2026-09-27.md`.
 
 Es una campaña con documentos **sintéticos**, sin datos reales:

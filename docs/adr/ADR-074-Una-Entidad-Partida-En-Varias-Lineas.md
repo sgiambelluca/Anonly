@@ -4,7 +4,7 @@
 
 - **Estado**: Accepted
 - **Fecha**: 2026-08-15
-- **Decidido por**: El humano, al tomar los puntos 1, 2, 4, 4bis y 10 de `roadmap/Post_Hito10.8_Pendientes.md` como Hito 10.9. El defecto se midió sobre la pericia judicial real en la segunda prueba manual del Hito 10.8 (`Post_Hito10.8_Pendientes.md` §2).
+- **Decidido por**: El humano, al tomar los puntos 1, 2, 4, 4bis y 10 de `roadmap/hitos/Post_Hito10.8_Pendientes.md` como Hito 10.9. El defecto se midió sobre la pericia judicial real en la segunda prueba manual del Hito 10.8 (`Post_Hito10.8_Pendientes.md` §2).
 - **Relacionado con**: **ADR-063** (la primera falla de esta misma clase —censura que cubre lo que no debe— por otra causa: la matriz de rotación), **ADR-066 §6** (el precedente exacto del modo de falla de este ADR: un campo que "viaja solo" por una unión de bboxes y se cae en silencio), ADR-057 §4 (la escalera elige nivel con `members[].bbox`), ADR-058 §1/§5 (shrink-to-fit y repintado de línea, que operan sobre un rectángulo por reemplazo), ADR-061 §2 (`sharesVerticalBand` en `@anonly/shared`, la primitiva que este ADR reusa), ADR-020 §1 (`Page.words` separa por whitespace)
 - **Parte de**: Hito 10.9, PRs 3 a 11
 
@@ -224,7 +224,7 @@ Tests, por PR:
 - `core/Export_Engine.md` — `buildPageReplacements` propaga el campo.
 - `core/Orchestrator.md` — `selectLineWords` por fragmento (§8).
 - `roadmap/MVP.md` §4 — bloque del Hito 10.9.
-- `roadmap/Post_Hito10.8_Pendientes.md` §2 — pasa de pendiente a adoptado.
+- `roadmap/hitos/Post_Hito10.8_Pendientes.md` §2 — pasa de pendiente a adoptado.
 - `roadmap/Future_Ideas.md` — el run vertical que se derrama a una segunda columna (§3).
 
 ## Validación
@@ -240,5 +240,5 @@ Tests, por PR:
 - `architecture/03_Data_Model.md` §5-§8, §12, §14 — `core/Contracts.md` §5, §6 (`sharesVerticalBand`)
 - `core/Regex_Engine.md` §10, §13 caso 16 — `core/NER_Engine.md` §10 — `core/Render_Engine.md` §13 — `core/Export_Engine.md` — `core/Orchestrator.md`
 - `adr/ADR-020` §1 — `adr/ADR-057` §4, §5 — `adr/ADR-058` §1, §2, §5, §7 — `adr/ADR-061` §2 y su errata — `adr/ADR-062` — `adr/ADR-063` — `adr/ADR-066` §6, §7
-- `roadmap/Post_Hito10.8_Pendientes.md` §2 (el reporte original, con la medición de 557,2 × 18,2 pt)
+- `roadmap/hitos/Post_Hito10.8_Pendientes.md` §2 (el reporte original, con la medición de 557,2 × 18,2 pt)
 - Código: `packages/anonymization-core/regex-engine/src/regex.engine.ts` (`mapSpanToWords`), `packages/anonymization-core/ner-engine/src/ner.engine.ts` (su copia), `packages/anonymization-core/render-engine/src/worker/kernel.ts` (`paintReplacements`, `planLineRepaint`), `packages/anonymization-core/export-engine/src/export.engine.ts` (`buildPageReplacements`), `packages/anonymization-core/src/line-words.ts` (`selectLineWords`)

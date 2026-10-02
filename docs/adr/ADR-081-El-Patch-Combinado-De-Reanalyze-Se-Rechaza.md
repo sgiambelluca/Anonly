@@ -4,7 +4,7 @@
 
 - **Estado**: Accepted
 - **Fecha**: 2026-08-19
-- **Decidido por**: El humano, al revisar las observaciones no bloqueantes del Hito 10 (`roadmap/Hito10_Observaciones_Plan_De_Resolucion.md` §6.3 punto L, gap abierto desde el PR3 del Hito 10).
+- **Decidido por**: El humano, al revisar las observaciones no bloqueantes del Hito 10 (`roadmap/hitos/Hito10_Observaciones_Plan_De_Resolucion.md` §6.3 punto L, gap abierto desde el PR3 del Hito 10).
 - **Relacionado con**: **ADR-038 §5 regla 4**, que este ADR enmienda. `reanalyzePlan.ts` (la mitigación de UI que ya existe y se conserva).
 - **Parte de**: cierre de las observaciones del Hito 10.
 

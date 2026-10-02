@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=adr | dependencias=core/Regex_Engine.md,adr/ADR-092-La-Caratula-Es-Un-Patron-No-Un-Caso-De-Modelo.md,adr/ADR-096-Los-Patrones-Cubren-Como-Se-Escribe-El-Dato.md,roadmap/Post_Hito10.8_Pendientes.md,ai/AI_Development_Guide.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=adr | dependencias=core/Regex_Engine.md,adr/ADR-092-La-Caratula-Es-Un-Patron-No-Un-Caso-De-Modelo.md,adr/ADR-096-Los-Patrones-Cubren-Como-Se-Escribe-El-Dato.md,roadmap/hitos/Post_Hito10.8_Pendientes.md,ai/AI_Development_Guide.md | audiencia=humanos+IA | fase=11 -->
 
 # ADR-103 — La carátula se reconoce por su contexto, no por su coma
 

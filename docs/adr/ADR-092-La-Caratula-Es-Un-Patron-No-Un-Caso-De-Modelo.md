@@ -6,7 +6,7 @@
 - **Fecha**: 2026-08-26
 - **Decidido por**: El humano, sobre §23c del gate manual y la medición de 16 casos de Contexto §2.
 - **Relacionado con**: ADR-091 §1 (el léxico promovido, que este ADR es la razón de que exista en `shared`), ADR-075 §1 (el precedente exacto de un `normalizer` que hace agrupar dos formas distintas del mismo dato), ADR-073 §1 (el pase difuso que cierra el último tramo), ADR-069 §1 (la fuente del léxico)
-- **Parte de**: la campaña de calidad de detección abierta por `roadmap/Calidad_De_Deteccion_Informe.md`
+- **Parte de**: la campaña de calidad de detección abierta por `roadmap/hitos/Calidad_De_Deteccion_Informe.md`
 
 > Convención de citas: `ADR-092 §N` refiere a **Decisión §N**.
 
@@ -132,7 +132,7 @@ Con una diferencia que conviene decir: contra una ocurrencia de **NER** la unió
 
 ## Referencias
 
-- `roadmap/Post_Hito10.8_Pendientes.md` §23c
+- `roadmap/hitos/Post_Hito10.8_Pendientes.md` §23c
 - `core/Regex_Engine.md` §"Patrones default (especificación exacta)", §13, §14
 - `adr/ADR-091-El-Lexico-De-Nombres-No-Es-De-Un-Motor.md` §1
 - `adr/ADR-075-Fechas-En-Texto-Y-Tramos-De-Identificadores.md` §1 (el precedente del normalizador que agrupa), §5 (el precedente del residuo aceptado)

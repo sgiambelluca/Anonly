@@ -6,7 +6,7 @@
 - **Fecha**: 2026-08-26
 - **Decidido por**: El humano, al ver el mecanismo real detrás de §23c: la herramienta veía dos nombres propios y los descartaba sin dejar rastro.
 - **Relacionado con**: ADR-073 §1 (los tres tipos de texto libre, que acá definen el alcance), ADR-078 (**el precedente**: un booleano en `EntityGroup` que el panel renderiza como marca), ADR-028 (`indexInType`), ADR-092 §3 (que cerró la carátula y dejó esto explícitamente abierto)
-- **Parte de**: la campaña de calidad de detección abierta por `roadmap/Calidad_De_Deteccion_Informe.md`
+- **Parte de**: la campaña de calidad de detección abierta por `roadmap/hitos/Calidad_De_Deteccion_Informe.md`
 
 > Convención de citas: `ADR-094 §N` refiere a **Decisión §N**.
 

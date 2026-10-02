@@ -1,10 +1,10 @@
-<!-- CONTEXT: scope=adr | dependencias=core/PDF_Engine.md,architecture/03_Data_Model.md,adr/ADR-020-PdfEngine-Word-Granularity-Hardening.md,adr/ADR-063-Bbox-De-Texto-Rotado.md,adr/ADR-065-OCR-Por-Region.md,adr/ADR-066-Texto-De-Anotaciones-Y-Reemplazo-Rotado.md,adr/ADR-068-Origen-De-Run-Corrido-Por-Word-Spacing.md,roadmap/Post_Hito10.8_Pendientes.md,ai/AI_Development_Guide.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=adr | dependencias=core/PDF_Engine.md,architecture/03_Data_Model.md,adr/ADR-020-PdfEngine-Word-Granularity-Hardening.md,adr/ADR-063-Bbox-De-Texto-Rotado.md,adr/ADR-065-OCR-Por-Region.md,adr/ADR-066-Texto-De-Anotaciones-Y-Reemplazo-Rotado.md,adr/ADR-068-Origen-De-Run-Corrido-Por-Word-Spacing.md,roadmap/hitos/Post_Hito10.8_Pendientes.md,ai/AI_Development_Guide.md | audiencia=humanos+IA | fase=11 -->
 
 # ADR-097 — El avance real de cada glifo reemplaza al ancho promedio
 
 - **Estado**: Accepted
 - **Fecha**: 2026-08-27
-- **Decidido por**: El humano, eligiendo la opción A de `roadmap/Post_Hito10.8_Pendientes.md` §24 tras revisar el costo/beneficio de las dos alternativas.
+- **Decidido por**: El humano, eligiendo la opción A de `roadmap/hitos/Post_Hito10.8_Pendientes.md` §24 tras revisar el costo/beneficio de las dos alternativas.
 - **Relacionado con**: **ADR-020 §1 (superseded en su premisa)**, ADR-063 §3 (el prorrateo sobre el eje de avance), ADR-066 §1 (el `TextState` y el recorrido que este ADR reutiliza), ADR-068 (la corrección de origen, que se compone con esta)
 - **Parte de**: Hito 11, calidad de detección
 
@@ -14,7 +14,7 @@
 
 ### 1. Una caja de censura corrida 12 pt no tapa el dato
 
-El gate manual de ADR-058 §11 encontró que el PDF exportado de `qa-stamp.pdf` deja fragmentos legibles **antes** del token de reemplazo: `Ju[HOMBRE 01]`, `B[DIRE 01]`, `DNI 3 [DNI 01]`. El diagnóstico completo está en `roadmap/Post_Hito10.8_Pendientes.md` §24 y no se repite acá. La causa, en una línea:
+El gate manual de ADR-058 §11 encontró que el PDF exportado de `qa-stamp.pdf` deja fragmentos legibles **antes** del token de reemplazo: `Ju[HOMBRE 01]`, `B[DIRE 01]`, `DNI 3 [DNI 01]`. El diagnóstico completo está en `roadmap/hitos/Post_Hito10.8_Pendientes.md` §24 y no se repite acá. La causa, en una línea:
 
 ```ts
 const charWidth = str.length > 0 ? width / str.length : 0;

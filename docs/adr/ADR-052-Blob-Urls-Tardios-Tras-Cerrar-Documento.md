@@ -102,7 +102,7 @@ Un solo PR de `packages/anonymization-core/src` (**PR 17.8**), sin tocar motores
 - `adr/ADR-034` §5: nota de completitud (llegadas tardías).
 - `adr/ADR-044` §3: nota de amendment (inmune a la cancelación, no a la baja).
 - `roadmap/MVP.md` y `adr/ADR-038` §8: PR 17.8.
-- `roadmap/Hito10_Observaciones_Revision.md`: entrada del hallazgo + tarea de seguimiento.
+- `roadmap/hitos/Hito10_Observaciones_Revision.md`: entrada del hallazgo + tarea de seguimiento.
 
 ## Validación
 

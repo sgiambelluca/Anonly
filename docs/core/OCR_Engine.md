@@ -753,7 +753,7 @@ OcrPageOutput {
 
 > Items 32–33 verificados en el cierre T5 del 2026-09-15. Evidencia funcional,
 > controles y límites de la comparación separados de ImageData en
-> `roadmap/T5_OSD_Compartido_Cierre_Final.md`.
+> `roadmap/ocr/T5_OSD_Compartido_Cierre_Final.md`.
 
 - [x] 33. (ADR-164 §2.3, revisión 2026-09-15) Implementar la ventana de §6,
   casos 34–38 y precisión del caso 28. Cambios de producto limitados a OCR;
@@ -763,7 +763,7 @@ OcrPageOutput {
   La aceptación final corresponde al revisor tras los gates globales.
 
 - [x] 32. (ADR-164, T-5) Implementar §6 y casos 26–33, en el orden de
-  `roadmap/T5_OSD_Compartido_Handoff.md` §2. Nuevo kernel OSD por instancia,
+  `roadmap/ocr/T5_OSD_Compartido_Handoff.md` §2. Nuevo kernel OSD por instancia,
   entry y exports de subpath; helper común de rutas; kernel LSTM usa ángulo
   requerido; OcrEngine con dos puertos y cola fallback exclusiva; init de OSD
   cacheada por promesa/generación; cancelación/timeout/liberación como ADR-164

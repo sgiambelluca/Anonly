@@ -1,10 +1,10 @@
-<!-- CONTEXT: scope=adr | dependencias=core/Contracts.md,core/Render_Engine.md,roadmap/Duplicacion_De_Logica.md,adr/ADR-061-Agregado-Manual-De-Entidades.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=adr | dependencias=core/Contracts.md,core/Render_Engine.md,roadmap/hardening/Duplicacion_De_Logica.md,adr/ADR-061-Agregado-Manual-De-Entidades.md | audiencia=humanos+IA | fase=11 -->
 
 # ADR-127 — El solapamiento de dos rectángulos se escribe una vez
 
 - **Estado**: Accepted
 - **Fecha**: 2026-09-03
-- **Decidido por**: El humano, que pidió eliminar código y lógica repetida a partir del inventario de `roadmap/Duplicacion_De_Logica.md`.
+- **Decidido por**: El humano, que pidió eliminar código y lógica repetida a partir del inventario de `roadmap/hardening/Duplicacion_De_Logica.md`.
 - **Relacionado con**: **ADR-061 §2 (errata)**, que promovió `sharesVerticalBand` y `normalizeForComparison` a `@anonly/shared` por exactamente esta razón; `Duplicacion_De_Logica.md` §3
 - **Parte de**: Hito 11
 

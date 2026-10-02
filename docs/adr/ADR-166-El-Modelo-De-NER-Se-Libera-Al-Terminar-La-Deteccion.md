@@ -248,7 +248,7 @@ balance que se aceptó, y la decisión habría que retomarla.
 
 ### Qué lo cierra
 
-[`roadmap/AB_Intercalado_Plan.md`](../roadmap/AB_Intercalado_Plan.md) (T-8): las
+[`roadmap/rendimiento/AB_Intercalado_Plan.md`](../roadmap/rendimiento/AB_Intercalado_Plan.md) (T-8): las
 dos versiones alternadas corrida por corrida en la misma sesión, con el brazo B
 distinto del A **en una sola línea** —la invocación de la baja—, para que la
 diferencia no se pueda atribuir a otra cosa.
