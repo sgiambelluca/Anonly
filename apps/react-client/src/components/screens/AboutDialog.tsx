@@ -14,6 +14,11 @@
  * verifica: ADR-070 §2 (los créditos son datos), §4 y §5 (el test de
  * sincronización con `NOTICE` y el provenance) no cambian.
  *
+ * **Software de terceros** (ADR-196 §4) va debajo: una lista de solo lectura,
+ * sin enlaces, con los componentes principales, y una oración que dice dónde
+ * están los textos completos de las licencias. Es contenido estático: nada
+ * aparece ni desaparece, así que no mueve el diseño (UX-10).
+ *
  * Cada bloque es un `<section>` con encabezado visible; los enlaces son `<a>`
  * nativos `target="_blank" rel="noopener noreferrer"` a las únicas URLs
  * externas del producto (`externalLinks.ts`).
@@ -24,6 +29,11 @@ import { ArrowUpRightIcon, BugIcon, DatabaseIcon, GithubIcon } from "lucide-reac
 import { Button } from "../common/Button.js";
 import { Dialog } from "../common/Dialog.js";
 import { THIRD_PARTY_CREDITS } from "../toolbar/thirdPartyCredits.js";
+import {
+  THIRD_PARTY_LICENSES_MAC_DIR,
+  THIRD_PARTY_LICENSES_PATH,
+  THIRD_PARTY_SOFTWARE,
+} from "../toolbar/thirdPartySoftware.js";
 
 import {
   PRODUCT_LICENSE,
@@ -148,6 +158,38 @@ export function AboutDialog({ open, onClose }: AboutDialogProps) {
               </div>
             </div>
           ))}
+        </section>
+
+        <section aria-labelledby="about-software-title" className="flex flex-col gap-2">
+          <h3
+            id="about-software-title"
+            className="text-sm font-semibold uppercase tracking-wide text-text-secondary"
+          >
+            Software de terceros
+          </h3>
+          <ul className="flex flex-col divide-y divide-border rounded-xl border border-border bg-bg-secondary">
+            {THIRD_PARTY_SOFTWARE.map((item) => (
+              <li key={item.id} className="flex items-start justify-between gap-3 px-4 py-2.5">
+                <span className="flex min-w-0 flex-col gap-0.5">
+                  <span className="text-sm font-semibold text-text-primary">{item.name}</span>
+                  <span className="text-sm text-text-secondary">{item.usedFor}</span>
+                </span>
+                <span className="shrink-0 text-sm text-text-secondary">{item.license}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="text-sm leading-relaxed text-text-secondary">
+            Los textos completos de todas las licencias, incluidas las de las dependencias internas,
+            viajan con la aplicación instalada, en{" "}
+            <span className="break-all font-mono text-text-primary">
+              {THIRD_PARTY_LICENSES_PATH}
+            </span>{" "}
+            (en macOS, dentro de{" "}
+            <span className="break-all font-mono text-text-primary">
+              {THIRD_PARTY_LICENSES_MAC_DIR}
+            </span>
+            ).
+          </p>
         </section>
       </div>
     </Dialog>
