@@ -35,18 +35,25 @@ import { useEntitiesStore } from "../../store/entities.store.js";
 import { usePipelineStore } from "../../store/pipeline.store.js";
 import { Button } from "../common/Button.js";
 import { ConflictDialog } from "../conflicts/ConflictDialog.js";
+import {
+  advanceConflictWalk,
+  conflictWalkProgress,
+  currentConflictId,
+  startConflictWalk,
+  type ConflictWalk,
+} from "../conflicts/conflictWalk.js";
 import { openFirstPendingManualOverlap } from "../conflicts/manualOverlapController.js";
 import { pendingManualOverlapConflicts } from "../conflicts/manualOverlapWarning.js";
 import { ExportDialog } from "../export/ExportDialog.js";
 
-import { exportBlockReason, firstPendingConflictId } from "./exportBlockReason.js";
+import { exportBlockReason, pendingConflictIdsInTreeOrder } from "./exportBlockReason.js";
 import { isExportTriggerVisible, shouldMountExportButton } from "./exportButtonVisibility.js";
 
 export function ExportButton() {
   const stage = usePipelineStore((state) => state.stage);
   const visible = isExportTriggerVisible(stage);
   const [open, setOpen] = useState(false);
-  const [conflictDialogId, setConflictDialogId] = useState<string | null>(null);
+  const [conflictWalk, setConflictWalk] = useState<ConflictWalk | null>(null);
 
   const conflicts = useEntitiesStore((state) => state.conflicts);
   const groupsByType = useEntitiesStore((state) => state.groupsByType);
@@ -71,13 +78,26 @@ export function ExportButton() {
   function handleResolve(): void {
     // ADR-175 §5 / §6.3: mismo "Resolver" que el aviso persistente — se
     // reusa, no se reimplementa. Si lo pendiente no es `heldManual` (hoy no
-    // existe ese caso), el `ConflictDialog` de siempre.
+    // existe ese caso), el `ConflictDialog` de siempre, recorriendo todos
+    // los pendientes del documento de una sola vez (`conflictWalk.ts`).
     if (pendingManualOverlapConflicts(conflicts).length > 0) {
       openFirstPendingManualOverlap();
       return;
     }
-    const conflictId = firstPendingConflictId({ conflicts, groupsByType, sortOrder });
-    if (conflictId !== null) setConflictDialogId(conflictId);
+    setConflictWalk(
+      startConflictWalk(pendingConflictIdsInTreeOrder({ conflicts, groupsByType, sortOrder })),
+    );
+  }
+
+  // Sirve para "Aplicar" y para "Saltear": los dos pasan al siguiente; lo que
+  // cambia es si antes se resolvió el actual.
+  function handleConflictAdvance(): void {
+    // El store todavía puede no reflejar lo recién aplicado: el conflicto
+    // actual queda atrás en la cola, y de los que siguen se saltean los que
+    // ya no estén pendientes.
+    setConflictWalk((walk) =>
+      walk === null ? null : advanceConflictWalk(walk, useEntitiesStore.getState().conflicts),
+    );
   }
 
   return (
@@ -121,11 +141,16 @@ export function ExportButton() {
         </div>
       ) : null}
       <ExportDialog open={open} onClose={() => setOpen(false)} />
-      {conflictDialogId !== null ? (
+      {conflictWalk !== null ? (
         <ConflictDialog
-          conflictId={conflictDialogId}
+          conflictId={currentConflictId(conflictWalk)}
           open
-          onClose={() => setConflictDialogId(null)}
+          onClose={() => setConflictWalk(null)}
+          // Con un solo conflicto no hay a dónde seguir: ni contador ni "Saltear".
+          {...(conflictWalk.ids.length > 1
+            ? { progress: conflictWalkProgress(conflictWalk), onSkip: handleConflictAdvance }
+            : {})}
+          onApplied={handleConflictAdvance}
         />
       ) : null}
     </>

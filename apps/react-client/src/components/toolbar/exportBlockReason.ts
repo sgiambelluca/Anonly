@@ -32,9 +32,36 @@ export function exportBlockReason(conflicts: ReadonlyArray<Conflict>): string | 
 }
 
 /**
+ * Todos los conflictos sin resolver que **no** son `heldManual`, en el orden
+ * del árbol (`entityTree.visibleTypeEntries`) y, dentro de una fila, en el
+ * orden en que llegaron. Es la cola que recorre "Resolver"
+ * (`conflicts/conflictWalk.ts`): uno por vez, sin volver al globo entre uno y
+ * otro. Un conflicto cuyo grupo ya no está en el árbol no entra.
+ */
+export function pendingConflictIdsInTreeOrder(params: {
+  readonly conflicts: ReadonlyArray<Conflict>;
+  readonly groupsByType: ReadonlyMap<EntityType, ReadonlyArray<EntityGroup>>;
+  readonly sortOrder: EntitySortOrder;
+}): ReadonlyArray<string> {
+  const byGroupId = new Map<string, string[]>();
+  for (const conflict of params.conflicts) {
+    if (conflict.resolved || conflict.heldManual === true) continue;
+    const ids = byGroupId.get(conflict.groupId);
+    if (ids === undefined) byGroupId.set(conflict.groupId, [conflict.id]);
+    else ids.push(conflict.id);
+  }
+  if (byGroupId.size === 0) return [];
+  const ordered: string[] = [];
+  for (const [, groups] of visibleTypeEntries(params.groupsByType, params.sortOrder)) {
+    for (const group of groups) ordered.push(...(byGroupId.get(group.id) ?? []));
+  }
+  return ordered;
+}
+
+/**
  * El primer conflicto sin resolver que **no** es `heldManual`, en el orden
- * del árbol (`entityTree.visibleTypeEntries`) — para "Resolver", que abre el
- * `ConflictDialog` de esa fila (`ui/Components.md` §2.5). Simétrico a
+ * del árbol — el primero de `pendingConflictIdsInTreeOrder`
+ * (`ui/Components.md` §2.5). Simétrico a
  * `manualOverlapWarning.firstPendingManualOverlapGroupId`, pero devuelve el
  * `conflictId` directo: `ConflictDialog` toma uno solo, a diferencia de
  * `ManualOverlapDialog` (que toma todos los de la fila).
@@ -44,17 +71,5 @@ export function firstPendingConflictId(params: {
   readonly groupsByType: ReadonlyMap<EntityType, ReadonlyArray<EntityGroup>>;
   readonly sortOrder: EntitySortOrder;
 }): string | null {
-  const byGroupId = new Map<string, Conflict>();
-  for (const conflict of params.conflicts) {
-    if (conflict.resolved || conflict.heldManual === true) continue;
-    if (!byGroupId.has(conflict.groupId)) byGroupId.set(conflict.groupId, conflict);
-  }
-  if (byGroupId.size === 0) return null;
-  for (const [, groups] of visibleTypeEntries(params.groupsByType, params.sortOrder)) {
-    for (const group of groups) {
-      const conflict = byGroupId.get(group.id);
-      if (conflict !== undefined) return conflict.id;
-    }
-  }
-  return null;
+  return pendingConflictIdsInTreeOrder(params)[0] ?? null;
 }

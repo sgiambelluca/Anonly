@@ -38,9 +38,31 @@ export interface ConflictDialogProps {
   readonly conflictId: string;
   readonly open: boolean;
   readonly onClose: () => void;
+  /**
+   * El recorrido de "Resolver" (`conflictWalk.ts`): el contador "5/9" que va
+   * junto al título. Sin recorrido —el ⚠ de una fila— no se muestra.
+   */
+  readonly progress?: string;
+  /**
+   * Qué hacer después de aplicar. Sin esto, se cierra. El recorrido lo usa
+   * para pasar al conflicto siguiente sin cerrar el diálogo.
+   */
+  readonly onApplied?: () => void;
+  /**
+   * Pasar al conflicto siguiente sin aplicar nada: este queda pendiente. Solo
+   * en el recorrido; sin esto no hay botón "Saltear".
+   */
+  readonly onSkip?: () => void;
 }
 
-export function ConflictDialog({ conflictId, open, onClose }: ConflictDialogProps) {
+export function ConflictDialog({
+  conflictId,
+  open,
+  onClose,
+  progress,
+  onApplied,
+  onSkip,
+}: ConflictDialogProps) {
   const conflict = useEntitiesStore((state) =>
     state.conflicts.find((candidate) => candidate.id === conflictId),
   );
@@ -126,7 +148,8 @@ export function ConflictDialog({ conflictId, open, onClose }: ConflictDialogProp
       entityType: selectedType ?? undefined,
       label: value,
     });
-    onClose();
+    if (onApplied !== undefined) onApplied();
+    else onClose();
   };
 
   return (
@@ -134,11 +157,26 @@ export function ConflictDialog({ conflictId, open, onClose }: ConflictDialogProp
       open={open}
       onClose={onClose}
       title="Revisar entidad"
+      titleAside={
+        progress !== undefined ? (
+          <span
+            aria-label={`Conflicto ${progress.replace("/", " de ")}`}
+            className="text-sm tabular-nums text-text-secondary"
+          >
+            {progress}
+          </span>
+        ) : undefined
+      }
       footer={
         <div className="flex justify-end gap-2">
           <Button variant="secondary" onClick={onClose}>
             Cerrar
           </Button>
+          {onSkip !== undefined ? (
+            <Button variant="secondary" onClick={onSkip}>
+              Saltear
+            </Button>
+          ) : null}
           <Button variant="primary" className="min-w-[6rem]" onClick={handleApply}>
             {hasChoice || hasSpellingChoice ? "Aplicar" : "Descartar"}
           </Button>

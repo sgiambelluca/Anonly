@@ -16,8 +16,15 @@ import {
 import { describe, expect, it } from "vitest";
 
 import {
+  advanceConflictWalk,
+  conflictWalkProgress,
+  currentConflictId,
+  startConflictWalk,
+} from "../components/conflicts/conflictWalk.js";
+import {
   exportBlockReason,
   firstPendingConflictId,
+  pendingConflictIdsInTreeOrder,
 } from "../components/toolbar/exportBlockReason.js";
 
 function candidate(overrides: Partial<ConflictCandidate> = {}): ConflictCandidate {
@@ -134,5 +141,114 @@ describe("firstPendingConflictId (ADR-176 §1, ConflictDialog para lo no heldMan
     expect(
       firstPendingConflictId({ conflicts: [], groupsByType: new Map(), sortOrder: "appearance" }),
     ).toBeNull();
+  });
+});
+
+describe("pendingConflictIdsInTreeOrder (la cola de «Resolver»)", () => {
+  const groupsByType = new Map([
+    [EntityType.Person, [group({ id: "p1", indexInType: 1 }), group({ id: "p2", indexInType: 2 })]],
+    [EntityType.DNI, [group({ id: "d1", type: EntityType.DNI, indexInType: 1 })]],
+  ]);
+
+  it("todos los pendientes, en el orden del árbol y no en el de llegada", () => {
+    const conflicts = [
+      conflict({ id: "c-d1", groupId: "d1" }),
+      conflict({ id: "c-p2", groupId: "p2" }),
+      conflict({ id: "c-p1", groupId: "p1" }),
+    ];
+    const ids = pendingConflictIdsInTreeOrder({ conflicts, groupsByType, sortOrder: "appearance" });
+    expect([...ids].sort()).toEqual(["c-d1", "c-p1", "c-p2"]);
+    expect(ids.indexOf("c-p1")).toBeLessThan(ids.indexOf("c-p2"));
+    expect(ids[0]).toBe(
+      firstPendingConflictId({ conflicts, groupsByType, sortOrder: "appearance" }),
+    );
+  });
+
+  it("dos conflictos de la misma fila entran los dos, en el orden en que llegaron", () => {
+    const conflicts = [
+      conflict({ id: "segundo", groupId: "p2" }),
+      conflict({ id: "a", groupId: "p1" }),
+      conflict({ id: "b", groupId: "p1" }),
+    ];
+    expect(
+      pendingConflictIdsInTreeOrder({ conflicts, groupsByType, sortOrder: "appearance" }),
+    ).toEqual(["a", "b", "segundo"]);
+  });
+
+  it("deja afuera los resueltos, los heldManual y los de un grupo que ya no está", () => {
+    const conflicts = [
+      conflict({ id: "resuelto", groupId: "p1", resolved: true }),
+      conflict({ id: "choque", groupId: "p1", heldManual: true }),
+      conflict({ id: "huerfano", groupId: "no-existe" }),
+      conflict({ id: "queda", groupId: "p2" }),
+    ];
+    expect(
+      pendingConflictIdsInTreeOrder({ conflicts, groupsByType, sortOrder: "appearance" }),
+    ).toEqual(["queda"]);
+  });
+});
+
+describe("conflictWalk (recorrer los conflictos sin volver al globo)", () => {
+  const pending = (ids: ReadonlyArray<string>): Conflict[] =>
+    ids.map((id) => conflict({ id, groupId: `g-${id}` }));
+
+  it("sin pendientes no hay recorrido", () => {
+    expect(startConflictWalk([])).toBeNull();
+  });
+
+  it("arranca en el primero y muestra la posición sobre el total", () => {
+    const walk = startConflictWalk(["a", "b", "c"]);
+    expect(walk).not.toBeNull();
+    if (walk === null) return;
+    expect(currentConflictId(walk)).toBe("a");
+    expect(conflictWalkProgress(walk)).toBe("1/3");
+  });
+
+  it("al aplicar pasa al siguiente, y el total no cambia", () => {
+    const first = startConflictWalk(["a", "b", "c"]);
+    if (first === null) throw new Error("sin recorrido");
+    // El store todavía no refleja que "a" se resolvió: no importa, queda atrás.
+    const second = advanceConflictWalk(first, pending(["a", "b", "c"]));
+    expect(second).not.toBeNull();
+    if (second === null) return;
+    expect(currentConflictId(second)).toBe("b");
+    expect(conflictWalkProgress(second)).toBe("2/3");
+  });
+
+  it("saltea los que dejaron de estar pendientes mientras tanto", () => {
+    const first = startConflictWalk(["a", "b", "c", "d"]);
+    if (first === null) throw new Error("sin recorrido");
+    const conflicts = [
+      conflict({ id: "b", groupId: "g-b", resolved: true }),
+      conflict({ id: "c", groupId: "g-c", heldManual: true }),
+      conflict({ id: "d", groupId: "g-d" }),
+    ];
+    const next = advanceConflictWalk(first, conflicts);
+    expect(next).not.toBeNull();
+    if (next === null) return;
+    expect(currentConflictId(next)).toBe("d");
+    expect(conflictWalkProgress(next)).toBe("4/4");
+  });
+
+  it("después del último, el recorrido termina", () => {
+    const first = startConflictWalk(["a", "b"]);
+    if (first === null) throw new Error("sin recorrido");
+    const second = advanceConflictWalk(first, pending(["a", "b"]));
+    if (second === null) throw new Error("tenía que seguir");
+    expect(advanceConflictWalk(second, pending(["a", "b"]))).toBeNull();
+  });
+
+  it("termina si lo que quedaba ya no está pendiente", () => {
+    const first = startConflictWalk(["a", "b"]);
+    if (first === null) throw new Error("sin recorrido");
+    expect(advanceConflictWalk(first, [])).toBeNull();
+  });
+
+  it("nunca vuelve atrás, aunque uno anterior siga pendiente", () => {
+    const first = startConflictWalk(["a", "b"]);
+    if (first === null) throw new Error("sin recorrido");
+    const second = advanceConflictWalk(first, pending(["a", "b"]));
+    if (second === null) throw new Error("tenía que seguir");
+    expect(advanceConflictWalk(second, pending(["a"]))).toBeNull();
   });
 });

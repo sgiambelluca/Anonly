@@ -22,6 +22,8 @@ export interface DialogProps {
   readonly open: boolean;
   readonly onClose: () => void;
   readonly title: string;
+  /** Contenido a la derecha del título, en el mismo renglón (p. ej. "5/9"). */
+  readonly titleAside?: ReactNode;
   readonly description?: string;
   readonly children?: ReactNode;
   /** Acciones fijas al pie: no scrollean con el cuerpo. */
@@ -44,6 +46,7 @@ export function Dialog({
   open,
   onClose,
   title,
+  titleAside,
   description,
   children,
   footer,
@@ -63,9 +66,12 @@ export function Dialog({
           className={`fixed left-1/2 top-1/2 z-50 flex max-h-[85vh] w-[calc(100%-2rem)] ${SIZE_CLASS[size]} -translate-x-1/2 -translate-y-1/2 flex-col rounded-lg bg-bg-primary p-5 shadow-md focus:outline-none`}
         >
           <div className="mb-3 flex shrink-0 items-start justify-between gap-4">
-            <RadixDialog.Title className="text-sm font-semibold text-text-primary">
-              {title}
-            </RadixDialog.Title>
+            <div className="flex min-w-0 items-baseline gap-2">
+              <RadixDialog.Title className="text-sm font-semibold text-text-primary">
+                {title}
+              </RadixDialog.Title>
+              {titleAside}
+            </div>
             {hideCloseButton ? null : (
               <RadixDialog.Close asChild>
                 <button

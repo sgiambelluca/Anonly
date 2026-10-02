@@ -18,6 +18,10 @@
  * con el resaltado de la fila que lo abrió, es la defensa contra cambiar el
  * modo de la fila equivocada. Es **flotante** (UX-10): no expande la fila.
  *
+ * Se abre **hacia abajo, o hacia arriba si abajo no entra**
+ * (`menuPlacement.ts`): en las últimas filas de la lista quedaba recortado
+ * por el área que scrollea y había que scrollear para leerlo.
+ *
  * Es un disclosure con botones, mismo patrón y mismas razones que
  * `GroupContextMenu` (sin `role="menu"`: ese rol promete navegación por
  * flechas que no está implementada).
@@ -25,8 +29,9 @@
 
 import type { ReplacementMode, ReplacementPreviews } from "@anonly/anonymization-core";
 import { CheckIcon } from "lucide-react";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
+import { resolveMenuPlacement, type MenuPlacement } from "./menuPlacement.js";
 import {
   REPLACEMENT_MODE_DESCRIPTION,
   REPLACEMENT_MODE_LABEL,
@@ -55,6 +60,26 @@ export interface ModeSelectMenuProps {
   readonly className?: string;
 }
 
+/** La separación entre el disparador y el menú (`mt-1` / `mb-1`). */
+const MENU_GAP_PX = 4;
+
+/**
+ * El área donde el menú se ve entero: la ventana, recortada por cada ancestro
+ * que scrollea o esconde lo que se sale.
+ */
+function clippingBoundary(element: HTMLElement): { readonly top: number; readonly bottom: number } {
+  let top = 0;
+  let bottom = window.innerHeight;
+  for (let node = element.parentElement; node !== null; node = node.parentElement) {
+    const overflowY = window.getComputedStyle(node).overflowY;
+    if (overflowY === "visible") continue;
+    const rect = node.getBoundingClientRect();
+    top = Math.max(top, rect.top);
+    bottom = Math.min(bottom, rect.bottom);
+  }
+  return { top, bottom };
+}
+
 export function ModeSelectMenu({
   current,
   previews,
@@ -67,6 +92,8 @@ export function ModeSelectMenu({
 }: ModeSelectMenuProps) {
   const [open, setOpenState] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [placement, setPlacement] = useState<MenuPlacement>("bottom");
   const onOpenChangeRef = useRef(onOpenChange);
   onOpenChangeRef.current = onOpenChange;
 
@@ -74,6 +101,28 @@ export function ModeSelectMenu({
     setOpenState(next);
     onOpenChangeRef.current?.(next);
   }
+
+  // Antes de pintar: el menú nunca llega a verse en el lado equivocado.
+  useLayoutEffect(() => {
+    if (!open) {
+      setPlacement("bottom");
+      return;
+    }
+    const container = containerRef.current;
+    const menu = menuRef.current;
+    if (container === null || menu === null) return;
+    const trigger = container.getBoundingClientRect();
+    const boundary = clippingBoundary(container);
+    setPlacement(
+      resolveMenuPlacement({
+        triggerTop: trigger.top,
+        triggerBottom: trigger.bottom,
+        menuHeight: menu.offsetHeight + MENU_GAP_PX,
+        boundaryTop: boundary.top,
+        boundaryBottom: boundary.bottom,
+      }),
+    );
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -99,9 +148,13 @@ export function ModeSelectMenu({
       {children({ open, toggle: () => setOpen(!open) })}
       {open ? (
         <div
+          ref={menuRef}
           role="group"
           aria-label="Modo de reemplazo"
-          className={`absolute top-full z-50 mt-1 w-[26.5rem] max-w-[calc(100vw-2rem)] rounded-xl border border-border bg-bg-primary p-1.5 shadow-md ${
+          data-placement={placement}
+          className={`absolute z-50 ${
+            placement === "top" ? "bottom-full mb-1" : "top-full mt-1"
+          } w-[26.5rem] max-w-[calc(100vw-2rem)] rounded-xl border border-border bg-bg-primary p-1.5 shadow-md ${
             align === "right" ? "right-0" : "left-0"
           }`}
         >
