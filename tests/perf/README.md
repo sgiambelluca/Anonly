@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=tests-perf | dependencias=adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-149-Un-Gate-Que-No-Ejecuta-Nada-Es-Rojo.md,adr/ADR-153-El-Gate-De-Tiempos-Se-Mide-Sobre-El-Producto.md,adr/ADR-159-La-Retencion-Se-Lee-Del-Heap-No-Del-RSS.md,roadmap/memoria/Optimizacion_De_Memoria_Plan.md,tests/e2e/README.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,adr/ADR-185-Gates-De-Leak-Y-Stress-En-Electron.md | audiencia=humanos+IA | fase=11 (gates Leak/Stress de ADR-185 implementados; CI pendiente) -->
+<!-- CONTEXT: scope=tests-perf | dependencias=adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-149-Un-Gate-Que-No-Ejecuta-Nada-Es-Rojo.md,adr/ADR-153-El-Gate-De-Tiempos-Se-Mide-Sobre-El-Producto.md,adr/ADR-159-La-Retencion-Se-Lee-Del-Heap-No-Del-RSS.md,roadmap/memoria/Optimizacion_De_Memoria_Plan.md,tests/e2e/README.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,adr/ADR-185-Gates-De-Leak-Y-Stress-En-Electron.md,roadmap/ocr/Regiones_Pequenas_Investigacion_Plan.md,roadmap/mediciones/ocr/Regiones_Pequenas_2026-10-05.md | audiencia=humanos+IA | fase=12 (gates Leak/Stress de ADR-185 implementados; CI pendiente; investigación de regiones pequeñas opt-in) -->
 
 # `tests/perf/` — tiempos y memoria sobre el producto real
 
@@ -13,6 +13,64 @@ Dos instrumentos, un mismo arnés (`tests/e2e/support/electronApp.ts`): `pipelin
 ## Por qué Electron y no un servidor de desarrollo
 
 `test:perf` corría antes contra `vite preview`. ADR-153 midió, intercalando corridas en la misma máquina: shell de Electron empaquetado 2258-2917 ms, `vite preview` 8625-9715 ms — un sobrecosto de ~5 s **sin causa identificada** (se descartaron compresión, MIME, aislamiento, headers de caché, `Content-Length` y tamaño de chunk). El producto no se sirve por HTTP (ADR-130): un gate de tiempos o de memoria tiene que medir el artefacto que se instala, no un servidor que ningún usuario ejecuta.
+
+### OCR de regiones pequeñas — investigación opt-in
+
+`ocr-small-regions.spec.ts` caracteriza la admisión vigente y un OCR
+experimental separado, con el corpus y alcance del
+[plan](../../docs/roadmap/ocr/Regiones_Pequenas_Investigacion_Plan.md).
+No forma parte de `pnpm test:perf` ni del gate ADR-148 y no cambia
+política de producto. Los
+[resultados del 2026-10-05](../../docs/roadmap/mediciones/ocr/Regiones_Pequenas_2026-10-05.md)
+conservan identidad, intentos fallidos y límites de cada instrumento.
+
+Preparar antes el build Electron con `VITE_E2E=1` para react-client y
+el build de desktop-shell, y los assets locales requeridos por el arnés
+E2E. El config rechaza un renderer anterior al código fuente. No correr
+otras mediciones o gates pesados al mismo tiempo.
+
+Ejemplos PowerShell desde la raíz, con fase y selección explícitas para
+evitar contar como ejecutadas las filas opt-in de otra fase:
+
+```powershell
+$env:ANONLY_SMALL_REGION_CAMPAIGN = "1"
+$env:ANONLY_SMALL_REGION_PHASE = "quality"
+pnpm.cmd exec playwright test --config=playwright.perf.config.ts tests/perf/ocr-small-regions.spec.ts --grep "full synthetic|mixed 300x56|neutral and filter-boundary|aligned native"
+
+$env:ANONLY_SMALL_REGION_PHASE = "memory"
+pnpm.cmd exec playwright test --config=playwright.perf.config.ts tests/perf/ocr-small-regions.spec.ts --grep "memory round"
+
+$env:ANONLY_SMALL_REGION_PHASE = "entity-audit"
+pnpm.cmd exec playwright test --config=playwright.perf.config.ts tests/perf/ocr-small-regions.spec.ts --grep "separate OCR words"
+
+$env:ANONLY_SMALL_REGION_PHASE = "aligned"
+pnpm.cmd exec playwright test --config=playwright.perf.config.ts tests/perf/ocr-small-regions.spec.ts --grep "aligned native"
+Remove-Item Env:ANONLY_SMALL_REGION_CAMPAIGN, Env:ANONLY_SMALL_REGION_PHASE
+```
+
+`source-audit` con `--grep "neutral and filter-boundary"` permite leer los
+originales sin repetir pipeline ni costo. Las evidencias se escriben en
+una carpeta única `.measure/ocr-small-regions/<fecha>-<pid>/`. Calidad
+conserva texto/conteos; la fase dirigida de entidades conserva además
+las palabras exactas antes de llamar Regex/NER reales con IDs aislados.
+El OCR independiente de verificación no entra en ventanas de memoria
+Electron. Los resultados de OCR experimental después de Ready no son
+un delta sumable ni una predicción del pipeline de una política futura.
+
+La fase `memory` ejecuta 12 series: tres repeticiones de
+1/10/50 bandas (una por página) y 50 imágenes pequeñas en una página;
+cada serie separa import/render/export/reposo y sesiones OCR
+experimentales fría/reapertura. Estas dos distribuciones tienen distintas
+geometrías y cantidades de píxeles. El muestreo RSS es de 150 ms y el
+heap de 1000 ms mediante CDP con GC forzado; una ventana sin muestras
+es `null`. Los workers OCR se liberan después de cada sesión.
+La corrida histórica intercaló las nueve bandas y ejecutó luego las tres
+de una página en bloque. El informe registra esa limitación; no tomar el
+orden declarado por el resumen histórico como orden realmente ejecutado.
+El derivado `memory-campaign-summary-corrected.json` ordena los raws por
+timestamp. El scheduler actual intercala los cuatro perfiles en cada una
+de tres rondas; está validado con una prueba sin Electron. Esa corrección
+solo afecta campañas futuras, no el diseño de la tanda histórica.
 
 ### Atribución física del renderer — instrumentos opt-in
 
