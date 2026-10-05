@@ -20,7 +20,7 @@ import {
   type GroupReplacementChanged,
   type GroupUpdateRequested,
 } from "@anonly/shared";
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from "vitest";
 
 import { GroupingEngine } from "../grouping.engine.js";
 import { GroupingGroupNotFoundError, GroupingInvalidPatchError } from "../grouping.errors.js";
@@ -5428,7 +5428,7 @@ describe("GroupingEngine — edge cases", () => {
       });
     }
 
-    function replacementEvents(spy: ReturnType<typeof vi.spyOn>): unknown[] {
+    function replacementEvents(spy: MockInstance<EngineContext["bus"]["emit"]>): unknown[] {
       return spy.mock.calls.filter(([, event]) => event === EngineEvents.GROUP_REPLACEMENT_CHANGED);
     }
 
