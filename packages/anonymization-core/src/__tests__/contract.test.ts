@@ -728,10 +728,10 @@ describe("Orchestrator — contract tests", () => {
     const engines = createMockEngines();
     wireHappyPathSpies(engines, bus);
     const callOrder: string[] = [];
-    (engines.grouping.startSession as ReturnType<typeof vi.fn>).mockImplementation(() => {
+    vi.mocked(engines.grouping.startSession).mockImplementation(() => {
       callOrder.push("startSession");
     });
-    (engines.regex.process as ReturnType<typeof vi.fn>).mockImplementation(
+    vi.mocked(engines.regex.process).mockImplementation(
       async (input: { document: { id: string } }) => {
         callOrder.push("regex.process");
         bus.emit(EventChannel.Regex, EngineEvents.REGEX_FINISHED, {
@@ -773,36 +773,29 @@ describe("Orchestrator — contract tests", () => {
     });
     wireHappyPathSpies(engines, bus, { pdfOutput });
     const callOrder: string[] = [];
-    (engines.render.rasterizePage as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+    vi.mocked(engines.render.rasterizePage).mockImplementation(async () => {
       callOrder.push("rasterizePage");
-      return { data: new Uint8ClampedArray(4), width: 1, height: 1, colorSpace: "srgb" as const };
+      return { bytes: new Uint8Array(4).buffer, format: "png" as const, widthPx: 1, heightPx: 1 };
     });
     // ADR-143 §1: la rasterización ya no la dispara el Orchestrator por
     // adelantado — vive en el productor que recibe processSession, y este
     // motor (mockeado) es quien decide cuándo invocarlo. Un OcrEngine real
     // lo llama uno por consumidor, bajo demanda (§3); acá alcanza con
     // invocarlo para probar que el productor efectivamente rasteriza.
-    (engines.ocr.processSession as ReturnType<typeof vi.fn>).mockImplementation(
-      async (requests, produce: (request: unknown, signal: AbortSignal) => Promise<unknown>) => {
-        callOrder.push("ocr.processSession");
-        const controller = new AbortController();
-        for (const request of requests as ReadonlyArray<{
-          readonly documentId: string;
-          readonly pageIndex: number;
-        }>) {
-          await produce(request, controller.signal);
-        }
-        return (
-          requests as ReadonlyArray<{ readonly documentId: string; readonly pageIndex: number }>
-        ).map((r) => ({
-          documentId: r.documentId,
-          pageIndex: r.pageIndex,
-          words: [],
-          confidence: 1,
-          durationMs: 1,
-        }));
-      },
-    );
+    vi.mocked(engines.ocr.processSession).mockImplementation(async (requests, produce) => {
+      callOrder.push("ocr.processSession");
+      const controller = new AbortController();
+      for (const request of requests) {
+        await produce(request, controller.signal);
+      }
+      return requests.map((r) => ({
+        documentId: r.documentId,
+        pageIndex: r.pageIndex,
+        words: [],
+        confidence: 1,
+        durationMs: 1,
+      }));
+    });
 
     const orchestrator = new PipelineOrchestrator({
       bus,

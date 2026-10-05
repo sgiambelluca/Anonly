@@ -47,7 +47,7 @@ import {
   type WorkerOutbound,
   type Word,
 } from "@anonly/shared";
-import { vi } from "vitest";
+import { vi, type Mock } from "vitest";
 
 import { LruCache } from "../../cache.js";
 import { mergeEngineConfig } from "../../config.js";
@@ -498,9 +498,9 @@ export function createDeferred<T>(): Deferred<T> {
  * los listeners que `WorkerPool` registró vía `addEventListener`.
  */
 export interface FakeWorker extends WorkerLike {
-  readonly postMessage: ReturnType<typeof vi.fn>;
-  readonly addEventListener: ReturnType<typeof vi.fn>;
-  readonly terminate: ReturnType<typeof vi.fn>;
+  readonly postMessage: Mock<WorkerLike["postMessage"]>;
+  readonly addEventListener: Mock<WorkerLike["addEventListener"]>;
+  readonly terminate: Mock<WorkerLike["terminate"]>;
   /**
    * `wrapInMessageEvent`: simula la entrega real de un `Worker` de DOM
    * (`MessageEvent.data` envuelve el mensaje posteado) en vez de la entrega
@@ -529,7 +529,7 @@ export function createFakeWorker(): FakeWorker {
   });
 
   return {
-    postMessage: vi.fn(),
+    postMessage: vi.fn<WorkerLike["postMessage"]>(),
     addEventListener,
     terminate: vi.fn(),
     emitMessage(message: WorkerOutbound, wrapInMessageEvent = false): void {
@@ -570,14 +570,23 @@ export function createOcrWorkerHarness(anglesByPage: ReadonlyMap<number, OcrAngl
     result: (payload: { pageIndex: number }) => unknown,
   ): void => {
     worker.postMessage.mockImplementation(
-      (message: { type: string; jobId: string; payload: { pageIndex: number } }) => {
+      (message) => {
         // Solo los `RUN`: un `CANCEL` (p. ej. al disponer) no trae payload.
+        if (typeof message !== "object" || message === null || !("type" in message)) return;
         if (message.type !== "RUN") return;
+        if (
+          !("jobId" in message) || typeof message.jobId !== "string" ||
+          !("payload" in message) || typeof message.payload !== "object" ||
+          message.payload === null || !("pageIndex" in message.payload) ||
+          typeof message.payload.pageIndex !== "number"
+        ) throw new Error("The OCR harness requires a RUN with jobId and pageIndex");
+        const jobId = message.jobId;
+        const pageIndex = message.payload.pageIndex;
         setTimeout(() => {
           worker.emitMessage({
             type: "COMPLETED",
-            jobId: message.jobId,
-            result: result(message.payload),
+            jobId,
+            result: result({ pageIndex }),
           });
         }, 0);
       },
