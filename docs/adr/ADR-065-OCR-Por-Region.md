@@ -10,6 +10,13 @@
 
 > Convención de citas: `ADR-065 §N` refiere a **Decisión §N**; el contexto se cita como `ADR-065, Contexto §N`.
 
+> **Experimento posterior (2026-10-05, ADR-202):** el humano autorizó
+> medir un candidato de 25 pt por lado manteniendo todas las otras reglas.
+> Los snapshots conservan ese experimento, refutado por H2 y no adoptado.
+> [ADR-203](ADR-203-El-Gate-De-Export-Cubre-La-Politica-OCR-Vigente.md)
+> restaura 100 pt en el runtime de trabajo para cerrar el gate de export.
+> Ver [ADR-202](ADR-202-El-Minimo-De-Region-OCR-Se-Prueba-A-25pt-Antes-De-Adoptarlo.md).
+
 ## Contexto
 
 ### 1. Una palabra nativa alcanza para que la página nunca vaya a OCR
