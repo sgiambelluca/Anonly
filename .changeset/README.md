@@ -1,10 +1,13 @@
 # Changesets
 
-Este proyecto usa [Changesets](https://github.com/changesets/changesets) para gestionar versiones y CHANGELOG.
+Anonly usa [Changesets](https://github.com/changesets/changesets) para gestionar
+una versión común de la app y sus CHANGELOG. Los paquetes privados se versionan
+juntos; no se publican librerías a npm.
 
 ## Flujo
 
-1. Cuando un PR introduce un cambio user-facing (feature, fix, breaking), ejecutá:
+1. Creá la rama de trabajo desde `develop`. Para un cambio visible en la app,
+   ejecutá:
 
    ```bash
    pnpm changeset
@@ -12,44 +15,43 @@ Este proyecto usa [Changesets](https://github.com/changesets/changesets) para ge
 
    Respondé las preguntas (paquete afectado, tipo de bump: major/minor/patch, mensaje).
 
-   Esto genera un archivo `.changeset/<random-name>.md` que **se commitea en el PR**.
+   Esto genera un archivo `.changeset/<random-name>.md` que **viaja en el PR hacia `develop`**.
 
-2. Al mergear el PR, el archivo queda en `main`.
+2. Los PR integrados acumulan changesets en `develop`.
 
-3. Cuando se quiere liberar una nueva versión, ejecutá:
+3. Para preparar una versión, creá una rama desde `develop` y ejecutá:
 
    ```bash
    pnpm run version
    ```
 
-   Changesets consume todos los `.changeset/*.md` pendientes, actualiza los `package.json` de los paquetes afectados, actualiza sus `CHANGELOG.md` y remueve los archivos consumidos.
+   Changesets consume todos los `.changeset/*.md` pendientes, actualiza las versiones y los CHANGELOG y remueve los archivos consumidos. Integrá ese cambio por PR a `develop`.
 
-4. Luego commiteá el "Version Packages" resultante y taggeá:
+4. Probá el conjunto y prepará una rama temporal desde `develop`, rebaseada
+   sobre `main`. Abrí su PR hacia `main` y usá Rebase and merge. Conservá
+   `develop` sin reescribirla. Esperá CI exitosa de push en `main` para el SHA
+   que vas a tagear.
 
-   ```bash
-   git commit -am "chore: version packages"
-   git tag v0.1.0
-   git push origin main --tags
-   ```
+5. Creá y pusheá solo el tag de esa versión, coincidente con
+   `apps/desktop-shell/package.json`. El workflow crea un release en borrador;
+   el mantenedor revisa y publica los instaladores. Los hotfixes exclusivos de
+   `main` se trasladan a `develop` mediante cherry-pick en una rama de trabajo
+   y PR, como explica `RELEASING.md`.
 
-5. Para publicar a npm (cuando aplique, v1.0+):
-
-   ```bash
-   pnpm release
-   ```
+El flujo completo, los hotfixes y las pruebas de instaladores están en
+[`RELEASING.md`](../RELEASING.md).
 
 ## Tipos de bump
 
 | Tipo | SemVer | Cuándo |
 |---|---|---|
 | `major` | `X.0.0` | cambio breaking de contrato público |
-| `minor` | `0.X.0` | nueva feature compatible |
-| `patch` | `0.0.X` | bug fix |
+| `minor` | `X.Y.0` | nueva feature compatible |
+| `patch` | `X.Y.Z` | bug fix |
 
 ## Reglas del proyecto
 
 - Toda feature o fix user-facing requiere un changeset. PRs solo de docs, refactor interno o tooling no necesitan changeset (usá `chore: ...`).
-- Para cambios que afectan `@anonly/shared` o `@anonly/anonymization-core`, el changeset es **obligatorio** porque son paquetes publicables.
-- `@anonly/react-client` está en `ignore` porque la app web no se publica a npm (es un build estático).
+- Los paquetes `@anonly/*` se versionan juntos (`fixed`), incluidos el cliente React y el contenedor de escritorio. `ignore` está vacío.
 - Los `docs/*` no requieren changeset.
 - Cuando un changeset dice `major`, verificá que haya un ADR que lo justifique.

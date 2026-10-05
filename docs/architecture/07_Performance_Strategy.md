@@ -298,6 +298,14 @@ Fixtures pesados (> 5 MB) vía Git LFS o descargados en `postinstall` con hash v
 
 Comando mínimo pre-PR (subset local de esta tabla): `pnpm lint && pnpm typecheck && pnpm test && pnpm test:contract && pnpm format:check`. `format:check` se agregó el 2026-09-29 porque CI ya lo exige en el job Lint; los tests de contrato corren en CI dentro de `pnpm test`, y `test:contract` los aísla en local.
 
+**Selección de ramas en CI (ADR-199, 2026-10-02):** los gates básicos corren en
+PR y pushes a `main` y `develop`. E2E y Performance corren en PR hacia `main`,
+pushes a ambas ramas y ejecuciones manuales; no en PR hacia `develop`. Leak y
+Stress conservan pushes a `main` y ejecuciones manuales. Un PR a `develop`
+exige Lint, Typecheck, Unit + Contract + Snapshot, Build, Security audit y
+Security gates; `main` exige además E2E. La ejecución manual permite probar
+el conjunto completo en `develop` antes de promover una versión a `main`.
+
 Además de los ejecutables, hay **gates de revisión** (no automatizables por comando) definidos en `ai/AI_Development_Guide.md` §4: Diff scope, Spec sync y Prohibiciones.
 
 ### 11.5 Documentos corruptos y edge

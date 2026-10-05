@@ -1,7 +1,7 @@
 name: Release
 
 # El tag dispara el release, no el merge a `main` (ADR-131 §1, RELEASING.md).
-# `main` puede acumular cambios sin que ningún usuario reciba nada.
+# `develop` acumula los cambios; promoverlos a `main` no publica nada (ADR-199).
 on:
   push:
     tags: ["v*"]
@@ -52,8 +52,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          CI_BRANCH="main"
           case "$GITHUB_EVENT_NAME:$GITHUB_REF" in
             workflow_dispatch:refs/heads/main) ;;
+            workflow_dispatch:refs/heads/develop) CI_BRANCH="develop" ;;
             push:refs/tags/v*)
               VERSION="$(node -p "require('./apps/desktop-shell/package.json').version")"
               if [ "$GITHUB_REF_NAME" != "v$VERSION" ]; then
@@ -61,16 +63,17 @@ jobs:
                 exit 1
               fi
               ;;
-            *) echo "::error::Solo se permite main manualmente o un tag de versión."; exit 1 ;;
+            *) echo "::error::Solo se permite main/develop manualmente o un tag de versión."; exit 1 ;;
           esac
-          if ! git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main; then
-            echo "::error::El commit del release no pertenece a main."
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" "refs/remotes/origin/$CI_BRANCH"; then
+            echo "::error::El commit no pertenece a $CI_BRANCH."
             exit 1
           fi
+          export CI_BRANCH
           COUNT="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$GITHUB_SHA&event=push&status=success" \
-            --jq '[.workflow_runs[] | select(.head_branch == "main" and .head_sha == env.GITHUB_SHA)] | length')"
+            --jq '[.workflow_runs[] | select(.head_branch == env.CI_BRANCH and .head_sha == env.GITHUB_SHA)] | length')"
           if [ "$COUNT" -lt 1 ]; then
-            echo "::error::Falta CI exitosa en main para este SHA. Esperá a CI y reintentá."
+            echo "::error::Falta CI exitosa en $CI_BRANCH para este SHA. Esperá a CI y reintentá."
             exit 1
           fi
 
