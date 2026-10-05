@@ -16,7 +16,7 @@ import {
   REPLACEMENT_FONT_HEIGHT_RATIO,
 } from "@anonly/shared";
 import { getDocument } from "pdfjs-dist";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 
 // `GlobalWorkerOptions` (además de `getDocument`): el describe de ADR-059 §5
 // más abajo importa dinámicamente `../worker/entry.js`, que lo toca en su
@@ -1663,7 +1663,7 @@ describe("RenderEngine — unit tests", () => {
   // tiraba.
   describe("PREVIEW_UPDATED.degraded (ADR-062)", () => {
     function previewPayloads(
-      emitSpy: ReturnType<typeof vi.spyOn>,
+      emitSpy: MockInstance<EngineContext["bus"]["emit"]>,
     ): ReadonlyArray<{ readonly kind: string; readonly degraded?: ReadonlyArray<Annotation> }> {
       return emitSpy.mock.calls
         .filter((call) => call[1] === EngineEvents.PREVIEW_UPDATED)
