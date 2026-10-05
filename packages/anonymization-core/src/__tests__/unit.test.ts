@@ -3089,9 +3089,7 @@ describe("Orchestrator — unit tests", () => {
     });
     wireHappyPathSpies(engines, bus, { pdfOutput });
     let checkpointSeq = 0;
-    (engines.grouping.createCheckpoint as ReturnType<typeof vi.fn>).mockImplementation(
-      () => `cp-${++checkpointSeq}`,
-    );
+    vi.mocked(engines.grouping.createCheckpoint).mockImplementation(() => `cp-${++checkpointSeq}`);
     const orchestrator = new PipelineOrchestrator({
       bus,
       logger: createMockLogger(),
@@ -3943,15 +3941,13 @@ describe("Orchestrator — export failure propagation", () => {
       retryable: false,
       details: {},
     };
-    (engines.export.export as ReturnType<typeof vi.fn>).mockImplementation(
-      async (input: { documentId: string }) => {
-        bus.emit(EventChannel.Export, EngineEvents.EXPORT_FAILED, {
-          documentId: input.documentId,
-          error: failure,
-        });
-        throw new Error("export failed");
-      },
-    );
+    vi.mocked(engines.export.export).mockImplementation(async (input: { documentId: string }) => {
+      bus.emit(EventChannel.Export, EngineEvents.EXPORT_FAILED, {
+        documentId: input.documentId,
+        error: failure,
+      });
+      throw new Error("export failed");
+    });
 
     const failedSpy = vi.fn();
     bus.on(EventChannel.Pipeline, EngineEvents.PIPELINE_FAILED, failedSpy);
