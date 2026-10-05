@@ -166,6 +166,7 @@ describe("ExportEngine — edge cases", () => {
         {},
         null,
         "not-a-recognized-shape",
+        [],
         // TypedArray, no ArrayBuffer -- el error real que `savePdf()` evita
         // copiando explícitamente a un ArrayBuffer plano antes de resolver.
         new Uint8Array([0x25, 0x50, 0x44, 0x46]),
@@ -176,6 +177,7 @@ describe("ExportEngine — edge cases", () => {
         const pooledEngine = new ExportEngine(pool);
         await pooledEngine.init(ctx);
         const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+        busEmitSpy.mockClear();
 
         const rejection: unknown = await pooledEngine
           .export(createExportEngineInput({ documentId: "doc-save-garbage" }), ctx)

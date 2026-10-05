@@ -17,7 +17,7 @@ import { DetectionSource, EntityType, ReplacementMode, type Document, type Docum
 import type { EngineConfig, EngineContext } from "@anonly/shared";
 import { createEngineContext as sharedCreateEngineContext, createMockConfig as sharedCreateMockConfig } from "@anonly/test-utils";
 import type { PDFDocument } from "pdf-lib";
-import { vi } from "vitest";
+import { vi, type Mock } from "vitest";
 
 
 import type { EncodedPageImage, ExportEngineInput, RenderPageProvider } from "../../export.types.js";
@@ -270,8 +270,8 @@ export interface MockRenderPageProviderOptions {
  * un acceso tipado solo por la interfaz.
  */
 export type MockRenderPageProvider = RenderPageProvider & {
-  readonly renderFull: ReturnType<typeof vi.fn>;
-  readonly renderLegend: ReturnType<typeof vi.fn>;
+  readonly renderFull: Mock<RenderPageProvider["renderFull"]>;
+  readonly renderLegend: Mock<RenderPageProvider["renderLegend"]>;
 };
 
 export function createMockRenderPageProvider(

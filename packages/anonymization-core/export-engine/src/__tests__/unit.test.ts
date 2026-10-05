@@ -386,6 +386,49 @@ describe("ExportEngine — unit", () => {
     await pooledEngine.dispose();
   });
 
+  it.each([
+    { stage: "page", error: new ExportFailedError("doc-remote-error", "remote assembly failed") },
+    { stage: "save", error: new ExportFailedError("doc-remote-error", "remote save failed") },
+    { stage: "save", error: new ExportTimeoutError("doc-remote-error", 0, 30_000) },
+  ])(
+    "normalizes deserialized $error.code during $stage and preserves the failure",
+    async ({ stage, error }) => {
+      const deserialized = EngineError.deserialize(error.serialize());
+      const dispatch = vi.fn((params: { readonly payload?: unknown }): Promise<unknown> => {
+        const payload = params.payload;
+        const isPage = typeof payload === "object" && payload !== null && "pageIndex" in payload;
+        if (stage === "save" && isPage) return Promise.resolve(null);
+        return Promise.reject(deserialized);
+      });
+      const pooledEngine = new ExportEngine({ dispatch });
+      await pooledEngine.init(ctx);
+      const emitSpy = vi.spyOn(ctx.bus, "emit");
+      try {
+        const rejection: unknown = await pooledEngine
+          .export(createExportEngineInput({ documentId: "doc-remote-error" }), ctx)
+          .catch((err: unknown) => err);
+        expect(rejection).toBeInstanceOf(ExportFailedError);
+        if (!(rejection instanceof ExportFailedError))
+          throw new Error("Expected a typed export failure");
+        expect(rejection.details.reason).toBe(error.details.reason ?? error.message);
+        expect(rejection.details.pageIndex).toBe(stage === "page" ? 0 : undefined);
+        expect(dispatch).toHaveBeenCalledTimes(stage === "page" ? 2 : 3);
+        expect(emitSpy).toHaveBeenCalledWith(
+          EventChannel.Export,
+          EngineEvents.EXPORT_FAILED,
+          expect.objectContaining({
+            error: expect.objectContaining({ code: EngineErrorCode.EXPORT_FAILED }),
+          }),
+        );
+        expect(emitSpy.mock.calls.some(([, event]) => event === EngineEvents.EXPORT_FINISHED)).toBe(
+          false,
+        );
+      } finally {
+        await pooledEngine.dispose();
+      }
+    },
+  );
+
   it("throws ExportTimeoutError when renderFull exceeds the export-page timeout", async () => {
     vi.mocked(PDFDocument.create).mockResolvedValue(asPdfDocument(createMockPdfLibDocument()));
     const shortTimeoutCtx = createEngineContext({
@@ -748,10 +791,8 @@ describe("ExportEngine — unit", () => {
       );
 
       expect(provider.renderLegend).toHaveBeenCalledTimes(1);
-      const [rows] = provider.renderLegend.mock.calls[0] as [
-        ReadonlyArray<Record<string, unknown>>,
-        AbortSignal,
-      ];
+      const rows = provider.renderLegend.mock.calls[0]?.[0];
+      if (rows === undefined) throw new Error("Expected a legend render call");
       expect(rows).toHaveLength(1);
       for (const row of rows) {
         // Ninguna clave de EntityGroup/EntityType (id, type, canonicalValue,
