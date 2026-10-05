@@ -170,11 +170,13 @@ describe("Orchestrator — edge cases", () => {
       const pdfColgado = new Promise<void>((resolve) => {
         liberarPdf = resolve;
       });
-      const procesoOriginal = engines.pdf.process as ReturnType<typeof vi.fn>;
+      const procesoOriginal = vi.mocked(engines.pdf.process);
       const resultadoOriginal = procesoOriginal.getMockImplementation();
-      procesoOriginal.mockImplementationOnce(async (...args: unknown[]) => {
+      if (resultadoOriginal === undefined)
+        throw new Error("Missing PDF process mock implementation");
+      procesoOriginal.mockImplementationOnce(async (...args) => {
         await pdfColgado;
-        return resultadoOriginal?.(...args) as unknown;
+        return resultadoOriginal(...args);
       });
 
       const progresoTrasCancelar: unknown[] = [];
@@ -503,7 +505,7 @@ describe("Orchestrator — edge cases", () => {
     // entera, acá la página YA tenía requiresOCR===false y texto nativo
     // desde la extracción; un fallo de región no debe tocar ninguno de los
     // dos.
-    (engines.ocr.processSession as ReturnType<typeof vi.fn>).mockImplementationOnce(
+    vi.mocked(engines.ocr.processSession).mockImplementationOnce(
       async (
         requests: ReadonlyArray<{ readonly documentId: string; readonly pageIndex: number }>,
       ) => {
@@ -587,26 +589,24 @@ describe("Orchestrator — edge cases", () => {
 
     const deferred = createDeferred<void>();
     let callCount = 0;
-    (engines.export.export as ReturnType<typeof vi.fn>).mockImplementation(
-      async (input: { documentId: string }) => {
-        callCount += 1;
-        if (callCount === 1) {
-          await deferred.promise;
-        }
-        bus.emit(EventChannel.Export, EngineEvents.EXPORT_FINISHED, {
-          documentId: input.documentId,
-          blobUrl: `blob:export-${callCount}`,
-          sizeBytes: 1,
-          durationMs: 1,
-        });
-        return {
-          documentId: input.documentId,
-          buffer: new Uint8Array([1]).buffer,
-          sizeBytes: 1,
-          durationMs: 1,
-        };
-      },
-    );
+    vi.mocked(engines.export.export).mockImplementation(async (input: { documentId: string }) => {
+      callCount += 1;
+      if (callCount === 1) {
+        await deferred.promise;
+      }
+      bus.emit(EventChannel.Export, EngineEvents.EXPORT_FINISHED, {
+        documentId: input.documentId,
+        blobUrl: `blob:export-${callCount}`,
+        sizeBytes: 1,
+        durationMs: 1,
+      });
+      return {
+        documentId: input.documentId,
+        buffer: new Uint8Array([1]).buffer,
+        sizeBytes: 1,
+        durationMs: 1,
+      };
+    });
 
     const options = {
       imageFormat: "jpeg" as const,
@@ -632,7 +632,7 @@ describe("Orchestrator — edge cases", () => {
 
   it("engines receive a copy: retained buffer stays intact if engine detaches its input (caso 23)", async () => {
     const { bus, engines, orchestrator } = makeOrchestrator();
-    (engines.pdf.process as ReturnType<typeof vi.fn>).mockImplementationOnce(
+    vi.mocked(engines.pdf.process).mockImplementationOnce(
       async (input: { documentId: string; buffer: ArrayBuffer }) => {
         // Simula lo que hace pdfjs-dist de verdad: transfiere el buffer que
         // recibió a su worker interno, dejándolo detached del lado del motor.
@@ -731,7 +731,7 @@ describe("Orchestrator — edge cases", () => {
     // preservando exactamente lo que el caso 24 verifica: cualquier fallo
     // dentro del try de runExport enruta a failPipeline -> PIPELINE_FAILED,
     // sin colgar el pipeline y sin invocar export.export().
-    (engines.grouping.getSnapshot as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
+    vi.mocked(engines.grouping.getSnapshot).mockImplementationOnce(() => {
       throw new InvalidInputError("fallo simulado en preparación de export.", {
         documentId: "doc-1",
       });
@@ -854,7 +854,7 @@ describe("Orchestrator — edge cases", () => {
     // puede fallar en este punto (ya se cargó con éxito durante el import) —
     // se fuerza el primer fallo (el que hace entrar a runExport en su catch)
     // con getSnapshot en lugar de loadDocument.
-    (engines.grouping.getSnapshot as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
+    vi.mocked(engines.grouping.getSnapshot).mockImplementationOnce(() => {
       throw new InvalidInputError("fallo simulado en preparación de export.", {
         documentId: "doc-1",
       });
@@ -911,7 +911,7 @@ describe("Orchestrator — edge cases", () => {
   it("DOCUMENT_CLOSED during pipeline cancels and frees", async () => {
     const { engines, orchestrator } = makeOrchestrator();
     const deferred = createDeferred<never>();
-    (engines.pdf.process as ReturnType<typeof vi.fn>).mockImplementation(
+    vi.mocked(engines.pdf.process).mockImplementation(
       (input: { documentId: string }, ctx: { abortSignal: AbortSignal }) => {
         ctx.abortSignal.addEventListener("abort", () => {
           deferred.reject(new CancelledError(input.documentId));
@@ -1522,7 +1522,7 @@ describe("Orchestrator — edge cases", () => {
       expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
 
       const deferred = createDeferred<never>();
-      (engines.ner.processPages as ReturnType<typeof vi.fn>).mockImplementation(
+      vi.mocked(engines.ner.processPages).mockImplementation(
         (_inputs, ctx: { abortSignal: AbortSignal }) => {
           ctx.abortSignal.addEventListener("abort", () => {
             deferred.reject(new CancelledError("doc-1"));
@@ -1576,7 +1576,7 @@ describe("Orchestrator — edge cases", () => {
       }));
 
       const deferred = createDeferred<never>();
-      (engines.ner.processPages as ReturnType<typeof vi.fn>).mockImplementation(
+      vi.mocked(engines.ner.processPages).mockImplementation(
         (_inputs, ctx: { abortSignal: AbortSignal }) => {
           ctx.abortSignal.addEventListener("abort", () => {
             deferred.reject(new CancelledError("doc-1"));
@@ -1685,7 +1685,7 @@ describe("Orchestrator — edge cases", () => {
       (engines.render.renderPage as ReturnType<typeof vi.fn>).mockClear();
 
       const deferred = createDeferred<never>();
-      (engines.ner.processPages as ReturnType<typeof vi.fn>).mockImplementation(
+      vi.mocked(engines.ner.processPages).mockImplementation(
         (_inputs, ctx: { abortSignal: AbortSignal }) => {
           ctx.abortSignal.addEventListener("abort", () => {
             deferred.reject(new CancelledError("doc-1"));
