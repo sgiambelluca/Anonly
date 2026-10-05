@@ -28,6 +28,8 @@ async function firstOccurrence(
   tokens: ReadonlyArray<string>,
 ): Promise<EntityFound["occurrence"] | undefined> {
   const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+  // Vitest 4 reuses an existing mock, including its earlier calls.
+  busEmitSpy.mockClear();
   const document = makeSinglePageDocument(`doc-${Math.random()}`, tokens);
   await engine.process({ document }, ctx);
   const call = busEmitSpy.mock.calls.find(([, event]) => event === EngineEvents.ENTITY_FOUND);
@@ -69,6 +71,7 @@ async function firstOccurrenceOfRotatedPage(
   };
 
   const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+  busEmitSpy.mockClear();
   await engine.process({ document: makeDocument(`doc-${Math.random()}`, [page]) }, ctx);
   const call = busEmitSpy.mock.calls.find(([, event]) => event === EngineEvents.ENTITY_FOUND);
   return (call?.[2] as EntityFound | undefined)?.occurrence;
@@ -956,6 +959,7 @@ describe("RegexEngine — unit tests", () => {
 
       const document = makeSinglePageDocument("doc-guard-comma", ["0221-4567890,0221-4567891"]);
       const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+      busEmitSpy.mockClear();
       const output = await engine.process({ document }, ctx);
       expect(output.occurrenceCount).toBe(2);
       const phoneOccurrences = busEmitSpy.mock.calls
