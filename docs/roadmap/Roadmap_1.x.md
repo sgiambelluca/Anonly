@@ -116,7 +116,10 @@ Lo primero, porque es lo que permite tocar la detección sin miedo.
   mixed elegible de 300 × 125 pt y preservar el de 300 × 56 pt en
   caracterización. **Cierre local: 21/21 en Windows, cero fallos/salteados,
   R-16 verde y Sol 6.1 APPROVED.** CI remota pendiente sobre el ref publicado;
-  el humano autorizó commit y push en develop. Ver
+  el humano autorizó commit y push utilizando develop. Los cambios están en
+  [PR #52 hacia develop](https://github.com/sgiambelluca/Anonly/pull/52), pues
+  la protección exige PR. CI está en cola durante el incidente de runners
+  de GitHub, sin pruebas remotas ejecutadas. Ver
   [evidencia y revisión final](hardening/ADR148_Cierre_ADR203_2026-10-05.md).
 - **«Validar muestra»**: la misma comprobación, al alcance del usuario.
   Después de exportar, la aplicación vuelve a leer el PDF exportado y

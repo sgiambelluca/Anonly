@@ -72,9 +72,9 @@ evidencia sintética aun al fallar. El agregador `E2E (Playwright)` exige
 su éxito. Conserva el filtro ADR-199: pushes a main/develop, PR hacia main
 y dispatch; no añade este costo a cada PR hacia develop.
 
-La revisión de wiring no acredita una ejecución macOS. Los cambios están
-sin publicar: un dispatch sobre un ref remoto existente no prueba este
-working tree. Preparar código, gates locales, revisión y docs antes de
+La revisión de wiring no acredita una ejecución macOS. Un dispatch sobre
+un ref remoto que no contiene el cambio no prueba ese working tree.
+Preparar código, gates locales, revisión y docs antes de
 solicitar autorización explícita de commit/push si la ejecución remota la
 requiere (I-9). No declarar CI verde sin resultado del ref que contiene el cambio.
 
@@ -91,7 +91,11 @@ cero fallos/salteados. Sol auditó evidencia/hashes, cobertura normativa y
 los cinco gates R-16; cerró el único P2 de lint con capacidad 20 y dio
 APPROVED. Ver [el cierre documentado](../roadmap/hardening/ADR148_Cierre_ADR203_2026-10-05.md).
 La corrida remota está pendiente. El humano autorizó crear commits y hacer
-push en develop para acumular los cambios y ejecutar CI sobre ese HEAD.
+push utilizando develop para acumular los cambios y ejecutar CI sobre ese HEAD.
+El push directo fue rechazado por protección; los commits se publicaron en
+[PR #52 hacia develop](https://github.com/sgiambelluca/Anonly/pull/52).
+La ejecución manual incluye export/macOS sobre el código publicado; está
+en cola durante el incidente de runners de GitHub registrado en el informe.
 
 Se corrige una contradicción del plan, no un defecto del wiring de OCR.
 La revisión de corpus fue decidida antes de código; el implementador no
