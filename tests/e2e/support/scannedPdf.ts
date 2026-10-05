@@ -147,172 +147,184 @@ async function rasterizeInBrowser(args: BrowserRasterizeArgs): Promise<string> {
   const pdfjsBlobUrl = URL.createObjectURL(new Blob([pdfjsSource], { type: "text/javascript" }));
   const pdfLibBlobUrl = URL.createObjectURL(new Blob([pdfLibSource], { type: "text/javascript" }));
 
-  const pdfjsLib = (await import(pdfjsBlobUrl)) as typeof PdfjsModule;
-  const pdfLib = (await import(pdfLibBlobUrl)) as typeof PdfLibModule;
+  const canvases: HTMLCanvasElement[] = [];
+  let sourceDoc: PdfjsModule.PDFDocumentProxy | undefined;
+  try {
+    const pdfjsLib = (await import(pdfjsBlobUrl)) as typeof PdfjsModule;
+    const pdfLib = (await import(pdfLibBlobUrl)) as typeof PdfLibModule;
+    pdfjsLib.GlobalWorkerOptions.workerSrc = workerBlobUrl;
+    sourceDoc = await pdfjsLib.getDocument({ data: base64ToBytes(sourceBase64) }).promise;
+    const outDoc = await pdfLib.PDFDocument.create();
+    const pagesToRasterize = Math.min(pageCount ?? sourceDoc.numPages, sourceDoc.numPages);
+    for (let pageNumber = 1; pageNumber <= pagesToRasterize; pageNumber += 1) {
+      const sourcePage = await sourceDoc.getPage(pageNumber);
+      // Dos viewports a propósito: `nativeViewport` (scale 1 = 72 DPI) define
+      // el tamaño de la página PDF de salida en puntos, igual que la original
+      // — `renderViewport` (la escala pedida, más alta) es solo la resolución
+      // del bitmap que se dibuja adentro, para que Tesseract tenga píxeles de
+      // sobra. Si se usaran los píxeles de `renderViewport` como tamaño de
+      // página (puntos), la página resultante sería `scale` veces más grande
+      // físicamente que el A4 original.
+      const nativeViewport = sourcePage.getViewport({ scale: 1 });
+      const renderViewport = sourcePage.getViewport({ scale });
 
-  pdfjsLib.GlobalWorkerOptions.workerSrc = workerBlobUrl;
+      const sourceCanvas = document.createElement("canvas");
+      canvases.push(sourceCanvas);
+      sourceCanvas.width = Math.ceil(renderViewport.width);
+      sourceCanvas.height = Math.ceil(renderViewport.height);
+      const sourceContext = sourceCanvas.getContext("2d");
+      if (!sourceContext) throw new Error("No se pudo obtener el contexto 2D del canvas.");
 
-  const sourceDoc = await pdfjsLib.getDocument({ data: base64ToBytes(sourceBase64) }).promise;
-  const outDoc = await pdfLib.PDFDocument.create();
+      // Fondo blanco explícito: un `<canvas>` recién creado es transparente, y
+      // `page.render()` de pdfjs-dist no rellena fondo — solo dibuja el
+      // contenido de la página (texto negro) sobre lo que ya haya. Sin este
+      // fill, el PNG exportado (`canvas.toBlob`) queda con texto negro sobre
+      // fondo TRANSPARENTE; en cualquier punto del pipeline de OCR que aplane
+      // esa transparencia sin asumir blanco (p. ej. una conversión a JPEG, sin
+      // canal alfa), el resultado es texto negro sobre negro — invisible para
+      // Tesseract. Confirmado empíricamente: sin este fill, el Escenario 2
+      // completaba OCR sin errores pero detectaba CERO entidades.
+      sourceContext.fillStyle = "white";
+      sourceContext.fillRect(0, 0, sourceCanvas.width, sourceCanvas.height);
 
-  const pagesToRasterize = Math.min(pageCount ?? sourceDoc.numPages, sourceDoc.numPages);
-  for (let pageNumber = 1; pageNumber <= pagesToRasterize; pageNumber += 1) {
-    const sourcePage = await sourceDoc.getPage(pageNumber);
-    // Dos viewports a propósito: `nativeViewport` (scale 1 = 72 DPI) define
-    // el tamaño de la página PDF de salida en puntos, igual que la original
-    // — `renderViewport` (la escala pedida, más alta) es solo la resolución
-    // del bitmap que se dibuja adentro, para que Tesseract tenga píxeles de
-    // sobra. Si se usaran los píxeles de `renderViewport` como tamaño de
-    // página (puntos), la página resultante sería `scale` veces más grande
-    // físicamente que el A4 original.
-    const nativeViewport = sourcePage.getViewport({ scale: 1 });
-    const renderViewport = sourcePage.getViewport({ scale });
+      // pdfjs-dist@4.x tipa `canvas` como parte de `RenderParameters` (además
+      // de `canvasContext`) desde v4.something; el genérico `build/pdf.min.mjs`
+      // acepta el mismo shape que usa `render-engine` (Core) en su propio
+      // `rasterizePage` — mismo patrón, sin necesidad de castear.
+      await sourcePage.render({ canvasContext: sourceContext, viewport: renderViewport }).promise;
 
-    const sourceCanvas = document.createElement("canvas");
-    sourceCanvas.width = Math.ceil(renderViewport.width);
-    sourceCanvas.height = Math.ceil(renderViewport.height);
-    const sourceContext = sourceCanvas.getContext("2d");
-    if (!sourceContext) throw new Error("No se pudo obtener el contexto 2D del canvas.");
-
-    // Fondo blanco explícito: un `<canvas>` recién creado es transparente, y
-    // `page.render()` de pdfjs-dist no rellena fondo — solo dibuja el
-    // contenido de la página (texto negro) sobre lo que ya haya. Sin este
-    // fill, el PNG exportado (`canvas.toBlob`) queda con texto negro sobre
-    // fondo TRANSPARENTE; en cualquier punto del pipeline de OCR que aplane
-    // esa transparencia sin asumir blanco (p. ej. una conversión a JPEG, sin
-    // canal alfa), el resultado es texto negro sobre negro — invisible para
-    // Tesseract. Confirmado empíricamente: sin este fill, el Escenario 2
-    // completaba OCR sin errores pero detectaba CERO entidades.
-    sourceContext.fillStyle = "white";
-    sourceContext.fillRect(0, 0, sourceCanvas.width, sourceCanvas.height);
-
-    // pdfjs-dist@4.x tipa `canvas` como parte de `RenderParameters` (además
-    // de `canvasContext`) desde v4.something; el genérico `build/pdf.min.mjs`
-    // acepta el mismo shape que usa `render-engine` (Core) en su propio
-    // `rasterizePage` — mismo patrón, sin necesidad de castear.
-    await sourcePage.render({ canvasContext: sourceContext, viewport: renderViewport }).promise;
-
-    if (degradation !== undefined) {
-      const width = sourceCanvas.width;
-      const height = sourceCanvas.height;
-      const image = sourceContext.getImageData(0, 0, width, height);
-      const pixels = image.data;
-      const plane = new Float32Array(width * height);
-      for (let index = 0; index < plane.length; index += 1) {
-        plane[index] =
-          0.299 * (pixels[index * 4] ?? 255) +
-          0.587 * (pixels[index * 4 + 1] ?? 255) +
-          0.114 * (pixels[index * 4 + 2] ?? 255);
-      }
-      if (degradation.blurSigmaPx > 0) {
-        const radius = Math.ceil(3 * degradation.blurSigmaPx);
-        const kernel = new Float32Array(2 * radius + 1);
-        let kernelSum = 0;
-        for (let offset = -radius; offset <= radius; offset += 1) {
-          const weight = Math.exp(-(offset * offset) / (2 * degradation.blurSigmaPx ** 2));
-          kernel[offset + radius] = weight;
-          kernelSum += weight;
+      if (degradation !== undefined) {
+        const width = sourceCanvas.width;
+        const height = sourceCanvas.height;
+        const image = sourceContext.getImageData(0, 0, width, height);
+        const pixels = image.data;
+        const plane = new Float32Array(width * height);
+        for (let index = 0; index < plane.length; index += 1) {
+          plane[index] =
+            0.299 * (pixels[index * 4] ?? 255) +
+            0.587 * (pixels[index * 4 + 1] ?? 255) +
+            0.114 * (pixels[index * 4 + 2] ?? 255);
         }
-        for (let index = 0; index < kernel.length; index += 1)
-          kernel[index] = (kernel[index] ?? 0) / kernelSum;
-        const scratch = new Float32Array(plane.length);
-        for (let row = 0; row < height; row += 1) {
-          for (let column = 0; column < width; column += 1) {
-            let sum = 0;
-            for (let offset = -radius; offset <= radius; offset += 1) {
-              const at = Math.min(width - 1, Math.max(0, column + offset));
-              sum += (kernel[offset + radius] ?? 0) * (plane[row * width + at] ?? 0);
+        if (degradation.blurSigmaPx > 0) {
+          const radius = Math.ceil(3 * degradation.blurSigmaPx);
+          const kernel = new Float32Array(2 * radius + 1);
+          let kernelSum = 0;
+          for (let offset = -radius; offset <= radius; offset += 1) {
+            const weight = Math.exp(-(offset * offset) / (2 * degradation.blurSigmaPx ** 2));
+            kernel[offset + radius] = weight;
+            kernelSum += weight;
+          }
+          for (let index = 0; index < kernel.length; index += 1)
+            kernel[index] = (kernel[index] ?? 0) / kernelSum;
+          const scratch = new Float32Array(plane.length);
+          for (let row = 0; row < height; row += 1) {
+            for (let column = 0; column < width; column += 1) {
+              let sum = 0;
+              for (let offset = -radius; offset <= radius; offset += 1) {
+                const at = Math.min(width - 1, Math.max(0, column + offset));
+                sum += (kernel[offset + radius] ?? 0) * (plane[row * width + at] ?? 0);
+              }
+              scratch[row * width + column] = sum;
             }
-            scratch[row * width + column] = sum;
+          }
+          for (let row = 0; row < height; row += 1) {
+            for (let column = 0; column < width; column += 1) {
+              let sum = 0;
+              for (let offset = -radius; offset <= radius; offset += 1) {
+                const at = Math.min(height - 1, Math.max(0, row + offset));
+                sum += (kernel[offset + radius] ?? 0) * (scratch[at * width + column] ?? 0);
+              }
+              plane[row * width + column] = sum;
+            }
           }
         }
-        for (let row = 0; row < height; row += 1) {
-          for (let column = 0; column < width; column += 1) {
-            let sum = 0;
-            for (let offset = -radius; offset <= radius; offset += 1) {
-              const at = Math.min(height - 1, Math.max(0, row + offset));
-              sum += (kernel[offset + radius] ?? 0) * (scratch[at * width + column] ?? 0);
-            }
-            plane[row * width + column] = sum;
-          }
+        // mulberry32 con semilla fija; Box-Muller para el ruido gaussiano.
+        let state = degradation.seed >>> 0;
+        const uniform = (): number => {
+          state = (state + 0x6d2b79f5) >>> 0;
+          let mixed = Math.imul(state ^ (state >>> 15), 1 | state);
+          mixed = (mixed + Math.imul(mixed ^ (mixed >>> 7), 61 | mixed)) ^ mixed;
+          return ((mixed ^ (mixed >>> 14)) >>> 0) / 4294967296;
+        };
+        const span = degradation.whiteLevel - degradation.blackLevel;
+        let darkest = 255;
+        for (let index = 0; index < plane.length; index += 1) {
+          const noise =
+            degradation.noiseSigma *
+            Math.sqrt(-2 * Math.log(1 - uniform())) *
+            Math.cos(2 * Math.PI * uniform());
+          const value = degradation.blackLevel + ((plane[index] ?? 255) / 255) * span + noise;
+          const byte = Math.min(255, Math.max(0, Math.round(value)));
+          if (byte < darkest) darkest = byte;
+          pixels[index * 4] = byte;
+          pixels[index * 4 + 1] = byte;
+          pixels[index * 4 + 2] = byte;
+          pixels[index * 4 + 3] = 255;
         }
+        // Una página que sale sin tinta es un fixture roto: se corta aquí y no se cachea.
+        if (darkest >= degradation.blackLevel + span / 2)
+          throw new Error(`degradación: la página ${pageNumber} quedó sin tinta`);
+        sourceContext.putImageData(image, 0, 0);
       }
-      // mulberry32 con semilla fija; Box-Muller para el ruido gaussiano.
-      let state = degradation.seed >>> 0;
-      const uniform = (): number => {
-        state = (state + 0x6d2b79f5) >>> 0;
-        let mixed = Math.imul(state ^ (state >>> 15), 1 | state);
-        mixed = (mixed + Math.imul(mixed ^ (mixed >>> 7), 61 | mixed)) ^ mixed;
-        return ((mixed ^ (mixed >>> 14)) >>> 0) / 4294967296;
-      };
-      const span = degradation.whiteLevel - degradation.blackLevel;
-      let darkest = 255;
-      for (let index = 0; index < plane.length; index += 1) {
-        const noise =
-          degradation.noiseSigma *
-          Math.sqrt(-2 * Math.log(1 - uniform())) *
-          Math.cos(2 * Math.PI * uniform());
-        const value = degradation.blackLevel + ((plane[index] ?? 255) / 255) * span + noise;
-        const byte = Math.min(255, Math.max(0, Math.round(value)));
-        if (byte < darkest) darkest = byte;
-        pixels[index * 4] = byte;
-        pixels[index * 4 + 1] = byte;
-        pixels[index * 4 + 2] = byte;
-        pixels[index * 4 + 3] = 255;
+
+      const rotation = rotations?.[pageNumber - 1] ?? 0;
+      const quarterTurn = rotation === 90 || rotation === 270;
+      const canvas = document.createElement("canvas");
+      canvases.push(canvas);
+      canvas.width = quarterTurn ? sourceCanvas.height : sourceCanvas.width;
+      canvas.height = quarterTurn ? sourceCanvas.width : sourceCanvas.height;
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("No se pudo obtener el contexto 2D del canvas girado.");
+      context.fillStyle = "white";
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      context.save();
+      if (rotation === 90) {
+        context.translate(canvas.width, 0);
+        context.rotate(Math.PI / 2);
+      } else if (rotation === 180) {
+        context.translate(canvas.width, canvas.height);
+        context.rotate(Math.PI);
+      } else if (rotation === 270) {
+        context.translate(0, canvas.height);
+        context.rotate(-Math.PI / 2);
       }
-      // Una página que sale sin tinta es un fixture roto: se corta aquí y no se cachea.
-      if (darkest >= degradation.blackLevel + span / 2)
-        throw new Error(`degradación: la página ${pageNumber} quedó sin tinta`);
-      sourceContext.putImageData(image, 0, 0);
+      context.drawImage(sourceCanvas, 0, 0);
+      context.restore();
+
+      const pngBlob = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob((blob) => {
+          if (blob) resolve(blob);
+          else reject(new Error(`canvas.toBlob() falló para la página ${pageNumber}.`));
+        }, "image/png");
+      });
+      const pngBytes = new Uint8Array(await pngBlob.arrayBuffer());
+
+      const embeddedImage = await outDoc.embedPng(pngBytes);
+      const outPage = outDoc.addPage(
+        quarterTurn
+          ? [nativeViewport.height, nativeViewport.width]
+          : [nativeViewport.width, nativeViewport.height],
+      );
+      outPage.drawImage(embeddedImage, {
+        x: 0,
+        y: 0,
+        width: quarterTurn ? nativeViewport.height : nativeViewport.width,
+        height: quarterTurn ? nativeViewport.width : nativeViewport.height,
+      });
     }
 
-    const rotation = rotations?.[pageNumber - 1] ?? 0;
-    const quarterTurn = rotation === 90 || rotation === 270;
-    const canvas = document.createElement("canvas");
-    canvas.width = quarterTurn ? sourceCanvas.height : sourceCanvas.width;
-    canvas.height = quarterTurn ? sourceCanvas.width : sourceCanvas.height;
-    const context = canvas.getContext("2d");
-    if (!context) throw new Error("No se pudo obtener el contexto 2D del canvas girado.");
-    context.fillStyle = "white";
-    context.fillRect(0, 0, canvas.width, canvas.height);
-    context.save();
-    if (rotation === 90) {
-      context.translate(canvas.width, 0);
-      context.rotate(Math.PI / 2);
-    } else if (rotation === 180) {
-      context.translate(canvas.width, canvas.height);
-      context.rotate(Math.PI);
-    } else if (rotation === 270) {
-      context.translate(0, canvas.height);
-      context.rotate(-Math.PI / 2);
+    const outBytes = await outDoc.save();
+    return bytesToBase64(outBytes);
+  } finally {
+    for (const canvas of canvases) {
+      canvas.width = 0;
+      canvas.height = 0;
     }
-    context.drawImage(sourceCanvas, 0, 0);
-    context.restore();
-
-    const pngBlob = await new Promise<Blob>((resolve, reject) => {
-      canvas.toBlob((blob) => {
-        if (blob) resolve(blob);
-        else reject(new Error(`canvas.toBlob() falló para la página ${pageNumber}.`));
-      }, "image/png");
-    });
-    const pngBytes = new Uint8Array(await pngBlob.arrayBuffer());
-
-    const embeddedImage = await outDoc.embedPng(pngBytes);
-    const outPage = outDoc.addPage(
-      quarterTurn
-        ? [nativeViewport.height, nativeViewport.width]
-        : [nativeViewport.width, nativeViewport.height],
-    );
-    outPage.drawImage(embeddedImage, {
-      x: 0,
-      y: 0,
-      width: quarterTurn ? nativeViewport.height : nativeViewport.width,
-      height: quarterTurn ? nativeViewport.width : nativeViewport.height,
-    });
+    if (sourceDoc !== undefined) await sourceDoc.destroy();
+    URL.revokeObjectURL(workerBlobUrl);
+    URL.revokeObjectURL(pdfjsBlobUrl);
+    URL.revokeObjectURL(pdfLibBlobUrl);
   }
-
-  const outBytes = await outDoc.save();
-  return bytesToBase64(outBytes);
 }
 
 async function samplePixelsInBrowser(args: {
