@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=seguridad | dependencias=00_Project_Vision.md,01_Technical_Architecture_Document.md,06_Pipeline.md,adr/ADR-130-El-Contenedor-De-Escritorio-Fija-El-Motor.md,adr/ADR-131-El-Actualizador-Es-La-Primera-Salida-De-Red.md,adr/ADR-132-El-Shell-Tiene-Su-Propio-Modelo-De-Seguridad.md,adr/ADR-137-Windows-Verifica-Actualizaciones-Con-Clave-Ed25519-Propia.md,adr/ADR-171-El-Usuario-Puede-Eliminar-Una-Entidad.md,adr/ADR-174-Un-Agregado-Manual-Que-Choca-Se-Resuelve-En-El-Momento.md | audiencia=IA+humanos | fase=11.6 -->
+<!-- CONTEXT: scope=seguridad | dependencias=00_Project_Vision.md,01_Technical_Architecture_Document.md,06_Pipeline.md,adr/ADR-130-El-Contenedor-De-Escritorio-Fija-El-Motor.md,adr/ADR-131-El-Actualizador-Es-La-Primera-Salida-De-Red.md,adr/ADR-132-El-Shell-Tiene-Su-Propio-Modelo-De-Seguridad.md,adr/ADR-137-Windows-Verifica-Actualizaciones-Con-Clave-Ed25519-Propia.md,adr/ADR-171-El-Usuario-Puede-Eliminar-Una-Entidad.md,adr/ADR-174-Un-Agregado-Manual-Que-Choca-Se-Resuelve-En-El-Momento.md,roadmap/hardening/Export_Verificado_ADR148_Plan.md,roadmap/hardening/ADR148_Revision_2026-10-05.md | audiencia=IA+humanos | fase=11.6 -->
 
 # Anonly — Modelo de Seguridad
 
@@ -14,7 +14,7 @@
 |---|---|---|
 | S-1 | Ningún byte del documento sale de la máquina del usuario. | gate `shell-no-egress` (§11): un pipeline completo no emite **ninguna** request a un host. Ese gate **no ejercita el actualizador**, que es la única salida de red del producto; lo que lo cubre es que corra en el proceso main —donde no hay documentos—, que su payload se arme por lista blanca (gate `updater-payload-clean`) y que sus destinos estén enumerados desde el código (gate `network-destinations`). |
 | S-2 | Ningún documento se persiste remotamente. | sin endpoints de upload; el Core no hace network (regla R-10 de `ai/AI_Development_Guide.md`). |
-| S-3 | El PDF exportado no permite recuperar la información original. | test de no-recuperabilidad: buscar texto original en el buffer del export. |
+| S-3 | El PDF exportado no permite recuperar la información original. | tests estructurales de §4.2 y verificación visual del archivo final. El gate OCR de ADR-148 tiene primera implementación **sin aprobar** (§4.2); buscar texto en el buffer no verifica la tinta de la imagen. |
 | S-4 | Los modelos IA entran al producto por una vía verificada. | sha256 por asset en `assets.lock.json`, verificado al mirrorearlos y al armar el instalador (ADR-018). **Ya no es SRI**: no hay `<script>` remoto que verificar — todo se sirve desde el propio paquete (ADR-132 §5). |
 | S-5 | No se conservan metadatos sensibles del PDF original en el export. | test de metadata del export. |
 | S-6 | El procesamiento ocurre en Web Workers con CSP estricta, y el renderer no llega al sistema. | CSP `worker-src 'self' blob:` + `script-src` con `'wasm-unsafe-eval'` acotado a compilar WASM (nunca `'unsafe-eval'` completo — ver §3.2). En el contenedor además `contextIsolation`/`sandbox` activos y `nodeIntegration` apagado, con `require`/`process` inalcanzables desde el renderer (gate `webprefs-locked`, ADR-132 §3). |
@@ -127,23 +127,39 @@ El PDF exportado se reconstruye desde cero:
 3. No se copia ninguna capa de texto, ningún bookmark, ningún JavaScript, ningún form, ninguna XMP del original.
 4. La metadata del nuevo PDF es mínima y generada por Anonly (no contiene autor, título ni datos del original).
 
-### 4.2 Test de no-recuperabilidad
+### 4.2 Verificación estructural y de la imagen final
 
-Test automatizado (gate de CI):
+Los tests de `tests/security/security.test.ts` verifican que Export no copia
+texto, estructuras ni metadatos sensibles del original. Usan pdf-lib real,
+pero el proveedor de imágenes entrega un PNG transparente constante:
+**no prueban que Render tape la tinta**. Se conservan como garantía
+estructural. Una coincidencia de texto original o metadata sensible en el
+archivo de salida hace fallar esa garantía.
 
-1. Tomar `text-10p.pdf` con nombres y DNIs.
-2. Procesar y exportar con todos los grupos habilitados en `placeholder`.
-3. Abrir el PDF resultante con PDF.js y buscar texto plano de cualquier nombre/DNI original.
-4. Verificar que **cero** resultados > 0 chars coincidentes.
-5. Verificar que la metadata del resultante no contiene `author`, `creator`, `title` del original.
+ADR-148 agrega la otra mitad: rasterizar y leer con OCR el **PDF final**,
+con un control original legible, ausencia de objetivos y fragmentos
+prohibidos, páginas y dimensiones conservadas y vecinos presentes.
+Separar reemplazos conocidos (geometría) del flujo de importación y
+detección (E2E). Un original que el OCR verificador no lee es inconcluso y
+falla; una página en blanco o totalmente tapada también falla.
 
-Cualquier regex que matche un DNI/nombre original en el export = fallo de gate.
+**Estado al 2026-10-05:** decisión aceptada, spec de implementación cerrado
+en `roadmap/hardening/Export_Verificado_ADR148_Plan.md`. Primera entrega
+sin aprobar: 20/21 en Windows, cero salteados, correcciones del arnés y
+diagnóstico mixto pendientes (`roadmap/hardening/ADR148_Revision_2026-10-05.md`).
+El comando existente y su estado se registran en la tabla canónica de
+`07_Performance_Strategy.md` §11.4; CI/macOS no verificada. No se
+atribuye esta cobertura al gate estructural actual. La lectura OCR es
+evidencia limitada: no reemplaza la revisión visual manual (ADR-148 §9).
 
 ### 4.3 Modo `redact` (censura visual)
 
 - En modo `redact`, el render pinta un bloque negro sólido sobre el bbox.
 - El texto **original** no se incluye en la imagen resultante (se pinta encima con fill opaco).
-- Garantía: incluso con OCR sobre la imagen, el texto debajo no se reconstruye porque la imagen se rasteriza sin el texto (se pinta fill antes del `convertToBlob`).
+- El bloque opaco elimina la tinta cubierta al rasterizar. La corrección de
+  su posición y extensión se verifica sobre el archivo final según §4.2;
+  la ausencia de lectura por un OCR no es una prueba matemática de
+  ilegibilidad para una persona (ADR-148 §9).
 
 ### 4.4 Caso trampa: redacción in-place
 
