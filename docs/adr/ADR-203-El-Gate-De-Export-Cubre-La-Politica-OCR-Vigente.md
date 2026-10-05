@@ -3,7 +3,7 @@
 # ADR-203 — El gate de export cubre la política OCR vigente
 
 - **Estado:** implementación y validación local APPROVED; 21/21 y R-16 verdes;
-  CI/macOS pendiente de ejecución sobre el cambio publicado.
+  export/macOS 21/21 y CI completa success sobre el cambio publicado.
 - **Fecha:** 2026-10-05.
 - **Decidido por:** el planificador, al resolver la instrucción humana de
   cerrar el criterio pendiente y buscar verde en todas las partes de ADR-148.
@@ -90,12 +90,16 @@ exactamente el source de referencia de 100 pt. Gate completo Windows 21/21,
 cero fallos/salteados. Sol auditó evidencia/hashes, cobertura normativa y
 los cinco gates R-16; cerró el único P2 de lint con capacidad 20 y dio
 APPROVED. Ver [el cierre documentado](../roadmap/hardening/ADR148_Cierre_ADR203_2026-10-05.md).
-La corrida remota está pendiente. El humano autorizó crear commits y hacer
+La corrida remota está acreditada por
+[run 37383499951](https://github.com/sgiambelluca/Anonly/actions/runs/37383499951),
+HEAD `93f0d3a`: export/macOS 21/21 y workflow completo success.
+El humano autorizó crear commits y hacer
 push utilizando develop para acumular los cambios y ejecutar CI sobre ese HEAD.
 El push directo fue rechazado por protección; los commits se publicaron en
 [PR #52 hacia develop](https://github.com/sgiambelluca/Anonly/pull/52).
-La ejecución manual incluye export/macOS sobre el código publicado; está
-en cola durante el incidente de runners de GitHub registrado en el informe.
+La primera espera quedó en cola durante el incidente de runners de GitHub;
+el relanzamiento posterior confirma el resultado completo. La integración
+del PR en develop no se realizó; la política OCR de publicación sigue en 100 pt.
 
 Se corrige una contradicción del plan, no un defecto del wiring de OCR.
 La revisión de corpus fue decidida antes de código; el implementador no

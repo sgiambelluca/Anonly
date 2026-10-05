@@ -84,7 +84,7 @@ restauró 100 pt en el runtime de trabajo y conservó los snapshots
 de este experimento. La variante pequeña permanece en caracterización;
 el mixed del gate tiene versión elegible nueva. La reversión y los gates
 quedaron verificadas localmente: 21/21, R-16 verde y Sol APPROVED local;
-CI remota pendiente. Ver [ADR-203](ADR-203-El-Gate-De-Export-Cubre-La-Politica-OCR-Vigente.md).
+CI completa success posterior, run 37383499951. Ver [ADR-203](ADR-203-El-Gate-De-Export-Cubre-La-Politica-OCR-Vigente.md).
 
 ### Resultado del experimento, 2026-10-05
 

@@ -28,7 +28,7 @@ consulta, salvo que su fila diga otra cosa.
 | [`ocr/`](./ocr/) | Orientación compartida (T5), fiabilidad de lectura (ADR-190) y las campañas de resolución del OCR | [`T5_OSD_Compartido_Cierre_Final.md`](./ocr/T5_OSD_Compartido_Cierre_Final.md) |
 | Investigación OCR de imágenes pequeñas (abierta, 1.0.x) | Política de regiones menores que el mínimo de ADR-065, con calidad y memoria; decidida por el humano el 2026-10-05 | [`Regiones_Pequenas_Investigacion_Plan.md`](./ocr/Regiones_Pequenas_Investigacion_Plan.md) |
 | Prototipo de mínimo 25 pt (ADR-202, piloto cerrado) | Evidencia/arnés aprobados; mixed recuperado, OCR adicional en capas alineadas; candidato no adoptado, costo no medido | [`Regiones_Pequenas_25pt_Experimento_Plan.md`](./ocr/Regiones_Pequenas_25pt_Experimento_Plan.md) |
-| Cierre del gate de export (ADR-203, aprobado local; CI pendiente) | Política 100 pt, mixed elegible versionado y pequeño histórico preservado; 21/21, R-16 verde y Sol APPROVED local | [`ADR148_Cierre_ADR203_2026-10-05.md`](./hardening/ADR148_Cierre_ADR203_2026-10-05.md) |
+| Cierre del gate de export (ADR-203, local y CI verde) | Política 100 pt, mixed elegible versionado y pequeño histórico preservado; 21/21 Windows/macOS, R-16 verde, Sol APPROVED local y CI completa success | [`ADR148_Cierre_ADR203_2026-10-05.md`](./hardening/ADR148_Cierre_ADR203_2026-10-05.md) |
 | [`distribucion/`](./distribucion/) | La postulación a SignPath para la firma de código de Windows. **Abierta**: enviada el 2026-10-02 | [`SignPath_Postulacion.md`](./distribucion/SignPath_Postulacion.md) |
 | [`mediciones/`](./mediciones/) | Los informes de cada medición, por motor. Cómo correr los arneses: `tests/perf/README.md` | [`mediciones/README.md`](./mediciones/README.md) |
 

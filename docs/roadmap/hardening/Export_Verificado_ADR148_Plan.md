@@ -8,7 +8,9 @@ con la política vigente de 100 pt. Mixed del gate versionado como
 en caracterización y documentar su fuga. Runtime experimental de 25 pt
 retirado del workspace; snapshots/evidencia intactos. Implementación de
 esta corrección y gate completo cerrados: **21/21, cero salteados, R-16
-verde y Sol APPROVED local**. CI/macOS sigue pendiente. La matriz y el oráculo no
+verde y Sol APPROVED local**. **CI/macOS 21/21 y corrida completa success**
+en [run 37383499951](https://github.com/sgiambelluca/Anonly/actions/runs/37383499951).
+La matriz y el oráculo no
 se aflojan. Ver [ADR-203](../../adr/ADR-203-El-Gate-De-Export-Cubre-La-Politica-OCR-Vigente.md).
 Evidencia final y revisión en
 [la ronda de cierre](ADR148_Cierre_ADR203_2026-10-05.md). Los resultados
