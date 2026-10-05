@@ -20,7 +20,9 @@ si hay algo nuevo.
 
 ## El flujo
 
-**1. Al hacer un cambio**, agregá un changeset:
+**1. Creá una rama de trabajo desde `develop`.** Features, fixes y documentación
+abren PR hacia `develop`. Si el cambio afecta lo que ve quien usa la app,
+agregá un changeset:
 
 ```bash
 pnpm changeset
@@ -29,10 +31,11 @@ pnpm changeset
 Elegís patch / minor / major y escribís una línea de qué cambió. Eso deja un
 `.md` en `.changeset/` que viaja en el PR.
 
-**2. Mergeás a `main` normalmente.** No se publica nada: `main` acumula
-changesets sin que ningún usuario reciba una actualización.
+**2. Integrás el PR a `develop`.** Ahí se acumulan los changesets de la próxima
+versión y se prueban todos los cambios juntos. No se publica ninguna actualización.
 
-**3. Cuando querés publicar**, aplicás los changesets acumulados:
+**3. Cuando querés publicar**, aplicás los changesets acumulados en una rama
+de preparación creada desde `develop` y abrís PR hacia ella:
 
 ```bash
 pnpm run version   # sube las versiones y escribe los CHANGELOG
@@ -41,11 +44,34 @@ pnpm run version   # sube las versiones y escribe los CHANGELOG
 Tiene que ser `pnpm run version`: `pnpm version` a secas es un comando propio
 de pnpm, que imprime versiones y no toca nada.
 
-**4. Esperás CI verde en `main` y tageás ese commit.** El tag debe coincidir exactamente con `v` + la versión de `apps/desktop-shell/package.json`. La validación del release rechaza un commit fuera de `main`, un tag que no coincide o un SHA sin CI exitosa. El tag dispara el release:
+**4. Probás la versión y preparás un PR hacia `main`, con Rebase and merge.**
+`main` y `develop` conservan historial lineal y ambas ramas son permanentes.
+Para preparar la promoción sin reescribir `develop`, creá una rama temporal
+desde ella y rebaseala sobre el último `main` antes de abrir el PR:
 
 ```bash
-git tag v0.9.3
-git push origin v0.9.3
+git fetch origin
+git switch -c release/1.1.0 origin/develop
+git rebase origin/main
+```
+
+El rebase local omite los patches equivalentes que ya están en `main` y permite
+resolver conflictos en la rama temporal. Revisá el diff final del PR y repetí
+las pruebas afectadas si la resolución cambia el contenido. Después integrá
+ese PR mediante Rebase and merge. No rebasees ni fuerces el push de `develop`.
+
+GitHub crea nuevos SHA al hacer Rebase and merge. Por eso las promociones no
+conservan la misma identidad de commits entre las dos ramas. No hace falta
+reintegrar toda la historia de `main` a `develop` después de cada promoción;
+los hotfixes y cualquier cambio exclusivo de `main` se trasladan por separado.
+
+**5. Esperás CI verde en `main` y tageás el commit validado.** El tag debe coincidir exactamente con `v` + la versión de `apps/desktop-shell/package.json`. La validación del release rechaza un commit fuera de `main`, un tag que no coincide o un SHA sin CI exitosa. El tag dispara el release:
+
+```bash
+git switch main
+git pull --ff-only origin main
+git tag v1.1.0
+git push origin v1.1.0
 ```
 
 `.github/workflows/release.yml` buildea en un runner de macOS y uno de
@@ -87,8 +113,10 @@ las dos firmas; la Ed25519 no se retira.
 **El release se crea como borrador.** El tag lo arma; publicarlo lo decidís
 vos, desde la página del release. Hasta entonces ningún usuario lo recibe.
 
-`workflow_dispatch`, seleccionado sobre `main`, corre todo el pipeline sin publicar nada, para probar que
-el camino funciona antes de tagear. Los jobs de Windows y macOS exigen y usan
+`workflow_dispatch`, seleccionado sobre `main` o `develop`, corre todo el
+pipeline sin crear un release: deja los instaladores como artifacts de Actions
+para probar antes de tagear. Exige CI exitosa de push para ese SHA en la rama
+seleccionada. Los jobs de Windows y macOS exigen y usan
 sus respectivos secrets (`WINDOWS_UPDATE_PRIVATE_KEY` y
 `SPARKLE_PRIVATE_KEY`) en esa prueba: es la forma segura de validar ambos
 circuitos de firma sin crear todavía un release.
@@ -100,14 +128,15 @@ El workflow declara el entorno `release` en los jobs de firma y de publicación
 
 - Revisor requerido: `sgiambelluca`. La autoaprobación está permitida mientras
   el proyecto tenga un solo autor; no es una segunda revisión independiente.
-- Ramas/tags permitidos: rama `main` y tags `v*`.
+- Ramas/tags permitidos: ramas `main` y `develop`, y tags `v*`.
 - Environment secrets: `SPARKLE_PRIVATE_KEY` y `WINDOWS_UPDATE_PRIVATE_KEY`.
   No deben quedar copias con alcance de repositorio u organización.
 
 Al ejecutar el workflow, abrí Actions → Release → ejecución → Review deployments.
 Verificá el SHA, el tag y el resultado de CI antes de aprobar el entorno. Los
-secrets se entregan al job después de esa aprobación. No apruebes un workflow
-modificado en una rama de trabajo, aunque la interfaz lo permita seleccionar.
+secrets se entregan al job después de esa aprobación. Para probar desde
+`develop`, revisá también los cambios del workflow antes de aprobar: recibe las
+mismas claves de firma. No apruebes ejecuciones de ramas de trabajo arbitrarias.
 
 Para migrar claves existentes, agregá sus valores originales al entorno,
 confirmá que ambos nombres están presentes y retiralos del alcance repositorio.
@@ -161,9 +190,42 @@ Y si una versión mala llega igual a producción, se arregla publicando el
 arreglo: el updater se lo empuja a todos. Es para lo que sirve tener
 actualizaciones automáticas.
 
-## Por qué no hay branch de producción
+## Protecciones de main y develop
 
-Porque el tag ya es el punto de corte. Una branch de release solo hace falta
-para parchear una versión vieja mientras `main` avanzó hacia otra cosa — un
-problema que este proyecto puede no tener nunca, y que si aparece se resuelve
-creando la branch ese día.
+`main` es la rama estable y sigue siendo la rama por defecto de GitHub.
+`develop` es la rama de integración de la próxima versión (ADR-199).
+
+Ambas exigen PR, conversaciones resueltas y prohíben force pushes y borrado.
+Los checks se aplican también al administrador y se vinculan a GitHub Actions.
+
+| Protección                                         | `develop`                                       | `main`                              |
+| -------------------------------------------------- | ----------------------------------------------- | ----------------------------------- |
+| Lint, Typecheck, Unit + Contract + Snapshot, Build | requeridos                                      | requeridos                          |
+| Security audit y Security gates                    | requeridos                                      | requeridos                          |
+| E2E (Playwright)                                   | después de integrar; no bloquea el PR cotidiano | requerido                           |
+| Rama actualizada antes del merge                   | no requerido                                    | requerido                           |
+| Performance                                        | después de integrar y a mano                    | en PR, después de integrar y a mano |
+| Memory leak y Stress                               | a mano                                          | después de integrar y a mano        |
+
+El ruleset de actualización de ambas ramas autoriza **solo a `sgiambelluca`** a
+integrar cambios, con una excepción limitada a merges de PR. No exime los checks
+de branch protection. `CODEOWNERS` solicita su revisión de todos los archivos.
+No se exige un segundo revisor para sus propios PRs: GitHub no permite aprobar
+un PR propio. No se otorgan permisos de administración a colaboradores externos.
+
+Los merge commits están deshabilitados y ambas ramas exigen historial lineal.
+Rebase and merge se usa para las promociones; squash sigue disponible para
+las ramas cortas. La protección contra borrado conserva las ramas permanentes
+aunque GitHub elimine automáticamente las ramas mergeadas.
+
+## Arreglos urgentes
+
+Si la versión publicada necesita un parche mientras `develop` contiene cambios
+incompletos, creá `hotfix/...` desde `main`, agregá el changeset y aplicá el bump
+del parche allí. Abrí PR hacia `main`, probá el arreglo, esperá su CI y publicá
+el tag como en el flujo anterior. Después creá una rama desde `develop`, llevá
+los commits del parche mediante cherry-pick y abrí PR hacia `develop`. Resolvé
+la versión y los CHANGELOG para conservar el parche junto al trabajo pendiente.
+
+La rama temporal `release/...` se usa para preparar la promoción con historial
+lineal; puede eliminarse después de integrar su PR.

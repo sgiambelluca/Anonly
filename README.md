@@ -88,7 +88,7 @@ El repositorio es un monorepo de pnpm con tres partes: `packages/anonymization-c
 
 ### Contribuir
 
-Los cambios llegan por pull request desde un fork, y los revisa y mergea el mantenedor. Las reglas del proyecto son estrictas a propósito; las principales:
+Los cambios llegan por pull request desde un fork hacia `develop`, y los revisa y mergea el mantenedor. `develop` reúne y prueba la próxima versión; luego se integra a la rama estable `main`. El flujo está en [`RELEASING.md`](./RELEASING.md). Las reglas principales:
 
 - Un commit toca un solo módulo.
 - Los contratos públicos de `docs/core/Contracts.md` no se rompen, y una decisión técnica no trivial se escribe como ADR antes de implementarse.
@@ -204,7 +204,7 @@ The repository is a pnpm monorepo with three parts: `packages/anonymization-core
 
 ### Contributing
 
-Changes arrive as pull requests from a fork and are reviewed and merged by the maintainer. The project rules are strict on purpose. The main ones:
+Changes arrive as pull requests from a fork targeting `develop` and are reviewed and merged by the maintainer. `develop` brings together and tests the next version before it is merged into the stable `main` branch. The workflow is documented in [`RELEASING.md`](./RELEASING.md) (Spanish). The main rules:
 
 - A commit touches a single module.
 - The public contracts in `docs/core/Contracts.md` are not broken, and any non-trivial technical decision is written as an ADR before it is implemented.
