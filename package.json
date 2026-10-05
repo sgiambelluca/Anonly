@@ -34,6 +34,7 @@
     "test:leak": "pnpm assets:mirror && cross-env VITE_E2E=1 pnpm --filter @anonly/react-client build && pnpm --filter @anonly/desktop-shell build && playwright test --config=playwright.leak.config.ts",
     "test:cancel": "vitest run tests/cancel",
     "test:security": "vitest run tests/security",
+    "audit:security": "tsx scripts/security-audit.ts",
     "test:integration": "vitest run tests/integration",
     "test:quality": "tsx --tsconfig tests/tsconfig.json tests/quality/main.ts",
     "test:all": "pnpm lint && pnpm typecheck && pnpm test && pnpm test:e2e",
@@ -66,11 +67,13 @@
     "tsx": "^4.19.1",
     "typescript": "^5.6.2",
     "typescript-eslint": "^8.8.0",
-    "vitest": "^4.1.11"
+    "vitest": "^4.1.11",
+    "yaml": "2.9.0"
   },
   "pnpm": {
     "overrides": {
       "vite": "^6.4.3",
+      "app-builder-lib>@electron/get": "5.1.0",
       "esbuild": "^0.25.0",
       "vitest": "^4.1.11",
       "@vitest/coverage-v8": "^4.1.11",
@@ -87,6 +90,9 @@
       "undici@^6": "^6.28.1",
       "undici@^7": "^7.29.1",
       "undici@^8": "^8.10.2"
+    },
+    "patchedDependencies": {
+      "braces@3.0.3": "patches/braces@3.0.3.patch"
     }
   },
   "lint-staged": {
