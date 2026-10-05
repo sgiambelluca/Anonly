@@ -48,6 +48,7 @@ reducir el threshold ni modificar producción.
 Las dos alertas altas detectadas por `pnpm audit` sobre `braces` y
 `http-cache-semantics` son avisos distintos y no forman parte de las 16 alertas
 de Dependabot. Esta actualización no los oculta ni desactiva el audit.
+ADR-201 documenta su corrección posterior dentro del mismo PR de seguridad.
 
 ## Referencias
 

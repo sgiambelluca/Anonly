@@ -194,7 +194,9 @@ jobs:
           npm_config_fetch_retries: "0"
           npm_config_fetch_timeout: "20000"
         run: |
-          if salida="$(pnpm audit --audit-level=high 2>&1)"; then
+          # ADR-201: el único advisory aceptado requiere parche instalado,
+          # lockfile y hashes exactos, y regresiones ejecutadas antes del audit.
+          if salida="$(pnpm audit:security 2>&1)"; then
             echo "$salida"
             exit 0
           fi
