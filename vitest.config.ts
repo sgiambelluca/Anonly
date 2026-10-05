@@ -206,6 +206,7 @@ export default defineConfig({
         "packages/**/src/**/*.ts",
         "apps/desktop-shell/src/windows-update-signature.ts",
         "apps/desktop-shell/src/update-check-policy.ts",
+        "scripts/security-audit-policy.ts",
       ],
       exclude: [
         "packages/**/src/**/__tests__/**",
@@ -225,6 +226,12 @@ export default defineConfig({
       // documentado es solo de líneas). Al implementar un motor nuevo (Hito 3+),
       // agregar su glob acá en el mismo PR.
       thresholds: {
+        "scripts/security-audit-policy.ts": {
+          lines: 85,
+          statements: 85,
+          branches: 80,
+          functions: 80,
+        },
         "packages/anonymization-core/shared/src/**": {
           lines: 85,
           statements: 85,
