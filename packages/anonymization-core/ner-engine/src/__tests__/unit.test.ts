@@ -648,6 +648,7 @@ describe("NerEngine — unit tests", () => {
       await engine.processPages([makeNerPageInput("doc-model-warm", 0, ["Hola"])], ctx);
 
       const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+      busEmitSpy.mockClear();
       await engine.processPages([makeNerPageInput("doc-model-warm", 1, ["Chau"])], ctx);
 
       expect(busEmitSpy).not.toHaveBeenCalledWith(
@@ -1158,6 +1159,7 @@ describe("NerEngine — unit tests", () => {
     const missingEngine = new NerEngine(missingPool);
     await missingEngine.init(ctx);
     const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+    busEmitSpy.mockClear();
     await expect(
       missingEngine.processPage(makeNerPageInput("doc-deserialized-missing", 0, ["Hola"]), ctx),
     ).rejects.toBeInstanceOf(NerModelMissingError);
