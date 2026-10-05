@@ -369,6 +369,7 @@ describe("OcrEngine — unit tests", () => {
       await engine.processPages([createValidOcrPageInput("doc-model-warm", 0)], ctx);
 
       const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+      busEmitSpy.mockClear();
       await engine.processPages([createValidOcrPageInput("doc-model-warm", 1)], ctx);
 
       expect(busEmitSpy).not.toHaveBeenCalledWith(
@@ -1129,6 +1130,7 @@ describe("OcrEngine — unit tests", () => {
       await new Promise<void>((resolve) => setTimeout(resolve, 0)); // deja asentar el cleanup async
 
       const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+      busEmitSpy.mockClear();
       await pooledEngine.processSession(
         [createValidOcrPageRequest("doc-warm-release", 1)],
         createImageProducer(),
