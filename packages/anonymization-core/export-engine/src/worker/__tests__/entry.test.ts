@@ -286,7 +286,7 @@ describe("ExportWorker entry-point — ensamblador con estado (ADR-047 §3/§4)"
   it("CANCEL discards the partial PDFDocument and answers CANCELLED (caso 13)", async () => {
     const pendingDoc = createMockPdfLibDocument();
     // embedJpg nunca resuelve: simula un append-page en vuelo.
-    (pendingDoc["embedJpg"] as ReturnType<typeof vi.fn>).mockImplementation(
+    vi.mocked(asPdfDocument(pendingDoc).embedJpg).mockImplementation(
       () => new Promise(() => undefined),
     );
     vi.mocked(PDFDocument.create).mockResolvedValueOnce(asPdfDocument(pendingDoc));
