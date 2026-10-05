@@ -4,7 +4,7 @@
 
 > Registro histórico de las primeras rondas. La ronda posterior bajo ADR-203
 > cerró el corpus elegible con 21/21 y R-16 verdes: Sol 6.1 **APPROVED local**.
-> La limitación del mixed pequeño permanece; CI remota pendiente. Ver
+> La limitación del mixed pequeño permanece; CI completa success posterior, run 37383499951. Ver
 > [el cierre posterior](ADR148_Cierre_ADR203_2026-10-05.md).
 
 **2026-10-05. VEREDICTO: REJECTED.** Revisión del working tree actual,

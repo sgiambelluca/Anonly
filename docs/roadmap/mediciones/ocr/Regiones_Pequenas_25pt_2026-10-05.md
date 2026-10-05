@@ -4,7 +4,7 @@
 
 > **Cierre posterior ADR-203:** el humano pidió cerrar el criterio de ADR-148.
 > Se restauró 100 pt en el workspace y se creó un mixed elegible versionado
-> para ese gate, con 21/21, R-16 verde y Sol APPROVED local (CI pendiente).
+> para ese gate, con 21/21, R-16 verde y Sol APPROVED local (CI completa success posterior, run 37383499951).
 > La variante pequeña y snapshots de esta investigación se
 > conservan. Las referencias a prototipo activo en el relato siguiente
 > describen el estado histórico del experimento, no una política actual.

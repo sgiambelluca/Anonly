@@ -8,7 +8,8 @@
 > `mixed-small-v1-300x56` se conserva en caracterización como limitación.
 > Se retira el candidato de 25 pt del runtime de trabajo, sin adoptarlo.
 > Implementación de esta corrección, **21/21 sin salteados, R-16 y revisión
-> Sol APPROVED local** completados. CI/macOS remota pendiente.
+> Sol APPROVED local** completados. **CI/macOS 21/21 y corrida completa
+> success** acreditados en [run 37383499951](https://github.com/sgiambelluca/Anonly/actions/runs/37383499951).
 > Ver [ADR-203](ADR-203-El-Gate-De-Export-Cubre-La-Politica-OCR-Vigente.md).
 > [Evidencia y cierre local](../roadmap/hardening/ADR148_Cierre_ADR203_2026-10-05.md).
 
