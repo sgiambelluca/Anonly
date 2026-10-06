@@ -263,10 +263,18 @@ class StubCanvasContext2D {
   // determinista, mismo criterio que `measureStubTextWidth` de
   // `render-engine/src/__tests__/fixtures/test-helpers.ts`: alcanza con que
   // crezca con el tamaño de fuente y el largo del texto.
-  measureText(text: string): { readonly width: number } {
+  measureText(text: string): {
+    readonly width: number;
+    readonly actualBoundingBoxAscent: number;
+    readonly actualBoundingBoxDescent: number;
+  } {
     const sizeMatch = /^([\d.]+)px/.exec(this.font);
     const size = sizeMatch ? Number(sizeMatch[1]) : 0;
-    return { width: text.length * size * 0.6 };
+    return {
+      width: text.length * size * 0.6,
+      actualBoundingBoxAscent: size * 0.8,
+      actualBoundingBoxDescent: size * 0.2,
+    };
   }
   drawImage(): void {}
   putImageData(): void {}

@@ -305,6 +305,7 @@ import {
   type IEngine,
   type LoadDocumentPayload,
   type MarkerLegendRow,
+  type PreviewInteractionGeometry,
   type RasterizePagePayload,
   type RenderLegendPayload,
   type RenderPagePayload as RenderPagePayloadWire,
@@ -456,7 +457,41 @@ function isKernelRenderResult(value: unknown): value is KernelRenderResult {
     // aceptarlo sería devolver un default en silencio, que ADR-055 §3
     // prohíbe — y el default silencioso de un veredicto de legibilidad es
     // "no hay nada degradado", que es justamente la mentira peligrosa.
-    Array.isArray(value.degraded)
+    Array.isArray(value.degraded) &&
+    (value.interactionGeometry === undefined ||
+      isPreviewInteractionGeometry(value.interactionGeometry))
+  );
+}
+
+function isPreviewInteractionGeometry(value: unknown): value is PreviewInteractionGeometry {
+  const isBox = (box: unknown): boolean =>
+    isRecord(box) &&
+    [box.x, box.y, box.width, box.height].every(
+      (part) => typeof part === "number" && Number.isFinite(part),
+    ) &&
+    (box.rotation === undefined ||
+      box.rotation === 0 ||
+      box.rotation === 90 ||
+      box.rotation === 180 ||
+      box.rotation === 270);
+  return (
+    isRecord(value) &&
+    Number.isInteger(value.revision) &&
+    typeof value.scale === "number" &&
+    Number.isFinite(value.scale) &&
+    value.scale > 0 &&
+    Array.isArray(value.wordPositions) &&
+    value.wordPositions.every(
+      (item) => isRecord(item) && isBox(item.sourceBbox) && isBox(item.bbox),
+    ) &&
+    Array.isArray(value.coveredRegions) &&
+    value.coveredRegions.every(
+      (item) =>
+        isRecord(item) &&
+        typeof item.occurrenceId === "string" &&
+        isBox(item.sourceBbox) &&
+        isBox(item.bbox),
+    )
   );
 }
 
@@ -645,10 +680,11 @@ function buildCacheKey(
   kind: "original" | "anonymized",
   mode: "preview" | "full",
   scale: number,
+  interactionRevision: number,
   replacements: ReadonlyArray<Replacement>,
   annotations: ReadonlyArray<Annotation>,
 ): string {
-  return `${documentId}:${pageIndex}:${kind}:${mode}:${scale}:${hashPageContent(replacements, annotations)}`;
+  return `${documentId}:${pageIndex}:${kind}:${mode}:${scale}:${interactionRevision}:${hashPageContent(replacements, annotations)}`;
 }
 
 function pageKey(documentId: string, pageIndex: number): string {
@@ -729,6 +765,7 @@ interface InternalCacheEntry {
    * ausencia nunca significa "no sé".
    */
   readonly degraded: ReadonlyArray<Annotation>;
+  readonly interactionGeometry?: PreviewInteractionGeometry;
 }
 
 // ADR-037 §3 (redefinido por ADR-156): tamaño estimado de una entrada de
@@ -738,7 +775,13 @@ interface InternalCacheEntry {
 // codificado) — y ya no existen en la entrada: se cuenta solo lo que de
 // verdad queda retenido.
 function estimateEntryBytes(entry: InternalCacheEntry): number {
-  return entry.encoded.bytes.byteLength;
+  const geometry = entry.interactionGeometry;
+  return (
+    entry.encoded.bytes.byteLength +
+    (geometry === undefined
+      ? 0
+      : geometry.wordPositions.length * 80 + geometry.coveredRegions.length * 112)
+  );
 }
 
 /**
@@ -753,6 +796,9 @@ function toPublicOutput(entry: InternalCacheEntry, mode: "preview" | "full"): Re
     kind: entry.kind,
     durationMs: entry.durationMs,
     ...(mode === "full" ? { encoded: entry.encoded } : {}),
+    ...(mode === "preview" && entry.interactionGeometry !== undefined
+      ? { interactionGeometry: entry.interactionGeometry }
+      : {}),
   };
 }
 
@@ -802,6 +848,9 @@ export class RenderEngine implements IEngine {
   // Último RenderPageInput usado por página (para la reconstrucción de RENDER_REQUESTED).
   private readonly lastAnonymizedInputs = new Map<string, RenderPageInput>();
   private readonly lastOriginalInputs = new Map<string, RenderPageInput>();
+  // A valid anonymous preview request materializes a page even while its
+  // raster is pending. Seeds use this to refresh materialized pages only.
+  private readonly requestedAnonymizedPreviewPages = new Set<string>();
   // Supersede por página (ADR-037 §4, nota 6 de cabecera) — clave
   // `documentId:pageIndex:kind` → escala vigente registrada por el último
   // RENDER_REQUESTED. Poblada únicamente por handleRenderRequested y
@@ -998,6 +1047,29 @@ export class RenderEngine implements IEngine {
     return this.renderPageInternal(input, ctx, false);
   }
 
+  /**
+   * Remember an anonymized preview without raster work. Returns whether this
+   * page already had a valid preview request since loadDocument.
+   */
+  preparePreviewInput(input: RenderPageInput): boolean {
+    this.assertNotDisposed();
+    this.assertInitialized();
+    this.validateRenderPageInput(input);
+    if (input.kind !== "anonymized" || input.mode !== "preview") {
+      throw new InvalidInputError("preparePreviewInput requiere anonymized preview.", {
+        documentId: input.documentId,
+        pageIndex: input.pageIndex,
+        kind: input.kind,
+        mode: input.mode,
+      });
+    }
+
+    const key = pageKey(input.documentId, input.pageIndex);
+    const wasRequested = this.requestedAnonymizedPreviewPages.has(key);
+    this.rememberInput(input);
+    return wasRequested;
+  }
+
   private async renderPageInternal(
     input: RenderPageInput,
     ctx: EngineContext,
@@ -1006,35 +1078,8 @@ export class RenderEngine implements IEngine {
     this.assertNotDisposed();
     this.assertInitialized();
 
-    if (input == null) {
-      throw new InvalidInputError("Input es null o undefined.", { engineId: EngineId.Render });
-    }
-
+    this.validateRenderPageInput(input);
     const { documentId, pageIndex, kind, mode } = input;
-    const doc = this.documents.get(documentId);
-    if (doc === undefined) {
-      // §11 / ADR-030 §2: renderPage/renderPages sobre documentId no cargado → INVALID_INPUT.
-      throw new InvalidInputError(
-        `Documento ${documentId} no está cargado. Llamá loadDocument antes de renderPage/renderPages (ADR-030).`,
-        { documentId },
-      );
-    }
-
-    if (!Number.isInteger(pageIndex) || pageIndex < 0 || pageIndex >= doc.pageCount) {
-      throw new InvalidInputError(
-        `pageIndex ${pageIndex} fuera de rango para documento con ${doc.pageCount} páginas.`,
-        { documentId, pageIndex, pageCount: doc.pageCount },
-      );
-    }
-
-    // ADR-037 §2: guard de rango en invocación directa → InvalidInputError
-    // (endurece una laguna previa: RenderPageInput.scale no declaraba validación).
-    if (input.scale !== undefined && !isValidScale(input.scale)) {
-      throw new InvalidInputError(
-        `scale ${input.scale} fuera de rango (0, ${MAX_RENDER_SCALE}] o no finito.`,
-        { documentId, pageIndex, scale: input.scale },
-      );
-    }
 
     if (ctx.abortSignal.aborted) {
       throw new CancelledError(documentId);
@@ -1057,6 +1102,7 @@ export class RenderEngine implements IEngine {
         ? this.getCurrentPreviewScale(documentId, kind, ctx)
         : ctx.config.render.fullScale);
     const imageFormat = input.imageFormat ?? (mode === "preview" ? "png" : "jpeg");
+    const interactionRevision = input.interactionRevision ?? 0;
 
     // ADR-037 §4, alcance precisado por el hallazgo del PR4 (nota 6 de
     // cabecera): solo los renders originados en RENDER_REQUESTED participan
@@ -1080,6 +1126,9 @@ export class RenderEngine implements IEngine {
     // corre ACÁ, antes de decidir si esta clave va al scheduler o despacha
     // inmediato — ninguna página queda sin su input por estar esperando
     // turno. `handleRenderRequested` reconstruye RENDER_REQUESTED desde acá.
+    if (kind === "anonymized" && mode === "preview") {
+      this.requestedAnonymizedPreviewPages.add(pageKey(documentId, pageIndex));
+    }
     this.rememberInput(input);
 
     if (mode === "full") {
@@ -1094,6 +1143,7 @@ export class RenderEngine implements IEngine {
         mode,
         scale,
         imageFormat,
+        interactionRevision,
         replacements,
         annotations,
         lineWords: input.lineWords,
@@ -1174,6 +1224,7 @@ export class RenderEngine implements IEngine {
             replacements: fresh.replacements,
             annotations: fresh.annotations,
             lineWords: fresh.lineWords,
+            interactionRevision: fresh.interactionRevision,
             ctx,
             checkpoint,
             priority: currentPriority,
@@ -1241,6 +1292,7 @@ export class RenderEngine implements IEngine {
     readonly kind: "original" | "anonymized";
     readonly mode: "preview" | "full";
     readonly scale: number;
+    readonly interactionRevision: number;
     readonly imageFormat: "png" | "jpeg";
     readonly replacements: ReadonlyArray<Replacement>;
     readonly annotations: ReadonlyArray<Annotation>;
@@ -1255,6 +1307,7 @@ export class RenderEngine implements IEngine {
       kind,
       mode,
       scale,
+      interactionRevision,
       imageFormat,
       replacements,
       annotations,
@@ -1270,6 +1323,7 @@ export class RenderEngine implements IEngine {
       kind,
       mode,
       scale,
+      interactionRevision,
       replacements,
       annotations,
     );
@@ -1290,6 +1344,7 @@ export class RenderEngine implements IEngine {
       annotations,
       scale,
       imageFormat,
+      ...(mode === "preview" && kind === "anonymized" ? { interactionRevision } : {}),
       // ADR-058 §5: reenvío puro, sin tocar hashPageContent/buildCacheKey — es
       // función pura de (documentId, pageIndex, replacements), datos que ya
       // integran la clave de cache (ver comentario de hashPageContent), mismo
@@ -1323,6 +1378,29 @@ export class RenderEngine implements IEngine {
     // único paso permitido antes de tocar imageData/encoded (nunca un cast a
     // ciegas). Ver su comentario más arriba (junto a IMMEDIATE_POOL).
     const kernelResult = decodeKernelRenderResult(dispatchResult, documentId, pageIndex);
+    if (
+      mode === "preview" &&
+      kind === "anonymized" &&
+      (kernelResult.interactionGeometry === undefined ||
+        kernelResult.interactionGeometry.revision !== interactionRevision ||
+        kernelResult.interactionGeometry.scale !== scale)
+    ) {
+      throw new RenderPageFailedError(
+        documentId,
+        pageIndex,
+        "El kernel no devolvió geometría vigente para el preview anonimizado.",
+      );
+    }
+    if (
+      (mode !== "preview" || kind !== "anonymized") &&
+      kernelResult.interactionGeometry !== undefined
+    ) {
+      throw new RenderPageFailedError(
+        documentId,
+        pageIndex,
+        "El kernel devolvió geometría fuera del preview anonimizado.",
+      );
+    }
 
     // Segundo checkpoint — ver el comentario de cabecera de este método.
     checkpoint();
@@ -1337,6 +1415,9 @@ export class RenderEngine implements IEngine {
       encoded: kernelResult.encoded,
       durationMs,
       degraded: kernelResult.degraded,
+      ...(kernelResult.interactionGeometry !== undefined
+        ? { interactionGeometry: kernelResult.interactionGeometry }
+        : {}),
     };
 
     return { cacheKey, entry, output: toPublicOutput(entry, mode), cacheHit: false };
@@ -1392,6 +1473,7 @@ export class RenderEngine implements IEngine {
     readonly replacements: ReadonlyArray<Replacement>;
     readonly annotations: ReadonlyArray<Annotation>;
     readonly lineWords: ReadonlyArray<Word> | undefined;
+    readonly interactionRevision: number;
   } {
     const key = pageKey(documentId, pageIndex);
     const remembered =
@@ -1400,6 +1482,7 @@ export class RenderEngine implements IEngine {
       replacements: kind === "anonymized" ? (remembered?.replacements ?? []) : [],
       annotations: kind === "original" ? (remembered?.annotations ?? []) : [],
       lineWords: remembered?.lineWords,
+      interactionRevision: remembered?.interactionRevision ?? 0,
     };
   }
 
@@ -1665,6 +1748,7 @@ export class RenderEngine implements IEngine {
     this.cacheBytes = 0;
     this.lastAnonymizedInputs.clear();
     this.lastOriginalInputs.clear();
+    this.requestedAnonymizedPreviewPages.clear();
     this.pendingRenders.clear();
     this.currentPreviewScale.clear();
     // ADR-144 §8: mismo criterio que `clearDocument` (ver
@@ -1865,14 +1949,59 @@ export class RenderEngine implements IEngine {
       kind: entry.kind,
       canvasBlobUrl,
       degraded: entry.degraded,
+      ...(entry.interactionGeometry !== undefined
+        ? { interactionGeometry: entry.interactionGeometry }
+        : {}),
     });
     return Promise.resolve();
+  }
+
+  private validateRenderPageInput(input: RenderPageInput): RetainedDocument {
+    if (input == null) {
+      throw new InvalidInputError("Input es null o undefined.", { engineId: EngineId.Render });
+    }
+    const { documentId, pageIndex } = input;
+    const doc = this.documents.get(documentId);
+    if (doc === undefined) {
+      throw new InvalidInputError(
+        `Documento ${documentId} no está cargado. Llamá loadDocument antes de renderPage/renderPages (ADR-030).`,
+        { documentId },
+      );
+    }
+    if (!Number.isInteger(pageIndex) || pageIndex < 0 || pageIndex >= doc.pageCount) {
+      throw new InvalidInputError(
+        `pageIndex ${pageIndex} fuera de rango para documento con ${doc.pageCount} páginas.`,
+        { documentId, pageIndex, pageCount: doc.pageCount },
+      );
+    }
+    if (input.scale !== undefined && !isValidScale(input.scale)) {
+      throw new InvalidInputError(
+        `scale ${input.scale} fuera de rango (0, ${MAX_RENDER_SCALE}] o no finito.`,
+        { documentId, pageIndex, scale: input.scale },
+      );
+    }
+    if (
+      input.interactionRevision !== undefined &&
+      (!Number.isInteger(input.interactionRevision) || input.interactionRevision < 0)
+    ) {
+      throw new InvalidInputError("interactionRevision debe ser un entero no negativo.", {
+        documentId,
+        pageIndex,
+        interactionRevision: input.interactionRevision,
+      });
+    }
+    return doc;
   }
 
   /** Recuerda el último `RenderPageInput` por página, para la reconstrucción de `RENDER_REQUESTED` (nota 1 de cabecera). */
   private rememberInput(input: RenderPageInput): void {
     const key = pageKey(input.documentId, input.pageIndex);
     if (input.kind === "anonymized") {
+      // Full renders (export) draw their own snapshot but must not replace an
+      // already remembered preview input. Zoom/refresh reconstructs from this
+      // map, where interactionRevision and the latest edits must stay paired.
+      // Keep the legacy fallback when no preview has been remembered yet.
+      if (input.mode === "full" && this.lastAnonymizedInputs.get(key)?.mode === "preview") return;
       this.lastAnonymizedInputs.set(key, input);
     } else {
       this.lastOriginalInputs.set(key, input);
@@ -1932,6 +2061,9 @@ export class RenderEngine implements IEngine {
     }
     for (const key of [...this.lastOriginalInputs.keys()]) {
       if (key.startsWith(prefix)) this.lastOriginalInputs.delete(key);
+    }
+    for (const key of this.requestedAnonymizedPreviewPages) {
+      if (key.startsWith(prefix)) this.requestedAnonymizedPreviewPages.delete(key);
     }
     for (const key of [...this.pendingRenders.keys()]) {
       if (key.startsWith(prefix)) this.pendingRenders.delete(key);
