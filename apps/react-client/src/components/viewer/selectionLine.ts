@@ -64,12 +64,34 @@ export function dominantLineWords(
       flush();
       continue;
     }
-    // Un renglón avanza hacia la derecha: que la `x` RETROCEDA es el retorno
-    // de carro. Hace falta además de la contigüidad porque dos renglones
-    // seguidos de una misma columna sí son contiguos en `Page.words` — es el
-    // caso del sello, donde `PROVINCIA…AIRES` y `TRIBUNAL…PENAL` van pegados.
     const previous = run[run.length - 1];
-    if (previous !== undefined && word.bbox.x < previous.bbox.x) flush();
+    if (previous !== undefined) {
+      const orientation = (box: BoundingBox): { vertical: boolean; reverse: boolean } => {
+        const rotation = (((box.rotation ?? 0) % 360) + 360) % 360;
+        return {
+          vertical: rotation === 90 || rotation === 270,
+          reverse: rotation === 180 || rotation === 270,
+        };
+      };
+      const before = orientation(previous.bbox);
+      const current = orientation(word.bbox);
+      const sameOrientation =
+        before.vertical === current.vertical && before.reverse === current.reverse;
+      const sameBand = before.vertical
+        ? Math.min(previous.bbox.x + previous.bbox.width, word.bbox.x + word.bbox.width) >
+          Math.max(previous.bbox.x, word.bbox.x)
+        : Math.min(previous.bbox.y + previous.bbox.height, word.bbox.y + word.bbox.height) >
+          Math.max(previous.bbox.y, word.bbox.y);
+      const advance = (box: BoundingBox, vertical: boolean, reverse: boolean): number =>
+        (vertical ? box.y + box.height / 2 : box.x + box.width / 2) * (reverse ? -1 : 1);
+      if (
+        !sameOrientation ||
+        !sameBand ||
+        advance(word.bbox, current.vertical, current.reverse) <
+          advance(previous.bbox, before.vertical, before.reverse)
+      )
+        flush();
+    }
     run.push(word);
     runArea += intersectionArea(word.bbox, rect);
   }

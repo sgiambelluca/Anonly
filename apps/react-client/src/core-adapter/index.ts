@@ -73,6 +73,8 @@ const stores: Stores = {
   viewer: useViewerStore,
   settings: useSettingsStore,
   unreadableInk: useUnreadableInkStore,
+  getPreviewInteractionRevision: (documentId, pageIndex) =>
+    core?.orchestrator.getPreviewInteractionRevision(documentId, pageIndex) ?? null,
 };
 
 let core: IAnonymizationCore | undefined;

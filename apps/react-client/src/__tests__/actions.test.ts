@@ -2,6 +2,8 @@ import {
   ConflictReason,
   createEventBus,
   EngineEvents,
+  EngineErrorCode,
+  EngineId,
   EntityType,
   EventChannel,
   PipelineStage,
@@ -32,10 +34,29 @@ const createEditCheckpoint = vi.fn();
 const restoreEditCheckpoint = vi.fn();
 const discardEditCheckpoints = vi.fn();
 const getSnapshot = vi.fn();
+let stageChanged: ((payload: { documentId: string; stage: PipelineStage }) => void) | undefined;
+const subscribeBus = vi.fn(
+  (
+    _channel: EventChannel,
+    _event: EngineEvents,
+    handler: (payload: { documentId: string; stage: PipelineStage }) => void,
+  ) => {
+    stageChanged = handler;
+    return () => {
+      stageChanged = undefined;
+    };
+  },
+);
 
 vi.mock("../core-adapter/index.js", () => {
   const getCore = () => ({
-    bus: { emit, on: vi.fn(), once: vi.fn(), off: vi.fn(), emitAsync: vi.fn() },
+    bus: {
+      emit,
+      on: subscribeBus,
+      once: vi.fn(),
+      off: vi.fn(),
+      emitAsync: vi.fn(),
+    },
     orchestrator: {
       importDocument,
       retryWithPassword,
@@ -82,9 +103,17 @@ function makeRule(overrides: Partial<Rule> = {}): Rule {
 describe("actions", () => {
   beforeEach(() => {
     emit.mockClear();
+    subscribeBus.mockClear();
+    stageChanged = undefined;
+    subscribeBus.mockImplementation((_channel, _event, handler) => {
+      stageChanged = handler;
+      return () => {
+        stageChanged = undefined;
+      };
+    });
     importDocument.mockClear();
     retryWithPassword.mockClear();
-    reanalyze.mockClear();
+    reanalyze.mockReset().mockResolvedValue(undefined);
     addManualEntity.mockClear();
     getPageWords.mockClear();
     getPageSize.mockClear();
@@ -367,6 +396,34 @@ describe("actions", () => {
         expect(inFlight()).toBe(false);
       });
 
+      it("invalidates export content on the first effective transition, before awaiting Core", async () => {
+        useDocumentStore.setState({ id: "doc-1" });
+        useViewerStore.getState().setPreview(0, "anonymized", "blob:anon", {
+          revision: 0,
+          scale: 1,
+          wordPositions: [],
+          coveredRegions: [],
+        });
+        let versionAtTransition = -1;
+        reanalyze.mockImplementation(() => {
+          stageChanged?.({ documentId: "doc-1", stage: PipelineStage.OCRing });
+          versionAtTransition = usePipelineStore.getState().currentVersion;
+          return Promise.resolve();
+        });
+
+        await actions.reanalyze({ ocr: { languages: ["spa"] } });
+
+        expect(versionAtTransition).toBe(1);
+        expect(usePipelineStore.getState().currentVersion).toBe(1);
+        expect(useViewerStore.getState().interactionGeometryByPage.size).toBe(0);
+      });
+
+      it("does not invalidate a no-op reanalysis that emits no transition", async () => {
+        useDocumentStore.setState({ id: "doc-1" });
+        await actions.reanalyze({ ocr: { languages: ["spa"] } });
+        expect(usePipelineStore.getState().currentVersion).toBe(0);
+      });
+
       it("a PIPELINE_CANCELLED emitted during the reanalysis leaves the stage in Ready (real bridge)", async () => {
         const bus = createEventBus({
           logger: { debug() {}, info() {}, warn() {}, error() {} },
@@ -436,11 +493,75 @@ describe("actions", () => {
         filename: "out.pdf",
         includeMarkerLegend: false,
       };
+      usePipelineStore.setState({
+        error: {
+          code: EngineErrorCode.EXPORT_FAILED,
+          engineId: EngineId.Export,
+          message: "previous failure",
+          retryable: true,
+          details: {},
+        },
+      });
       actions.requestExport(options);
+      expect(usePipelineStore.getState().error).toBeNull();
       expect(emit).toHaveBeenCalledWith(EventChannel.UI, EngineEvents.EXPORT_REQUESTED, {
         documentId: "doc-1",
         options,
       });
+    });
+
+    it("clears a failed export and accepts the subsequent successful result", () => {
+      useDocumentStore.setState({ id: "doc-1" });
+      usePipelineStore.setState({
+        currentVersion: 6,
+        error: {
+          code: EngineErrorCode.EXPORT_FAILED,
+          engineId: EngineId.Export,
+          message: "first attempt failed",
+          retryable: true,
+          details: {},
+        },
+      });
+      const options = {
+        imageFormat: "jpeg" as const,
+        jpegQuality: 0.8,
+        dpi: 300,
+        includeOriginalMetadata: false as const,
+        filename: "retry.pdf",
+        includeMarkerLegend: false,
+      };
+
+      expect(actions.requestExport(options)).toBe(true);
+      expect(usePipelineStore.getState()).toMatchObject({
+        exportingVersion: 6,
+        exportResult: null,
+        exportProgress: null,
+        error: null,
+      });
+
+      const bus = createEventBus({ logger: { debug() {}, info() {}, warn() {}, error() {} } });
+      const unsubscribe = subscribe(bus, {
+        document: useDocumentStore,
+        entities: useEntitiesStore,
+        rules: useRulesStore,
+        pipeline: usePipelineStore,
+        viewer: useViewerStore,
+        settings: useSettingsStore,
+        unreadableInk: useUnreadableInkStore,
+      });
+      bus.emit(EventChannel.Export, EngineEvents.EXPORT_FINISHED, {
+        documentId: "doc-1",
+        blobUrl: "blob:retry",
+        sizeBytes: 321,
+        durationMs: 10,
+      });
+      expect(usePipelineStore.getState()).toMatchObject({
+        exportedVersion: 6,
+        exportingVersion: null,
+        exportResult: { blobUrl: "blob:retry", sizeBytes: 321 },
+        error: null,
+      });
+      unsubscribe();
     });
 
     it("cancel emits CANCEL_REQUESTED on the pipeline channel", () => {
@@ -545,6 +666,7 @@ describe("actions.removeGroup (ADR-171 §5)", () => {
       ],
     ]);
     expect(useRulesStore.getState().rules.map((rule) => rule.id)).toEqual(["r-g2"]);
+    expect(usePipelineStore.getState().currentVersion).toBe(1);
   });
 });
 
@@ -581,6 +703,35 @@ describe("pila de deshacer conectada al Core (ADR-172)", () => {
     expect(useHistoryStore.getState().future).toEqual([
       { checkpointId: "cp-now", label: "Fusionar" },
     ]);
+  });
+
+  it("undo and redo advance export version after successful identical restores", async () => {
+    useDocumentStore.setState({ id: "doc-1" });
+    createEditCheckpoint.mockReturnValueOnce("cp-before").mockReturnValueOnce("cp-now");
+    restoreEditCheckpoint.mockResolvedValue(undefined);
+    const snapshot = { documentId: "doc-1", groups: [], conflicts: [], rules: [] };
+    getSnapshot.mockReturnValue(snapshot);
+    usePipelineStore.setState({ currentVersion: 20 });
+    expect(useHistoryStore.getState().record("Editar")).toBe(true);
+
+    expect(await useHistoryStore.getState().undo()).toBe(true);
+    expect(usePipelineStore.getState().currentVersion).toBe(21);
+    expect(await useHistoryStore.getState().redo()).toBe(true);
+    expect(usePipelineStore.getState().currentVersion).toBe(22);
+    expect(restoreEditCheckpoint).toHaveBeenCalledTimes(2);
+    expect(getSnapshot).toHaveBeenCalledTimes(2);
+  });
+
+  it("failed restore and empty history do not advance export version", async () => {
+    useDocumentStore.setState({ id: "doc-1" });
+    usePipelineStore.setState({ currentVersion: 30 });
+    expect(await useHistoryStore.getState().undo()).toBe(false);
+    createEditCheckpoint.mockReturnValueOnce("cp-before");
+    useHistoryStore.getState().record("Editar");
+    restoreEditCheckpoint.mockRejectedValueOnce(new Error("restore failed"));
+
+    expect(await useHistoryStore.getState().undo()).toBe(false);
+    expect(usePipelineStore.getState().currentVersion).toBe(30);
   });
 
   it("sin documento no hay punto: la edición no entra a la pila", () => {

@@ -206,6 +206,8 @@ export default defineConfig({
         "packages/**/src/**/*.ts",
         "apps/desktop-shell/src/windows-update-signature.ts",
         "apps/desktop-shell/src/update-check-policy.ts",
+        "apps/react-client/src/components/viewer/interactionProjection.ts",
+        "apps/react-client/src/components/toolbar/updateCheckState.ts",
         "scripts/security-audit-policy.ts",
         "tests/e2e/support/exportVerificationOracle.ts",
       ],
@@ -306,6 +308,18 @@ export default defineConfig({
           functions: 80,
         },
         "apps/desktop-shell/src/update-check-policy.ts": {
+          lines: 85,
+          statements: 85,
+          branches: 80,
+          functions: 80,
+        },
+        "apps/react-client/src/components/viewer/interactionProjection.ts": {
+          lines: 85,
+          statements: 85,
+          branches: 80,
+          functions: 80,
+        },
+        "apps/react-client/src/components/toolbar/updateCheckState.ts": {
           lines: 85,
           statements: 85,
           branches: 80,
