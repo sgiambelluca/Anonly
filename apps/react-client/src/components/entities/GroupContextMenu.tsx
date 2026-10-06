@@ -37,9 +37,7 @@ import {
 } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
-import { clippingBoundary, resolveMenuPlacement, type MenuPlacement } from "./menuPlacement.js";
-
-const MENU_GAP_PX = 4;
+import { observeMenuLayout, type MenuLayout } from "./menuPlacement.js";
 
 export interface GroupContextMenuProps {
   readonly onMerge: () => void;
@@ -71,7 +69,11 @@ export function GroupContextMenu({
   const [open, setOpenState] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-  const [placement, setPlacement] = useState<MenuPlacement>("bottom");
+  const [layout, setLayout] = useState<MenuLayout>({
+    placement: "bottom",
+    top: 0,
+    maxHeight: 0,
+  });
   const onOpenChangeRef = useRef(onOpenChange);
   onOpenChangeRef.current = onOpenChange;
 
@@ -80,26 +82,24 @@ export function GroupContextMenu({
     onOpenChangeRef.current?.(next);
   }
 
+  const contentSignature =
+    Number(onEditReplacement !== undefined) | (Number(onRestoreComputedValue !== undefined) << 1);
+
   useLayoutEffect(() => {
-    if (!open) {
-      setPlacement("bottom");
-      return;
-    }
+    if (!open) return;
     const container = containerRef.current;
     const menu = menuRef.current;
     if (container === null || menu === null) return;
-    const trigger = container.getBoundingClientRect();
-    const boundary = clippingBoundary(container);
-    setPlacement(
-      resolveMenuPlacement({
-        triggerTop: trigger.top,
-        triggerBottom: trigger.bottom,
-        menuHeight: menu.offsetHeight + MENU_GAP_PX,
-        boundaryTop: boundary.top,
-        boundaryBottom: boundary.bottom,
-      }),
-    );
-  }, [open, onEditReplacement, onRestoreComputedValue]);
+    return observeMenuLayout(container, menu, (next) => {
+      setLayout((previous) =>
+        previous.placement === next.placement &&
+        previous.top === next.top &&
+        previous.maxHeight === next.maxHeight
+          ? previous
+          : next,
+      );
+    });
+  }, [open, contentSignature]);
 
   useEffect(() => {
     if (!open) return;
@@ -153,10 +153,9 @@ export function GroupContextMenu({
           ref={menuRef}
           role="group"
           aria-label="Acciones del grupo"
-          data-placement={placement}
-          className={`absolute right-0 z-50 w-60 rounded-xl border border-border bg-bg-primary p-1.5 shadow-md ${
-            placement === "top" ? "bottom-full mb-1" : "top-full mt-1"
-          }`}
+          data-placement={layout.placement}
+          style={{ top: `${layout.top}px`, maxHeight: `${layout.maxHeight}px` }}
+          className="absolute right-0 z-50 w-60 overflow-y-auto overscroll-contain rounded-xl border border-border bg-bg-primary p-1.5 shadow-md"
         >
           <MenuItem
             icon={<EyeIcon className="h-4 w-4" aria-hidden />}

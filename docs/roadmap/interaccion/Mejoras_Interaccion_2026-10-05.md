@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=plan-ui | dependencias=ui/Components.md,ui/React_Client.md,core/Contracts.md,core/Render_Engine.md,core/Orchestrator.md,adr/ADR-199-Develop-Como-Rama-De-Integracion.md,adr/ADR-204-La-Interaccion-Anonimizada-Usa-La-Geometria-Visible.md,adr/ADR-205-El-Resultado-Exportado-Pertenece-A-Una-Revision.md,adr/ADR-206-Una-Busqueda-Omitida-No-Confirma-La-Version.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=plan-ui | dependencias=ui/Components.md,ui/React_Client.md,core/Contracts.md,core/Render_Engine.md,core/Orchestrator.md,adr/ADR-199-Develop-Como-Rama-De-Integracion.md,adr/ADR-204-La-Interaccion-Anonimizada-Usa-La-Geometria-Visible.md,adr/ADR-205-El-Resultado-Exportado-Pertenece-A-Una-Revision.md,adr/ADR-206-Una-Busqueda-Omitida-No-Confirma-La-Version.md,adr/ADR-207-Los-Menus-De-Entidades-Se-Mantienen-Dentro-Del-Area-Visible.md | audiencia=humanos+IA | fase=11 -->
 
 # Mejoras de interacción — 2026-10-05
 
@@ -12,7 +12,9 @@ en el cliente. No agrega dependencias externas.
 están implementados. Sol aprobó el candidato completo contra `origin/develop`,
 incluidos los archivos nuevos. El mantenedor autorizó commit, push y apertura
 de PR a `develop` el 2026-10-06. La rama está publicada en el
-[PR #53](https://github.com/sgiambelluca/Anonly/pull/53), abierto hacia `develop`.
+[PR #53](https://github.com/sgiambelluca/Anonly/pull/53), integrado en `develop`
+como `a2573a5`. El fallo posterior del E2E de menús se investiga en
+`codex/fix-e2e-post-merge`, creada desde esa base.
 El registro de implementación, revisión y
 publicación está al final, incluido el cierre de foco del toast saliente.
 
@@ -516,3 +518,60 @@ aprobado por Sol; `git diff --check` también pasó. Se abrió el
 sin draft, y se adjuntó a esta tarea. CI y CodeQL estaban en ejecución
 al abrirlo; la aprobación de Sol es la revisión local registrada arriba.
 Este registro se incorpora en un commit documental posterior.
+
+### Fallo E2E después de integrar #53 — 2026-10-06
+
+El mantenedor integró #53 y pidió corregir el fallo y abrir otro PR.
+CI [37502791346](https://github.com/sgiambelluca/Anonly/actions/runs/37502791346)
+falló en la mitad 1/2 sobre macOS: 27 pruebas pasaron y falló
+`group-context-menu-placement.spec.ts`, línea 38, en las tres ejecuciones.
+El menú de la primera fila indica `bottom`, pero alguna opción no es el
+elemento alcanzable en su centro (`elementFromPoint`). La mitad 2/2,
+verificación de export, auditoría, tests unitarios y demás gates activados
+pasaron. No hay artefacto E2E del fallo disponible en esa corrida.
+
+La reproducción inicial del spec exacto en Electron Windows, con builds
+frescos de renderer y shell, pasó 1/1. Luna retoma el diagnóstico para
+identificar el elemento que tapa las opciones y la geometría del viewport.
+No se modifica el resultado esperado: todas las opciones deben ser
+alcanzables, sin scrollear un menú que cabe, tanto abajo como arriba.
+No se reemplaza la aserción por una espera fija ni se adapta el fixture
+para esconder una colisión. El fix se especificará a partir de la causa
+reproducida y será revisado por Sol antes de publicar el nuevo PR.
+
+Luna reprodujo el mismo fallo de hit testing a 1024 × 700: la lista termina
+en y=608,25 y el menú en y=633,5; el pie de sugerencia tapa Eliminar entidad.
+No cabe en ningún lado del disparador, aunque sí cabe en la lista completa.
+Se cerró ADR-207 y Components §3.4/§3.5 antes de implementar: mantener
+dirección, desplazar lo mínimo dentro de los límites y limitar alto con
+scroll interno solo cuando excede el área total. Ambos menús deben aplicar
+la misma regla y reaccionar a resize/scroll/reflow. Luna retoma el fix y
+regresiones de ventana pequeña, amplia y fallback sin reducir aserciones.
+
+Luna cerró la implementación: ambos menús comparten posición y altura
+limitadas al área visible, con observación de resize, scroll y reflow y
+limpieza al cerrar. Las regresiones recorren todas las opciones por hit
+testing; cuando el panel necesita scroll interno, cada opción se alcanza
+con mouse y Tab sin desplazar la lista. Los tamaños solicitados se validan
+contra el contenido efectivo de la ventana nativa.
+
+Validación del candidato en Electron Windows: renderer y shell compilan;
+`group-context-menu-placement` pasó 1/1 y `mode-menu-opens-upward` pasó 1/1,
+ejecutados de a uno. Formato scoped y `git diff --check` limpios. El build
+conserva el aviso habitual de chunks grandes. Sin gates globales a cargo
+del implementador ni ejecución nativa macOS. Se pasa el candidato a Sol
+para revisión y confirmación de los gates mínimos de este PR nuevo.
+
+Sol emitió **APPROVED** sin bloqueantes para el candidato sobre `a2573a5`.
+Verificó los cinco gates globales: lint, typecheck, test, test:contract y
+format:check. Resultado: 233 suites, 3.682 tests aprobados, un expected fail
+y 77 omitidos existentes; 342 tests de contrato aprobados. La cobertura
+configurada cumplió sus thresholds (96,68% líneas / 85,79% ramas), y los
+12 tests de colocación pasaron. Repitió los dos E2E afectados de a uno
+sobre builds frescos: acciones 1/1 y modos 1/1, ambos verdes. Diff limpio,
+sin cambios de Core, workflows ni dependencias.
+
+La revisión y las ejecuciones fueron en Windows nativo. La confirmación
+del runner macOS permanece pendiente; no se ejecutaron E2E completo ni
+mediciones. El mantenedor autorizó el fix y su PR nuevo a develop. Tras
+la aprobación, el planificador publica la rama `codex/fix-e2e-post-merge`.
