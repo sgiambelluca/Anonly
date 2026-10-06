@@ -661,6 +661,21 @@
   .anonly-toast-in {
     animation: anonly-toast-in 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
   }
+  /* Distinto del nombre de entrada: Radix Presence espera este cierre antes
+     de retirar el nodo cuando `open` pasa a false. */
+  @keyframes anonly-toast-out {
+    from {
+      opacity: 1;
+      transform: none;
+    }
+    to {
+      opacity: 0;
+      transform: translateY(12px);
+    }
+  }
+  .anonly-toast-out {
+    animation: anonly-toast-out 260ms cubic-bezier(0.4, 0, 1, 1) both;
+  }
   /* Selección persistente sobre el original: el borde punteado avanza. */
   @keyframes anonly-ants {
     to {

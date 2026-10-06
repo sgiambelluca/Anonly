@@ -172,8 +172,9 @@ export function applyRemove(group: EntityGroup): void {
       ? {
           title: `Eliminaste «${group.canonicalValue}»`,
           description: `Lo que marcaste («${reveal.value}») ahora se oculta`,
+          tone: "deletion" as const,
         }
-      : removedToastText(group.canonicalValue);
+      : { ...removedToastText(group.canonicalValue), tone: "deletion" as const };
   showToast(editToast(text, recorded));
 }
 
