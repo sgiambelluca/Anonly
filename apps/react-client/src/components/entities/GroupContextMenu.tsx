@@ -35,7 +35,11 @@ import {
   TagIcon,
   Trash2Icon,
 } from "lucide-react";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+
+import { clippingBoundary, resolveMenuPlacement, type MenuPlacement } from "./menuPlacement.js";
+
+const MENU_GAP_PX = 4;
 
 export interface GroupContextMenuProps {
   readonly onMerge: () => void;
@@ -66,6 +70,8 @@ export function GroupContextMenu({
 }: GroupContextMenuProps) {
   const [open, setOpenState] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [placement, setPlacement] = useState<MenuPlacement>("bottom");
   const onOpenChangeRef = useRef(onOpenChange);
   onOpenChangeRef.current = onOpenChange;
 
@@ -73,6 +79,27 @@ export function GroupContextMenu({
     setOpenState(next);
     onOpenChangeRef.current?.(next);
   }
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setPlacement("bottom");
+      return;
+    }
+    const container = containerRef.current;
+    const menu = menuRef.current;
+    if (container === null || menu === null) return;
+    const trigger = container.getBoundingClientRect();
+    const boundary = clippingBoundary(container);
+    setPlacement(
+      resolveMenuPlacement({
+        triggerTop: trigger.top,
+        triggerBottom: trigger.bottom,
+        menuHeight: menu.offsetHeight + MENU_GAP_PX,
+        boundaryTop: boundary.top,
+        boundaryBottom: boundary.bottom,
+      }),
+    );
+  }, [open, onEditReplacement, onRestoreComputedValue]);
 
   useEffect(() => {
     if (!open) return;
@@ -123,9 +150,13 @@ export function GroupContextMenu({
       </button>
       {open ? (
         <div
+          ref={menuRef}
           role="group"
           aria-label="Acciones del grupo"
-          className="absolute right-0 top-full z-50 mt-1 w-60 rounded-xl border border-border bg-bg-primary p-1.5 shadow-md"
+          data-placement={placement}
+          className={`absolute right-0 z-50 w-60 rounded-xl border border-border bg-bg-primary p-1.5 shadow-md ${
+            placement === "top" ? "bottom-full mb-1" : "top-full mt-1"
+          }`}
         >
           <MenuItem
             icon={<EyeIcon className="h-4 w-4" aria-hidden />}
