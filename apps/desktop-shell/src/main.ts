@@ -278,7 +278,7 @@ function startUpdater(window: BrowserWindow): void {
       userDataDir: app.getPath("userData"),
       quit: () => app.quit(),
     });
-    ipcMain.on("updater:check", () => checkWindowsUpdates());
+    ipcMain.on("updater:check", () => checkWindowsUpdates(emitir));
     // ADR-197: el usuario aceptó el aviso. Verifica, instala en silencio y reabre.
     ipcMain.on("updater:install", () => windowsUpdater.installNow());
     // ADR-188: el main no busca nada hasta que este mensaje llegue.
