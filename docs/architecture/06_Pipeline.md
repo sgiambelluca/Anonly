@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=pipeline | dependencias=03_Data_Model.md,04_Event_System.md,05_Worker_Architecture.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-056-RenderRequested-Kind-Por-Panel.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md | audiencia=IA+humanos | fase=1 (§14 precisado en fase 10: etapa 11 en ExportWorker único, ADR-036 §1; §10/§11 y el diagrama de secuencia en fase 10: re-render por edición mediado por el Orchestrator, ADR-044; §10 en fase 11: un RENDER_REQUESTED renderiza un solo kind, ADR-056) -->
+<!-- CONTEXT: scope=pipeline | dependencias=03_Data_Model.md,04_Event_System.md,05_Worker_Architecture.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-056-RenderRequested-Kind-Por-Panel.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,adr/ADR-204-La-Interaccion-Anonimizada-Usa-La-Geometria-Visible.md | audiencia=IA+humanos | fase=1 (§14 precisado en fase 10: etapa 11 en ExportWorker único, ADR-036 §1; §10/§11 y el diagrama de secuencia en fase 10: re-render por edición mediado por el Orchestrator, ADR-044; §10 en fase 11: un RENDER_REQUESTED renderiza un solo kind, ADR-056) -->
 
 # Anonly — Pipeline (TAD bloque 6)
 
@@ -195,6 +195,10 @@ El usuario puede overridear cualquiera desde la UI, emitiendo `CONFLICT_RESOLVE_
 
 **Entra**: `Document` + `EntityGroup[]` + `Annotation[]` + PDF fuente: antes del primer render, el Orchestrator carga los bytes retenidos en la etapa 0 vía `RenderEngine.loadDocument(documentId, buffer, password?)` (una sola vez por documento; ADR-030, tercer argumento por ADR-050). Si el documento tenía páginas sin texto, `loadDocument` ya ocurrió en la etapa 2 (rasterización para OCR, ADR-034 §1) y **no** se repite.
 **Sale**: `canvasBlobUrl` por página visible en la UI (original + anonimizado).
+ADR-204 añade `interactionGeometry` al preview anonimizado, ligado al mismo
+raster/revisión/escala. La UI usa ese mapa para lupa y selección; no agrega
+estos overlays al PDF exportado. Tipos y vigencia en Contracts §5.1/§8 y
+Render/Orchestrator, sin una nueva etapa del pipeline.
 **Eventos emitidos**: `PREVIEW_UPDATED` (por página), `PREVIEW_PAGE_FAILED`.
 **Errores**: `PREVIEW_PAGE_FAILED` → reintento (1) → se muestra placeholder en la UI.
 **Cancelación**: entre páginas.

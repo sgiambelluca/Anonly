@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=workers | dependencias=03_Data_Model.md,04_Event_System.md,06_Pipeline.md,adr/ADR-035-Hito9-Pools-InProcess-Retryable.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-042-WorkerOutbound-Completed-Result-Unknown.md,adr/ADR-043-RenderEngine-Reparto-Host-Worker-Kernel.md,adr/ADR-045-OcrEngine-Pool-Propia-Kernel-Puro.md,adr/ADR-046-NerEngine-Pool-Propia-Kernel-Puro.md,adr/ADR-053-Pdfjs-Dentro-De-Un-Worker-Fuentes-Y-Cmaps.md,adr/ADR-055-Decodificacion-Del-Resultado-Que-Cruza-Un-Worker.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,adr/ADR-167-El-Modelo-De-NER-Se-Libera-A-Los-15-s-De-Inactividad.md | audiencia=IA+humanos | fase=1 (actualizado en fase 9/10: entrega por fases ADR-035; transporte, EVENT, payloads y ExportWorker por ADR-036; COMPLETED.result unknown por ADR-042; RenderWorker kernel, unload-document y re-priming por ADR-043; OcrWorker kernel por ADR-045; NerWorker kernel y enrutamiento de PROGRESS por ADR-046; invariante de decodificación en §2.2 por ADR-055 y regla transversal de pdf.js-en-Worker en §7 por ADR-053, ambos del cierre de fase 10); §2.2/§2.3/§7.3/§7.4 en fase 11 por ADR-158: el ráster de OCR viaja codificado (PNG) y se clona en vez de transferirse -->
+<!-- CONTEXT: scope=workers | dependencias=03_Data_Model.md,04_Event_System.md,06_Pipeline.md,adr/ADR-035-Hito9-Pools-InProcess-Retryable.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-042-WorkerOutbound-Completed-Result-Unknown.md,adr/ADR-043-RenderEngine-Reparto-Host-Worker-Kernel.md,adr/ADR-045-OcrEngine-Pool-Propia-Kernel-Puro.md,adr/ADR-046-NerEngine-Pool-Propia-Kernel-Puro.md,adr/ADR-053-Pdfjs-Dentro-De-Un-Worker-Fuentes-Y-Cmaps.md,adr/ADR-055-Decodificacion-Del-Resultado-Que-Cruza-Un-Worker.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,adr/ADR-167-El-Modelo-De-NER-Se-Libera-A-Los-15-s-De-Inactividad.md,adr/ADR-204-La-Interaccion-Anonimizada-Usa-La-Geometria-Visible.md | audiencia=IA+humanos | fase=1 (actualizado en fase 9/10: entrega por fases ADR-035; transporte, EVENT, payloads y ExportWorker por ADR-036; COMPLETED.result unknown por ADR-042; RenderWorker kernel, unload-document y re-priming por ADR-043; OcrWorker kernel por ADR-045; NerWorker kernel y enrutamiento de PROGRESS por ADR-046; invariante de decodificación en §2.2 por ADR-055 y regla transversal de pdf.js-en-Worker en §7 por ADR-053, ambos del cierre de fase 10); §2.2/§2.3/§7.3/§7.4 en fase 11 por ADR-158: el ráster de OCR viaja codificado (PNG) y se clona en vez de transferirse -->
 
 # Anonly — Arquitectura de Workers (TAD bloque 8)
 
@@ -267,6 +267,15 @@ Y **factories propias** para `CMapReaderFactory`/`StandardFontDataFactory`, inye
 **Dueño de la pool**: el propio `ner-engine` (ADR-046 §2/§7) — el `NerPool` lo construye el façade en `create-core.ts` y se inyecta al motor por constructor, como ya ocurre con `RenderPool` y `OcrPool`; el Orchestrator no lo envuelve.
 
 ### 7.4 RenderWorker
+
+**Transporte ADR-204:** `RenderPagePayload` lleva
+`interactionRevision?: number` (Data Model §18). `COMPLETED` de un preview
+anonimizado incluye `interactionGeometry: PreviewInteractionGeometry`
+(Contracts §5.1), producido por el kernel del mismo raster: revisión,
+escala, posiciones trasladadas y regiones cubiertas, sin texto adicional.
+Preview original y full omiten el mapa. El host valida el shape y lo conserva
+con `encoded` en el cache y en `PREVIEW_UPDATED`; no hay un job nuevo ni una
+segunda rasterización. El payload ausente de revisión usa 0 en callers directos.
 
 **Responsabilidad**: renderizar una página (original o anonimizada) a `ImageData` o `Blob` PNG/JPEG usando OffscreenCanvas + pdfjs-dist (fe de erratas ADR-030 §5: decía pdf-lib, que es del ExportWorker y está prohibido en Render — `Render_Engine.md` §5). Produce highlight de grupos habilitados.
 

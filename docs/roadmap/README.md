@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap-indice | dependencias=roadmap/Version_1.0.md,roadmap/Roadmap_1.x.md,roadmap/Version_2.0.md,roadmap/Future_Ideas.md,roadmap/MVP.md,roadmap/hardening/Export_Verificado_ADR148_Plan.md,roadmap/hardening/ADR148_Revision_2026-10-05.md,roadmap/hardening/ADR148_Revision_Sol61_2026-10-05.md,roadmap/ocr/Regiones_Pequenas_Investigacion_Plan.md,adr/ADR-202-El-Minimo-De-Region-OCR-Se-Prueba-A-25pt-Antes-De-Adoptarlo.md,roadmap/ocr/Regiones_Pequenas_25pt_Experimento_Plan.md | audiencia=humanos+IA | fase=1.0.1 -->
+<!-- CONTEXT: scope=roadmap-indice | dependencias=roadmap/Version_1.0.md,roadmap/Roadmap_1.x.md,roadmap/Version_2.0.md,roadmap/Future_Ideas.md,roadmap/MVP.md,roadmap/hardening/Export_Verificado_ADR148_Plan.md,roadmap/hardening/ADR148_Revision_2026-10-05.md,roadmap/hardening/ADR148_Revision_Sol61_2026-10-05.md,roadmap/ocr/Regiones_Pequenas_Investigacion_Plan.md,adr/ADR-202-El-Minimo-De-Region-OCR-Se-Prueba-A-25pt-Antes-De-Adoptarlo.md,roadmap/ocr/Regiones_Pequenas_25pt_Experimento_Plan.md,roadmap/interaccion/Mejoras_Interaccion_2026-10-05.md,adr/ADR-204-La-Interaccion-Anonimizada-Usa-La-Geometria-Visible.md,adr/ADR-205-El-Resultado-Exportado-Pertenece-A-Una-Revision.md,adr/ADR-206-Una-Busqueda-Omitida-No-Confirma-La-Version.md | audiencia=humanos+IA | fase=1.0.1 -->
 
 # Roadmap — cómo está ordenada esta carpeta
 
@@ -31,6 +31,19 @@ consulta, salvo que su fila diga otra cosa.
 | Cierre del gate de export (ADR-203, local y CI verde) | Política 100 pt, mixed elegible versionado y pequeño histórico preservado; 21/21 Windows/macOS, R-16 verde, Sol APPROVED local y CI completa success | [`ADR148_Cierre_ADR203_2026-10-05.md`](./hardening/ADR148_Cierre_ADR203_2026-10-05.md) |
 | [`distribucion/`](./distribucion/) | La postulación a SignPath para la firma de código de Windows. **Abierta**: enviada el 2026-10-02 | [`SignPath_Postulacion.md`](./distribucion/SignPath_Postulacion.md) |
 | [`mediciones/`](./mediciones/) | Los informes de cada medición, por motor. Cómo correr los arneses: `tests/perf/README.md` | [`mediciones/README.md`](./mediciones/README.md) |
+
+## Campaña de interacción implementada y revisada
+
+[Mejoras de interacción — 2026-10-05](./interaccion/Mejoras_Interaccion_2026-10-05.md):
+ocho cambios implementados, incluidos lupa/selección anonimizada y vigencia
+del export mediante ADR-204/205. Sol aprobó el candidato completo contra
+`origin/develop` el 2026-10-06. Branch `codex/mejoras-interaccion-anonimizado`,
+desde develop; publicación a develop autorizada por el mantenedor el 2026-10-06,
+sin release ni versión asignada. El estado del PR se registra en el plan.
+Los tres ajustes posteriores (salida del toast, búsqueda omitida en
+desarrollo y arrastre desde blanco) también quedaron implementados y
+aprobados por Sol, con ADR-206 y enmienda de ADR-204. El cierre incluye
+retirada completa de foco y acciones del toast saliente.
 
 ## Convenciones
 
