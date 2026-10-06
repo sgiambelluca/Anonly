@@ -56,7 +56,53 @@ tests del gate cubren el aviso conocido corregido, otros avisos, versión
 distinta y evidencia inválida. Se ejecutan los gates existentes, build,
 empaquetado local y CI remoto sin reducir thresholds.
 
+## Corrección del gate en PR #53 — 2026-10-06
+
+El job Security audit falló con `inconsistent vulnerability totals`.
+La respuesta reproducida de pnpm 9.12.0 contiene tres advisories altos,
+pero cuatro findings: sharp aparece en dos resoluciones de peers. Los
+totales del registry cuentan los findings, no los advisories únicos ni
+las rutas que pnpm agrega a cada finding. El evaluador debe validar
+findings no vacíos con versiones válidas y comparar los totales altos y
+críticos con la suma de sus findings. Una discrepancia real o respuesta
+malformada sigue bloqueando. La excepción de braces no se amplía.
+
+También se corrigen los avisos nuevos GHSA-wq5f-xc86-pv6w y
+GHSA-68fv-2mgg-jv7q actualizando las dependencias existentes sharp a
+0.35.5 y source-map-js a 1.2.2. Se fija el mínimo corregido mediante
+overrides y se actualiza el lockfile; no se añaden dependencias nuevas.
+Las regresiones deben cubrir varias resoluciones, varias rutas dentro
+de un finding, avisos altos/críticos sin corregir y metadata inválida.
+Se verifica instalación congelada, parche braces, audit y consumidores
+afectados antes de publicar el fix en la misma rama.
+
+Validación local del fix: 44 regresiones del verificador y 149 pruebas
+en nueve suites de seguridad, NER e integración en verde. El reporte
+real anterior ahora se evalúa y bloquea los dos avisos sin corregir,
+en lugar de fallar por los totales. El audit actualizado pasa: solo
+permanece braces con su parche verificado y los avisos moderados
+de sprintf-js y postcss-selector-parser, fuera del umbral del gate.
+Typecheck del tooling, ESLint y formato scoped, diff check y build
+del cliente pasan. Una copia limpia confirmó `pnpm install --frozen-lockfile`,
+el audit y el funcionamiento real de sharp (PNG) y source-map-js
+(mapping desde el consumidor de cobertura).
+
+La copia original conserva un enlace WSL antiguo de esbuild que impide
+completar una instalación nativa; las pruebas se ejecutaron allí y la
+instalación se verificó en la copia limpia. Vitest no arrancó en la ruta
+temporal limpia por `#module-evaluator`; no se cuenta esa ejecución como
+pruebas aprobadas ni se cambian dependencias ajenas para resolverlo.
+
+Sol aprobó el fix scoped sin bloqueos el 2026-10-06. Verificó por su
+cuenta 63 pruebas de seguridad, audit y checks estáticos scoped;
+confirmó que el lock solo cambia sharp, sus binarios/libvips y
+source-map-js, conservando importers y evidencia del parche braces.
+
 ## Referencias
+
+- [Advisory y corrección de sharp](https://github.com/lovell/sharp/security/advisories/GHSA-wq5f-xc86-pv6w).
+- [Corrección de source-map-js 1.2.2](https://github.com/7rulnik/source-map-js/releases/tag/v1.2.2).
+- [Formato de pnpm 9.12.0](https://github.com/pnpm/pnpm/blob/v9.12.0/lockfile/audit/src/types.ts).
 
 - [Advisory de braces](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm).
 - [Parche upstream propuesto](https://github.com/micromatch/braces/pull/72).
