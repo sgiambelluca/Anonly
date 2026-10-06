@@ -11,7 +11,9 @@ en el cliente. No agrega dependencias externas.
 **Estado al 2026-10-06:** los ocho cambios y los tres ajustes posteriores
 están implementados. Sol aprobó el candidato completo contra `origin/develop`,
 incluidos los archivos nuevos. El mantenedor autorizó commit, push y apertura
-de PR a `develop` el 2026-10-06. El registro de implementación, revisión y
+de PR a `develop` el 2026-10-06. La rama está publicada en el
+[PR #53](https://github.com/sgiambelluca/Anonly/pull/53), abierto hacia `develop`.
+El registro de implementación, revisión y
 publicación está al final, incluido el cierre de foco del toast saliente.
 
 ## Especificación cerrada para implementación
@@ -503,3 +505,14 @@ ya estaba conservada en el árbol revisado. Una referencia de respaldo y hashes
 de los 87 archivos modificados/nuevos confirmaron que alinear el historial
 no cambió su contenido. El PR no arrastra los commits locales equivalentes
 del cierre anterior de ADR-148. Los commits se separan por módulo.
+
+### PR publicado — 2026-10-06
+
+Se publicaron diez commits por módulo, desde `65da18e` hasta `c59b958`,
+en `origin/codex/mejoras-interaccion-anonimizado`. Los hooks pasaron y
+los hashes de los 63 archivos de código y tests coinciden con el candidato
+aprobado por Sol; `git diff --check` también pasó. Se abrió el
+[PR #53](https://github.com/sgiambelluca/Anonly/pull/53) hacia `develop`,
+sin draft, y se adjuntó a esta tarea. CI y CodeQL estaban en ejecución
+al abrirlo; la aprobación de Sol es la revisión local registrada arriba.
+Este registro se incorpora en un commit documental posterior.

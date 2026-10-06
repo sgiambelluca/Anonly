@@ -38,8 +38,9 @@ consulta, salvo que su fila diga otra cosa.
 ocho cambios implementados, incluidos lupa/selección anonimizada y vigencia
 del export mediante ADR-204/205. Sol aprobó el candidato completo contra
 `origin/develop` el 2026-10-06. Branch `codex/mejoras-interaccion-anonimizado`,
-desde develop; publicación a develop autorizada por el mantenedor el 2026-10-06,
-sin release ni versión asignada. El estado del PR se registra en el plan.
+desde develop; publicada en el [PR #53](https://github.com/sgiambelluca/Anonly/pull/53)
+hacia develop el 2026-10-06, sin release ni versión asignada.
+El estado del PR se registra en el plan.
 Los tres ajustes posteriores (salida del toast, búsqueda omitida en
 desarrollo y arrastre desde blanco) también quedaron implementados y
 aprobados por Sol, con ADR-206 y enmienda de ADR-204. El cierre incluye
