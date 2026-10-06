@@ -12,6 +12,7 @@ import { type ElectronApplication, type Locator, type Page } from "@playwright/t
 import { expect, openApp, test } from "./support/electronApp.js";
 import { textTenPagesFile } from "./support/fixtures.js";
 import { installSettingsOverride } from "./support/settingsOverride.js";
+import { setContentSizeAndWait } from "./support/windowSize.js";
 
 /** `true` si las cuatro opciones del menú son lo que está arriba de todo en su centro. */
 async function everyOptionIsOnTop(page: Page, menu: Locator): Promise<boolean> {
@@ -111,6 +112,24 @@ async function menuMetrics(
   }, handle);
 }
 
+/**
+ * `true` si alguna opción queda, aunque sea en parte, fuera del área visible del
+ * propio menú. Un menú puede desbordar su límite solo por el padding de abajo:
+ * entonces tiene scroll interno pero ninguna opción necesita scrollear para verse.
+ */
+async function someOptionIsClipped(menu: Locator): Promise<boolean> {
+  return menu.evaluate((element) => {
+    const style = getComputedStyle(element);
+    const rect = element.getBoundingClientRect();
+    const top = rect.top + (Number.parseFloat(style.borderTopWidth) || 0);
+    const bottom = rect.bottom - (Number.parseFloat(style.borderBottomWidth) || 0);
+    return [...element.querySelectorAll("button")].some((option) => {
+      const optionRect = option.getBoundingClientRect();
+      return optionRect.top < top - 0.5 || optionRect.bottom > bottom + 0.5;
+    });
+  });
+}
+
 async function everyOptionCanBeReached(
   page: Page,
   trigger: Locator,
@@ -128,6 +147,8 @@ async function everyOptionCanBeReached(
     return;
   }
   expect(metrics.scrollHeight).toBeGreaterThan(metrics.clientHeight);
+  // Antes de recorrer: scrollIntoViewIfNeeded y Tab ya mueven el scroll interno.
+  const clippedBeforeTraversal = await someOptionIsClipped(menu);
   for (let index = 0; index < (await options.count()); index += 1) {
     const option = options.nth(index);
     await option.scrollIntoViewIfNeeded();
@@ -144,7 +165,10 @@ async function everyOptionCanBeReached(
     expect(await tree.evaluate((element) => element.scrollTop)).toBe(externalScrollBefore);
   }
   await everyOptionIsReachableByTab(page, trigger, menu, tree);
-  expect(await menu.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+  // El scroll interno solo es obligatorio si alguna opción estaba recortada.
+  if (clippedBeforeTraversal) {
+    expect(await menu.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+  }
 }
 
 async function resizeToNativeWideArea(
@@ -161,35 +185,17 @@ async function resizeToNativeWideArea(
       height: Math.max(700, Math.min(900, workArea.height - 80)),
     };
   });
-  await electronApp.evaluate(({ BrowserWindow }, size) => {
-    BrowserWindow.getAllWindows()[0]?.setContentSize(size.width, size.height);
-  }, requested);
-  const bounds = await electronApp.evaluate(({ BrowserWindow }) => {
-    const appWindow = BrowserWindow.getAllWindows()[0];
-    const { width, height } = appWindow?.getContentBounds() ?? { width: 0, height: 0 };
-    return { width, height };
-  });
-  await expect
-    .poll(() => page.evaluate(() => [innerWidth, innerHeight]))
-    .toEqual([bounds.width, bounds.height]);
-  return bounds;
+  return setContentSizeAndWait(page, electronApp, requested);
 }
 
 test("el menú de modos se mantiene visible y permite recorrer opciones en scroll interno", async ({
   page,
   electronApp,
 }) => {
-  await electronApp.evaluate(({ BrowserWindow }) => {
-    BrowserWindow.getAllWindows()[0]?.setContentSize(1024, 700);
+  const minimumBounds = await setContentSizeAndWait(page, electronApp, {
+    width: 1024,
+    height: 700,
   });
-  const minimumBounds = await electronApp.evaluate(({ BrowserWindow }) => {
-    const appWindow = BrowserWindow.getAllWindows()[0];
-    const { width, height } = appWindow?.getContentBounds() ?? { width: 0, height: 0 };
-    return { width, height };
-  });
-  await expect
-    .poll(() => page.evaluate(() => [innerWidth, innerHeight]))
-    .toEqual([minimumBounds.width, minimumBounds.height]);
   if (process.platform === "win32") expect(minimumBounds).toEqual({ width: 1024, height: 700 });
   await installSettingsOverride(page, { nerEnabled: false });
   await openApp(page, "networkidle");
