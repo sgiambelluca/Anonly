@@ -2,6 +2,7 @@ import {
   AnnotationKind,
   EngineEvents,
   EventChannel,
+  InvalidInputError,
   ReplacementMode,
   type Annotation,
   type EngineContext,
@@ -55,6 +56,14 @@ import {
   type ResolvedRenderPool,
 } from "./fixtures/test-helpers.js";
 
+function readDispatchedInteractionRevision(payload: unknown): number {
+  if (typeof payload !== "object" || payload === null || !("interactionRevision" in payload)) {
+    return 0;
+  }
+  const value = (payload as { readonly interactionRevision?: unknown }).interactionRevision;
+  return typeof value === "number" ? value : 0;
+}
+
 describe("RenderEngine — unit tests", () => {
   let engine: RenderEngine;
   let ctx: EngineContext;
@@ -91,6 +100,196 @@ describe("RenderEngine — unit tests", () => {
     // Sin annotations: el único call registrado es getImageData (ningún fill/stroke/texto).
     const drawOps = canvas!.calls.filter((c) => c.op !== "getImageData");
     expect(drawOps).toHaveLength(0);
+  });
+
+  it("preview geometry travels through worker cache and event", async () => {
+    const docId = "doc-interaction-revisions-cache";
+    vi.mocked(getDocument).mockReturnValue(
+      mockGetDocumentResult(createMockPdfDocument({ pageCount: 1 })),
+    );
+    await engine.dispose();
+    const serializingPool = {
+      dispatch: async ({ run }: { run: () => Promise<unknown> }) => structuredClone(await run()),
+      broadcast: async (_payload: unknown, run: () => Promise<unknown>) => [
+        structuredClone(await run()),
+      ],
+    };
+    engine = new RenderEngine(serializingPool);
+    await engine.init(ctx);
+    await engine.loadDocument(docId, createValidBuffer());
+    const emit = vi.spyOn(ctx.bus, "emit");
+    const input = (interactionRevision: number) =>
+      createRenderPageInput({
+        documentId: docId,
+        pageIndex: 0,
+        kind: "anonymized",
+        mode: "preview",
+        interactionRevision,
+        replacements: [makeReplacement({ occurrenceId: "worker-occurrence" })],
+      });
+
+    const first = await engine.renderPage(input(4), ctx);
+    expect(first.interactionGeometry).toEqual({
+      revision: 4,
+      scale: 1,
+      wordPositions: [],
+      coveredRegions: [expect.objectContaining({ occurrenceId: "worker-occurrence" })],
+    });
+    const firstPreview = [...emit.mock.calls]
+      .reverse()
+      .find((call) => call[1] === EngineEvents.PREVIEW_UPDATED)?.[2] as {
+      interactionGeometry?: { revision: number; coveredRegions: ReadonlyArray<unknown> };
+    };
+    expect(firstPreview.interactionGeometry?.revision).toBe(4);
+    expect(firstPreview.interactionGeometry).toEqual(first.interactionGeometry);
+    const canvasCount = getCreatedCanvases().length;
+    const cached = await engine.renderPage(input(4), ctx);
+    expect(cached.interactionGeometry).toEqual(first.interactionGeometry);
+    expect(getCreatedCanvases()).toHaveLength(canvasCount);
+    const refreshed = await engine.renderPage(input(5), ctx);
+    expect(refreshed.interactionGeometry?.revision).toBe(5);
+    expect(getCreatedCanvases().length).toBeGreaterThan(canvasCount);
+  });
+
+  it("preview geometry follows revision scale supersede and eviction", async () => {
+    const docId = "doc-interaction-revision-scale-eviction";
+    vi.mocked(getDocument).mockReturnValue(
+      mockGetDocumentResult(createMockPdfDocument({ pageCount: 2 })),
+    );
+    await engine.dispose();
+    const cacheConfig = createMockConfig({
+      render: { ...createMockConfig().render, cachePages: 1 },
+    });
+    ctx = createEngineContextWithRealBus({ config: cacheConfig });
+    engine = new RenderEngine();
+    await engine.init(ctx);
+    await engine.loadDocument(docId, createValidBuffer());
+    const render = (pageIndex: number, revision: number, scale: number, occurrenceId: string) =>
+      engine.renderPage(
+        createRenderPageInput({
+          documentId: docId,
+          pageIndex,
+          kind: "anonymized",
+          mode: "preview",
+          interactionRevision: revision,
+          scale,
+          replacements: [makeReplacement({ occurrenceId })],
+        }),
+        ctx,
+      );
+
+    const first = await render(0, 1, 1, "revision-one");
+    expect(first.interactionGeometry).toMatchObject({ revision: 1, scale: 1 });
+    expect(first.interactionGeometry?.coveredRegions[0]?.occurrenceId).toBe("revision-one");
+    const changed = await render(0, 2, 2, "revision-two");
+    expect(changed.interactionGeometry).toMatchObject({ revision: 2, scale: 2 });
+    expect(changed.interactionGeometry?.coveredRegions[0]?.occurrenceId).toBe("revision-two");
+
+    await render(1, 0, 1, "other-page");
+    const canvasCountAfterEviction = getCreatedCanvases().length;
+    const afterEviction = await render(0, 2, 2, "revision-two");
+    expect(getCreatedCanvases().length).toBeGreaterThan(canvasCountAfterEviction);
+    expect(afterEviction.interactionGeometry).toEqual(changed.interactionGeometry);
+  });
+
+  it("full rendering cannot overwrite the remembered preview revision or content", async () => {
+    const docId = "doc-full-does-not-replace-preview-input";
+    vi.mocked(getDocument).mockReturnValue(
+      mockGetDocumentResult(createMockPdfDocument({ pageCount: 1 })),
+    );
+    ctx = createEngineContextWithRealBus();
+    await engine.init(ctx);
+    await engine.loadDocument(docId, createValidBuffer());
+
+    await engine.renderPage(
+      createRenderPageInput({
+        documentId: docId,
+        pageIndex: 0,
+        kind: "anonymized",
+        mode: "preview",
+        interactionRevision: 9,
+        replacements: [makeReplacement({ occurrenceId: "preview-occurrence" })],
+      }),
+      ctx,
+    );
+    await engine.renderPage(
+      createRenderPageInput({
+        documentId: docId,
+        pageIndex: 0,
+        kind: "anonymized",
+        mode: "full",
+        replacements: [makeReplacement({ occurrenceId: "older-full-occurrence" })],
+      }),
+      ctx,
+    );
+
+    const previewUpdated = new Promise<{
+      interactionGeometry?: {
+        revision: number;
+        coveredRegions: ReadonlyArray<{ occurrenceId: string }>;
+      };
+    }>((resolve) => {
+      let unsubscribe = (): void => undefined;
+      unsubscribe = ctx.bus.on(EventChannel.Render, EngineEvents.PREVIEW_UPDATED, (payload) => {
+        if (payload.documentId !== docId || payload.kind !== "anonymized") return;
+        unsubscribe();
+        resolve(payload);
+      });
+    });
+    ctx.bus.emit(EventChannel.UI, EngineEvents.RENDER_REQUESTED, {
+      documentId: docId,
+      pageIndices: [0],
+      kind: "anonymized",
+      mode: "preview",
+    });
+
+    const event = await previewUpdated;
+    expect(event.interactionGeometry?.revision).toBe(9);
+    expect(
+      event.interactionGeometry?.coveredRegions.map(({ occurrenceId }) => occurrenceId),
+    ).toContain("preview-occurrence");
+    expect(
+      event.interactionGeometry?.coveredRegions.map(({ occurrenceId }) => occurrenceId),
+    ).not.toContain("older-full-occurrence");
+  });
+
+  it("preview interaction revision rejects invalid input before dispatch", async () => {
+    const docId = "doc-invalid-interaction-revision-host";
+    vi.mocked(getDocument).mockReturnValue(
+      mockGetDocumentResult(createMockPdfDocument({ pageCount: 1 })),
+    );
+    await engine.init(ctx);
+    await engine.loadDocument(docId, createValidBuffer());
+    const dispatch = vi.spyOn(engine["pool"], "dispatch");
+    for (const interactionRevision of [
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      Number.NEGATIVE_INFINITY,
+      -1,
+      1.5,
+    ]) {
+      const input = createRenderPageInput({
+        documentId: docId,
+        pageIndex: 0,
+        kind: "anonymized",
+        mode: "preview",
+        interactionRevision,
+      });
+      await expect(engine.renderPage(input, ctx)).rejects.toMatchObject({ code: "INVALID_INPUT" });
+      expect(() => engine.preparePreviewInput(input)).toThrow(InvalidInputError);
+    }
+    expect(dispatch).not.toHaveBeenCalled();
+    await engine.renderPage(
+      createRenderPageInput({
+        documentId: docId,
+        pageIndex: 0,
+        kind: "anonymized",
+        mode: "preview",
+        interactionRevision: 0,
+      }),
+      ctx,
+    );
+    expect(dispatch).toHaveBeenCalledTimes(1);
   });
 
   it("highlight border on original kind", async () => {
@@ -2725,8 +2924,21 @@ describe("RenderEngine — unit tests", () => {
       return { bytes: new Uint8Array([1]).buffer, format: "png", widthPx: 1, heightPx: 1 };
     }
 
-    function fakeKernelRenderResult(): unknown {
-      return { imageData: fakeImageData(), encoded: fakeEncoded(), degraded: [] };
+    function fakeKernelRenderResult(
+      scale = 1,
+      revision = 0,
+      kind: "original" | "anonymized" = "anonymized",
+      mode: "preview" | "full" = "preview",
+    ): unknown {
+      const result: Record<string, unknown> = {
+        imageData: fakeImageData(),
+        encoded: fakeEncoded(),
+        degraded: [],
+      };
+      if (kind === "anonymized" && mode === "preview") {
+        result.interactionGeometry = { revision, scale, wordPositions: [], coveredRegions: [] };
+      }
+      return result;
     }
 
     beforeEach(() => {
@@ -2861,7 +3073,7 @@ describe("RenderEngine — unit tests", () => {
       while (resolvedCount < totalPages) {
         await vi.waitFor(() => expect(pendingResolvers.length).toBeGreaterThan(0));
         const resolve = pendingResolvers.shift();
-        resolve?.(fakeKernelRenderResult());
+        resolve?.(fakeKernelRenderResult(1, 0, "original"));
         resolvedCount += 1;
       }
 
@@ -2878,7 +3090,7 @@ describe("RenderEngine — unit tests", () => {
       const pool = {
         dispatch: (params: { readonly priority?: number }): Promise<unknown> => {
           dispatchPriorities.push(params.priority);
-          return Promise.resolve(fakeKernelRenderResult());
+          return Promise.resolve(fakeKernelRenderResult(1, 0, "original"));
         },
         broadcast: async <T>(
           _payload: unknown,
@@ -2932,6 +3144,22 @@ describe("RenderEngine — unit tests", () => {
       return typeof value === "number" ? value : -1;
     }
 
+    function readDispatchedKind(payload: unknown): "original" | "anonymized" {
+      if (typeof payload !== "object" || payload === null || !("kind" in payload)) {
+        return "anonymized";
+      }
+      return (payload as { readonly kind?: unknown }).kind === "original"
+        ? "original"
+        : "anonymized";
+    }
+
+    function readDispatchedMode(payload: unknown): "preview" | "full" {
+      if (typeof payload !== "object" || payload === null || !("mode" in payload)) {
+        return "preview";
+      }
+      return (payload as { readonly mode?: unknown }).mode === "full" ? "full" : "preview";
+    }
+
     /** `RENDER_FINISHED.pageIndices` (`04_Event_System.md` §… ): un array, no un escalar. */
     function payloadIncludesPageIndex(payload: unknown, pageIndex: number): boolean {
       if (typeof payload !== "object" || payload === null || !("pageIndices" in payload)) {
@@ -2951,7 +3179,10 @@ describe("RenderEngine — unit tests", () => {
         dispatch: (params: { readonly payload?: unknown }): Promise<unknown> => {
           dispatchOrder.push(readDispatchedPageIndex(params.payload));
           return new Promise((resolve) => {
-            pendingResolvers.push(() => resolve(fakeKernelRenderResult()));
+            const payload = params.payload;
+            const kind = readDispatchedKind(payload);
+            const mode = readDispatchedMode(payload);
+            pendingResolvers.push(() => resolve(fakeKernelRenderResult(1, 0, kind, mode)));
           });
         },
         broadcast: async <T>(
@@ -3043,7 +3274,7 @@ describe("RenderEngine — unit tests", () => {
         dispatch: (params: { readonly priority?: number }): Promise<unknown> => {
           dispatchCount += 1;
           dispatchPriorities.push(params.priority);
-          return Promise.resolve(fakeKernelRenderResult());
+          return Promise.resolve(fakeKernelRenderResult(1, 0, "anonymized", "full"));
         },
         broadcast: async <T>(
           _payload: unknown,
@@ -3076,12 +3307,21 @@ describe("RenderEngine — unit tests", () => {
 
   // ─── Escala vigente del preview mediado (ADR-189) ───
   describe("current preview scale (ADR-189)", () => {
-    function fakeKernelRenderResult(): unknown {
-      return {
+    function fakeKernelRenderResult(
+      scale = 1,
+      revision = 0,
+      kind: "original" | "anonymized" = "anonymized",
+      mode: "preview" | "full" = "preview",
+    ): unknown {
+      const result: Record<string, unknown> = {
         imageData: { data: new Uint8ClampedArray(4), width: 1, height: 1, colorSpace: "srgb" },
         encoded: { bytes: new Uint8Array([1]).buffer, format: "png", widthPx: 1, heightPx: 1 },
         degraded: [],
       };
+      if (kind === "anonymized" && mode === "preview") {
+        result.interactionGeometry = { revision, scale, wordPositions: [], coveredRegions: [] };
+      }
+      return result;
     }
 
     function readDispatchedScale(payload: unknown): number | undefined {
@@ -3092,10 +3332,205 @@ describe("RenderEngine — unit tests", () => {
       return typeof value === "number" ? value : undefined;
     }
 
+    function readDispatchedKind(payload: unknown): "original" | "anonymized" {
+      if (typeof payload !== "object" || payload === null || !("kind" in payload)) {
+        return "anonymized";
+      }
+      return (payload as { readonly kind?: unknown }).kind === "original"
+        ? "original"
+        : "anonymized";
+    }
+
+    function readDispatchedMode(payload: unknown): "preview" | "full" {
+      if (typeof payload !== "object" || payload === null || !("mode" in payload)) {
+        return "preview";
+      }
+      return (payload as { readonly mode?: unknown }).mode === "full" ? "full" : "preview";
+    }
+
     beforeEach(() => {
       vi.mocked(getDocument).mockReturnValue(
         mockGetDocumentResult(createMockPdfDocument({ pageCount: 5 })),
       );
+    });
+
+    it("prepared preview input stays lazy and refreshes requested pages", async () => {
+      const docId = "doc-prepared-preview";
+      const dispatchPayloads: unknown[] = [];
+      const pendingResolvers: Array<() => void> = [];
+      const pool = {
+        dispatch: (params: { readonly payload?: unknown }): Promise<unknown> => {
+          const payload = params.payload;
+          dispatchPayloads.push(payload);
+          return new Promise((resolve) => {
+            pendingResolvers.push(() =>
+              resolve(
+                fakeKernelRenderResult(
+                  readDispatchedScale(payload) ?? 1,
+                  readDispatchedInteractionRevision(payload),
+                  readDispatchedKind(payload),
+                  readDispatchedMode(payload),
+                ),
+              ),
+            );
+          });
+        },
+        broadcast: async <T>(
+          _payload: unknown,
+          run: () => Promise<T>,
+        ): Promise<ReadonlyArray<T>> => [await run()],
+      };
+      const pooledEngine = new RenderEngine(pool);
+      const realCtx = createEngineContextWithRealBus();
+      await pooledEngine.init(realCtx);
+      await pooledEngine.loadDocument(docId, createValidBuffer());
+
+      const firstInput = createRenderPageInput({
+        documentId: docId,
+        pageIndex: 0,
+        kind: "anonymized",
+        mode: "preview",
+        interactionRevision: 1,
+      });
+      let updatedRevision: number | undefined;
+      realCtx.bus.on(EventChannel.Render, EngineEvents.PREVIEW_UPDATED, (payload: unknown) => {
+        if (typeof payload === "object" && payload !== null && "interactionGeometry" in payload) {
+          const geometry = (payload as { readonly interactionGeometry?: unknown })
+            .interactionGeometry;
+          if (typeof geometry === "object" && geometry !== null && "revision" in geometry) {
+            const revision = (geometry as { readonly revision?: unknown }).revision;
+            if (typeof revision === "number") updatedRevision = revision;
+          }
+        }
+      });
+
+      expect(pooledEngine.preparePreviewInput(firstInput)).toBe(false);
+      expect(dispatchPayloads).toHaveLength(0);
+      expect(updatedRevision).toBeUndefined();
+      expect(() => pooledEngine.preparePreviewInput({ ...firstInput, kind: "original" })).toThrow(
+        "preparePreviewInput requiere anonymized preview",
+      );
+      expect(dispatchPayloads).toHaveLength(0);
+
+      realCtx.bus.emit(EventChannel.UI, EngineEvents.RENDER_REQUESTED, {
+        documentId: docId,
+        pageIndices: [0],
+        kind: "anonymized",
+        mode: "preview",
+        scale: 1,
+      });
+      await vi.waitFor(() => expect(dispatchPayloads).toHaveLength(1));
+      expect(readDispatchedInteractionRevision(dispatchPayloads[0])).toBe(1);
+      const refreshedInput = { ...firstInput, interactionRevision: 2 };
+      expect(pooledEngine.preparePreviewInput(refreshedInput)).toBe(true);
+      const refreshedRender = pooledEngine.renderPage(refreshedInput, realCtx);
+      expect(dispatchPayloads).toHaveLength(1);
+
+      pendingResolvers[0]?.();
+      await vi.waitFor(() => expect(dispatchPayloads).toHaveLength(2));
+      expect(readDispatchedInteractionRevision(dispatchPayloads[1])).toBe(2);
+      pendingResolvers[1]?.();
+      const refreshedOutput = await refreshedRender;
+      expect(refreshedOutput.interactionGeometry?.revision).toBe(2);
+      expect(updatedRevision).toBe(2);
+
+      await pooledEngine.dispose();
+    });
+
+    it("prepared preview request markers reset when a document reloads or unloads", async () => {
+      const docId = "doc-preview-request-reset";
+      const pool = createResolvedRenderDispatchPool({
+        imageData: { data: new Uint8ClampedArray(4), width: 1, height: 1, colorSpace: "srgb" },
+        encoded: { bytes: new Uint8Array([1]).buffer, format: "png", widthPx: 1, heightPx: 1 },
+        degraded: [],
+        interactionGeometry: { revision: 0, scale: 1, wordPositions: [], coveredRegions: [] },
+      });
+      const pooledEngine = new RenderEngine(pool);
+      const realCtx = createEngineContextWithRealBus();
+      await pooledEngine.init(realCtx);
+      await pooledEngine.loadDocument(docId, createValidBuffer());
+
+      const input = createRenderPageInput({
+        documentId: docId,
+        pageIndex: 0,
+        kind: "anonymized",
+        mode: "preview",
+      });
+      expect(pooledEngine.preparePreviewInput(input)).toBe(false);
+      await pooledEngine.renderPage(input, realCtx);
+      expect(pooledEngine.preparePreviewInput(input)).toBe(true);
+
+      await pooledEngine.loadDocument(docId, createValidBuffer());
+      expect(pooledEngine.preparePreviewInput(input)).toBe(false);
+      await pooledEngine.renderPage(input, realCtx);
+      expect(pooledEngine.preparePreviewInput(input)).toBe(true);
+
+      await pooledEngine.unloadDocument(docId);
+      await pooledEngine.loadDocument(docId, createValidBuffer());
+      expect(pooledEngine.preparePreviewInput(input)).toBe(false);
+      await pooledEngine.dispose();
+    });
+
+    it("two full renders before the first preview keep the latest fallback input", async () => {
+      const docId = "doc-full-fallback-input";
+      const payloads: unknown[] = [];
+      const pool = {
+        dispatch: (params: { readonly payload?: unknown }): Promise<unknown> => {
+          payloads.push(params.payload);
+          return Promise.resolve(
+            fakeKernelRenderResult(
+              readDispatchedScale(params.payload) ?? 1,
+              readDispatchedInteractionRevision(params.payload),
+              readDispatchedKind(params.payload),
+              readDispatchedMode(params.payload),
+            ),
+          );
+        },
+        broadcast: async <T>(
+          _payload: unknown,
+          run: () => Promise<T>,
+        ): Promise<ReadonlyArray<T>> => [await run()],
+      };
+      const pooledEngine = new RenderEngine(pool);
+      const realCtx = createEngineContextWithRealBus();
+      await pooledEngine.init(realCtx);
+      await pooledEngine.loadDocument(docId, createValidBuffer());
+      const firstFull = createRenderPageInput({
+        documentId: docId,
+        pageIndex: 0,
+        kind: "anonymized",
+        mode: "full",
+        replacements: [makeReplacement({ groupId: "full-one" })],
+      });
+      const secondFull = {
+        ...firstFull,
+        replacements: [makeReplacement({ groupId: "full-two" })],
+      };
+      await pooledEngine.renderPage(firstFull, realCtx);
+      await pooledEngine.renderPage(secondFull, realCtx);
+
+      payloads.length = 0;
+      realCtx.bus.emit(EventChannel.UI, EngineEvents.RENDER_REQUESTED, {
+        documentId: docId,
+        pageIndices: [0],
+        kind: "anonymized",
+        mode: "preview",
+        scale: 1,
+      });
+      await vi.waitFor(() => expect(payloads).toHaveLength(1));
+      expect(readDispatchedInteractionRevision(payloads[0])).toBe(0);
+      const payload = payloads[0];
+      expect(payload).toMatchObject({
+        replacements: [expect.objectContaining({ groupId: "full-two" })],
+      });
+      expect(
+        pooledEngine.preparePreviewInput({
+          ...secondFull,
+          mode: "preview",
+          interactionRevision: 4,
+        }),
+      ).toBe(true);
+      await pooledEngine.dispose();
     });
 
     it("mediated preview follows the current scale of its kind", async () => {
@@ -3103,8 +3538,16 @@ describe("RenderEngine — unit tests", () => {
       const dispatchedScales: Array<number | undefined> = [];
       const pool = {
         dispatch: (params: { readonly payload?: unknown }): Promise<unknown> => {
-          dispatchedScales.push(readDispatchedScale(params.payload));
-          return Promise.resolve(fakeKernelRenderResult());
+          const scale = readDispatchedScale(params.payload);
+          dispatchedScales.push(scale);
+          return Promise.resolve(
+            fakeKernelRenderResult(
+              scale ?? 1,
+              0,
+              readDispatchedKind(params.payload),
+              readDispatchedMode(params.payload),
+            ),
+          );
         },
         broadcast: async <T>(
           _payload: unknown,
@@ -3160,8 +3603,16 @@ describe("RenderEngine — unit tests", () => {
       const dispatchedScales: Array<number | undefined> = [];
       const pool = {
         dispatch: (params: { readonly payload?: unknown }): Promise<unknown> => {
-          dispatchedScales.push(readDispatchedScale(params.payload));
-          return Promise.resolve(fakeKernelRenderResult());
+          const scale = readDispatchedScale(params.payload);
+          dispatchedScales.push(scale);
+          return Promise.resolve(
+            fakeKernelRenderResult(
+              scale ?? 1,
+              0,
+              readDispatchedKind(params.payload),
+              readDispatchedMode(params.payload),
+            ),
+          );
         },
         broadcast: async <T>(
           _payload: unknown,
@@ -3239,6 +3690,12 @@ describe("RenderEngine — unit tests", () => {
             heightPx: 1,
           },
           degraded: [],
+          interactionGeometry: {
+            revision: 0,
+            scale: marker / 10,
+            wordPositions: [],
+            coveredRegions: [],
+          },
         };
       }
 
@@ -3265,6 +3722,16 @@ describe("RenderEngine — unit tests", () => {
       await pooledEngine.loadDocument(docId, createValidBuffer());
 
       const capturedBlobs: Blob[] = [];
+      const emittedInteractionScales: number[] = [];
+      const stopInteractionEvents = realCtx.bus.on(
+        EventChannel.Render,
+        EngineEvents.PREVIEW_UPDATED,
+        (payload) => {
+          if (payload.documentId === docId && payload.kind === "anonymized") {
+            emittedInteractionScales.push(payload.interactionGeometry?.scale ?? -1);
+          }
+        },
+      );
       const realCreateObjectURL = URL.createObjectURL.bind(URL);
       const createObjectURLSpy = vi
         .spyOn(URL, "createObjectURL")
@@ -3338,8 +3805,10 @@ describe("RenderEngine — unit tests", () => {
         // de la escala 1 (10) que quedó obsoleta — exactamente "no se emite
         // el resultado viejo y sí se emite uno a la escala nueva" (ADR-189 §2).
         expect(markers).toEqual([10, 20, 20]);
+        expect(emittedInteractionScales).toEqual([1, 2, 2]);
         await expect(mediatedPromise).resolves.toBeDefined();
       } finally {
+        stopInteractionEvents();
         createObjectURLSpy.mockRestore();
       }
 
@@ -3367,7 +3836,19 @@ describe("RenderEngine — unit tests", () => {
         dispatch: (params: { readonly payload?: unknown }): Promise<unknown> => {
           const scale = readDispatchedScale(params.payload);
           return new Promise((resolve) => {
-            jobs.push({ scale, resolve: () => resolve(fakeKernelRenderResult()), released: false });
+            jobs.push({
+              scale,
+              resolve: () =>
+                resolve(
+                  fakeKernelRenderResult(
+                    scale ?? 1,
+                    0,
+                    readDispatchedKind(params.payload),
+                    readDispatchedMode(params.payload),
+                  ),
+                ),
+              released: false,
+            });
           });
         },
         broadcast: async <T>(
@@ -3491,8 +3972,16 @@ describe("RenderEngine — unit tests", () => {
       const dispatchedScales: Array<number | undefined> = [];
       const pool = {
         dispatch: (params: { readonly payload?: unknown }): Promise<unknown> => {
-          dispatchedScales.push(readDispatchedScale(params.payload));
-          return Promise.resolve(fakeKernelRenderResult());
+          const scale = readDispatchedScale(params.payload);
+          dispatchedScales.push(scale);
+          return Promise.resolve(
+            fakeKernelRenderResult(
+              scale ?? 1,
+              0,
+              readDispatchedKind(params.payload),
+              readDispatchedMode(params.payload),
+            ),
+          );
         },
         broadcast: async <T>(
           _payload: unknown,
