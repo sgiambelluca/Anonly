@@ -51,27 +51,24 @@ lo nuevo en lugar de volver a encontrar los mismos cambios como commits
 distintos. `develop` sigue lineal: ahí se integra siempre con Rebase and merge
 o squash, y GitHub rechaza un merge commit.
 
-Antes de abrir el PR, mirá si hay conflictos:
+La promoción **siempre** pasa por una rama temporal creada desde `main`, no por
+un PR directo de `develop`: `main` exige estar actualizada y su punta es, tras
+cada promoción, un merge commit que `develop` no contiene.
 
 ```bash
 git fetch origin
-git merge-tree --write-tree --name-only origin/main origin/develop
+git switch -c release/1.1.0 origin/main
+git merge origin/develop       # si hay conflictos, resolvelos y commiteá
+git push -u origin release/1.1.0
 ```
 
-- **Sin conflictos** (sale con código 0): abrí el PR de `develop` hacia `main`
-  y usá **Create a merge commit**.
-- **Con conflictos**: prepará una rama temporal desde `main`, resolvelos ahí y
-  abrí su PR hacia `main`, también con **Create a merge commit**:
-
-  ```bash
-  git switch -c release/1.1.0 origin/main
-  git merge origin/develop       # resolvé los conflictos y commiteá
-  git push -u origin release/1.1.0
-  ```
-
-  Revisá que el diff final sea el esperado y repetí las pruebas afectadas si
-  la resolución cambió contenido. Si `develop` avanza antes de integrar, hacé
-  `git merge origin/develop` en esa rama. Puede eliminarse después del PR.
+Abrí el PR de `release/1.1.0` hacia `main` y usá **Create a merge commit**.
+Para saber de antemano si habrá conflictos:
+`git merge-tree --write-tree --name-only origin/main origin/develop` sale con
+código 1 si los hay y 0 si no. Revisá que el diff final sea el esperado y
+repetí las pruebas afectadas si la resolución cambió contenido. Si `develop`
+avanza antes de integrar, hacé `git merge origin/develop` en esa rama. La rama
+puede eliminarse después del PR.
 
 Nunca uses Rebase and merge ni squash en esta promoción: reescriben los SHA y
 vuelven a separar las dos ramas. Tampoco hagas merge de `main` en `develop`: es
@@ -248,6 +245,5 @@ el tag como en el flujo anterior. Después creá una rama desde `develop`, llev�
 los commits del parche mediante cherry-pick y abrí PR hacia `develop`. Resolvé
 la versión y los CHANGELOG para conservar el parche junto al trabajo pendiente.
 
-La rama temporal `release/...` se usa para resolver los conflictos de una
-promoción antes de abrir su PR hacia `main`; puede eliminarse después de
-integrarlo.
+La rama temporal `release/...` es el camino de toda promoción (paso 4); puede
+eliminarse después de integrar su PR.

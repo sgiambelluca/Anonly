@@ -39,11 +39,15 @@ promociones.
 4. **Configuración de GitHub.** El repositorio permite merge commits, y `main`
    deja de exigir historial lineal. `develop` lo sigue exigiendo. Los demás
    checks de ambas ramas no cambian (ADR-208).
-5. **Conflictos en la promoción.** Si `git merge-tree --write-tree origin/main
-   origin/develop` anticipa conflictos, se prepara una rama temporal
-   `release/...` creada desde `main` con `git merge origin/develop`, y se
-   abre el PR de esa rama hacia `main`, también con merge commit. Sin
-   conflictos, el PR va directo de `develop` a `main`.
+5. **La promoción pasa siempre por una rama temporal.** `main` exige estar
+   actualizada antes del merge (ADR-208). Tras cada promoción, la punta de
+   `main` es un merge commit que `develop` no contiene, así que un PR directo
+   de `develop` a `main` quedaría desactualizado, y ponerlo al día exigiría un
+   merge de `main` en `develop`, que `develop` rechaza. Por eso se crea una
+   rama `release/...` desde `main`, se le hace `git merge origin/develop`, y
+   se abre su PR hacia `main` con merge commit. Esa rama contiene la punta de
+   `main`, de modo que cumple la regla. Si hay conflictos se resuelven en esa
+   rama; `git merge-tree --write-tree origin/main origin/develop` los anticipa.
 6. **Publicación.** El tag va sobre la punta de `main` con CI exitosa de push.
    La validación de `release.yml` ya lo permite: exige que el SHA sea
    ancestro de `main` y que tenga una corrida de CI exitosa de push en
@@ -62,8 +66,9 @@ que ese costo se paga. Si `develop` avanza antes de promover, se le hace
 
 ## Consecuencias
 
-- `main` deja de ser lineal: su historial tiene un merge commit por
-  promoción. `git log --first-parent main` muestra una línea por promoción.
+- `main` deja de ser lineal: cada promoción deja dos merge commits (el de la
+  rama temporal y el del PR). `git log --first-parent main` muestra una línea
+  por promoción.
 - Las promociones no vuelven a duplicar commits entre las ramas, y un SHA de
   `develop` se puede buscar en `main`.
 - Un merge accidental de un PR a `main` con merge commit ya no lo impide la
