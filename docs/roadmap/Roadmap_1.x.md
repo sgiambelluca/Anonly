@@ -16,7 +16,8 @@ resolver; no son decisiones tomadas.**
 La campaña local de [mejoras de interacción](./interaccion/Mejoras_Interaccion_2026-10-05.md)
 está implementada desde develop con ADR-204/205 y aprobada por Sol contra
 `origin/develop` (2026-10-06). Sus pruebas y revisión se registran en ese plan;
-la publicación del PR a develop está autorizada, sin release ni versión asignada.
+la rama está publicada en el [PR #53](https://github.com/sgiambelluca/Anonly/pull/53)
+hacia develop, sin release ni versión asignada.
 Los tres ajustes reportados después de esa aprobación también están
 implementados y aprobados por Sol; el cierre está en el mismo plan (ADR-206).
 
