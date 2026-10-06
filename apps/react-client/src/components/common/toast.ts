@@ -21,6 +21,11 @@ export interface ToastAction {
   readonly shortcut?: string;
 }
 
+/** Default automatic lifetime shared by every non-persistent toast. */
+export const TOAST_DURATION_MS = 3000;
+/** Visual time reserved for the closing motion; logical dismissal is immediate. */
+export const TOAST_EXIT_DURATION_MS = 260;
+
 // `Components.md` §8.6 documenta cuatro tonos (`info`, `success`, `warning`,
 // `error`); la implementación fue sumándolos según hizo falta uno nuevo.
 // `warning` lo suma ADR-174 §4: el toast persistente de un choque sin
@@ -30,7 +35,7 @@ export interface ToastAction {
 // (`occurrenceCount > 0` sin `heldConflictIds` ni `groupIds`) — *"No se pudo
 // agregar «X»."* — no es una advertencia que el usuario tenga que resolver,
 // es una falla.
-export type ToastTone = "success" | "neutral" | "warning" | "error";
+export type ToastTone = "success" | "neutral" | "warning" | "error" | "deletion";
 
 export interface ToastInput {
   readonly title: string;
@@ -91,6 +96,11 @@ export function showToast(input: ToastInput): ToastMessage {
 export function dismissToast(): void {
   current = null;
   for (const listener of listeners) listener(null);
+}
+
+/** A Radix close from an older node cannot dismiss a newer toast instance. */
+export function dismissToastIfCurrent(id: number): void {
+  if (current?.id === id) dismissToast();
 }
 
 /** Cierra el toast vigente solo si es el de una edición (React_Client §3.6c). */
