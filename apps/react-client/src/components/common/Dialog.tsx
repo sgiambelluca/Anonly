@@ -16,7 +16,14 @@
 
 import * as RadixDialog from "@radix-ui/react-dialog";
 import { XIcon } from "lucide-react";
-import type { ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
+
+const DialogSelectOpenContext = createContext<(open: boolean) => void>(() => undefined);
+
+/** Connects a portalled Radix Select to the Dialog that contains its trigger. */
+export function useDialogSelectOpenChange(): (open: boolean) => void {
+  return useContext(DialogSelectOpenContext);
+}
 
 export interface DialogProps {
   readonly open: boolean;
@@ -53,51 +60,63 @@ export function Dialog({
   hideCloseButton = false,
   size = "md",
 }: DialogProps) {
+  const [selectOpen, setSelectOpen] = useState(false);
+  const handleSelectOpenChange = useCallback((next: boolean) => setSelectOpen(next), []);
+
+  useEffect(() => {
+    if (!open) setSelectOpen(false);
+  }, [open]);
+
   return (
-    <RadixDialog.Root
-      open={open}
-      onOpenChange={(next) => {
-        if (!next) onClose();
-      }}
-    >
-      <RadixDialog.Portal>
-        <RadixDialog.Overlay className="fixed inset-0 z-40 bg-black/40" />
-        <RadixDialog.Content
-          className={`fixed left-1/2 top-1/2 z-50 flex max-h-[85vh] w-[calc(100%-2rem)] ${SIZE_CLASS[size]} -translate-x-1/2 -translate-y-1/2 flex-col rounded-lg bg-bg-primary p-5 shadow-md focus:outline-none`}
-        >
-          <div className="mb-3 flex shrink-0 items-start justify-between gap-4">
-            <div className="flex min-w-0 items-baseline gap-2">
-              <RadixDialog.Title className="text-sm font-semibold text-text-primary">
-                {title}
-              </RadixDialog.Title>
-              {titleAside}
+    <DialogSelectOpenContext.Provider value={handleSelectOpenChange}>
+      <RadixDialog.Root
+        open={open}
+        onOpenChange={(next) => {
+          if (!next) onClose();
+        }}
+      >
+        <RadixDialog.Portal>
+          <RadixDialog.Overlay onClick={onClose} className="fixed inset-0 z-40 bg-black/40" />
+          {/* Radix Select's modal portal disables outside pointer events. Re-enable
+              them only over this Dialog while its own Select is open. */}
+          <RadixDialog.Content
+            style={selectOpen ? { pointerEvents: "auto" } : undefined}
+            className={`fixed left-1/2 top-1/2 z-50 flex max-h-[85vh] w-[calc(100%-2rem)] ${SIZE_CLASS[size]} -translate-x-1/2 -translate-y-1/2 flex-col rounded-lg bg-bg-primary p-5 shadow-md focus:outline-none`}
+          >
+            <div className="mb-3 flex shrink-0 items-start justify-between gap-4">
+              <div className="flex min-w-0 items-baseline gap-2">
+                <RadixDialog.Title className="text-sm font-semibold text-text-primary">
+                  {title}
+                </RadixDialog.Title>
+                {titleAside}
+              </div>
+              {hideCloseButton ? null : (
+                <RadixDialog.Close asChild>
+                  <button
+                    type="button"
+                    aria-label="Cerrar"
+                    className="rounded-md p-1 text-text-secondary hover:bg-bg-tertiary"
+                  >
+                    <XIcon className="h-4 w-4" aria-hidden />
+                  </button>
+                </RadixDialog.Close>
+              )}
             </div>
-            {hideCloseButton ? null : (
-              <RadixDialog.Close asChild>
-                <button
-                  type="button"
-                  aria-label="Cerrar"
-                  className="rounded-md p-1 text-text-secondary hover:bg-bg-tertiary"
-                >
-                  <XIcon className="h-4 w-4" aria-hidden />
-                </button>
-              </RadixDialog.Close>
-            )}
-          </div>
-          {description ? (
-            <RadixDialog.Description className="mb-3 shrink-0 text-sm text-text-secondary">
-              {description}
-            </RadixDialog.Description>
-          ) : null}
-          {/*
+            {description ? (
+              <RadixDialog.Description className="mb-3 shrink-0 text-sm text-text-secondary">
+                {description}
+              </RadixDialog.Description>
+            ) : null}
+            {/*
             `-mx-5 px-5`: el padding horizontal se reaplica adentro del área
             que scrollea para que la barra quede pegada al borde del diálogo y
             no flotando en el medio del padding.
           */}
-          <div className="-mx-5 min-h-0 flex-1 overflow-y-auto px-5">{children}</div>
-          {footer ? <div className="mt-4 shrink-0">{footer}</div> : null}
-        </RadixDialog.Content>
-      </RadixDialog.Portal>
-    </RadixDialog.Root>
+            <div className="-mx-5 min-h-0 flex-1 overflow-y-auto px-5">{children}</div>
+            {footer ? <div className="mt-4 shrink-0">{footer}</div> : null}
+          </RadixDialog.Content>
+        </RadixDialog.Portal>
+      </RadixDialog.Root>
+    </DialogSelectOpenContext.Provider>
   );
 }

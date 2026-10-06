@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=render-engine | dependencias=adr/ADR-189-El-Preview-Se-Redibuja-A-La-Escala-Que-Se-Ve.md,core/Contracts.md,architecture/05_Worker_Architecture.md,architecture/06_Pipeline.md,ADR-004-Rendering.md,ADR-012-Replacement-Modes.md,ADR-030-RenderEngine-LoadDocument.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-043-RenderEngine-Reparto-Host-Worker-Kernel.md,adr/ADR-044-Preview-Grupos-Mediacion-Orchestrator.md,adr/ADR-053-Pdfjs-Dentro-De-Un-Worker-Fuentes-Y-Cmaps.md,adr/ADR-056-RenderRequested-Kind-Por-Panel.md,adr/ADR-061-Agregado-Manual-De-Entidades.md,adr/ADR-065-OCR-Por-Region.md,adr/ADR-066-Texto-De-Anotaciones-Y-Reemplazo-Rotado.md,adr/ADR-062-Veredicto-De-Degradacion-Hasta-La-UI.md,adr/ADR-086-El-Detector-De-Degradacion-Mide-El-Ancho.md,adr/ADR-074-Una-Entidad-Partida-En-Varias-Lineas.md,adr/ADR-144-El-Input-Se-Registra-Ya-El-Trabajo-Se-Planifica.md,adr/ADR-158-El-Raster-De-OCR-Viaja-Codificado.md | audiencia=IA-implementador | fase=11 (§2/§13 casos 35-36/§14/§15 ítem 31 en fase 11 por ADR-144: PreviewRenderScheduler acota la concurrencia del trabajo pesado de preview, coalescido por clave, sin demorar el registro sincrónico de rememberInput; §2/§13 casos 32-33/§14/§15 ítem 29 en fase 10.9: un `Replacement` con `fragments` se expande en unidades de pintado, el token va en el fragmento más ancho y el veredicto de degradación se computa contra ése —ADR-074 §4-§6—; §6/§8/§12/§13 actualizados en fase 10: RENDER_REQUESTED.scale, guard MAX_RENDER_SCALE, cache LRU por escala + límite de bytes, supersede, ADR-037; reparto host/worker para PR13 por ADR-043; retiro del delta render por eventos de grouping por ADR-044; opciones de fuentes/CMaps de pdf.js en el kernel por ADR-053, cierre de fase 10; §2/§8/§13/§14/§15 en fase 11: RENDER_REQUESTED.kind requerido y render de un solo lado por ADR-056; §2/§6/§9/§13/§14/§15 en fase 10.5: shrink-to-fit, repintado de línea por calibración, lineWords y AnnotationKind.Degraded por ADR-058; renderLegendPage y RenderLegendPayload por ADR-059 §5; §6/§13/§14/§15 en fase 10.8: rasterizePage gana region?: BoundingBox —ADR-065 §5, caso 30— y paintReplacements rota el token cuando bbox.rotation es 90/270 —ADR-066 §7, caso 31—; §15 en fase 10.7: ítem 28, el kernel consume sharesVerticalBand de @anonly/shared en vez de su copia local —errata de ADR-061 §2, de-dup diferible—; post-Hito 10.10: §7/§12/§14/§15 por ADR-062 —el veredicto de degradación viaja en `PREVIEW_UPDATED.degraded` y se guarda en la entrada del cache, para que el acierto emita lo mismo que el fallo— y §2/§13 casos 25 y 28/§14/§15 por ADR-086 —el criterio pasa a la razón de anchos, la referencia va sin piso ni redondeo y el piso de dibujo escala; la calibración del caso 26 conserva el piso SIN escalar—; fase 11: nota v1.14.0 por ADR-109 — la caja que llega pasa a ser la de tinta y `REPLACEMENT_FONT_HEIGHT_RATIO` se recalibra a 0,64; el motor no cambia código—) -->
+<!-- CONTEXT: scope=render-engine | dependencias=adr/ADR-189-El-Preview-Se-Redibuja-A-La-Escala-Que-Se-Ve.md,core/Contracts.md,architecture/05_Worker_Architecture.md,architecture/06_Pipeline.md,ADR-004-Rendering.md,ADR-012-Replacement-Modes.md,ADR-030-RenderEngine-LoadDocument.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-043-RenderEngine-Reparto-Host-Worker-Kernel.md,adr/ADR-044-Preview-Grupos-Mediacion-Orchestrator.md,adr/ADR-053-Pdfjs-Dentro-De-Un-Worker-Fuentes-Y-Cmaps.md,adr/ADR-056-RenderRequested-Kind-Por-Panel.md,adr/ADR-061-Agregado-Manual-De-Entidades.md,adr/ADR-065-OCR-Por-Region.md,adr/ADR-066-Texto-De-Anotaciones-Y-Reemplazo-Rotado.md,adr/ADR-062-Veredicto-De-Degradacion-Hasta-La-UI.md,adr/ADR-086-El-Detector-De-Degradacion-Mide-El-Ancho.md,adr/ADR-074-Una-Entidad-Partida-En-Varias-Lineas.md,adr/ADR-144-El-Input-Se-Registra-Ya-El-Trabajo-Se-Planifica.md,adr/ADR-158-El-Raster-De-OCR-Viaja-Codificado.md,adr/ADR-204-La-Interaccion-Anonimizada-Usa-La-Geometria-Visible.md,adr/ADR-205-El-Resultado-Exportado-Pertenece-A-Una-Revision.md | audiencia=IA-implementador | fase=11 (§2/§13 casos 35-36/§14/§15 ítem 31 en fase 11 por ADR-144: PreviewRenderScheduler acota la concurrencia del trabajo pesado de preview, coalescido por clave, sin demorar el registro sincrónico de rememberInput; §2/§13 casos 32-33/§14/§15 ítem 29 en fase 10.9: un `Replacement` con `fragments` se expande en unidades de pintado, el token va en el fragmento más ancho y el veredicto de degradación se computa contra ése —ADR-074 §4-§6—; §6/§8/§12/§13 actualizados en fase 10: RENDER_REQUESTED.scale, guard MAX_RENDER_SCALE, cache LRU por escala + límite de bytes, supersede, ADR-037; reparto host/worker para PR13 por ADR-043; retiro del delta render por eventos de grouping por ADR-044; opciones de fuentes/CMaps de pdf.js en el kernel por ADR-053, cierre de fase 10; §2/§8/§13/§14/§15 en fase 11: RENDER_REQUESTED.kind requerido y render de un solo lado por ADR-056; §2/§6/§9/§13/§14/§15 en fase 10.5: shrink-to-fit, repintado de línea por calibración, lineWords y AnnotationKind.Degraded por ADR-058; renderLegendPage y RenderLegendPayload por ADR-059 §5; §6/§13/§14/§15 en fase 10.8: rasterizePage gana region?: BoundingBox —ADR-065 §5, caso 30— y paintReplacements rota el token cuando bbox.rotation es 90/270 —ADR-066 §7, caso 31—; §15 en fase 10.7: ítem 28, el kernel consume sharesVerticalBand de @anonly/shared en vez de su copia local —errata de ADR-061 §2, de-dup diferible—; post-Hito 10.10: §7/§12/§14/§15 por ADR-062 —el veredicto de degradación viaja en `PREVIEW_UPDATED.degraded` y se guarda en la entrada del cache, para que el acierto emita lo mismo que el fallo— y §2/§13 casos 25 y 28/§14/§15 por ADR-086 —el criterio pasa a la razón de anchos, la referencia va sin piso ni redondeo y el piso de dibujo escala; la calibración del caso 26 conserva el piso SIN escalar—; fase 11: nota v1.14.0 por ADR-109 — la caja que llega pasa a ser la de tinta y `REPLACEMENT_FONT_HEIGHT_RATIO` se recalibra a 0,64; el motor no cambia código—) -->
 
 # Render Engine — Spec de Motor
 
@@ -148,6 +148,7 @@ export interface RenderPageInput {
   readonly scale?: number;                              // override
   readonly imageFormat?: "png" | "jpeg";               // default png preview, jpeg full
   readonly lineWords?: ReadonlyArray<Word>;             // ADR-058 §5; ver abajo
+  readonly interactionRevision?: number;               // ADR-204; default 0
 }
 
 export interface RenderPageOutput {
@@ -158,6 +159,7 @@ export interface RenderPageOutput {
   readonly encoded?: EncodedPageImage; // presente si mode === "full": bytes codificados
                                        // (imageFormat efectivo + config.render.jpegQuality),
                                        // generados donde vive el canvas (ADR-034 §3)
+  readonly interactionGeometry?: PreviewInteractionGeometry; // ADR-204: solo preview anonimizado
   readonly durationMs: number;
 }
 
@@ -166,6 +168,7 @@ export class RenderEngine implements IEngine {
   init(ctx: EngineContext): Promise<void>;
   loadDocument(documentId: string, buffer: ArrayBuffer, password?: string): Promise<void>; // password: ADR-050
   unloadDocument(documentId: string): Promise<void>;
+  preparePreviewInput(input: RenderPageInput): boolean; // ADR-204: metadata sin raster; true si hubo solicitud de preview.
   renderPage(input: RenderPageInput, ctx: EngineContext): Promise<RenderPageOutput>;
   renderPages(inputs: ReadonlyArray<RenderPageInput>, ctx: EngineContext): Promise<ReadonlyArray<RenderPageOutput>>;
   // ADR-034 §1; `region` (opcional) desde ADR-065 §5: recorte en PUNTOS de
@@ -600,6 +603,83 @@ Fixtures: `tests/fixtures/text-10p.pdf`, `scanned-10p.pdf`, una página con rota
 - [x] 32. (ADR-189) Escala vigente del preview por `(documentId, kind)`: se actualiza con `RENDER_REQUESTED` válido en `mode: "preview"`, la usan las invocaciones directas de preview sin `scale`, un resultado a escala obsoleta se descarta y se redespacha, y se borra con el estado del documento. Tests de §14 (caso 38).
 
 ---
+
+## Enmienda normativa ADR-204 — interacción del preview
+
+Esta enmienda amplía §6, §7, §9–§12 y §14. `RenderPageOutput` gana
+`readonly interactionGeometry?: PreviewInteractionGeometry`, tipo de
+Contracts §5.1. El payload del worker lleva `interactionRevision?: number`
+(Data Model §18). Solo el preview anonimizado produce mapa, incluso con
+arrays vacíos; original y full lo omiten. El resultado interno del kernel,
+su decoder, el cache, la proyección pública y `PREVIEW_UPDATED` conservan el
+mismo mapa. No se calcula el mapa a partir del raster ni en el cliente.
+
+`preparePreviewInput(input): boolean` registra síncronamente un input
+`kind: "anonymized", mode: "preview"`, sin rasterizar, encolar trabajo,
+emitir eventos ni ocupar cache de imágenes. Aplica las mismas precondiciones
+de inicialización, documento/página, escala y revisión que `renderPage`;
+otro kind/mode lanza `InvalidInputError` sin modificar el estado. Devuelve
+`true` si esa página/kind tuvo una solicitud válida de render de preview
+desde la última carga, tanto si sigue en vuelo como si terminó. Las llamadas
+a este método y los renders full no crean esa marca. Load/unload/dispose
+eliminan la marca junto con los inputs retenidos. El input preparado se usa
+en el siguiente `RENDER_REQUESTED`, incluso si nunca hubo raster previo.
+
+En el seed, el Orchestrator prepara todas las páginas, pero renderiza solo
+las que tienen reemplazos o devuelven `true`. Si había una solicitud previa,
+invoca `renderPage` inmediatamente en el mismo turno para actualizar la
+generación del scheduler: registrar metadatos sin ese refresco permitiría
+que un raster en vuelo de la revisión anterior se emitiera. Las páginas
+vacías nunca solicitadas conservan la carga diferida y su revisión vigente,
+incluidas las de OCR. El flush de páginas sucias mantiene su comportamiento.
+
+El recolector de geometría sigue las decisiones efectivas de pintado:
+
+- Para fallback/shrink-to-fit, redact y fragmentos de solo tapado, registrar
+  la caja original cubierta y su caja pintada por unidad/ocurrencia.
+  En el fallback con texto, la coordenada vertical de tinta se calcula desde
+  el baseline efectivo menos `actualBoundingBoxAscent`, no centrando la suma
+  ascent/descent. Aplicar la transformación efectiva de los cuatro vértices
+  si el dibujo rota 90°/270°, con el mismo ángulo de Canvas que usa el
+  pintado: 90° usa −π/2 y 270° usa +π/2. No convertir el valor de
+  `bbox.rotation` directamente a radianes con signo positivo. 180° conserva
+  el dibujo sin rotación de ADR-066.
+  La corrección del mapa no cambia el baseline ni el pintado del PDF.
+- Cuando `tryRepaintLine` tiene éxito, registrar la extensión del token que
+  se acaba de medir y, para cada vecina, su caja original trasladada por
+  `plan.delta / scale`. No registrar vecinas que no se repintaron.
+- Las cajas se expresan en puntos de página; conservar `rotation` y no
+  formar una gran caja cubierta sobre el espacio entre fragmentos.
+- La extracción no modifica órdenes de dibujo, métricas, colores ni la
+  salida full/export. Las cajas de palabra trasladadas conservan el tamaño
+  de `Word.bbox`; son áreas de interacción, no una nueva estimación de tinta.
+
+La clave de cache incluye `interactionRevision` además de sus componentes
+existentes; el scheduler lee la revisión junto con el input más reciente.
+Un render `full` no reemplaza el input de preview retenido si ya existe uno
+para esa página/kind: un snapshot de export no puede pisar su contenido ni
+perder su revisión. Si solo hubo invocaciones full y nunca preview, se
+conserva el fallback existente para callers directos (revisión 0 por defecto).
+El render full usa su propio input para dibujar, sin cambiar esa regla.
+Los bytes estimados de entradas incluyen los arrays del mapa. Evicción,
+unload/dispose y guardas de supersede/escala eliminan mapa y raster juntos.
+Validar el wire result con el mismo rigor que `degraded`, sin `any`.
+Si un caller provee `interactionRevision`, validar entero finito no negativo
+antes de despachar; inválido lanza `InvalidInputError` en la invocación
+directa. El kernel aplica la misma guarda a su payload directo. Ausente es 0.
+
+Nuevos nombres de pruebas requeridos en §14:
+
+| Tipo | Nombre | Garantía |
+| --- | --- | --- |
+| Unit | `preview geometry records shifted neighbors and expanded replacement` | Mismo delta/extensión que el dibujo; puntos de página. |
+| Edge | `preview geometry preserves redact rotated and multiline covered regions` | Una región por fragmento; sin selección del original oculto; fallback horizontal/rotado con ascent/descent asimétricos y mapa coincidente con la transformación efectivamente ejecutada al dibujar. |
+| Contract | `preview geometry travels through worker cache and event` | Mapas iguales en miss/hit, decoder y proyección pública. |
+| Edge | `preview geometry follows revision scale supersede and eviction` | Sin combinar resultados de revisiones/escalas diferentes. |
+| Unit | `interaction geometry does not change full rendering` | Sin alterar pixels/export ni colectar mapa innecesario. |
+| Edge | `preview interaction revision rejects invalid input` | NaN, infinito, negativo y fraccionario rechazados; 0/default válidos. |
+| Edge | `full rendering cannot overwrite the remembered preview revision or content` | Zoom después de export y snapshot full viejo no envenenan el preview más reciente; si solo hubo full, dos full consecutivos conservan el fallback del último. |
+| Contract | `prepared preview input stays lazy and refreshes requested pages` | Sin dispatch/evento al preparar; primer pedido usa la revisión vigente; marca solo por preview, reset y refresco de trabajo en vuelo. |
 
 ## Referencias
 

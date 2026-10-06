@@ -271,6 +271,7 @@ describe("applyEdits", () => {
     });
     expect(toasts.get()?.title).toBe("Eliminaste «Juan Pérez»");
     expect(toasts.get()?.description).toBe("Ya no está en la lista ni se va a ocultar");
+    expect(toasts.get()?.tone).toBe("deletion");
     toasts.unsubscribe();
   });
 
@@ -292,6 +293,7 @@ describe("applyEdits", () => {
 
     expect(toasts.get()?.title).toBe("Eliminaste «Fiscalía de Quilmes»");
     expect(toasts.get()?.description).toBe("Lo que marcaste («X») ahora se oculta");
+    expect(toasts.get()?.tone).toBe("deletion");
     toasts.unsubscribe();
   });
 

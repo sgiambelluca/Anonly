@@ -47,6 +47,7 @@ import { usePipelineStore } from "../../store/pipeline.store.js";
 import { useUnreadableInkStore } from "../../store/unreadableInk.store.js";
 import { useViewerStore, type ViewerKind } from "../../store/viewer.store.js";
 
+import { projectMatchBoxes } from "./interactionProjection.js";
 import { PageCanvas } from "./PageCanvas.js";
 import { computePageHeight, computePageWidth } from "./pageLayout.js";
 import { computePageSlots } from "./pageSlots.js";
@@ -63,7 +64,6 @@ import {
 } from "./viewerGestures.js";
 import { computeMountRange, rangeToPageIndices, type VisibleRange } from "./visibleRange.js";
 import { WordSelectionOverlay, type PageSelection } from "./WordSelectionOverlay.js";
-import { isOriginalPanel } from "./wordSelectionRect.js";
 import { computeZoomRenderScale } from "./zoomRenderScale.js";
 import { createZoomRenderScheduler } from "./zoomRenderScheduler.js";
 
@@ -95,6 +95,8 @@ export function PdfViewer({ activeMatch, scrollNonce }: PdfViewerProps) {
   // tienen imágenes distintas de la misma página, y conmutar el toggle pinta
   // la cacheada sin esperar un render nuevo.
   const previewByPage = useViewerStore((state) => state.previewByPage[kind]);
+  const interactionGeometryByPage = useViewerStore((state) => state.interactionGeometryByPage);
+  const interactionEpoch = useViewerStore((state) => state.interactionEpoch);
   const failedPages = useViewerStore((state) => state.failedPages);
 
   // ADR-190 §4: las páginas marcadas `unreadableInk` reservan una franja de
@@ -229,13 +231,20 @@ export function PdfViewer({ activeMatch, scrollNonce }: PdfViewerProps) {
     useViewerStore.getState().setPage(pageIndex);
   }
 
-  // ADR-169 §7: la selección sobre el original persiste hasta que se agrega,
-  // se cancela, se hace otra, se presiona Escape, se conmuta a Anonimizado o
-  // se cierra el documento. Vive acá —y no en cada página— para que haya una
-  // sola en todo el documento y sobreviva a que su página salga del rango
-  // montado.
+  // La selección vive acá —y no en cada página— para que haya una sola en
+  // todo el documento y sobreviva a que su página salga del rango montado.
+  // En Anonimizado queda ligada a la revisión de geometría de esa página.
   const [selection, setSelection] = useState<PageSelection | null>(null);
   const clearSelection = useCallback(() => setSelection(null), []);
+  useEffect(() => {
+    if (
+      selection !== null &&
+      selection.interactionRevision !== null &&
+      actions.getPreviewInteractionRevision(selection.pageIndex) !== selection.interactionRevision
+    ) {
+      clearSelection();
+    }
+  }, [interactionEpoch, selection, clearSelection]);
   useEffect(() => {
     setSelection(null);
   }, [kind, documentId]);
@@ -310,8 +319,24 @@ export function PdfViewer({ activeMatch, scrollNonce }: PdfViewerProps) {
             // `exactOptionalPropertyTypes`: no se puede pasar `blobUrl` en
             // `undefined` explícito a un `blobUrl?: string`.
             const blobUrl = previewByPage.get(pageIndex);
-            const activeMatchBbox =
-              activeMatch && activeMatch.pageIndex === pageIndex ? activeMatch.bbox : undefined;
+            const candidateGeometry = interactionGeometryByPage.get(pageIndex);
+            const interactionGeometry =
+              kind === "anonymized" &&
+              candidateGeometry?.revision === actions.getPreviewInteractionRevision(pageIndex)
+                ? candidateGeometry
+                : undefined;
+            const activeMatchBboxes =
+              activeMatch?.pageIndex !== pageIndex
+                ? []
+                : kind === "anonymized"
+                  ? interactionGeometry === undefined
+                    ? []
+                    : projectMatchBoxes(
+                        actions.getPageWords(pageIndex),
+                        activeMatch,
+                        interactionGeometry,
+                      )
+                  : [activeMatch.bbox];
             return (
               <div className="flex shrink-0 flex-col items-center" style={{ width: pageWidth }}>
                 <PageSeparator pageIndex={pageIndex} pageCount={pageCount} />
@@ -342,17 +367,17 @@ export function PdfViewer({ activeMatch, scrollNonce }: PdfViewerProps) {
                     height={pageHeight}
                     failed={failedPages.has(pageIndex)}
                   />
-                  {isOriginalPanel(kind) ? (
-                    <WordSelectionOverlay
-                      pageIndex={pageIndex}
-                      displayWidth={pageWidth}
-                      displayHeight={pageHeight}
-                      {...(activeMatchBbox !== undefined ? { activeMatchBbox } : {})}
-                      selection={selection?.pageIndex === pageIndex ? selection : null}
-                      onSelect={setSelection}
-                      onClearSelection={clearSelection}
-                    />
-                  ) : null}
+                  <WordSelectionOverlay
+                    pageIndex={pageIndex}
+                    displayWidth={pageWidth}
+                    displayHeight={pageHeight}
+                    activeMatchBboxes={activeMatchBboxes}
+                    kind={kind}
+                    {...(interactionGeometry !== undefined ? { interactionGeometry } : {})}
+                    selection={selection?.pageIndex === pageIndex ? selection : null}
+                    onSelect={setSelection}
+                    onClearSelection={clearSelection}
+                  />
                 </div>
               </div>
             );

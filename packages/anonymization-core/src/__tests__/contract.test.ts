@@ -35,6 +35,7 @@ import {
   createPdfEngineOutput,
   createOcrWorkerHarness,
   createRealBus,
+  createRenderPageOutput,
   createWord,
   runMessagesOf,
   runOcrPage,
@@ -909,6 +910,144 @@ describe("Orchestrator — contract tests", () => {
       }),
       expect.anything(),
     );
+  });
+
+  it.each([
+    "empty preview pages stay lazy through OCR and reanalysis",
+    "interaction revision invalidates OCR and empty reanalysis pages",
+  ])("%s", async () => {
+    const bus = createRealBus();
+    const cache = new LruCache();
+    const engines = createMockEngines();
+    const pages = [
+      createPage({ index: 0 }),
+      createPage({ index: 1 }),
+      createPage({ index: 2, requiresOCR: true }),
+    ];
+    const document = createDocument({ pageCount: pages.length, pages });
+    const pdfOutput = createPdfEngineOutput({ document, textlessPages: [2] });
+    wireHappyPathSpies(engines, bus, { pdfOutput });
+
+    const group = createEntityGroup({
+      id: "group-lazy-seed",
+      members: [
+        {
+          occurrenceId: "occ-lazy-seed",
+          value: "valor",
+          pageIndex: 0,
+          bbox: { x: 1, y: 2, width: 30, height: 12 },
+          source: DetectionSource.Regex,
+        },
+      ],
+    });
+    let snapshotGroups = [group];
+    vi.spyOn(engines.grouping, "getSnapshot").mockImplementation((documentId) => ({
+      documentId,
+      groups: snapshotGroups,
+      conflicts: [],
+      rules: [],
+    }));
+
+    const ocrWords = [createWord({ pageIndex: 2, source: "ocr" })];
+    vi.spyOn(engines.ocr, "processSession").mockImplementation(async (requests) => {
+      const request = requests.find((candidate) => candidate.pageIndex === 2);
+      expect(request).toBeDefined();
+      cache.set(`ocr-words:doc-1:2`, ocrWords);
+      bus.emit(EventChannel.Ocr, EngineEvents.OCR_PAGE_FINISHED, {
+        documentId: "doc-1",
+        pageIndex: 2,
+        wordCount: ocrWords.length,
+        confidence: 0.9,
+      });
+      return requests.map((candidate) => ({
+        documentId: candidate.documentId,
+        pageIndex: candidate.pageIndex,
+        words: ocrWords,
+        confidence: 0.9,
+        durationMs: 1,
+      }));
+    });
+
+    const requestedPages = new Set([1]);
+    vi.spyOn(engines.render, "preparePreviewInput").mockImplementation((input) =>
+      requestedPages.has(input.pageIndex),
+    );
+    const renderPage = vi.mocked(engines.render.renderPage);
+    renderPage.mockImplementation((input) => {
+      requestedPages.add(input.pageIndex);
+      return Promise.resolve(
+        createRenderPageOutput({
+          documentId: input.documentId,
+          pageIndex: input.pageIndex,
+          kind: input.kind,
+        }),
+      );
+    });
+
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache,
+      config: createEngineConfig(),
+      engines,
+    });
+    await orchestrator.importDocument(createImportInput());
+
+    bus.emit(EventChannel.Grouping, EngineEvents.ENTITY_GROUP_UPDATED, {
+      documentId: "doc-1",
+      group,
+      changes: ["members"],
+    });
+    const pageZeroRevision = orchestrator.getPreviewInteractionRevision("doc-1", 0);
+    expect(pageZeroRevision).toBe(1);
+    expect(orchestrator.getPreviewInteractionRevision("doc-1", 2)).toBe(1);
+    const initialPreparedInputs = vi
+      .mocked(engines.render.preparePreviewInput)
+      .mock.calls.map(([input]) => input);
+    expect(initialPreparedInputs.map((input) => input.pageIndex)).toEqual([0, 1, 2]);
+    expect(initialPreparedInputs.find((input) => input.pageIndex === 2)).toMatchObject({
+      replacements: [],
+      interactionRevision: 1,
+    });
+    expect(
+      renderPage.mock.calls
+        .map(([input]) => input)
+        .filter((input) => input.kind === "anonymized")
+        .map((input) => input.pageIndex),
+    ).toEqual([0, 1]);
+
+    snapshotGroups = [];
+    vi.mocked(engines.grouping.dropOccurrences).mockImplementation(() => {
+      bus.emit(EventChannel.Grouping, EngineEvents.ENTITY_GROUP_REMOVED, {
+        documentId: "doc-1",
+        groupId: group.id,
+      });
+    });
+    renderPage.mockClear();
+    vi.mocked(engines.render.preparePreviewInput).mockClear();
+    await orchestrator.reanalyze("doc-1", { ner: { enabled: false } });
+
+    expect(orchestrator.getPreviewInteractionRevision("doc-1", 0)).toBe(pageZeroRevision! + 1);
+    expect(orchestrator.getPreviewInteractionRevision("doc-1", 2)).toBe(1);
+
+    const reanalysisPreparedInputs = vi
+      .mocked(engines.render.preparePreviewInput)
+      .mock.calls.map(([input]) => input);
+    expect(reanalysisPreparedInputs).toHaveLength(3);
+    expect(reanalysisPreparedInputs.find((input) => input.pageIndex === 2)).toMatchObject({
+      replacements: [],
+      interactionRevision: 1,
+    });
+    expect(
+      renderPage.mock.calls
+        .map(([input]) => input)
+        .filter((input) => input.kind === "anonymized")
+        .map((input) => input.pageIndex),
+    ).toEqual([0, 1]);
+    expect(renderPage.mock.calls[0]?.[0]).toMatchObject({ pageIndex: 0, replacements: [] });
+    expect(renderPage.mock.calls.some(([input]) => input.pageIndex === 2)).toBe(false);
+
+    await orchestrator.dispose();
   });
 
   it("renderFull attaches the same lineWords as the preview for the same page", async () => {

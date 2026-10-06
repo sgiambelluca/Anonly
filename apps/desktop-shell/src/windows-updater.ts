@@ -343,6 +343,17 @@ export function startWindowsUpdater(
 }
 
 /** Fuerza un chequeo (el botón "Buscar actualizaciones ahora"). */
-export function checkWindowsUpdates(): void {
-  void autoUpdater.checkForUpdates();
+export function checkWindowsUpdates(emit: Emit): void {
+  void autoUpdater
+    .checkForUpdates()
+    .then((result) => {
+      // electron-updater de producción puede resolver `null` sin ningún
+      // evento cuando la app corre sin empaquetar. Solo el chequeo manual
+      // comunica este resultado al renderer; el caller automático no usa
+      // esta función.
+      if (result === null) emit(toUpdateEventPayload({ type: "check-unavailable" }));
+    })
+    // Los fallos reales ya llegan por el evento `error`; evitar un rechazo
+    // sin manejar sin duplicar feedback ni filtrar texto de la librería.
+    .catch(() => undefined);
 }

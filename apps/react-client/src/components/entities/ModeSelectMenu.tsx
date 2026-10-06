@@ -31,7 +31,7 @@ import type { ReplacementMode, ReplacementPreviews } from "@anonly/anonymization
 import { CheckIcon } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
-import { resolveMenuPlacement, type MenuPlacement } from "./menuPlacement.js";
+import { observeMenuLayout, type MenuLayout } from "./menuPlacement.js";
 import {
   REPLACEMENT_MODE_DESCRIPTION,
   REPLACEMENT_MODE_LABEL,
@@ -60,26 +60,6 @@ export interface ModeSelectMenuProps {
   readonly className?: string;
 }
 
-/** La separación entre el disparador y el menú (`mt-1` / `mb-1`). */
-const MENU_GAP_PX = 4;
-
-/**
- * El área donde el menú se ve entero: la ventana, recortada por cada ancestro
- * que scrollea o esconde lo que se sale.
- */
-function clippingBoundary(element: HTMLElement): { readonly top: number; readonly bottom: number } {
-  let top = 0;
-  let bottom = window.innerHeight;
-  for (let node = element.parentElement; node !== null; node = node.parentElement) {
-    const overflowY = window.getComputedStyle(node).overflowY;
-    if (overflowY === "visible") continue;
-    const rect = node.getBoundingClientRect();
-    top = Math.max(top, rect.top);
-    bottom = Math.min(bottom, rect.bottom);
-  }
-  return { top, bottom };
-}
-
 export function ModeSelectMenu({
   current,
   previews,
@@ -93,7 +73,11 @@ export function ModeSelectMenu({
   const [open, setOpenState] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-  const [placement, setPlacement] = useState<MenuPlacement>("bottom");
+  const [layout, setLayout] = useState<MenuLayout>({
+    placement: "bottom",
+    top: 0,
+    maxHeight: 0,
+  });
   const onOpenChangeRef = useRef(onOpenChange);
   onOpenChangeRef.current = onOpenChange;
 
@@ -104,24 +88,19 @@ export function ModeSelectMenu({
 
   // Antes de pintar: el menú nunca llega a verse en el lado equivocado.
   useLayoutEffect(() => {
-    if (!open) {
-      setPlacement("bottom");
-      return;
-    }
+    if (!open) return;
     const container = containerRef.current;
     const menu = menuRef.current;
     if (container === null || menu === null) return;
-    const trigger = container.getBoundingClientRect();
-    const boundary = clippingBoundary(container);
-    setPlacement(
-      resolveMenuPlacement({
-        triggerTop: trigger.top,
-        triggerBottom: trigger.bottom,
-        menuHeight: menu.offsetHeight + MENU_GAP_PX,
-        boundaryTop: boundary.top,
-        boundaryBottom: boundary.bottom,
-      }),
-    );
+    return observeMenuLayout(container, menu, (next) => {
+      setLayout((previous) =>
+        previous.placement === next.placement &&
+        previous.top === next.top &&
+        previous.maxHeight === next.maxHeight
+          ? previous
+          : next,
+      );
+    });
   }, [open]);
 
   useEffect(() => {
@@ -151,10 +130,9 @@ export function ModeSelectMenu({
           ref={menuRef}
           role="group"
           aria-label="Modo de reemplazo"
-          data-placement={placement}
-          className={`absolute z-50 ${
-            placement === "top" ? "bottom-full mb-1" : "top-full mt-1"
-          } w-[26.5rem] max-w-[calc(100vw-2rem)] rounded-xl border border-border bg-bg-primary p-1.5 shadow-md ${
+          data-placement={layout.placement}
+          style={{ top: `${layout.top}px`, maxHeight: `${layout.maxHeight}px` }}
+          className={`absolute z-50 w-[26.5rem] max-w-[calc(100vw-2rem)] overflow-y-auto overscroll-contain rounded-xl border border-border bg-bg-primary p-1.5 shadow-md ${
             align === "right" ? "right-0" : "left-0"
           }`}
         >

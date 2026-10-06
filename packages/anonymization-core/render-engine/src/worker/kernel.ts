@@ -45,6 +45,9 @@ import {
   type EncodedPageImage,
   type LoadDocumentPayload,
   type MarkerLegendRow,
+  type PreviewCoveredRegion,
+  type PreviewInteractionGeometry,
+  type PreviewWordPosition,
   type RasterizePagePayload,
   type RenderLegendPayload,
   type RenderPagePayload,
@@ -474,6 +477,7 @@ function tryRepaintLine(
   otherReplacements: ReadonlyArray<Replacement>,
   scale: number,
   pageWidthPx: number,
+  interaction?: InteractionGeometryCollector,
 ): boolean {
   const plan = planLineRepaint(
     measureWidth,
@@ -513,6 +517,20 @@ function tryRepaintLine(
     scaledBbox.y + scaledBbox.height / 2,
     eraseWidth,
   );
+  if (interaction !== undefined) {
+    const metrics = context.measureText(replacement.replacementValue);
+    interaction.coveredRegions.push({
+      occurrenceId: replacement.occurrenceId,
+      sourceBbox: replacement.bbox,
+      bbox: {
+        x: scaledBbox.x / scale,
+        y: (scaledBbox.y + scaledBbox.height / 2 - metrics.actualBoundingBoxAscent) / scale,
+        width: metrics.width / scale,
+        height: (metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent) / scale,
+        ...(replacement.bbox.rotation !== undefined ? { rotation: replacement.bbox.rotation } : {}),
+      },
+    });
+  }
 
   for (const neighbor of plan.neighbors) {
     const neighborBbox = scaleBbox(neighbor.bbox, scale);
@@ -521,9 +539,24 @@ function tryRepaintLine(
       neighborBbox.x + plan.delta,
       neighborBbox.y + neighborBbox.height / 2,
     );
+    if (interaction !== undefined && plan.delta !== 0) {
+      interaction.wordPositions.set(interactionBboxKey(neighbor.bbox), {
+        sourceBbox: neighbor.bbox,
+        bbox: { ...neighbor.bbox, x: neighbor.bbox.x + plan.delta / scale },
+      });
+    }
   }
 
   return true;
+}
+
+interface InteractionGeometryCollector {
+  readonly wordPositions: Map<string, PreviewWordPosition>;
+  readonly coveredRegions: PreviewCoveredRegion[];
+}
+
+function interactionBboxKey(bbox: BoundingBox): string {
+  return `${bbox.x},${bbox.y},${bbox.width},${bbox.height},${bbox.rotation ?? 0}`;
 }
 
 /**
@@ -1060,6 +1093,7 @@ function paintReplacements(
   pageWidthPx: number,
   abortSignal: AbortSignal,
   documentId: string,
+  interaction?: InteractionGeometryCollector,
 ): ReadonlyArray<Annotation> {
   const measureWidth = (font: string, text: string): number => {
     context.font = font;
@@ -1080,6 +1114,11 @@ function paintReplacements(
       // §13 caso 3: fill opaco negro, sin texto.
       context.fillStyle = REDACT_FILL_COLOR;
       context.fillRect(bbox.x, bbox.y, bbox.width, bbox.height);
+      interaction?.coveredRegions.push({
+        occurrenceId: replacement.occurrenceId,
+        sourceBbox: replacement.bbox,
+        bbox: replacement.bbox,
+      });
       continue;
     }
 
@@ -1145,6 +1184,7 @@ function paintReplacements(
         otherReplacements,
         scale,
         pageWidthPx,
+        interaction,
       );
       if (repainted) continue;
     }
@@ -1164,7 +1204,14 @@ function paintReplacements(
     // fondo ya se tapó arriba; sin texto que dibujar, tampoco hay fitting ni
     // veredicto de degradación que evaluar (no puede degradar lo que no
     // dibuja), así que corta acá y nunca llega a `fillText`.
-    if (replacement.replacementValue === "") continue;
+    if (replacement.replacementValue === "") {
+      interaction?.coveredRegions.push({
+        occurrenceId: replacement.occurrenceId,
+        sourceBbox: replacement.bbox,
+        bbox: replacement.bbox,
+      });
+      continue;
+    }
 
     context.fillStyle = REPLACEMENT_TEXT_COLOR;
     context.textAlign = "center";
@@ -1198,6 +1245,47 @@ function paintReplacements(
         bbox.y + bbox.height / 2,
         bbox.width,
       );
+    }
+
+    if (interaction !== undefined) {
+      const metrics = context.measureText(replacement.replacementValue);
+      const widthRatio = metrics.width > 0 ? Math.min(1, availableLengthPx / metrics.width) : 1;
+      const textWidth = metrics.width * widthRatio;
+      const centerX = bbox.x + bbox.width / 2;
+      const centerY = bbox.y + bbox.height / 2;
+      const localLeft = -textWidth / 2;
+      const localRight = textWidth / 2;
+      const localTop = -metrics.actualBoundingBoxAscent;
+      const localBottom = metrics.actualBoundingBoxDescent;
+      const localCorners: ReadonlyArray<readonly [number, number]> = [
+        [localLeft, localTop],
+        [localRight, localTop],
+        [localRight, localBottom],
+        [localLeft, localBottom],
+      ];
+      const angle = sidewaysRotation === undefined ? 0 : CANVAS_ROTATION_RADIANS[sidewaysRotation];
+      const cosine = Math.cos(angle);
+      const sine = Math.sin(angle);
+      const corners: Array<[number, number]> = localCorners.map(([x, y]) => {
+        return [centerX + cosine * x - sine * y, centerY + sine * x + cosine * y];
+      });
+      const left = Math.min(...corners.map(([x]) => x));
+      const right = Math.max(...corners.map(([x]) => x));
+      const top = Math.min(...corners.map(([, y]) => y));
+      const bottom = Math.max(...corners.map(([, y]) => y));
+      interaction.coveredRegions.push({
+        occurrenceId: replacement.occurrenceId,
+        sourceBbox: replacement.bbox,
+        bbox: {
+          x: left / scale,
+          y: top / scale,
+          width: (right - left) / scale,
+          height: (bottom - top) / scale,
+          ...(replacement.bbox.rotation !== undefined
+            ? { rotation: replacement.bbox.rotation }
+            : {}),
+        },
+      });
     }
 
     // ADR-086 §1 (reemplaza el criterio de ADR-058 §7/caso 28): la razón, y
@@ -1413,6 +1501,8 @@ export interface KernelRenderResult {
    * que no pinta reemplazos.
    */
   readonly degraded: ReadonlyArray<Annotation>;
+  /** Sparse interaction geometry produced during anonymized preview painting. */
+  readonly interactionGeometry?: PreviewInteractionGeometry;
   // Siempre presente (a diferencia de `RenderPageOutput.encoded`, público y
   // opcional según `mode` — Render_Engine.md §10): el host decide si lo
   // expone según `mode === "full"`, y reusa este mismo valor para el blob de
@@ -1450,6 +1540,16 @@ export async function kernelRenderPage(
   const replacements = payload.replacements ?? [];
   const annotations = payload.annotations ?? [];
   const scale = payload.scale ?? 1;
+  if (
+    payload.interactionRevision !== undefined &&
+    (!Number.isInteger(payload.interactionRevision) || payload.interactionRevision < 0)
+  ) {
+    throw new InvalidInputError("interactionRevision debe ser un entero no negativo.", {
+      documentId,
+      pageIndex,
+      interactionRevision: payload.interactionRevision,
+    });
+  }
   const imageFormat = payload.imageFormat ?? (mode === "preview" ? "png" : "jpeg");
 
   if (opts.abortSignal.aborted) throw new CancelledError(documentId);
@@ -1483,6 +1583,13 @@ export async function kernelRenderPage(
   if (opts.abortSignal.aborted) throw new CancelledError(documentId);
 
   let degradedVerdict: ReadonlyArray<Annotation> = [];
+  const interaction =
+    mode === "preview" && kind === "anonymized"
+      ? {
+          wordPositions: new Map<string, PreviewWordPosition>(),
+          coveredRegions: [] as PreviewCoveredRegion[],
+        }
+      : undefined;
   if (kind === "anonymized") {
     // ADR-058 §5: `lineWords` ausente es el caso normal (página donde todo
     // entra a tamaño natural) y nunca un error — se resuelve a `[]`, que hace
@@ -1496,6 +1603,7 @@ export async function kernelRenderPage(
       viewport.width,
       opts.abortSignal,
       documentId,
+      interaction,
     );
     // ADR-058 §7 + nota posterior (ver ADR-058 "Docs actualizados", entrada de
     // repintado preview-only): la anotación Degraded se pinta reutilizando
@@ -1536,9 +1644,22 @@ export async function kernelRenderPage(
   // exactamente el ahorro del ADR (no materializar en el host una copia que
   // nadie lee en preview). `getImageData()` de arriba ya corrió en los dos
   // modos, sin condicional: hace falta igual para producir `encoded`.
+  const interactionGeometry =
+    interaction === undefined
+      ? undefined
+      : {
+          revision: payload.interactionRevision ?? 0,
+          scale,
+          wordPositions: [...interaction.wordPositions.values()],
+          coveredRegions: interaction.coveredRegions,
+        };
   return mode === "full"
     ? { imageData, encoded, degraded: degradedVerdict }
-    : { encoded, degraded: degradedVerdict };
+    : {
+        encoded,
+        degraded: degradedVerdict,
+        ...(interactionGeometry !== undefined ? { interactionGeometry } : {}),
+      };
 }
 
 export interface KernelRasterizeOptions {

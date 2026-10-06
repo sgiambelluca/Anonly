@@ -309,6 +309,8 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
   // solo trae groupId) y para detectar páginas que un grupo abandonó por
   // merge/split/dropOccurrences. Se limpia en DOCUMENT_CLOSED.
   private readonly groupPagesByDocument = new Map<string, Map<string, Set<number>>>();
+  // ADR-204: monotonic revisions for per-page preview interaction geometry.
+  private readonly interactionRevisionsByDocument = new Map<string, number[]>();
   // Páginas marcadas sucias por documento, pendientes del flush coalescido
   // por microtask (§13 caso 27). Vacío durante las etapas pre-Ready: el seed
   // de GROUPING_FINISHED las cubre sin necesitar el flush incremental.
@@ -708,6 +710,21 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     return { width: page.width, height: page.height };
   }
 
+  getPreviewInteractionRevision(documentId: string, pageIndex: number): number | null {
+    const document = this.documents.get(documentId);
+    const revisions = this.interactionRevisionsByDocument.get(documentId);
+    if (
+      document === undefined ||
+      !Number.isInteger(pageIndex) ||
+      pageIndex < 0 ||
+      document.pages[pageIndex] === undefined ||
+      revisions === undefined
+    ) {
+      return null;
+    }
+    return revisions[pageIndex] ?? null;
+  }
+
   private getPageOrThrow(documentId: string, pageIndex: number): Page {
     const document = this.documents.get(documentId);
     if (document === undefined) {
@@ -977,6 +994,7 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     // copia de literales) no sobreviven al cierre.
     this.checkpointedLiteralsByDocument.delete(documentId);
     this.groupPagesByDocument.delete(documentId);
+    this.interactionRevisionsByDocument.delete(documentId);
     this.dirtyPagesByDocument.delete(documentId);
     this.flushScheduledDocuments.delete(documentId);
     // ADR-189 §3: la marca de precalentado muere con el documento — uno
@@ -1026,6 +1044,7 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     // copia de literales retenidos es estado propio de este componente.
     this.checkpointedLiteralsByDocument.clear();
     this.groupPagesByDocument.clear();
+    this.interactionRevisionsByDocument.clear();
     this.dirtyPagesByDocument.clear();
     this.flushScheduledDocuments.clear();
     this.prewarmedDocuments.clear();
@@ -1114,6 +1133,10 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     }
 
     this.documents.set(documentId, pdfOutput.document);
+    this.interactionRevisionsByDocument.set(
+      documentId,
+      Array.from({ length: pdfOutput.document.pageCount }, () => 0),
+    );
     // ADR-065 §8: retenido por documento — ver el mapa arriba.
     this.ocrRegionsByDocument.set(documentId, pdfOutput.ocrRegions);
 
@@ -1723,6 +1746,9 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
       ?.find((candidate) => candidate.pageIndex === payload.pageIndex);
 
     try {
+      // The incoming OCR words replace interaction-source geometry. Invalidate
+      // any map built against the previous words before publishing the new page.
+      this.incrementInteractionRevision(payload.documentId, payload.pageIndex);
       const updatedDocument =
         region !== undefined
           ? fuseOcrRegion(document, payload.pageIndex, region.bbox, words)
@@ -1864,11 +1890,19 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
    * correría de todos modos, sin necesidad de guardarlas para más tarde).
    */
   private markPagesDirty(documentId: string, pages: ReadonlySet<number>): void {
-    if (pages.size === 0 || this.isPreReadyStage(documentId)) return;
+    if (pages.size === 0) return;
+    for (const pageIndex of pages) this.incrementInteractionRevision(documentId, pageIndex);
+    if (this.isPreReadyStage(documentId)) return;
     const dirty = this.dirtyPagesByDocument.get(documentId) ?? new Set<number>();
     for (const pageIndex of pages) dirty.add(pageIndex);
     this.dirtyPagesByDocument.set(documentId, dirty);
     this.scheduleFlush(documentId);
+  }
+
+  private incrementInteractionRevision(documentId: string, pageIndex: number): void {
+    const revisions = this.interactionRevisionsByDocument.get(documentId);
+    if (revisions === undefined || revisions[pageIndex] === undefined) return;
+    revisions[pageIndex] += 1;
   }
 
   private isPreReadyStage(documentId: string): boolean {
@@ -1933,12 +1967,14 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
 
     for (let pageIndex = 0; pageIndex < document.pageCount; pageIndex++) {
       const replacements = buildPageReplacements(pageIndex, snapshot.groups);
-      // Caso 26: páginas sin ningún reemplazo habilitado no se siembran (la
-      // reconstrucción default de RENDER_REQUESTED con `replacements: []` ya
-      // es correcta — a diferencia del flush, acá no hay un estado previo que
-      // revertir).
-      if (replacements.length === 0) continue;
-      this.renderMediatedPreview(documentId, pageIndex, replacements, ctx);
+      const input = this.createMediatedPreviewInput(documentId, pageIndex, replacements);
+      const hadPreviewRequest = this.engines.render.preparePreviewInput(input);
+      // Seed metadata for every page, but rasterize only pages that have work
+      // or were already requested/materialized. Refreshing an in-flight page
+      // bumps its scheduler generation before its older raster can settle.
+      if (replacements.length > 0 || hadPreviewRequest) {
+        this.renderMediatedPreviewInput(input, ctx);
+      }
     }
   }
 
@@ -1995,20 +2031,36 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     replacements: ReadonlyArray<Replacement>,
     ctx: EngineContext,
   ): void {
+    this.renderMediatedPreviewInput(
+      this.createMediatedPreviewInput(documentId, pageIndex, replacements),
+      ctx,
+    );
+  }
+
+  private createMediatedPreviewInput(
+    documentId: string,
+    pageIndex: number,
+    replacements: ReadonlyArray<Replacement>,
+  ): RenderPageInput {
     // `Page.words` del Document retenido; ausente (documento ya cerrado,
     // página fuera de rango) degrada a [] — `selectLineWords` sobre un
     // array vacío ya se comporta bien (ADR-058 §5: sin vecinas utilizables,
     // el kernel cae a shrink-to-fit).
     const pageWords = this.documents.get(documentId)?.pages[pageIndex]?.words ?? [];
     const lineWords = selectLineWords(pageWords, replacements);
-    const input: RenderPageInput = {
+    return {
       documentId,
       pageIndex,
       kind: "anonymized",
       mode: "preview",
       replacements,
+      interactionRevision: this.getPreviewInteractionRevision(documentId, pageIndex) ?? 0,
       ...(lineWords !== undefined ? { lineWords } : {}),
     };
+  }
+
+  private renderMediatedPreviewInput(input: RenderPageInput, ctx: EngineContext): void {
+    const { documentId, pageIndex } = input;
     this.engines.render.renderPage(input, ctx).catch((err: unknown) => {
       this.logger.warn("Render mediado del preview anonimizado falló (best-effort, ADR-044).", {
         documentId,

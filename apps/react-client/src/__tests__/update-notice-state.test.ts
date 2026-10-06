@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import { PipelineStage } from "@anonly/anonymization-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { TOAST_DURATION_MS } from "../components/common/toast.js";
 import {
   describeUpdateNotice,
   dismissUpdateNotice,
@@ -464,12 +465,7 @@ describe("tarjeta estable (UX-10, ADR-197 §4)", () => {
   });
 
   it("los toasts siguen igual por defecto y suben solo mientras está la tarjeta", () => {
-    const toast = readFileSync(
-      fileURLToPath(new URL("../components/common/ToastHost.tsx", import.meta.url)),
-      "utf8",
-    );
-    expect(toast).toContain("bottom-[var(--anonly-toast-bottom,1.25rem)]");
-    expect(toast).toContain("const TOAST_DURATION_MS = 6000;");
+    expect(TOAST_DURATION_MS).toBe(3000);
   });
 
   it("un aviso descartado vuelve a mostrarse con un update-available posterior", () => {

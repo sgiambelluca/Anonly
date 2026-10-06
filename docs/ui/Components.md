@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=componentes-ui | dependencias=ui/React_Client.md,ui/UX_Guidelines.md,ADR-001-Framework.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-054-Scroll-Independiente-Por-Panel.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-056-RenderRequested-Kind-Por-Panel.md,adr/ADR-150-La-Pantalla-De-Escaneo-Dura-Lo-Que-Dura-El-Escaneo.md,adr/ADR-151-La-Primera-Pagina-Ya-Esta-Dibujada-Cuando-Se-Abre-El-Panel.md,adr/ADR-152-La-Pantalla-De-Escaneo-Dice-En-Que-Pagina-Va.md,adr/ADR-069-Lexico-De-Genero-Fuente-Unica-Y-Canal-Del-Usuario.md,adr/ADR-071-El-Genero-Se-Muestra-Solo-Donde-Se-Usa.md,adr/ADR-089-Buscar-No-Es-Agregar.md,adr/ADR-114-La-Seleccion-Del-Mouse-Es-De-Un-Renglon.md,adr/ADR-168-Pantallas-De-Carga-Y-Escaneo-Tras-Pruebas-De-Usuario.md,adr/ADR-169-La-Pantalla-De-Trabajo-Tras-Pruebas-De-Usuario.md,adr/ADR-170-Las-Vistas-Previas-De-Edicion-Las-Calcula-El-Core.md,adr/ADR-171-El-Usuario-Puede-Eliminar-Una-Entidad.md,adr/ADR-172-Deshacer-Y-Rehacer-Exactos.md,adr/ADR-174-Un-Agregado-Manual-Que-Choca-Se-Resuelve-En-El-Momento.md,adr/ADR-175-Un-Choque-Manual-No-Queda-Colgado.md,adr/ADR-176-Un-Choque-Pendiente-Bloquea-El-Export.md,adr/ADR-177-Una-Entidad-Eliminada-No-Ocupa-Lugar.md,adr/ADR-178-Lo-Contenido-Se-Oculta-Solo-Si-Su-Contenedor-Se-Elimina.md | audiencia=IA-implementador-ui | fase=4 (reconciliado en fase 10 por ADR-036: PasswordDialog/SettingsDialog/ConfirmDialog agregados §2.6–2.7/§8.9, zoom §5.2, mapeo §12; §2.6/§5.2/§5.5/§12 reescritos por ADR-037 —zoom con re-render real— y ADR-038 —SettingsDialog dispara reanalyze, no recreación del core—; §2.1/§2.5/§13.9 ajustados 2026-07-22 por el bug #7 del Escenario 1 E2E: gate de visibilidad por stage vs. vida del diálogo hijo abierto; §5.2/§5.4 en fase 11 por ADR-056 —requestRender con kind por panel, canvas que no se borra—; §3.3/§3.4/§7.1/§12 en fase 10.5 por ADR-058 —marca de reemplazo degradado— y ADR-059 —checkbox de leyenda—; §3.3 por ADR-062 —el canal `PREVIEW_UPDATED.degraded` del que sale esa marca, y las tres reglas de su consumo; el checkbox de leyenda entra en el Hito 10.5 y la marca queda para después—; §3.3/§3.4b/§12 en fase 10.6 por ADR-060 —PersonGenderSelect y marca de género sin determinar— y ADR-069 —§3.4b actualizado: el patch usa `PersonGenderChoice`, "sin determinar" viaja como `"neutral"` explícito—; §3.3/§3.4b/§8.3/§12 reescritos en fase 10.6 por ADR-071 —`PersonGenderSelect` pasa a ser `PersonGenderToggle`: visible solo en `placeholder`/`synthetic`, botón cíclico de tres estados con SVG propios, la marca de "sin determinar" fusionada con el estado neutro, y `Select` sin apertura controlada—; §3.4c/§5.4b/§5.4c/§12 en fase 10.7 por ADR-061 —agregado manual, hit-test de selección y buscador—; §1/§2.6 en fase 10.6 por ADR-070 —sección "Acerca de" con la atribución CC-BY dentro del SettingsDialog, y `thirdPartyCredits.ts` como módulo de datos—; post-Hito 10.10: §3.3 por ADR-086 —la marca de degradado se enciende cuando el texto queda más angosto que `DEGRADED_FONT_RATIO` de su ancho natural, criterio y valor nuevos—); §1/§2/§3/§4/§5/§7 reescritos en el rediseño post-10.9 por **ADR-087** —tres momentos en vez de cuatro paneles: `SideBySideViewer`/`ScrollSyncToggle` y los cuatro componentes de `rules/` se retiran, aparecen `LoadScreen`/`ScanScreen`/`ViewerModeToggle`/`DocumentModeSelect`/`TypeModeSelect`, y `ExportDialog` queda con un solo control—; §5.4c en fase 11 por **ADR-089** —la lupa afloja el último sub-token por prefijo y "Agregar como…" no, porque barre el documento entero—; §5.4b en fase 11 por **ADR-114** —la selección del arrastre se recorta a un renglón y el resultado de `addManualEntity` se muestra—; §3.3/§3.4d en fase 11 por **ADR-094** —`NeedsReviewBadge`: el detector sugiere lo que duda, apagado y marcado, y la fila sugerida no se atenúa—; §2.10 en fase 11 por **ADR-150**/**ADR-151**/**ADR-152** — `ScanScreen` pierde el techo y suelta cuando el `stage` es terminal, precalienta y espera la página 1 antes de soltar, y muestra progreso real por etapa incluido el OCR -->
+<!-- CONTEXT: scope=componentes-ui | dependencias=ui/React_Client.md,ui/UX_Guidelines.md,ADR-001-Framework.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-054-Scroll-Independiente-Por-Panel.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-056-RenderRequested-Kind-Por-Panel.md,adr/ADR-150-La-Pantalla-De-Escaneo-Dura-Lo-Que-Dura-El-Escaneo.md,adr/ADR-151-La-Primera-Pagina-Ya-Esta-Dibujada-Cuando-Se-Abre-El-Panel.md,adr/ADR-152-La-Pantalla-De-Escaneo-Dice-En-Que-Pagina-Va.md,adr/ADR-069-Lexico-De-Genero-Fuente-Unica-Y-Canal-Del-Usuario.md,adr/ADR-071-El-Genero-Se-Muestra-Solo-Donde-Se-Usa.md,adr/ADR-089-Buscar-No-Es-Agregar.md,adr/ADR-114-La-Seleccion-Del-Mouse-Es-De-Un-Renglon.md,adr/ADR-168-Pantallas-De-Carga-Y-Escaneo-Tras-Pruebas-De-Usuario.md,adr/ADR-169-La-Pantalla-De-Trabajo-Tras-Pruebas-De-Usuario.md,adr/ADR-170-Las-Vistas-Previas-De-Edicion-Las-Calcula-El-Core.md,adr/ADR-171-El-Usuario-Puede-Eliminar-Una-Entidad.md,adr/ADR-172-Deshacer-Y-Rehacer-Exactos.md,adr/ADR-174-Un-Agregado-Manual-Que-Choca-Se-Resuelve-En-El-Momento.md,adr/ADR-175-Un-Choque-Manual-No-Queda-Colgado.md,adr/ADR-176-Un-Choque-Pendiente-Bloquea-El-Export.md,adr/ADR-177-Una-Entidad-Eliminada-No-Ocupa-Lugar.md,adr/ADR-178-Lo-Contenido-Se-Oculta-Solo-Si-Su-Contenedor-Se-Elimina.md,adr/ADR-204-La-Interaccion-Anonimizada-Usa-La-Geometria-Visible.md,adr/ADR-205-El-Resultado-Exportado-Pertenece-A-Una-Revision.md,adr/ADR-206-Una-Busqueda-Omitida-No-Confirma-La-Version.md,adr/ADR-207-Los-Menus-De-Entidades-Se-Mantienen-Dentro-Del-Area-Visible.md | audiencia=IA-implementador-ui | fase=4 (reconciliado en fase 10 por ADR-036: PasswordDialog/SettingsDialog/ConfirmDialog agregados §2.6–2.7/§8.9, zoom §5.2, mapeo §12; §2.6/§5.2/§5.5/§12 reescritos por ADR-037 —zoom con re-render real— y ADR-038 —SettingsDialog dispara reanalyze, no recreación del core—; §2.1/§2.5/§13.9 ajustados 2026-07-22 por el bug #7 del Escenario 1 E2E: gate de visibilidad por stage vs. vida del diálogo hijo abierto; §5.2/§5.4 en fase 11 por ADR-056 —requestRender con kind por panel, canvas que no se borra—; §3.3/§3.4/§7.1/§12 en fase 10.5 por ADR-058 —marca de reemplazo degradado— y ADR-059 —checkbox de leyenda—; §3.3 por ADR-062 —el canal `PREVIEW_UPDATED.degraded` del que sale esa marca, y las tres reglas de su consumo; el checkbox de leyenda entra en el Hito 10.5 y la marca queda para después—; §3.3/§3.4b/§12 en fase 10.6 por ADR-060 —PersonGenderSelect y marca de género sin determinar— y ADR-069 —§3.4b actualizado: el patch usa `PersonGenderChoice`, "sin determinar" viaja como `"neutral"` explícito—; §3.3/§3.4b/§8.3/§12 reescritos en fase 10.6 por ADR-071 —`PersonGenderSelect` pasa a ser `PersonGenderToggle`: visible solo en `placeholder`/`synthetic`, botón cíclico de tres estados con SVG propios, la marca de "sin determinar" fusionada con el estado neutro, y `Select` sin apertura controlada—; §3.4c/§5.4b/§5.4c/§12 en fase 10.7 por ADR-061 —agregado manual, hit-test de selección y buscador—; §1/§2.6 en fase 10.6 por ADR-070 —sección "Acerca de" con la atribución CC-BY dentro del SettingsDialog, y `thirdPartyCredits.ts` como módulo de datos—; post-Hito 10.10: §3.3 por ADR-086 —la marca de degradado se enciende cuando el texto queda más angosto que `DEGRADED_FONT_RATIO` de su ancho natural, criterio y valor nuevos—); §1/§2/§3/§4/§5/§7 reescritos en el rediseño post-10.9 por **ADR-087** —tres momentos en vez de cuatro paneles: `SideBySideViewer`/`ScrollSyncToggle` y los cuatro componentes de `rules/` se retiran, aparecen `LoadScreen`/`ScanScreen`/`ViewerModeToggle`/`DocumentModeSelect`/`TypeModeSelect`, y `ExportDialog` queda con un solo control—; §5.4c en fase 11 por **ADR-089** —la lupa afloja el último sub-token por prefijo y "Agregar como…" no, porque barre el documento entero—; §5.4b en fase 11 por **ADR-114** —la selección del arrastre se recorta a un renglón y el resultado de `addManualEntity` se muestra—; §3.3/§3.4d en fase 11 por **ADR-094** —`NeedsReviewBadge`: el detector sugiere lo que duda, apagado y marcado, y la fila sugerida no se atenúa—; §2.10 en fase 11 por **ADR-150**/**ADR-151**/**ADR-152** — `ScanScreen` pierde el techo y suelta cuando el `stage` es terminal, precalienta y espera la página 1 antes de soltar, y muestra progreso real por etapa incluido el OCR -->
 
 # Anonly — Catálogo de Componentes
 
@@ -145,7 +145,24 @@ apps/react-client/src/components/
 - **Acción**: muta `settings.store` + `settings.persist()`. Si el cambio es `ocrLanguages` y hay documento abierto: `ConfirmDialog` "¿Reanalizar el documento con la nueva configuración? Tus ediciones se conservan, pero lo hecho hasta acá ya no se va a poder deshacer." (la segunda mitad por ADR-172 §1: los puntos de restauración no cruzan un re-análisis) → `actions.reanalyze(patch)` (ADR-038 §7, `React_Client.md` §3.7 — **no** recrea el core). Si es `performancePreset` con documento abierto: se persiste y aplica al próximo documento, sin diálogo de confirmación (ADR-038 §7 Q3).
 - **ARIA**: `aria-label="Configuración"`.
 - **Sin sección "Acerca de"** (ADR-168 §3, reemplaza ADR-070 §1): los créditos y el código fuente pasan a `AboutDialog` (§2.9). Al pie del formulario queda **una línea** que dice dónde están ahora, para quien los busque acá.
-- **Actualizaciones** (solo en el contenedor de escritorio; ADR-195, reemplaza los dos interruptores de ADR-188 §5): subtítulo *"Elegí qué hace Anonly con las versiones nuevas."*; **un selector** (`updateMode`, default `notify`) con tres opciones en este orden: "Instalar automáticamente" (`install`), "Avisarme" (`notify`) y "No buscar" (`off`), con su descripción en un renglón de alto fijo (textos en ADR-197 §4, que reemplazan a los de ADR-195 §3); y el aviso de la salida de red de ADR-131 §5 con este texto: *"Es la única conexión de Anonly a internet: le pregunta a GitHub si hay una versión nueva. Como en cualquier conexión, GitHub ve desde dónde llega la consulta (tu IP) y qué versión tenés. Nunca se envía el contenido ni el nombre de un documento. Si elegís "No buscar", Anonly no se conecta a internet salvo que toques "Buscar actualizaciones ahora"."* Debajo, la versión instalada y "Buscar actualizaciones ahora", que funciona siempre.
+- **Actualizaciones** (solo en el contenedor de escritorio; ADR-195, reemplaza los dos interruptores de ADR-188 §5): subtítulo *"Elegí qué hace Anonly con las versiones nuevas."*; **un selector** (`updateMode`, default `notify`) con tres opciones en este orden: "Instalar automáticamente" (`install`), "Avisarme" (`notify`) y "No buscar" (`off`), con su descripción en un renglón de alto fijo (textos en ADR-197 §4, que reemplazan a los de ADR-195 §3); y el aviso de la salida de red de ADR-131 §5 con este texto: *"Es la única conexión de Anonly a internet: le pregunta a GitHub si hay una versión nueva. Como en cualquier conexión, GitHub ve desde dónde llega la consulta (tu IP) y qué versión tenés. Nunca se envía el contenido ni el nombre de un documento. Si elegís "No buscar", Anonly no se conecta a internet salvo que toques "Buscar actualizaciones ahora"."* Debajo, la versión instalada y "Buscar actualizaciones ahora", que funciona independientemente de la preferencia; una ejecución sin empaquetar puede informar búsqueda no disponible (ADR-206).
+- **Confirmación de búsqueda manual** (pedido del humano, 2026-10-05): al
+  recibir `update-not-available` después de buscar, mostrar debajo de Versión
+  instalada «Estás utilizando la última versión.», con un círculo con tilde a
+  la izquierda y tono gris o verde. Reservar el alto de la línea. Limpiar la
+  confirmación al abrir el diálogo o iniciar otra búsqueda; no mostrarla ante
+  errores ni mientras la consulta está pendiente. Usar el puente del shell
+  existente y evitar acumular suscripciones al reabrir.
+  `updater/index.ts` puede ofrecer `subscribeToUpdateEvents`: un relay por
+  objeto `ShellUpdater`, con suscriptores locales y función de limpieza.
+  El relay conserva la suscripción única al preload sin ampliar su contrato
+  IPC; los componentes retiran su listener local al desmontarse, incluyendo
+  StrictMode y el paso entre LoadScreen y Toolbar.
+- **Búsqueda omitida en desarrollo** (ADR-206): `check-unavailable` después
+  de una búsqueda manual muestra «Para buscar actualizaciones, abrí la app
+  instalada.» en tono secundario con ícono informativo, sin check de éxito.
+  Reservar el espacio tanto de ese aviso como de la confirmación, con ajuste
+  de línea en la ventana mínima. Sin consulta real no confirmar vigencia.
 - **Apariencia**: tres opciones con miniatura —*Como el sistema*, *Claro*, *Oscuro*— en vez del checkbox "Seguir la configuración del sistema" más dos miniaturas (ADR-169 §8).
 - **Diseño estable** (ADR-169 §1): la descripción del perfil de rendimiento ocupa siempre el mismo renglón para los cinco perfiles (ADR-194 §6), y el error "Elegí al menos un idioma" y el aviso de re-análisis comparten una ranura de alto fijo con un texto neutro cuando no hay nada que avisar. Cambiar una opción no cambia el alto del diálogo.
 
@@ -308,6 +325,12 @@ apps/react-client/src/components/
 ### 3.4 `ReplacementModeSelect`
 
 > **El menú de modos abre hacia arriba si abajo no entra (2026-10-01, pedido del humano).** Al abrirse mide el lugar que queda entre el disparador y el borde del área que lo recorta (la lista que scrollea, o la ventana). Abajo si entra; si no, arriba; si no entra en ninguno, el lado con más lugar. Antes abría siempre hacia abajo y en las últimas filas había que scrollear para leerlo. Regla pura en `entities/menuPlacement.ts`, con tests; `tests/e2e/mode-menu-opens-upward.spec.ts` lo cubre en la app.
+>
+> **Límites completos (ADR-207, 2026-10-06):** la dirección se conserva, pero
+> la posición vertical se desplaza lo mínimo para mantener el menú entero en
+> el área visible total cuando cabe allí. Si supera esa área, limita su alto
+> y permite scroll interno. Recalcula con resize, scroll y reflow; no desplaza
+> la lista externa ni cambia los roles o cierres del disclosure.
 
 - **Props**: `groupId`, `currentMode`.
 - **Opciones**: `placeholder` (default), `mask`, `synthetic`, `redact` — con las **etiquetas de
@@ -439,6 +462,16 @@ Marca los grupos que **el detector sugirió sin estar seguro**: nacen con `enabl
 ### 3.5 `GroupContextMenu`
 
 - **Trigger**: botón `[⋯]` en `EntityGroupItem`.
+- **Posición** (pedido del humano, 2026-10-05): abajo si entra; arriba si
+  colisiona con el borde inferior de la ventana o de un ancestro que recorta.
+  Medir el alto real con sus opciones condicionales. Reutiliza la regla de
+  `ModeSelectMenu` (§3.4): si no entra entero en ningún lado, elegir el lado
+  con más espacio. No desplaza la lista ni requiere scrollear para alcanzar
+  un menú que puede entrar arriba.
+  ADR-207 completa el caso sin lugar suficiente a ambos lados: desplazar lo
+  mínimo dentro del área visible total, incluso solapando el disparador.
+  Solo si excede el alto de esa área, limitar alto y habilitar scroll interno.
+  Recalcular con resize, scroll y reflow, retirando listeners al cerrar.
 - **Opciones, en este orden** (ADR-169 §10): Ver apariciones · Editar reemplazo… · Cambiar tipo… ·
   Fusionar con… · Dividir… · separador · **Eliminar entidad** (en rojo). "Restaurar valor calculado"
   aparece solo si `group.replacementValueUserSet`. **La fila que abrió el menú queda resaltada**
@@ -814,6 +847,16 @@ hay nada que sincronizar: se retira junto con `SideBySideViewer` y `scrollSyncCo
 
 - Wrapper sobre Radix `Dialog` con focus trap, escape para cerrar, backdrop.
 - Props: `open`, `onClose`, `title`, `children`.
+- **Select anidado** (pedido del humano, 2026-10-05): con un Select abierto,
+  hacer click en el cuerpo de este mismo diálogo cierra únicamente el Select,
+  conservando el formulario. Escape cierra primero el Select y un segundo
+  Escape el diálogo. El backdrop y el cierre explícito siguen cerrando el
+  diálogo.
+  La integración puede usar un contexto local de `Dialog` que reciba
+  `onOpenChange` interno de `Select` y habilite eventos de puntero sobre el
+  cuerpo del padre únicamente mientras ese Select está abierto. No añade
+  props de apertura controlada a los consumidores de `Select` ni listeners
+  globales. Verificar también los modales de confirmación anidados.
 
 ### 8.2b `ConfirmDialog` (ADR-036 §7)
 
@@ -825,6 +868,8 @@ hay nada que sincronizar: se retira junto con `SideBySideViewer` y `scrollSyncCo
 
 - Wrapper sobre Radix `Select` con estilos Tailwind.
 - Props: `value`, `onChange`, `options`.
+- El cierre por click fuera dentro de un `Dialog` respeta la regla de §8.2:
+  no debe cerrar el diálogo que lo contiene.
 - **Sin apertura controlada** (ADR-071 §4). El PR 12 le agregó `open`/`onOpenChange` para un solo caso: que el badge de "género sin determinar" pudiera abrir el desplegable de un componente **hermano**. Al fusionarse la marca con el control (§3.4b), ese caso desaparece y las props se retiran — un componente compartido no lleva superficie que usa un consumidor y que ya no existe.
 
 ### 8.4 `Checkbox`
@@ -840,7 +885,31 @@ hay nada que sincronizar: se retira junto con `SideBySideViewer` y `scrollSyncCo
 ### 8.6 `Toast`
 
 - Wrapper sobre Radix `Toast` (o `sonner` si se agrega con ADR).
-- Tipos: `info`, `success`, `warning`, `error`.
+- Tonos implementados: `neutral`, `success`, `warning`, `error`, `deletion`.
+- **Duración** (pedido del humano, 2026-10-05): 3 segundos para los avisos no
+  persistentes. Un nuevo toast sustituye inmediatamente al anterior y
+  comienza su propio plazo. Los avisos persistentes de conflictos conservan
+  su duración hasta resolverlos o cerrarlos.
+- **Eliminación de entidad**: tono `deletion`, con un ligero fondo/borde rojo
+  e ícono de papelera, conservando Deshacer. También cuando el detalle explica
+  que la eliminación resolvió un choque; una eliminación exitosa no es `error`.
+- **Salida** (pedido del humano, 2026-10-06): al expirar, cerrar con el botón,
+  una acción o dismiss programático, animar la entrada en sentido inverso:
+  mismo desplazamiento vertical, opacidad y duración de 260 ms. Conservar el
+  nodo durante la salida, retirar su interacción (puntero, foco y activación
+  por teclado de root y controles) y respetar reduced-motion. Un root saliente
+  no participa del recorrido Tab, sus acciones no se ejecutan y un foco que
+  quedó dentro debe abandonar la instancia cerrada. Probar Tab/Enter después
+  de cerrar y ausencia de ejecución de Deshacer durante la salida.
+  `tabIndex=-1` solo no alcanza: Radix ToastViewport incluye el root y llama
+  `focus()` programáticamente. El root DOM saliente debe quedar `inert`,
+  manteniendo controles deshabilitados y retiro del foco anterior. Probar
+  cada Tab por separado y que `focus()` no pueda devolver foco a la instancia
+  cerrada; el root de un toast abierto/nuevo nunca queda inert.
+  Los keyframes de salida deben distinguirse de los de entrada para que
+  Presence pueda esperar su final. Sustituir por un toast nuevo sigue siendo
+  inmediato: no conservar dos avisos ni esperar la salida anterior. El
+  cierre tardío de una instancia vieja nunca descarta el toast nuevo.
 - **Posición**: abajo a la derecha, flotante — no desplaza nada (UX-10).
 - **Acción de deshacer** (ADR-172): los toasts de edición llevan **"Deshacer"** con la pista `Ctrl+Z`; deshacer desde el toast y desde el atajo es lo mismo (`history.store.undo()`). Los de agregado llevan además "Ver en la lista".
 
@@ -1071,6 +1140,65 @@ Modo oscuro: en v1.0. MVP es solo claro.
 9. **Auto-gating vs. diálogos hijos (bug #7 del Escenario 1 E2E, 2026-07-22)**: un componente que se auto-oculta por `stage` y renderiza un diálogo hijo controlado por estado local **nunca desmonta el diálogo mientras esté abierto** — el gate condiciona el trigger (botón), no la vida del diálogo: `if (!visible && !open) return null`. `stage` puede cambiar por debajo de un diálogo abierto en cualquier momento (el pipeline es asíncrono); desmontar destruye el estado en vuelo del diálogo. Aplica a `ExportButton` (§2.5) y a cualquier componente con el mismo patrón (`CancelButton` + `ConfirmDialog`, §2.4).
 
 ---
+
+## Enmienda normativa ADR-204/205 — selección anonimizada y reexportación
+
+Amplía §5.2, §5.4b, §5.4c y §7; reemplaza la restricción de que la selección
+solo se monta en original. El original conserva exactamente su comportamiento.
+
+Con un mapa de interacción vigente, PdfViewer muestra en anonimizado el mismo
+rectángulo amarillo de la lupa, usando la posición trasladada del texto
+visible o la región de su etiqueta/bloque si ya está cubierto. La consulta
+sigue sobre el índice original. Los overlays no forman parte del export.
+Sin mapa vigente, esperar el preview; no dibujar en cajas originales como
+fallback en anonimizado.
+
+WordSelectionOverlay usa los tokens originales y la proyección de cajas del
+mapa para click/arrastre. Si el puntero empieza sobre una zona cubierta,
+ignorar el gesto; si empieza sobre texto visible, tomar un tramo consecutivo
+del mismo renglón y cortar en la primera palabra/zona cubierta en la dirección
+del arrastre. Nunca concatenar ambos lados de una etiqueta. Las entidades
+deshabilitadas siguen visibles y seleccionables. Un drag vacío no abre globo.
+El tramo se ancla en la palabra visible de inicio, no en la corrida de mayor
+área de otro lado de la etiqueta. La primera zona cubierta corta el recorrido
+de índices aunque su caja visible no toque una franja fina del drag.
+Cualquier solapamiento de área positiva entre palabra original y región
+cubierta excluye esa palabra entera; sin umbral porcentual.
+Si el arrastre comienza en espacio en blanco y su rectángulo toca palabras,
+no exigir que su punto inicial caiga dentro de una caja. Elegir el renglón
+dominante del rectángulo como en el original (ADR-114) y anclar en la primera
+palabra tocada de ese renglón según la dirección del gesto. No filtrar antes
+las palabras cubiertas: si el primer token elegido está cubierto, no hay
+selección; si se alcanza uno después del ancla, cortar ahí. Un punto inicial
+directamente sobre una etiqueta sigue ignorándose. No agregar tolerancias
+verticales ni ampliar bboxes: el solapamiento real del rectángulo con el
+texto visible manda. Probar rectángulo que empieza arriba/abajo del texto,
+ambos sentidos, dos renglones, zoom/rotación y zonas cubiertas.
+La marca de selección y el ancla del globo usan cajas visibles, mientras el
+valor a agregar usa `Word.text` original. El globo muestra exactamente ese
+tramo y conserva agregado de todas las apariciones, conteo y conflictos.
+
+Al cambiar la página, modo, documento o revisión afectada, limpiar selección.
+Antes de confirmar, validar que la revisión/palabras siguen siendo las de la
+selección y que el tramo continúa visible; si no, cerrar el globo y requerir
+otra selección sin mandar un agregado obsoleto. Las cajas rotadas conservan
+la semántica del renglón del original: el criterio de línea y el orden de
+lectura deben reconocer 90° y 270°, sin exigir una banda horizontal ni
+inferir la dirección solamente con X. El recorrido conserva el ancla y corta
+en el primer token cubierto también en una línea vertical. Probar arrastre
+en ambos sentidos, a 90°/270°, click, OCR, etiqueta larga, redact, varios
+reemplazos y fragmentos; comparar la selección visible con la del original.
+
+ExportDialog usa la vigencia definida en React_Client. Sin cambios reabre el
+resultado existente y conserva el nombre usado para descargar. Con cambios
+abre el formulario normal, sin el menú de descarga anterior. Bajo el campo
+de nombre reserva una ranura para el aviso secundario:
+«Ya exportaste este documento anteriormente. Hay cambios pendientes de exportar.»
+Mostrarlo cuando hubo un éxito previo y la versión ya no coincide. No bloquear
+export ni presentar la exportación previa como error. Resetear el estado local
+de descarga al generar un archivo nuevo, aunque el componente siga montado.
+Una solicitud pendiente bloquea nuevos submits; error/cancelación habilitan
+reintento. El archivo ya descargado no se modifica.
 
 ## 14. Referencias
 

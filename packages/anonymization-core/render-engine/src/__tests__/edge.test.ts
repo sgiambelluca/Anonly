@@ -1984,7 +1984,12 @@ describe("RenderEngine — edge cases", () => {
     }
 
     function fakeKernelRenderResult(): unknown {
-      return { imageData: fakeImageData(), encoded: fakeEncoded(), degraded: [] };
+      return {
+        imageData: fakeImageData(),
+        encoded: fakeEncoded(),
+        degraded: [],
+        interactionGeometry: { revision: 0, scale: 1, wordPositions: [], coveredRegions: [] },
+      };
     }
 
     it("a stale generation result is discarded without caching nor emitting PREVIEW_UPDATED; only the redispatch (fresh input) does — caso 36", async () => {

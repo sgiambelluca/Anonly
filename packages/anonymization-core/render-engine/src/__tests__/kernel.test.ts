@@ -55,6 +55,8 @@ import {
   removeOffscreenCanvasStub,
   makeMarkerLegendRow,
   makeReplacement,
+  makeLineRepaintScenario,
+  measureStubTextWidth,
   mockGetDocumentResult,
   resetConvertToBlobCalls,
   resetCreatedCanvases,
@@ -452,6 +454,284 @@ describe("paintReplacements — no-regresión vía kernelRenderPage (ADR-058 §1
     const size = Math.max(8, Math.round(14 * REPLACEMENT_FONT_HEIGHT_RATIO));
     expect(fillTextCalls[0]!.font).toBe(`${String(size)}px monospace, sans-serif`);
     expect(fillTextCalls[0]!.args).toEqual(["[DNI 01]", 10 + 100 / 2, 20 + 14 / 2, 100]);
+  });
+
+  it("preview geometry records shifted neighbors and expanded replacement", async () => {
+    const docId = "doc-preview-geometry";
+    const scenario = makeLineRepaintScenario();
+    vi.mocked(getDocument).mockReturnValue(
+      mockGetDocumentResult(
+        createMockPdfDocument({
+          pageCount: 1,
+          pageFactory: () =>
+            createMockPage({ width: scenario.pageWidth, height: scenario.pageHeight }),
+        }),
+      ),
+    );
+    await kernelLoadDocument({ documentId: docId, buffer: createValidBuffer() });
+    const result = await kernelRenderPage(
+      {
+        documentId: docId,
+        pageIndex: 0,
+        kind: "anonymized",
+        mode: "preview",
+        interactionRevision: 7,
+        replacements: [scenario.replacement],
+        lineWords: scenario.lineWords,
+      },
+      renderOpts,
+    );
+
+    expect(result.interactionGeometry?.revision).toBe(7);
+    expect(result.interactionGeometry?.scale).toBe(1);
+    expect(result.interactionGeometry?.wordPositions.length).toBeGreaterThan(0);
+    expect(
+      result.interactionGeometry?.wordPositions.every(
+        ({ sourceBbox, bbox }) => bbox.x > sourceBbox.x,
+      ),
+    ).toBe(true);
+    const covered = result.interactionGeometry?.coveredRegions[0];
+    expect(covered?.occurrenceId).toBe(scenario.replacement.occurrenceId);
+    expect(covered?.bbox.width).toBeGreaterThan(scenario.replacement.bbox.width);
+  });
+
+  it("preview geometry preserves redact rotated and multiline covered regions", async () => {
+    const docId = "doc-preview-fragments";
+    vi.mocked(getDocument).mockReturnValue(
+      mockGetDocumentResult(createMockPdfDocument({ pageCount: 1 })),
+    );
+    await kernelLoadDocument({ documentId: docId, buffer: createValidBuffer() });
+    const fragments = [
+      { x: 20, y: 30, width: 55, height: 12, rotation: 90 as const },
+      { x: 18, y: 48, width: 74, height: 12, rotation: 270 as const },
+      { x: 25, y: 70, width: 80, height: 16 },
+    ];
+
+    const result = await kernelRenderPage(
+      {
+        documentId: docId,
+        pageIndex: 0,
+        kind: "anonymized",
+        mode: "preview",
+        scale: 2,
+        replacements: [
+          makeReplacement({
+            occurrenceId: "occ-multiline",
+            bbox: { x: 18, y: 30, width: 87, height: 56 },
+            fragments,
+          }),
+          makeReplacement({
+            occurrenceId: "occ-redact",
+            mode: ReplacementMode.Redact,
+            bbox: { x: 120, y: 30, width: 30, height: 14 },
+          }),
+          ...([0, 90, 270] as const).map((rotation, index) =>
+            makeReplacement({
+              occurrenceId: `occ-fallback-${rotation}`,
+              bbox: {
+                x: 170 + index * 60,
+                y: 30,
+                width: 48,
+                height: 30,
+                ...(rotation === 0 ? {} : { rotation }),
+              },
+            }),
+          ),
+        ],
+      },
+      renderOpts,
+    );
+
+    const regions = result.interactionGeometry?.coveredRegions ?? [];
+    expect(regions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          occurrenceId: "occ-multiline",
+          sourceBbox: fragments[0],
+          bbox: expect.objectContaining({ rotation: 90 }),
+        }),
+        expect.objectContaining({
+          occurrenceId: "occ-multiline",
+          sourceBbox: fragments[1],
+          bbox: expect.objectContaining({ rotation: 270 }),
+        }),
+        expect.objectContaining({ occurrenceId: "occ-multiline", sourceBbox: fragments[2] }),
+        expect.objectContaining({
+          occurrenceId: "occ-redact",
+          bbox: { x: 120, y: 30, width: 30, height: 14 },
+        }),
+      ]),
+    );
+    const fallbacks = regions.filter(({ occurrenceId }) =>
+      occurrenceId.startsWith("occ-fallback-"),
+    );
+    expect(fallbacks).toHaveLength(3);
+    expect(result.interactionGeometry?.scale).toBe(2);
+    const canvasCalls = getCreatedCanvases()[0]!.calls;
+    const fallbackDraws = canvasCalls.filter((call) => call.op === "fillText").slice(-3);
+    const recordedRotations = canvasCalls
+      .filter((call) => call.op === "rotate")
+      .slice(-2)
+      .map((call) => call.args[0]);
+    expect(recordedRotations).toEqual([-Math.PI / 2, Math.PI / 2]);
+    for (const [index, { occurrenceId, sourceBbox, bbox }] of fallbacks.entries()) {
+      const rotation = sourceBbox.rotation;
+      const draw = fallbackDraws[index]!;
+      if (draw.font === undefined) throw new Error("fillText call must retain its font");
+      const fontSize = Number.parseFloat(draw.font);
+      const ascent = fontSize * 0.72;
+      const descent = fontSize * 0.18;
+      const metricsWidth = measureStubTextWidth("[DNI 01]", draw.font);
+      const rotated = rotation === 90 || rotation === 270;
+      const drawIndex = canvasCalls.indexOf(draw);
+      const precedingCalls = canvasCalls.slice(0, drawIndex).reverse();
+      const rotateCall = rotated ? precedingCalls.find((call) => call.op === "rotate") : undefined;
+      const translateCall = rotated
+        ? precedingCalls.find((call) => call.op === "translate")
+        : undefined;
+      const angle = typeof rotateCall?.args[0] === "number" ? rotateCall.args[0] : 0;
+      const centerX = rotated ? Number(translateCall?.args[0]) : Number(draw.args[1]);
+      const centerY = rotated ? Number(translateCall?.args[1]) : Number(draw.args[2]);
+      const availableLength = (rotated ? sourceBbox.height : sourceBbox.width) * 2;
+      const textWidth = Math.min(metricsWidth, availableLength);
+      const localCorners = [
+        [-textWidth / 2, -ascent],
+        [textWidth / 2, -ascent],
+        [textWidth / 2, descent],
+        [-textWidth / 2, descent],
+      ] as const;
+      const cosine = Math.cos(angle);
+      const sine = Math.sin(angle);
+      const projectedCorners: Array<[number, number]> = localCorners.map(([x, y]) => [
+        centerX + cosine * x - sine * y,
+        centerY + sine * x + cosine * y,
+      ]);
+      const xs = projectedCorners.map(([x]) => x);
+      const ys = projectedCorners.map(([, y]) => y);
+      expect(bbox.x).toBeCloseTo(Math.min(...xs) / 2, 4);
+      expect(bbox.y).toBeCloseTo(Math.min(...ys) / 2, 4);
+      expect(bbox.width).toBeCloseTo((Math.max(...xs) - Math.min(...xs)) / 2, 4);
+      expect(bbox.height).toBeCloseTo((Math.max(...ys) - Math.min(...ys)) / 2, 4);
+      expect(occurrenceId).toMatch(/^occ-fallback-/);
+    }
+  });
+
+  it("anonymized previews carry empty geometry while original and full renders omit it", async () => {
+    const docId = "doc-empty-preview-geometry";
+    vi.mocked(getDocument).mockReturnValue(
+      mockGetDocumentResult(createMockPdfDocument({ pageCount: 1 })),
+    );
+    await kernelLoadDocument({ documentId: docId, buffer: createValidBuffer() });
+    const preview = await kernelRenderPage(
+      { documentId: docId, pageIndex: 0, kind: "anonymized", mode: "preview" },
+      renderOpts,
+    );
+    const original = await kernelRenderPage(
+      { documentId: docId, pageIndex: 0, kind: "original", mode: "preview" },
+      renderOpts,
+    );
+    const full = await kernelRenderPage(
+      { documentId: docId, pageIndex: 0, kind: "anonymized", mode: "full" },
+      renderOpts,
+    );
+    expect(preview.interactionGeometry).toEqual({
+      revision: 0,
+      scale: 1,
+      wordPositions: [],
+      coveredRegions: [],
+    });
+    expect(original.interactionGeometry).toBeUndefined();
+    expect(full.interactionGeometry).toBeUndefined();
+  });
+
+  it("interaction geometry does not change full rendering", async () => {
+    const docId = "doc-full-render-pixels-stable";
+    vi.mocked(getDocument).mockReturnValue(
+      mockGetDocumentResult(
+        createMockPdfDocument({
+          pageCount: 1,
+          pageFactory: () => createMockPage({ width: 300, height: 200 }),
+        }),
+      ),
+    );
+    await kernelLoadDocument({ documentId: docId, buffer: createValidBuffer() });
+    const replacement = makeReplacement({ bbox: { x: 20, y: 30, width: 140, height: 28 } });
+    const full = await kernelRenderPage(
+      {
+        documentId: docId,
+        pageIndex: 0,
+        kind: "anonymized",
+        mode: "full",
+        replacements: [replacement],
+      },
+      renderOpts,
+    );
+    const fullDraws = getCreatedCanvases()
+      .at(-1)!
+      .calls.filter((call) => call.op !== "getImageData");
+    const preview = await kernelRenderPage(
+      {
+        documentId: docId,
+        pageIndex: 0,
+        kind: "anonymized",
+        mode: "preview",
+        replacements: [replacement],
+      },
+      renderOpts,
+    );
+    const previewDraws = getCreatedCanvases()
+      .at(-1)!
+      .calls.filter((call) => call.op !== "getImageData");
+
+    expect(fullDraws).toEqual(previewDraws);
+    expect(full.imageData).toBeDefined();
+    expect(full.interactionGeometry).toBeUndefined();
+    expect(preview.interactionGeometry?.coveredRegions).toHaveLength(1);
+    expect(full.encoded.bytes).toEqual(preview.encoded.bytes);
+  });
+
+  it("preview interaction revision rejects invalid input", async () => {
+    const docId = "doc-invalid-interaction-revision";
+    vi.mocked(getDocument).mockReturnValue(
+      mockGetDocumentResult(createMockPdfDocument({ pageCount: 1 })),
+    );
+    await kernelLoadDocument({ documentId: docId, buffer: createValidBuffer() });
+    for (const interactionRevision of [
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      Number.NEGATIVE_INFINITY,
+      -1,
+      1.5,
+    ]) {
+      await expect(
+        kernelRenderPage(
+          {
+            documentId: docId,
+            pageIndex: 0,
+            kind: "anonymized",
+            mode: "preview",
+            interactionRevision,
+          },
+          renderOpts,
+        ),
+      ).rejects.toMatchObject({ code: EngineErrorCode.INVALID_INPUT });
+    }
+    const explicitZero = await kernelRenderPage(
+      {
+        documentId: docId,
+        pageIndex: 0,
+        kind: "anonymized",
+        mode: "preview",
+        interactionRevision: 0,
+      },
+      renderOpts,
+    );
+    const defaulted = await kernelRenderPage(
+      { documentId: docId, pageIndex: 0, kind: "anonymized", mode: "preview" },
+      renderOpts,
+    );
+    expect(explicitZero.interactionGeometry?.revision).toBe(0);
+    expect(defaulted.interactionGeometry?.revision).toBe(0);
   });
 });
 

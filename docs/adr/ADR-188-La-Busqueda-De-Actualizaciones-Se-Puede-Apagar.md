@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=adr | dependencias=adr/ADR-131-El-Actualizador-Es-La-Primera-Salida-De-Red.md,adr/ADR-132-El-Shell-Tiene-Su-Propio-Modelo-De-Seguridad.md,adr/ADR-137-Windows-Verifica-Actualizaciones-Con-Clave-Ed25519-Propia.md,architecture/08_Security_Model.md,ui/Components.md,PRIVACY.md,roadmap/distribucion/SignPath_Postulacion.md | audiencia=humanos+IA | fase=11.5 -->
+<!-- CONTEXT: scope=adr | dependencias=adr/ADR-131-El-Actualizador-Es-La-Primera-Salida-De-Red.md,adr/ADR-132-El-Shell-Tiene-Su-Propio-Modelo-De-Seguridad.md,adr/ADR-137-Windows-Verifica-Actualizaciones-Con-Clave-Ed25519-Propia.md,architecture/08_Security_Model.md,ui/Components.md,PRIVACY.md,roadmap/distribucion/SignPath_Postulacion.md,adr/ADR-206-Una-Busqueda-Omitida-No-Confirma-La-Version.md | audiencia=humanos+IA | fase=11.5 -->
 
 # ADR-188 — La búsqueda de actualizaciones se puede apagar
 
@@ -101,6 +101,11 @@ el diálogo de permiso propio de Sparkle, que la app no muestra.
 **En las dos plataformas**, «Buscar actualizaciones ahora» funciona siempre.
 Es una consulta que pide el usuario, y es la excepción que la política de
 privacidad declara.
+
+> **Enmienda de desarrollo (ADR-206, 2026-10-06).** «Funciona siempre» se
+> refiere a que no depende de la preferencia de búsqueda automática. Una
+> ejecución Windows sin empaquetar puede omitirla; el shell informa
+> `check-unavailable` en vez de confirmar una versión no consultada.
 
 ### 4. La superficie main↔renderer pasa de tres mensajes a cuatro
 

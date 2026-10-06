@@ -32,7 +32,7 @@
 
 import { CheckIcon, DownloadIcon, FileCheck2Icon, Loader2Icon } from "lucide-react";
 import type { ReactNode } from "react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { actions } from "../../core-adapter/actions.js";
 import { usePipelineStore } from "../../store/pipeline.store.js";
@@ -57,11 +57,16 @@ export function ExportProgress({ filename, onExportAnother, onClose }: ExportPro
   const progress = usePipelineStore((state) => state.exportProgress);
   const result = usePipelineStore((state) => state.exportResult);
   const error = usePipelineStore((state) => state.error);
+  const exportingVersion = usePipelineStore((state) => state.exportingVersion);
 
   // `downloaded` es local y efímero: solo decide qué cara del panel se
   // muestra. No sube a `pipeline.store` porque nadie más lo lee, y porque
   // "apreté descargar" no es estado del pipeline.
   const [downloaded, setDownloaded] = useState(false);
+
+  useEffect(() => {
+    if (exportingVersion !== null || result !== null) setDownloaded(false);
+  }, [exportingVersion, result]);
 
   const phase = resolveExportPhase(true, result, error !== null);
 

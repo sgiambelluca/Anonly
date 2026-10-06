@@ -37,6 +37,33 @@ export interface ShellUpdater {
   setInstallOnQuit(enabled: boolean): void;
 }
 
+const updateEventListeners = new WeakMap<ShellUpdater, Set<(event: UpdateEvent) => void>>();
+const updateEventRelays = new WeakSet<ShellUpdater>();
+
+/** Suscripción local que comparte el listener único del puente IPC. */
+export function subscribeToUpdateEvents(
+  updater: ShellUpdater,
+  listener: (event: UpdateEvent) => void,
+): () => void {
+  let listeners = updateEventListeners.get(updater);
+  if (listeners === undefined) {
+    listeners = new Set();
+    updateEventListeners.set(updater, listeners);
+  }
+  listeners.add(listener);
+  if (!updateEventRelays.has(updater)) {
+    updateEventRelays.add(updater);
+    updater.onEvent((event) => {
+      for (const activeListener of updateEventListeners.get(updater) ?? []) {
+        activeListener(event);
+      }
+    });
+  }
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
 /*
  * El shell inyecta esto con `contextBridge.exposeInMainWorld`, así que declarar
  * la propiedad es lo que corresponde: el objeto **existe** en `window` cuando

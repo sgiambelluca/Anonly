@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=contratos-base | dependencias=03_Data_Model.md,04_Event_System.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-049-Errores-Cruzando-Worker-Discriminacion-Por-Code.md,adr/ADR-056-RenderRequested-Kind-Por-Panel.md,adr/ADR-061-Agregado-Manual-De-Entidades.md,adr/ADR-065-OCR-Por-Region.md,adr/ADR-066-Texto-De-Anotaciones-Y-Reemplazo-Rotado.md,adr/ADR-074-Una-Entidad-Partida-En-Varias-Lineas.md,adr/ADR-062-Veredicto-De-Degradacion-Hasta-La-UI.md,adr/ADR-086-El-Detector-De-Degradacion-Mide-El-Ancho.md,adr/ADR-109-La-Caja-De-Una-Palabra-Es-Su-Caja-De-Tinta.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,adr/ADR-167-El-Modelo-De-NER-Se-Libera-A-Los-15-s-De-Inactividad.md,adr/ADR-170-Las-Vistas-Previas-De-Edicion-Las-Calcula-El-Core.md,adr/ADR-171-El-Usuario-Puede-Eliminar-Una-Entidad.md,adr/ADR-172-Deshacer-Y-Rehacer-Exactos.md,adr/ADR-173-El-Motor-Rechaza-Fusiones-Y-Divisiones-Invalidas.md,adr/ADR-174-Un-Agregado-Manual-Que-Choca-Se-Resuelve-En-El-Momento.md,adr/ADR-175-Un-Choque-Manual-No-Queda-Colgado.md,adr/ADR-176-Un-Choque-Pendiente-Bloquea-El-Export.md | audiencia=IA-implementador | fase=3 (fase 10.9: §5 nota de `fragments` junto a `BoundingBox` — el campo va en `Occurrence`/`OccurrenceRef`/`Replacement`, no adentro del rectángulo, ADR-074 §1; §3.5 actualizado en fase 10: CoreRuntimeOptions/WorkerLike/WorkerFactory para transporte de workers —ADR-036 §2—, IPipelineOrchestrator.reanalyze/ReanalyzeConfigPatch —ADR-038 §1—; §6 gana MAX_RENDER_SCALE/PREVIEW_CACHE_MAX_BYTES —ADR-037 §2-3—; §8 RenderRequested.scale —ADR-037 §1—; §4 precisa qué garantiza deserialize() al cruzar el boundary, sin cambio de shape —ADR-049 §2—; fase 11: §8 RenderRequested.kind requerido —ADR-056 §1—; fase 10.5/10.6: §5 AnnotationKind.Degraded —ADR-058 §7— y PersonGender —ADR-060 §2—, §6 REPLACEMENT_FONT_HEIGHT_RATIO/AVG_GLYPH_ADVANCE_RATIO/estimateTokenWidth —ADR-057 §5— y DEGRADED_FONT_RATIO —ADR-058 §7—; fase 10.8: §5 gana los primeros tipos públicos que §10 regla 1 obliga a declarar acá antes que en `shared/src/types.ts` — `BoundingBox.rotation` —ADR-066 §6— y `OcrRegion` —ADR-065 §4—; fase 10.6: §5 `PersonGenderChoice` y §8 `GroupUpdateRequested.patch.personGender` —ADR-069 §4—, §5 `SyntheticRequest` y §6 la declaración de `synthesize` —ADR-072 §2, que la trae al contrato: se exportaba desde `shared` sin estar acá, contra §10 regla 1—; fase 10.7: §6 gana `sharesVerticalBand` y `normalizeForComparison` —ADR-061 §2 errata: dos primitivas que ya estaban duplicadas dentro de motores y façade por no tener lugar donde vivir—, y §3.5 gana `ManualEntityResult` con `addManualEntity` devolviéndolo en vez de `void` —ADR-061 §6 errata: sin eso la UI no puede distinguir "no se encontró" de "agregado"—; post-Hito 10.10: §8 `PreviewUpdated.degraded` —ADR-062, el veredicto de legibilidad sale de Render por acá— y §6 `DEGRADED_FONT_RATIO` con **criterio y valor nuevos** —ADR-086: pasa a medir la razón de ANCHOS y baja a 0,5, porque el cociente de tamaños era estructuralmente inalcanzable en cuerpo de texto—; fase 11: §5 la caja de una palabra pasa a ser su caja de tinta —del descenso al ascenso de su fuente, no de la línea de base hacia arriba por un cuerpo— y §6 `REPLACEMENT_FONT_HEIGHT_RATIO` se recalibra de 0,7 a 0,64 para que el token siga dibujándose igual —ADR-109 §1/§4—; fase 11 (plan de campaña, H-01A): §4 gana `EngineErrorCode.PDF_PAGE_ROTATED` —ADR-140: página con `/Rotate` heredado y texto nativo, rechazo tipado en vez de una geometría equivocada con cara de éxito; retirado por ángulo cuando ADR-141 lo verifique de punta a punta—; fase 11 (plan de campaña, H-09D3-b): §7.1 declara por primera vez `OcrPagePayload` —que se exportaba desde `shared` sin estar acá, contra §10 regla 1— y lo cambia: la imagen del job `ocr-page` viaja **codificada** (PNG) en vez de `ImageData` crudo, ADR-158 §2; fase 12.5 (Hito 12.5): §3.5 gana `previewEdit` con `EditPreviewRequest`/`EditPreview`/`EditPreviewGroup` y §5 `ReplacementPreviews`, nuevo campo requerido de `EntityGroup` —ADR-170: la UI muestra valores exactos antes de aplicar sin reimplementar el motor—; fase 12.5: §2/§8 `GROUP_REMOVE_REQUESTED` + `GroupRemoveRequested`, y §3.5 `addManualEntity` levanta la supresión de un valor eliminado —ADR-171: el usuario elimina una entidad y no vuelve tras un re-análisis—; fase 12.5: §3.5 `createEditCheckpoint`/`restoreEditCheckpoint`/`discardEditCheckpoints` y §6 `MAX_EDIT_CHECKPOINTS` —ADR-172: deshacer exacto por puntos de restauración que guarda el Core—) -->
+<!-- CONTEXT: scope=contratos-base | dependencias=03_Data_Model.md,04_Event_System.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-049-Errores-Cruzando-Worker-Discriminacion-Por-Code.md,adr/ADR-056-RenderRequested-Kind-Por-Panel.md,adr/ADR-061-Agregado-Manual-De-Entidades.md,adr/ADR-065-OCR-Por-Region.md,adr/ADR-066-Texto-De-Anotaciones-Y-Reemplazo-Rotado.md,adr/ADR-074-Una-Entidad-Partida-En-Varias-Lineas.md,adr/ADR-062-Veredicto-De-Degradacion-Hasta-La-UI.md,adr/ADR-086-El-Detector-De-Degradacion-Mide-El-Ancho.md,adr/ADR-109-La-Caja-De-Una-Palabra-Es-Su-Caja-De-Tinta.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,adr/ADR-167-El-Modelo-De-NER-Se-Libera-A-Los-15-s-De-Inactividad.md,adr/ADR-170-Las-Vistas-Previas-De-Edicion-Las-Calcula-El-Core.md,adr/ADR-171-El-Usuario-Puede-Eliminar-Una-Entidad.md,adr/ADR-172-Deshacer-Y-Rehacer-Exactos.md,adr/ADR-173-El-Motor-Rechaza-Fusiones-Y-Divisiones-Invalidas.md,adr/ADR-174-Un-Agregado-Manual-Que-Choca-Se-Resuelve-En-El-Momento.md,adr/ADR-175-Un-Choque-Manual-No-Queda-Colgado.md,adr/ADR-176-Un-Choque-Pendiente-Bloquea-El-Export.md,adr/ADR-204-La-Interaccion-Anonimizada-Usa-La-Geometria-Visible.md,adr/ADR-205-El-Resultado-Exportado-Pertenece-A-Una-Revision.md | audiencia=IA-implementador | fase=3 (fase 10.9: §5 nota de `fragments` junto a `BoundingBox` — el campo va en `Occurrence`/`OccurrenceRef`/`Replacement`, no adentro del rectángulo, ADR-074 §1; §3.5 actualizado en fase 10: CoreRuntimeOptions/WorkerLike/WorkerFactory para transporte de workers —ADR-036 §2—, IPipelineOrchestrator.reanalyze/ReanalyzeConfigPatch —ADR-038 §1—; §6 gana MAX_RENDER_SCALE/PREVIEW_CACHE_MAX_BYTES —ADR-037 §2-3—; §8 RenderRequested.scale —ADR-037 §1—; §4 precisa qué garantiza deserialize() al cruzar el boundary, sin cambio de shape —ADR-049 §2—; fase 11: §8 RenderRequested.kind requerido —ADR-056 §1—; fase 10.5/10.6: §5 AnnotationKind.Degraded —ADR-058 §7— y PersonGender —ADR-060 §2—, §6 REPLACEMENT_FONT_HEIGHT_RATIO/AVG_GLYPH_ADVANCE_RATIO/estimateTokenWidth —ADR-057 §5— y DEGRADED_FONT_RATIO —ADR-058 §7—; fase 10.8: §5 gana los primeros tipos públicos que §10 regla 1 obliga a declarar acá antes que en `shared/src/types.ts` — `BoundingBox.rotation` —ADR-066 §6— y `OcrRegion` —ADR-065 §4—; fase 10.6: §5 `PersonGenderChoice` y §8 `GroupUpdateRequested.patch.personGender` —ADR-069 §4—, §5 `SyntheticRequest` y §6 la declaración de `synthesize` —ADR-072 §2, que la trae al contrato: se exportaba desde `shared` sin estar acá, contra §10 regla 1—; fase 10.7: §6 gana `sharesVerticalBand` y `normalizeForComparison` —ADR-061 §2 errata: dos primitivas que ya estaban duplicadas dentro de motores y façade por no tener lugar donde vivir—, y §3.5 gana `ManualEntityResult` con `addManualEntity` devolviéndolo en vez de `void` —ADR-061 §6 errata: sin eso la UI no puede distinguir "no se encontró" de "agregado"—; post-Hito 10.10: §8 `PreviewUpdated.degraded` —ADR-062, el veredicto de legibilidad sale de Render por acá— y §6 `DEGRADED_FONT_RATIO` con **criterio y valor nuevos** —ADR-086: pasa a medir la razón de ANCHOS y baja a 0,5, porque el cociente de tamaños era estructuralmente inalcanzable en cuerpo de texto—; fase 11: §5 la caja de una palabra pasa a ser su caja de tinta —del descenso al ascenso de su fuente, no de la línea de base hacia arriba por un cuerpo— y §6 `REPLACEMENT_FONT_HEIGHT_RATIO` se recalibra de 0,7 a 0,64 para que el token siga dibujándose igual —ADR-109 §1/§4—; fase 11 (plan de campaña, H-01A): §4 gana `EngineErrorCode.PDF_PAGE_ROTATED` —ADR-140: página con `/Rotate` heredado y texto nativo, rechazo tipado en vez de una geometría equivocada con cara de éxito; retirado por ángulo cuando ADR-141 lo verifique de punta a punta—; fase 11 (plan de campaña, H-09D3-b): §7.1 declara por primera vez `OcrPagePayload` —que se exportaba desde `shared` sin estar acá, contra §10 regla 1— y lo cambia: la imagen del job `ocr-page` viaja **codificada** (PNG) en vez de `ImageData` crudo, ADR-158 §2; fase 12.5 (Hito 12.5): §3.5 gana `previewEdit` con `EditPreviewRequest`/`EditPreview`/`EditPreviewGroup` y §5 `ReplacementPreviews`, nuevo campo requerido de `EntityGroup` —ADR-170: la UI muestra valores exactos antes de aplicar sin reimplementar el motor—; fase 12.5: §2/§8 `GROUP_REMOVE_REQUESTED` + `GroupRemoveRequested`, y §3.5 `addManualEntity` levanta la supresión de un valor eliminado —ADR-171: el usuario elimina una entidad y no vuelve tras un re-análisis—; fase 12.5: §3.5 `createEditCheckpoint`/`restoreEditCheckpoint`/`discardEditCheckpoints` y §6 `MAX_EDIT_CHECKPOINTS` —ADR-172: deshacer exacto por puntos de restauración que guarda el Core—) -->
 
 # Anonly — Contratos Base (`@anonly/shared`)
 
@@ -287,6 +287,8 @@ export interface IPipelineOrchestrator {
   addManualEntity(documentId: string, request: ManualEntityRequest): Promise<ManualEntityResult>;
   /** ADR-061 §8: misma búsqueda literal, salida para el buscador del visor. */
   findText(documentId: string, query: string): ReadonlyArray<TextMatch>;
+  /** ADR-204: revisión de geometría de una página existente; null si no existe. */
+  getPreviewInteractionRevision(documentId: string, pageIndex: number): number | null;
   /**
    * ADR-170 §2: cómo quedarían los grupos si se aplicara la operación. Simulacro
    * sobre una copia descartable de la sesión de Grouping, con el mismo código que
@@ -737,6 +739,47 @@ export type GenderLexicon = ReadonlyMap<string, GenderLexiconLabel>;
 
 ---
 
+### 5.1 Geometría de interacción del preview (ADR-204)
+
+Los siguientes tipos nuevos viven en `shared/src/types.ts` y se reexportan
+desde shared y el façade. Todas las cajas están en puntos de página;
+`sourceBbox` identifica la caja original dentro de la página del evento.
+No se agregan IDs ni un boolean mutable a `Word`, ni se duplica su texto.
+
+```typescript
+export interface PreviewWordPosition {
+  readonly sourceBbox: BoundingBox;
+  readonly bbox: BoundingBox;
+}
+
+export interface PreviewCoveredRegion {
+  readonly occurrenceId: string;
+  readonly sourceBbox: BoundingBox;
+  readonly bbox: BoundingBox;
+}
+
+export interface PreviewInteractionGeometry {
+  readonly revision: number;
+  readonly scale: number;
+  readonly wordPositions: ReadonlyArray<PreviewWordPosition>;
+  readonly coveredRegions: ReadonlyArray<PreviewCoveredRegion>;
+}
+```
+
+`wordPositions` es disperso: solo las palabras trasladadas por el repintado.
+Las demás conservan su bbox original. La cobertura se evalúa contra las cajas
+originales con solapamiento de área positiva, sin umbral porcentual; el hit-test
+contra las visibles. Un fragmento cubierto produce
+una región, incluso si solo se tapa. La etiqueta expandida usa su extensión
+real; la redacción negra y el fallback usan la caja pintada. La rotación
+se conserva. El mapa no contiene texto oculto adicional.
+
+`revision` es un entero no negativo de la página mantenido por el
+Orchestrator (§3.5), independiente del contador de export local (ADR-205).
+Un consumidor directo de Render que no pasa revisión obtiene 0.
+`scale` es la escala efectiva del raster; no escala las cajas del mapa.
+El mapa pertenece al mismo resultado que el blob, no se combina con otro.
+
 ## 6. Configuración por motor
 
 **ADR-164 (T-5)**: `WorkerJobType` gana `ocr-orient`; los mapas exhaustivos de
@@ -990,6 +1033,13 @@ vida están en ADR-164 §2/§3 y OCR_Engine §6/§13. No hay eventos ni errores 
 
 ## 8. Tipos de payload de eventos (`EventPayloadMap`)
 
+**Transporte ADR-204:** `RenderPagePayload` (definición canónica en
+`architecture/03_Data_Model.md` §18) y `RenderPageInput` (Render §6) ganan
+`readonly interactionRevision?: number`; entero no negativo, ausente equivale
+a 0 para callers directos. `PreviewInteractionGeometry` es el tipo de §5.1.
+El worker devuelve ese mapa en su resultado de preview anonimizado; el
+decoder, output y cache de Render lo transportan sin reconstruirlo.
+
 > **Nota técnica**: la forma canónica es **interfaces individuales exportadas + un type map (`EventPayloadMap`)**, no un `namespace`. Un `namespace EventPayloads` con indexed access (`EventPayloads.Foo` o `EventPayloads[E]`) importado con `import type` no es compatible con `verbatimModuleSyntax` (Code_Standards.md §2): el compilador no puede garantizar en runtime que el namespace exporta solo tipos. Interfaces top-level + type map logran el mismo resultado (un tipo por evento, indexable por `EngineEvents`) sin ese problema. El **contenido** de cada payload es idéntico al que tendría dentro del namespace; solo cambia el empaquetado.
 
 ```ts
@@ -1039,6 +1089,8 @@ export interface PreviewUpdated {
   readonly pageIndex: number;
   readonly kind: "original" | "anonymized";
   readonly canvasBlobUrl: string;
+  /** ADR-204: ausente significa geometría desconocida; no un mapa vacío. */
+  readonly interactionGeometry?: PreviewInteractionGeometry;
   // ADR-062 §1: las anotaciones `Degraded` (ADR-058 §7) que el kernel detectó
   // en ESTE render de ESTA página. Es el único camino por el que el veredicto
   // de legibilidad sale de `render-engine`.

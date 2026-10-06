@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=eventos | dependencias=03_Data_Model.md,core/Contracts.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-044-Preview-Grupos-Mediacion-Orchestrator.md,adr/ADR-056-RenderRequested-Kind-Por-Panel.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,adr/ADR-171-El-Usuario-Puede-Eliminar-Una-Entidad.md,adr/ADR-174-Un-Agregado-Manual-Que-Choca-Se-Resuelve-En-El-Momento.md | audiencia=IA+humanos | fase=1 (§2/§5/§6/§10 actualizados en fase 10: RENDER_REQUESTED.scale —ADR-037—, PIPELINE_READY/GROUPING_FINISHED emitibles más de una vez y dedup real de ENTITY_FOUND —ADR-038—; §6/§11: ENTITY_GROUP_* al Orchestrator y Render sin suscripciones a grouping —ADR-044—; fase 11: §10 RENDER_REQUESTED.kind requerido —ADR-056—; fase 10.6: §10 `GROUP_UPDATE_REQUESTED.patch` gana `personGender?: PersonGenderChoice`, con el tercer estado del selector como valor explícito `"neutral"` —ADR-069 §4—) -->
+<!-- CONTEXT: scope=eventos | dependencias=03_Data_Model.md,core/Contracts.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-044-Preview-Grupos-Mediacion-Orchestrator.md,adr/ADR-056-RenderRequested-Kind-Por-Panel.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,adr/ADR-171-El-Usuario-Puede-Eliminar-Una-Entidad.md,adr/ADR-174-Un-Agregado-Manual-Que-Choca-Se-Resuelve-En-El-Momento.md,adr/ADR-204-La-Interaccion-Anonimizada-Usa-La-Geometria-Visible.md,adr/ADR-205-El-Resultado-Exportado-Pertenece-A-Una-Revision.md | audiencia=IA+humanos | fase=1 (§2/§5/§6/§10 actualizados en fase 10: RENDER_REQUESTED.scale —ADR-037—, PIPELINE_READY/GROUPING_FINISHED emitibles más de una vez y dedup real de ENTITY_FOUND —ADR-038—; §6/§11: ENTITY_GROUP_* al Orchestrator y Render sin suscripciones a grouping —ADR-044—; fase 11: §10 RENDER_REQUESTED.kind requerido —ADR-056—; fase 10.6: §10 `GROUP_UPDATE_REQUESTED.patch` gana `personGender?: PersonGenderChoice`, con el tercer estado del selector como valor explícito `"neutral"` —ADR-069 §4—) -->
 
 # Anonly — Sistema de Eventos (TAD bloque 7)
 
@@ -93,6 +93,18 @@ Estos son los eventos que la UI **sí** escucha para construir el árbol de enti
 ---
 
 ## 7. Eventos de Render Engine (canal `render`)
+
+**Enmienda ADR-204:** `PREVIEW_UPDATED` gana
+`interactionGeometry?: PreviewInteractionGeometry` (Contracts §5.1/§8).
+Los tres tipos nuevos del modelo (`PreviewWordPosition`,
+`PreviewCoveredRegion`, `PreviewInteractionGeometry`) se declaran en Contracts
+§5.1 antes de implementarse en shared; no agregan nombres a EngineEvents.
+Presente en los nuevos previews anonimizados, incluso sin reemplazos;
+ausente en original. Ausencia significa geometría desconocida: no admite
+hit-test ni resaltado anonimizado. Se entrega junto al blob desde la misma
+entrada de cache, también en hits. No se agrega evento nuevo. La UI verifica
+la revisión vigente de la página mediante el façade antes de usar el mapa;
+las reglas de propiedad de blob URLs permanecen en el Orchestrator.
 
 | Evento | Emisor | Receptores | Payload | Timing | Idempotente | Orden | Notas |
 |---|---|---|---|---|---|---|---|

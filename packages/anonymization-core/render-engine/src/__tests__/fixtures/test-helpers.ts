@@ -247,8 +247,17 @@ class StubCanvasRenderingContext2D {
   // (shrink-to-fit). No es un "draw call" (no pinta nada, no se registra en
   // `calls`) — mismo criterio que un getter: es una consulta de solo lectura
   // sobre el estado actual de `font`.
-  measureText(text: string): { readonly width: number } {
-    return { width: measureStubTextWidth(text, this.font) };
+  measureText(text: string): {
+    readonly width: number;
+    readonly actualBoundingBoxAscent: number;
+    readonly actualBoundingBoxDescent: number;
+  } {
+    const fontSize = parseStubFontSizePx(this.font);
+    return {
+      width: measureStubTextWidth(text, this.font),
+      actualBoundingBoxAscent: fontSize * 0.72,
+      actualBoundingBoxDescent: fontSize * 0.18,
+    };
   }
 
   drawImage(...args: unknown[]): void {

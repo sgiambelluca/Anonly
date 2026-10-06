@@ -198,14 +198,18 @@ actualizaciones automáticas.
 Ambas exigen PR, conversaciones resueltas y prohíben force pushes y borrado.
 Los checks se aplican también al administrador y se vinculan a GitHub Actions.
 
-| Protección                                         | `develop`                                       | `main`                              |
-| -------------------------------------------------- | ----------------------------------------------- | ----------------------------------- |
-| Lint, Typecheck, Unit + Contract + Snapshot, Build | requeridos                                      | requeridos                          |
-| Security audit y Security gates                    | requeridos                                      | requeridos                          |
-| E2E (Playwright)                                   | después de integrar; no bloquea el PR cotidiano | requerido                           |
-| Rama actualizada antes del merge                   | no requerido                                    | requerido                           |
-| Performance                                        | después de integrar y a mano                    | en PR, después de integrar y a mano |
-| Memory leak y Stress                               | a mano                                          | después de integrar y a mano        |
+| Protección                                         | `develop`                           | `main`                              |
+| -------------------------------------------------- | ----------------------------------- | ----------------------------------- |
+| Lint, Typecheck, Unit + Contract + Snapshot, Build | requeridos                          | requeridos                          |
+| Security audit y Security gates                    | requeridos                          | requeridos                          |
+| E2E (Playwright)                                   | requerido                           | requerido                           |
+| Rama actualizada antes del merge                   | requerido                           | requerido                           |
+| Performance                                        | en PR, después de integrar y a mano | en PR, después de integrar y a mano |
+| Memory leak y Stress                               | a mano                              | después de integrar y a mano        |
+
+Desde ADR-208 `develop` exige lo mismo que `main`. `E2E (Playwright)` es el
+check agregador: exige las dos mitades de E2E y `Export verification`, que hoy
+solo existe en `develop` y llega a `main` con la promoción.
 
 El ruleset de actualización de ambas ramas autoriza **solo a `sgiambelluca`** a
 integrar cambios, con una excepción limitada a merges de PR. No exime los checks

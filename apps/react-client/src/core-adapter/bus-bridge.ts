@@ -27,6 +27,7 @@ import {
   EngineEvents,
   EventChannel,
   PipelineStage,
+  type EntityGroup,
   type IEventBus,
   type Unsubscribe,
   type WorkerJobType,
@@ -51,6 +52,7 @@ export interface Stores {
   readonly viewer: typeof useViewerStore;
   readonly settings: typeof useSettingsStore;
   readonly unreadableInk: typeof useUnreadableInkStore;
+  readonly getPreviewInteractionRevision?: (documentId: string, pageIndex: number) => number | null;
 }
 
 /**
@@ -83,6 +85,12 @@ export function subscribe(bus: IEventBus, stores: Stores): Unsubscribe {
   unsubs.push(
     bus.on(EventChannel.Pipeline, EngineEvents.DOCUMENT_IMPORTED, (payload) => {
       stores.document.setState({ id: payload.documentId, name: payload.name });
+      stores.pipeline.setState({
+        currentVersion: 0,
+        exportedVersion: null,
+        exportingVersion: null,
+        exportResult: null,
+      });
       // Documento nuevo, cuenta nueva: si no, el aviso de un análisis viejo
       // sobrevive al siguiente y acusa a un documento que no tuvo el problema.
       jobTypeById.clear();
@@ -205,7 +213,8 @@ export function subscribe(bus: IEventBus, stores: Stores): Unsubscribe {
   );
 
   unsubs.push(
-    bus.on(EventChannel.Pipeline, EngineEvents.PIPELINE_CANCELLED, () => {
+    bus.on(EventChannel.Pipeline, EngineEvents.PIPELINE_CANCELLED, (payload) => {
+      if (payload.documentId !== stores.document.getState().id) return;
       /*
        * `modelLoading` se limpia junto con el stage, y no es cosmético: el
        * label le da prioridad **sobre** el stage, así que cancelar mientras el
@@ -219,12 +228,18 @@ export function subscribe(bus: IEventBus, stores: Stores): Unsubscribe {
       const stage = stores.pipeline.getState().reanalyzeInFlight
         ? PipelineStage.Ready
         : PipelineStage.Cancelled;
-      stores.pipeline.setState({ stage, modelLoading: null });
+      stores.pipeline.setState({
+        stage,
+        modelLoading: null,
+        exportingVersion: null,
+        exportProgress: null,
+      });
     }),
   );
 
   unsubs.push(
     bus.on(EventChannel.Pipeline, EngineEvents.PIPELINE_FAILED, (payload) => {
+      if (payload.documentId !== stores.document.getState().id) return;
       // ADR-168 §4: el Orchestrator emite `PIPELINE_FAILED` sin un
       // `PIPELINE_STAGE_CHANGED` a `Failed` antes, así que el `stage` del store
       // en este momento es la última etapa observada. Se guarda para decidir
@@ -234,6 +249,8 @@ export function subscribe(bus: IEventBus, stores: Stores): Unsubscribe {
         stage: PipelineStage.Failed,
         error: payload.error,
         failedAtStage: resolveFailedAtStage(previous.stage, previous.failedAtStage),
+        exportingVersion: null,
+        exportProgress: null,
       });
     }),
   );
@@ -273,42 +290,87 @@ export function subscribe(bus: IEventBus, stores: Stores): Unsubscribe {
 
   unsubs.push(
     bus.on(EventChannel.Grouping, EngineEvents.ENTITY_GROUP_CREATED, (payload) => {
+      if (payload.documentId !== stores.document.getState().id) return;
+      if (findGroup(stores, payload.group.id) !== undefined) return;
       stores.entities.getState().addGroup(payload.group);
+      markExportContentChanged(stores, payload.documentId);
+      invalidateInteractionGeometry(stores, payload.documentId);
     }),
   );
 
   unsubs.push(
     bus.on(EventChannel.Grouping, EngineEvents.ENTITY_GROUP_UPDATED, (payload) => {
+      if (payload.documentId !== stores.document.getState().id) return;
+      const previous = findGroup(stores, payload.group.id);
+      if (previous !== undefined && !groupExportStateChanged(previous, payload.group)) return;
       stores.entities.getState().updateGroup(payload.group);
+      markExportContentChanged(stores, payload.documentId);
+      invalidateInteractionGeometry(stores, payload.documentId);
     }),
   );
 
   unsubs.push(
     bus.on(EventChannel.Grouping, EngineEvents.ENTITY_GROUP_REMOVED, (payload) => {
+      if (payload.documentId !== stores.document.getState().id) return;
+      if (findGroup(stores, payload.groupId) === undefined) return;
       stores.entities.getState().removeGroup(payload.groupId);
+      markExportContentChanged(stores, payload.documentId);
+      invalidateInteractionGeometry(stores, payload.documentId);
     }),
   );
 
   unsubs.push(
     bus.on(EventChannel.Grouping, EngineEvents.GROUP_REPLACEMENT_CHANGED, (payload) => {
+      if (payload.documentId !== stores.document.getState().id) return;
+      const group = findGroup(stores, payload.groupId);
+      if (
+        group === undefined ||
+        (group.replacementMode === payload.mode && group.replacementValue === payload.value)
+      )
+        return;
       stores.entities.getState().updateReplacement(payload.groupId, payload.mode, payload.value);
+      markExportContentChanged(stores, payload.documentId);
+      invalidateInteractionGeometry(stores, payload.documentId);
+    }),
+  );
+
+  unsubs.push(
+    bus.on(EventChannel.Grouping, EngineEvents.GROUP_TOGGLED, (payload) => {
+      if (payload.documentId !== stores.document.getState().id) return;
+      const group = findGroup(stores, payload.groupId);
+      if (group === undefined || group.enabled === payload.enabled) return;
+      stores.entities.getState().updateGroup({ ...group, enabled: payload.enabled });
+      markExportContentChanged(stores, payload.documentId);
+      invalidateInteractionGeometry(stores, payload.documentId);
     }),
   );
 
   unsubs.push(
     bus.on(EventChannel.Grouping, EngineEvents.CONFLICT_DETECTED, (payload) => {
+      if (payload.documentId !== stores.document.getState().id) return;
+      if (stores.entities.getState().conflicts.some((item) => item.id === payload.conflict.id))
+        return;
       stores.entities.getState().addConflict(payload.conflict);
+      markExportContentChanged(stores, payload.documentId);
+      invalidateInteractionGeometry(stores, payload.documentId);
     }),
   );
 
   unsubs.push(
     bus.on(EventChannel.Grouping, EngineEvents.CONFLICT_RESOLVED, (payload) => {
+      if (payload.documentId !== stores.document.getState().id) return;
+      const conflict = stores.entities
+        .getState()
+        .conflicts.find((item) => item.id === payload.conflictId);
+      if (conflict === undefined || conflict.resolved) return;
       // ADR-083 §3: el tipo elegido viaja en el evento y hay que guardarlo —
       // sin esto `ConflictDialog` sigue mostrando el `resolvedType` que traía
       // el `CONFLICT_DETECTED` original, o sea el tipo VIEJO después de que el
       // usuario eligió otro. Mismo patrón que el bug de `updateGroup`: el
       // store fue el único lugar donde el contrato no se migró.
       stores.entities.getState().resolveConflict(payload.conflictId, payload.entityType);
+      markExportContentChanged(stores, payload.documentId);
+      invalidateInteractionGeometry(stores, payload.documentId);
     }),
   );
 
@@ -331,7 +393,19 @@ export function subscribe(bus: IEventBus, stores: Stores): Unsubscribe {
 
   unsubs.push(
     bus.on(EventChannel.Render, EngineEvents.PREVIEW_UPDATED, (payload) => {
-      stores.viewer.getState().setPreview(payload.pageIndex, payload.kind, payload.canvasBlobUrl);
+      const activeDocumentId = stores.document.getState().id;
+      if (payload.documentId !== activeDocumentId) return;
+      const geometry = payload.interactionGeometry;
+      const currentRevision =
+        payload.kind === "anonymized"
+          ? (stores.getPreviewInteractionRevision?.(payload.documentId, payload.pageIndex) ?? null)
+          : null;
+      if (geometry !== undefined && geometry.revision !== currentRevision) return;
+      const acceptedGeometry =
+        geometry !== undefined && geometry.revision === currentRevision ? geometry : undefined;
+      stores.viewer
+        .getState()
+        .setPreview(payload.pageIndex, payload.kind, payload.canvasBlobUrl, acceptedGeometry);
 
       // ADR-062 §3: **solo** el panel anonimizado trae veredicto. El original
       // se renderiza sin reemplazos, así que emite el array vacío por
@@ -346,7 +420,7 @@ export function subscribe(bus: IEventBus, stores: Stores): Unsubscribe {
       // PREVIEW_UPDATED puede llegar tarde, después de cerrar el documento;
       // sin el filtro, ese evento rezagado sembraría el veredicto de un
       // documento muerto sobre el que se acaba de abrir.
-      if (payload.kind === "anonymized" && payload.documentId === stores.document.getState().id) {
+      if (payload.kind === "anonymized") {
         useDegradedStore.getState().setPageVerdict(payload.pageIndex, payload.degraded ?? []);
       }
     }),
@@ -356,6 +430,11 @@ export function subscribe(bus: IEventBus, stores: Stores): Unsubscribe {
 
   unsubs.push(
     bus.on(EventChannel.Export, EngineEvents.EXPORT_PROGRESS, (payload) => {
+      if (
+        payload.documentId !== stores.document.getState().id ||
+        stores.pipeline.getState().exportingVersion === null
+      )
+        return;
       stores.pipeline.setState({
         exportProgress: { current: payload.current, total: payload.total },
       });
@@ -368,16 +447,26 @@ export function subscribe(bus: IEventBus, stores: Stores): Unsubscribe {
   // para siempre tras terminar el export (`React_Client.md` §2.2).
   unsubs.push(
     bus.on(EventChannel.Export, EngineEvents.EXPORT_FINISHED, (payload) => {
+      const pending = stores.pipeline.getState().exportingVersion;
+      if (payload.documentId !== stores.document.getState().id || pending === null) return;
       stores.pipeline.setState({
         exportResult: { blobUrl: payload.blobUrl, sizeBytes: payload.sizeBytes },
         exportProgress: null,
+        exportedVersion: pending,
+        exportingVersion: null,
       });
     }),
   );
 
   unsubs.push(
     bus.on(EventChannel.Export, EngineEvents.EXPORT_FAILED, (payload) => {
-      stores.pipeline.setState({ error: payload.error, exportProgress: null });
+      const pending = stores.pipeline.getState().exportingVersion;
+      if (pending === null || stores.document.getState().id !== payload.documentId) return;
+      stores.pipeline.setState({
+        error: payload.error,
+        exportProgress: null,
+        exportingVersion: null,
+      });
     }),
   );
 
@@ -386,6 +475,41 @@ export function subscribe(bus: IEventBus, stores: Stores): Unsubscribe {
       unsub();
     });
   };
+}
+
+function markExportContentChanged(stores: Stores, documentId: string): void {
+  if (stores.document.getState().id !== documentId) return;
+  stores.pipeline.setState({ currentVersion: stores.pipeline.getState().currentVersion + 1 });
+}
+
+function findGroup(stores: Stores, groupId: string) {
+  for (const groups of stores.entities.getState().groupsByType.values()) {
+    const group = groups.find((item) => item.id === groupId);
+    if (group !== undefined) return group;
+  }
+  return undefined;
+}
+
+function groupExportStateChanged(previous: EntityGroup, next: EntityGroup): boolean {
+  return (
+    previous.type !== next.type ||
+    previous.canonicalValue !== next.canonicalValue ||
+    previous.enabled !== next.enabled ||
+    previous.replacementMode !== next.replacementMode ||
+    previous.replacementValue !== next.replacementValue ||
+    previous.members !== next.members
+  );
+}
+
+function invalidateInteractionGeometry(stores: Stores, documentId: string): void {
+  if (stores.document.getState().id !== documentId) return;
+  const viewer = stores.viewer.getState();
+  for (const [pageIndex, geometry] of viewer.interactionGeometryByPage) {
+    if (stores.getPreviewInteractionRevision?.(documentId, pageIndex) !== geometry.revision) {
+      viewer.clearInteractionGeometry(pageIndex);
+    }
+  }
+  stores.viewer.getState().bumpInteractionEpoch();
 }
 
 /**

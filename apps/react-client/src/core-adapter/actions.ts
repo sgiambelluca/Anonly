@@ -16,6 +16,7 @@
 import {
   EngineEvents,
   EventChannel,
+  PipelineStage,
   type EditPreview,
   type EditPreviewRequest,
   type EntityGroup,
@@ -47,6 +48,12 @@ import { getCore, getCoreWhenReady, recreateCoreIfOverridesChanged } from "./ind
 /** `null` si no hay documento activo; las acciones que lo requieren no-opean en ese caso. */
 function activeDocumentId(): string | null {
   return useDocumentStore.getState().id;
+}
+
+function markExportContentChanged(documentId: string): void {
+  if (useDocumentStore.getState().id !== documentId) return;
+  const pipeline = usePipelineStore.getState();
+  pipeline.setState({ currentVersion: pipeline.currentVersion + 1 });
 }
 
 export const actions = {
@@ -124,6 +131,7 @@ export const actions = {
         ruleId: groupRule.id,
       });
       useRulesStore.getState().removeRule(groupRule.id);
+      markExportContentChanged(documentId);
     }
     getCore().bus.emit(EventChannel.UI, EngineEvents.GROUP_REMOVE_REQUESTED, {
       documentId,
@@ -148,8 +156,11 @@ export const actions = {
   createRule(rule: Rule): void {
     const documentId = activeDocumentId();
     if (documentId === null) return;
+    const rules = useRulesStore.getState();
+    if (rules.rules.some((candidate) => candidate.id === rule.id)) return;
     getCore().bus.emit(EventChannel.UI, EngineEvents.RULE_CREATED, { documentId, rule });
-    useRulesStore.getState().addRule(rule);
+    rules.addRule(rule);
+    markExportContentChanged(documentId);
   },
 
   /**
@@ -183,15 +194,24 @@ export const actions = {
   updateRule(ruleId: string, patch: Partial<Rule>): void {
     const documentId = activeDocumentId();
     if (documentId === null) return;
+    const current = useRulesStore.getState().rules.find((rule) => rule.id === ruleId);
+    if (
+      current === undefined ||
+      Object.entries(patch).every(([key, value]) => current[key as keyof Rule] === value)
+    )
+      return;
     getCore().bus.emit(EventChannel.UI, EngineEvents.RULE_UPDATED, { documentId, ruleId, patch });
     useRulesStore.getState().updateRule(ruleId, patch);
+    markExportContentChanged(documentId);
   },
 
   deleteRule(ruleId: string): void {
     const documentId = activeDocumentId();
     if (documentId === null) return;
+    if (!useRulesStore.getState().rules.some((rule) => rule.id === ruleId)) return;
     getCore().bus.emit(EventChannel.UI, EngineEvents.RULE_DELETED, { documentId, ruleId });
     useRulesStore.getState().removeRule(ruleId);
+    markExportContentChanged(documentId);
   },
 
   // `kind` REQUERIDO (ADR-056 §1): identifica el panel que pide, y el motor
@@ -230,10 +250,33 @@ export const actions = {
     useHistoryStore.getState().clear();
     // React_Client.md §2.2 regla 2: el bridge lo lee ante PIPELINE_CANCELLED.
     usePipelineStore.getState().setState({ reanalyzeInFlight: true });
+    let effective = false;
+    const unsubscribe = getCore().bus.on(
+      EventChannel.Pipeline,
+      EngineEvents.PIPELINE_STAGE_CHANGED,
+      (event) => {
+        if (
+          event.documentId === documentId &&
+          event.stage !== PipelineStage.Ready &&
+          event.stage !== PipelineStage.Failed
+        ) {
+          if (effective) return;
+          effective = true;
+          if (activeDocumentId() !== documentId) return;
+          markExportContentChanged(documentId);
+          const viewer = useViewerStore.getState();
+          for (const pageIndex of viewer.interactionGeometryByPage.keys())
+            viewer.clearInteractionGeometry(pageIndex);
+          viewer.bumpInteractionEpoch();
+        }
+      },
+    );
     try {
       await getCore().orchestrator.reanalyze(documentId, patch);
     } finally {
-      usePipelineStore.getState().setState({ reanalyzeInFlight: false });
+      unsubscribe();
+      if (activeDocumentId() === documentId)
+        usePipelineStore.getState().setState({ reanalyzeInFlight: false });
     }
   },
 
@@ -263,6 +306,12 @@ export const actions = {
     const documentId = activeDocumentId();
     if (documentId === null) return null;
     return getCore().orchestrator.getPageSize(documentId, pageIndex);
+  },
+
+  getPreviewInteractionRevision(pageIndex: number): number | null {
+    const documentId = activeDocumentId();
+    if (documentId === null) return null;
+    return getCore().orchestrator.getPreviewInteractionRevision(documentId, pageIndex);
   },
 
   // ADR-061 §8: misma búsqueda literal, de solo lectura, para el buscador
@@ -301,10 +350,19 @@ export const actions = {
     await getCore().orchestrator.retryWithPassword(documentId, password);
   },
 
-  requestExport(options: ExportOptions): void {
+  requestExport(options: ExportOptions): boolean {
     const documentId = activeDocumentId();
-    if (documentId === null) return;
+    if (documentId === null) return false;
+    const pipeline = usePipelineStore.getState();
+    if (pipeline.exportingVersion !== null) return false;
+    pipeline.setState({
+      exportingVersion: pipeline.currentVersion,
+      exportResult: null,
+      exportProgress: null,
+      error: null,
+    });
     getCore().bus.emit(EventChannel.UI, EngineEvents.EXPORT_REQUESTED, { documentId, options });
+    return true;
   },
 
   // CANCEL_REQUESTED viaja por el canal `pipeline` (excepción documentada de

@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=ui-contract | dependencias=adr/ADR-191-Lo-Que-Muestra-La-Vista-Previa-Es-Lo-Que-Se-Exporta.md,01_Technical_Architecture_Document.md,03_Data_Model.md,04_Event_System.md,ADR-005-State-Management.md,adr/ADR-034-Auditoria-Pre-Hito9-Orchestrator.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-054-Scroll-Independiente-Por-Panel.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-056-RenderRequested-Kind-Por-Panel.md,adr/ADR-069-Lexico-De-Genero-Fuente-Unica-Y-Canal-Del-Usuario.md,adr/ADR-134-Cancelled-Es-Terminal.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,adr/ADR-168-Pantallas-De-Carga-Y-Escaneo-Tras-Pruebas-De-Usuario.md,adr/ADR-169-La-Pantalla-De-Trabajo-Tras-Pruebas-De-Usuario.md,adr/ADR-170-Las-Vistas-Previas-De-Edicion-Las-Calcula-El-Core.md,adr/ADR-171-El-Usuario-Puede-Eliminar-Una-Entidad.md,adr/ADR-172-Deshacer-Y-Rehacer-Exactos.md,adr/ADR-174-Un-Agregado-Manual-Que-Choca-Se-Resuelve-En-El-Momento.md | audiencia=IA-implementador-ui | fase=4 (reconciliado en fase 10 por ADR-036: acciones completas §2.3, workers §2.4, settings §3.7, zoom §7, errores §8; §2.3/§3.7/§7 reescritos por ADR-037 —zoom con re-render real— y ADR-038 —reanalyze preservando ediciones, supersede el flujo "recrear el core"; §2.3/§7 en fase 11 por ADR-056 —requestRender con kind requerido, cada panel pide lo suyo—; §2.3 en fase 10.6 por ADR-069 §4 —`updateGroup.patch` gana `personGender?: PersonGenderChoice`, para el control de género del PR 12, que ADR-071 rebautiza `PersonGenderToggle` sin tocar este contrato—; post-Hito 10.10: §2.2 y §3.6b nuevas por ADR-062 —`degraded.store`, el séptimo slice: convierte el veredicto por página que trae `PREVIEW_UPDATED.degraded` en la marca por grupo del árbol, con sus tres reglas de consumo—; §3.5 pierde `sideBySide`, que estaba declarado sin setter ni consumidor desde PR7); §3.5/§3.6/§6 reescritos en el rediseño post-10.9 por **ADR-087** —un solo visor con toggle: `viewer.currentPageIndex`/`visibleRange` dejan de ser por `kind` y aparece `viewer.mode`; `settings.scrollSyncEnabled` se retira; el recap de layout pasa a los tres momentos—; §2.2 ignora carga NER tardía después de Cancelled por ADR-134 -->
+<!-- CONTEXT: scope=ui-contract | dependencias=adr/ADR-191-Lo-Que-Muestra-La-Vista-Previa-Es-Lo-Que-Se-Exporta.md,01_Technical_Architecture_Document.md,03_Data_Model.md,04_Event_System.md,ADR-005-State-Management.md,adr/ADR-034-Auditoria-Pre-Hito9-Orchestrator.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-054-Scroll-Independiente-Por-Panel.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-056-RenderRequested-Kind-Por-Panel.md,adr/ADR-069-Lexico-De-Genero-Fuente-Unica-Y-Canal-Del-Usuario.md,adr/ADR-134-Cancelled-Es-Terminal.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,adr/ADR-168-Pantallas-De-Carga-Y-Escaneo-Tras-Pruebas-De-Usuario.md,adr/ADR-169-La-Pantalla-De-Trabajo-Tras-Pruebas-De-Usuario.md,adr/ADR-170-Las-Vistas-Previas-De-Edicion-Las-Calcula-El-Core.md,adr/ADR-171-El-Usuario-Puede-Eliminar-Una-Entidad.md,adr/ADR-172-Deshacer-Y-Rehacer-Exactos.md,adr/ADR-174-Un-Agregado-Manual-Que-Choca-Se-Resuelve-En-El-Momento.md,adr/ADR-204-La-Interaccion-Anonimizada-Usa-La-Geometria-Visible.md,adr/ADR-205-El-Resultado-Exportado-Pertenece-A-Una-Revision.md,adr/ADR-206-Una-Busqueda-Omitida-No-Confirma-La-Version.md | audiencia=IA-implementador-ui | fase=4 (reconciliado en fase 10 por ADR-036: acciones completas §2.3, workers §2.4, settings §3.7, zoom §7, errores §8; §2.3/§3.7/§7 reescritos por ADR-037 —zoom con re-render real— y ADR-038 —reanalyze preservando ediciones, supersede el flujo "recrear el core"; §2.3/§7 en fase 11 por ADR-056 —requestRender con kind requerido, cada panel pide lo suyo—; §2.3 en fase 10.6 por ADR-069 §4 —`updateGroup.patch` gana `personGender?: PersonGenderChoice`, para el control de género del PR 12, que ADR-071 rebautiza `PersonGenderToggle` sin tocar este contrato—; post-Hito 10.10: §2.2 y §3.6b nuevas por ADR-062 —`degraded.store`, el séptimo slice: convierte el veredicto por página que trae `PREVIEW_UPDATED.degraded` en la marca por grupo del árbol, con sus tres reglas de consumo—; §3.5 pierde `sideBySide`, que estaba declarado sin setter ni consumidor desde PR7); §3.5/§3.6/§6 reescritos en el rediseño post-10.9 por **ADR-087** —un solo visor con toggle: `viewer.currentPageIndex`/`visibleRange` dejan de ser por `kind` y aparece `viewer.mode`; `settings.scrollSyncEnabled` se retira; el recap de layout pasa a los tres momentos—; §2.2 ignora carga NER tardía después de Cancelled por ADR-134 -->
 
 # Anonly — React Client (UI Contract, TAD bloque 9)
 
@@ -115,7 +115,11 @@ export function subscribe(bus: IEventBus, stores: Stores): Unsubscribes {
   }));
 
   unsubs.push(bus.on(EventChannel.Render, EngineEvents.PREVIEW_UPDATED, (p) => {
-    stores.viewer.setPreview(p.pageIndex, p.kind, p.canvasBlobUrl);
+    if (p.documentId !== stores.document.getState().id) return;
+    if (p.kind === "anonymized" && p.interactionGeometry !== undefined &&
+        p.interactionGeometry.revision !==
+          getCore().orchestrator.getPreviewInteractionRevision(p.documentId, p.pageIndex)) return;
+    stores.viewer.setPreview(p.pageIndex, p.kind, p.canvasBlobUrl, p.interactionGeometry);
     // ADR-062 §3: SOLO el panel anonimizado trae veredicto. El original se
     // renderiza sin reemplazos, así que emite el array vacío por construcción
     // y borraría lo que el anonimizado había levantado.
@@ -142,9 +146,13 @@ export function subscribe(bus: IEventBus, stores: Stores): Unsubscribes {
   // Escenario 1 E2E, 2026-07-22): sin esto, PipelineStatus muestra el último
   // "Exportando página N de N…" para siempre tras terminar el export.
   unsubs.push(bus.on(EventChannel.Export, EngineEvents.EXPORT_FINISHED, (p) => {
+    const pending = stores.pipeline.getState().exportingVersion;
+    if (p.documentId !== stores.document.getState().id || pending === null) return;
     stores.pipeline.setState({
       exportResult: { blobUrl: p.blobUrl, sizeBytes: p.sizeBytes },
       exportProgress: null,
+      exportedVersion: pending,
+      exportingVersion: null,
     });
   }));
 
@@ -272,10 +280,18 @@ export const actions = {
     await getCore().orchestrator.retryWithPassword(documentId, password);
   },
 
-  requestExport(options: ExportOptions): void {
+  requestExport(options: ExportOptions): boolean {
     const documentId = stores.document.getState().id;
-    if (!documentId) return;
+    const pipeline = stores.pipeline.getState();
+    if (!documentId || pipeline.exportingVersion !== null) return false;
+    pipeline.setState({
+      exportingVersion: pipeline.currentVersion,
+      exportResult: null,
+      exportProgress: null,
+      error: null,
+    });
     getCore().bus.emit(EventChannel.UI, EngineEvents.EXPORT_REQUESTED, { documentId, options });
+    return true;
   },
 
   // CANCEL_REQUESTED viaja por el canal `pipeline` (excepción documentada de
@@ -386,6 +402,9 @@ interface PipelineSlice {
   readonly modelLoading: { modelId: string; progress: number } | null;
   readonly exportProgress: { current: number; total: number } | null;
   readonly exportResult: { blobUrl: string; sizeBytes: number } | null;
+  readonly currentVersion: number;                    // ADR-205: inicialmente 0
+  readonly exportedVersion: number | null;            // último éxito, inicialmente null
+  readonly exportingVersion: number | null;           // capturada antes del pedido, inicialmente null
   readonly error: SerializedEngineError | null;
   /**
    * ADR-168 §4: la última etapa observada antes de `Failed`. `null` si no falló.
@@ -441,9 +460,11 @@ interface ViewerSlice {
   // sin necesidad (con paneles independientes cada uno pide sus propios
   // renders, ver §7). Un Map por kind evita el re-render cruzado.
   readonly previewByPage: Readonly<Record<ViewerKind, ReadonlyMap<number, string>>>;
+  readonly interactionGeometryByPage: ReadonlyMap<number, PreviewInteractionGeometry>;
+  readonly interactionEpoch: number; // señal local de invalidación React, inicialmente 0
   setPage(index: number): void;
   setZoom(z: number): void;
-  setPreview(pageIndex: number, kind: ViewerKind, blobUrl: string): void;
+  setPreview(pageIndex: number, kind: ViewerKind, blobUrl: string, geometry?: PreviewInteractionGeometry): void;
   setVisibleRange(start: number, end: number): void;
   reset(): void;
 }
@@ -712,6 +733,109 @@ Tabla reconciliada por ADR-036 §5 (la versión previa refería un evento inexis
 | `enabledGroups === 0` (pre-flight **local** del `ExportDialog`, calculado del store — no es un evento; el motor solo loguea warn, ADR-032 §3) | modal de confirmación: "No hay grupos habilitados. El export será idéntico al original. ¿Continuar?" |
 
 ---
+
+## Enmienda normativa ADR-204/205 — interacción y vigencia del export
+
+Esta enmienda amplía §2.2, §2.3, §3.4, §3.5 y §7; prevalece sobre cualquier
+restricción anterior que limite la selección o el resaltado a original.
+
+### Preview e interacción (ADR-204)
+
+`viewer.store` conserva `interactionGeometryByPage`, un mapa por página del
+anonimizado con `PreviewInteractionGeometry`. `setPreview` recibe el mapa
+opcional del mismo evento y actualiza URL y mapa en una sola escritura. Un
+evento sin mapa elimina el mapa anterior de esa página. Reset lo vacía.
+El bridge descarta eventos de documentos inactivos y mapas de revisión
+obsoleta comparándolos con el getter del façade. Si el evento trae un mapa
+obsoleto, descartar el evento completo: no reemplazar un raster más nuevo
+por ese raster tardío ni borrar su mapa vigente. Un evento realmente sin
+mapa puede mostrar raster sin interacción. No revoca URLs del Core.
+
+`actions.getPreviewInteractionRevision(pageIndex): number | null` delega el
+documento activo al getter público. No duplicar una revisión Core en un
+contador React. `interactionEpoch` solo dispara refresco/limpieza de selección
+ante invalidación del mapa; no identifica contenido ni sustituye la revisión
+del façade. Reset la devuelve a 0. Los cambios de grupos/palabras y el comienzo de reanálisis
+limpian las selecciones afectadas y disparan actualización del visor; mientras
+el mapa no coincida con la revisión actual, no hay interacción anonimizada.
+Las cajas están en puntos; el zoom CSS inmediato transforma raster y overlay
+juntos. La escala del mapa identifica el raster del mismo evento, no exige
+convertir otra vez sus cajas a píxeles. Respetar el guard de escala del motor.
+
+La UI proyecta `Page.words` a cajas visibles por `sourceBbox`, derivando la
+cobertura con `coveredRegions`. No muta palabras, no guarda un boolean
+persistente, no mide fuentes ni calcula repintado. Los helpers de búsqueda
+y selección comparten esta proyección. En búsqueda, usar `TextMatch.wordSpan`
+para reunir cajas transformadas y zonas cubiertas; no unir todo en una caja
+que resalte texto intermedio de otros renglones.
+
+### Contador local de export (ADR-205)
+
+`pipeline.store` incorpora `currentVersion: number` (0),
+`exportedVersion: number | null` (null) y
+`exportingVersion: number | null` (null), con una operación atómica para
+incrementar el contador y otra para iniciar una solicitud si no hay otra.
+Todas se resetean al importar/cerrar documento. No requiere eventos nuevos.
+
+Observar cambios efectivos del documento activo en el bridge:
+`ENTITY_GROUP_CREATED`, `ENTITY_GROUP_UPDATED`, `ENTITY_GROUP_REMOVED`,
+`GROUP_REPLACEMENT_CHANGED` y `CONFLICT_RESOLVED`.
+`GROUP_TOGGLED` cubre la habilitación por su evento existente, y
+`CONFLICT_DETECTED` puede invalidar conservadoramente al crear un choque.
+No-op obvio (grupo ausente,
+patch sin cambios o actualización idéntica) no invalida por sí solo; no se
+requiere igualdad profunda ni hashing del documento. Reglas se observan en
+`createRule/updateRule/deleteRule`, incluido el borrado implícito de regla
+group. `history` incrementa tras una restauración exitosa, aunque haya vuelto
+al mismo contenido. Un reanálisis efectivo invalida al comenzar, pues puede
+dejar cambios parciales si termina cancelado/fallido; detectar patch vacío o
+idéntico con config vigente cuando está disponible. Sus eventos también
+pueden incrementar. No importa cuántos incrementos tiene una acción compuesta.
+Si la acción detecta el comienzo efectivo por `PIPELINE_STAGE_CHANGED`,
+invalidar en esa primera transición, antes de esperar su promesa; no posponer
+el incremento hasta `finally`. Limpiar también la selección/geometría de
+interacción al comenzar ese reanálisis efectivo. Un cambio de documento
+durante la espera no invalida el documento nuevo.
+
+`actions.requestExport` captura `exportingVersion = currentVersion` antes
+de emitir `EXPORT_REQUESTED`; impide solicitudes duplicadas.
+Devuelve `boolean`: `true` si emitió una nueva solicitud, `false` si
+no hay documento activo o ya hay una pendiente; el diálogo solo pasa a
+`submitted` cuando se acepta. Es un resultado local del adapter, sin ampliar
+el evento ni la interfaz de export del Core. Limpia resultado,
+progreso y error anteriores conservando `exportedVersion`. Éxito correlacionado
+del documento activo guarda resultado y `exportedVersion = exportingVersion`
+y limpia `exportingVersion`. Fallo/cancelación/fallo de pipeline durante export
+limpia la solicitud pendiente, sin cambiar `exportedVersion`. Ignorar éxitos
+de otro documento o sin solicitud local pendiente. Una edición durante la
+generación sigue pendiente. No poner el contador a 0 con el éxito.
+
+Un resultado se reabre solo si existe y `currentVersion === exportedVersion`.
+Si difieren, ExportDialog abre formulario normal con el aviso especificado
+en Components bajo el nombre. Si `exportedVersion === null`, no hay aviso.
+Zoom, lupa, navegación, selección y orden de lista no cambian el contador.
+Ningún componente revoca blobs cuya propiedad es del Core.
+
+Verificar bridge/actions/history y ciclo Electron: reabrir sin editar,
+editar/reexportar, error y reintento, edición durante generación, cancelación,
+reanálisis, undo/redo y cierre/cambio de documento con resultados tardíos.
+
+### Búsqueda manual de actualizaciones — ADR-206
+
+El estado local del diálogo es `idle | checking | up-to-date | unavailable`.
+Al buscar pasa a checking y limpia el aviso anterior. Solo
+`update-not-available` recibido durante checking confirma up-to-date.
+`check-unavailable` recibido durante checking pasa a unavailable y muestra
+el aviso secundario de Components; recibido durante idle no muestra nada.
+`error`, `update-available` y `update-downloaded` conservan la limpieza
+existente. Cerrar/reabrir el diálogo limpia el estado y la suscripción local.
+El evento nuevo usa el mismo `UpdateEvent`/IPC con tipo string y sin campos
+adicionales; ningún slice ni contrato del Core cambia.
+
+La selección con inicio en blanco y la salida animada de ToastHost siguen
+las enmiendas de Components y ADR-204. La vida visual de un aviso saliente
+puede durar 260 ms después del dismiss lógico; no retener un segundo aviso
+ni permitir que el cierre saliente afecte una instancia nueva.
 
 ## 9. Referencias
 

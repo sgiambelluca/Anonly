@@ -100,6 +100,8 @@ Cómo se coordinan:
 - **Se retoma el mismo agente** con `SendMessage` entre rondas y tras un corte (límite de uso, fin de sesión), en vez de lanzar uno nuevo.
   - Al retomar, lo primero es `git status` y `git diff` para no rehacer trabajo.
 - **El revisor se lanza por lote**: cuando todas las tareas de la ronda están listas, no después de cada tanda del implementador.
+- **El planificador mantiene su turno abierto durante la coordinación.** Espera el aviso de finalización del sub-agente y retoma al siguiente agente según el informe, sin depender de que el humano avise. No cierra el turno solo por haber delegado; lo cierra cuando termina la ronda o hace falta una decisión humana.
+  - Cada sub-agente entrega su resultado al planificador al terminar. La espera usa avisos de finalización, sin consultar repetidamente el estado ni el avance de comandos largos.
 - **Los sub-agentes corren los gates en modo síncrono**, nunca en background ni con Monitor: nada los reanuda si el turno termina antes.
 - **Ningún sub-agente edita `docs/` ni commitea.** Si un hallazgo pide cambiar un spec o un contrato, primero escribe el planificador y después se toca código.
 

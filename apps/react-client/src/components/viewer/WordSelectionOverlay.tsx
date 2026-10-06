@@ -2,9 +2,9 @@
  * `WordSelectionOverlay` (`ui/Components.md` §5.4b, ADR-061 §3/§4 ruta B;
  * selección persistente por ADR-169 §7).
  *
- * Capa transparente sobre el `PageCanvas` del panel `original` — nunca se
- * monta sobre `anonymized` (`PdfViewer.tsx`): ahí lo visible puede ser un
- * reemplazo, y señalarlo no significaría nada.
+ * Capa transparente sobre el `PageCanvas` del panel activo. En `anonymized`
+ * necesita la geometría de interacción vigente para traducir palabras y
+ * bloquear regiones cubiertas por reemplazos; sin ese mapa queda inerte.
  *
  * Click o arrastre → `pointerSelectionToPageRect` traduce a coordenadas de
  * página → `wordsInRect` (`@anonly/shared`) hit-test contra `Page.words` →
@@ -24,14 +24,27 @@
  * (`activeMatchBbox`) — mismo mecanismo, sentido inverso.
  */
 
-import { EntityType, wordsInRect, type BoundingBox, type Word } from "@anonly/anonymization-core";
-import { useEffect, useState, type PointerEvent } from "react";
+import {
+  EntityType,
+  wordsInRect,
+  type BoundingBox,
+  type PreviewInteractionGeometry,
+  type Word,
+} from "@anonly/anonymization-core";
+import { useEffect, useRef, useState, type PointerEvent } from "react";
 
 import { actions } from "../../core-adapter/actions.js";
 import { Button } from "../common/Button.js";
 import { addManualEntityWithFeedback } from "../entities/addManualEntity.js";
 import { EntityTypePicker } from "../entities/EntityTypePicker.js";
 
+import {
+  blankStartAnchorIndex,
+  pointIsCovered,
+  projectWords,
+  selectVisibleSpan,
+  selectionDirection,
+} from "./interactionProjection.js";
 import { dominantLineWords } from "./selectionLine.js";
 import { wordsBoundingBox } from "./viewerGestures.js";
 import { pageRectToScreenRect, pointerSelectionToPageRect } from "./wordSelectionRect.js";
@@ -40,6 +53,9 @@ import { pageRectToScreenRect, pointerSelectionToPageRect } from "./wordSelectio
 export interface PageSelection {
   readonly pageIndex: number;
   readonly words: ReadonlyArray<Word>;
+  readonly wordIndexes: ReadonlyArray<number>;
+  readonly interactionRevision: number | null;
+  readonly kind: "original" | "anonymized";
 }
 
 export interface WordSelectionOverlayProps {
@@ -48,7 +64,9 @@ export interface WordSelectionOverlayProps {
   readonly displayWidth: number;
   readonly displayHeight: number;
   /** Bbox de página del resultado activo de la lupa, si hay uno en esta página. */
-  readonly activeMatchBbox?: BoundingBox;
+  readonly activeMatchBboxes?: ReadonlyArray<BoundingBox>;
+  readonly kind: "original" | "anonymized";
+  readonly interactionGeometry?: PreviewInteractionGeometry;
   /** La selección vigente si es de esta página, o `null`. */
   readonly selection: PageSelection | null;
   readonly onSelect: (selection: PageSelection) => void;
@@ -60,17 +78,26 @@ interface Point {
   readonly y: number;
 }
 
+function distanceSquared(box: BoundingBox, x: number, y: number): number {
+  const dx = x < box.x ? box.x - x : x > box.x + box.width ? x - box.x - box.width : 0;
+  const dy = y < box.y ? box.y - y : y > box.y + box.height ? y - box.y - box.height : 0;
+  return dx * dx + dy * dy;
+}
+
 export function WordSelectionOverlay({
   pageIndex,
   displayWidth,
   displayHeight,
-  activeMatchBbox,
+  activeMatchBboxes,
+  kind,
+  interactionGeometry,
   selection,
   onSelect,
   onClearSelection,
 }: WordSelectionOverlayProps) {
   const [dragStart, setDragStart] = useState<Point | null>(null);
   const [dragCurrent, setDragCurrent] = useState<Point | null>(null);
+  const dragRevisionRef = useRef<number | null>(null);
 
   function pointFromEvent(event: PointerEvent<HTMLDivElement>): Point {
     const rect = event.currentTarget.getBoundingClientRect();
@@ -80,6 +107,22 @@ export function WordSelectionOverlay({
   function handlePointerDown(event: PointerEvent<HTMLDivElement>): void {
     if (event.button !== 0) return;
     const point = pointFromEvent(event);
+    dragRevisionRef.current = actions.getPreviewInteractionRevision(pageIndex);
+    if (kind === "anonymized") {
+      const geometry = interactionGeometry;
+      if (
+        geometry === undefined ||
+        geometry.revision !== actions.getPreviewInteractionRevision(pageIndex)
+      )
+        return;
+      const size = actions.getPageSize(pageIndex);
+      if (size === null) return;
+      const pagePoint = {
+        x: (point.x * size.width) / displayWidth,
+        y: (point.y * size.height) / displayHeight,
+      };
+      if (pointIsCovered(pagePoint, geometry)) return;
+    }
     setDragStart(point);
     setDragCurrent(point);
   }
@@ -94,6 +137,11 @@ export function WordSelectionOverlay({
     const end = pointFromEvent(event);
     setDragStart(null);
     setDragCurrent(null);
+    if (dragRevisionRef.current !== actions.getPreviewInteractionRevision(pageIndex)) {
+      dragRevisionRef.current = null;
+      return;
+    }
+    dragRevisionRef.current = null;
 
     const pageSize = actions.getPageSize(pageIndex);
     if (pageSize === null) return;
@@ -109,18 +157,90 @@ export function WordSelectionOverlay({
       pageHeight: pageSize.height,
     });
 
-    const pageWords = actions.getPageWords(pageIndex);
+    const sourceWords = actions.getPageWords(pageIndex);
+    const geometry = kind === "anonymized" ? interactionGeometry : undefined;
+    if (
+      kind === "anonymized" &&
+      (geometry === undefined ||
+        geometry.revision !== actions.getPreviewInteractionRevision(pageIndex))
+    )
+      return;
+    const projected =
+      geometry === undefined
+        ? sourceWords.map((word, wordIndex) => ({ word, covered: false, wordIndex }))
+        : projectWords(sourceWords, geometry);
+    const pageWords = projected.map((item) => item.word);
     // ADR-114 §1: al renglón dominante. El valor se arma con `join(" ")` y la
     // búsqueda literal exige palabras consecutivas de una misma línea.
-    const words = dominantLineWords(pageWords, wordsInRect(pageWords, rect), rect);
+    const touched = wordsInRect(pageWords, rect);
+    const selectedLine = dominantLineWords(pageWords, touched, rect);
+    let wordIndexes: ReadonlyArray<number> = selectedLine.map((word) => pageWords.indexOf(word));
+    if (geometry !== undefined && touched.length > 0) {
+      const startX = (dragStart.x * pageSize.width) / displayWidth;
+      const endX = (end.x * pageSize.width) / displayWidth;
+      const startY = (dragStart.y * pageSize.height) / displayHeight;
+      const endY = (end.y * pageSize.height) / displayHeight;
+      const startRect = pointerSelectionToPageRect({
+        startX: dragStart.x,
+        startY: dragStart.y,
+        endX: dragStart.x,
+        endY: dragStart.y,
+        displayWidth,
+        displayHeight,
+        pageWidth: pageSize.width,
+        pageHeight: pageSize.height,
+      });
+      const startCandidates = [...wordsInRect(pageWords, startRect)];
+      const startWord = startCandidates.sort(
+        (a, b) => distanceSquared(a.bbox, startX, startY) - distanceSquared(b.bbox, startX, startY),
+      )[0];
+      const lineDirection = selectionDirection(
+        selectedLine[0]?.bbox ?? { x: 0, y: 0, width: 0, height: 0 },
+        startX,
+        startY,
+        endX,
+        endY,
+      );
+      const fallbackIndex = blankStartAnchorIndex(
+        selectedLine.map((word) => pageWords.indexOf(word)),
+        lineDirection,
+      );
+      // Un inicio sobre una palabra visible conserva el ancla original. Si
+      // cae en blanco, el rectángulo ya eligió el renglón dominante según
+      // ADR-114; anclamos su primer token en la dirección del gesto.
+      const fallbackWord =
+        startWord === undefined
+          ? fallbackIndex === null
+            ? undefined
+            : pageWords[fallbackIndex]
+          : undefined;
+      const anchorWord = startWord ?? fallbackWord;
+      if (anchorWord === undefined) return;
+      const direction = selectionDirection(anchorWord.bbox, startX, startY, endX, endY);
+      const anchorIndex = pageWords.indexOf(anchorWord);
+      const touchedIndices = new Set(touched.map((word) => pageWords.indexOf(word)));
+      wordIndexes = selectVisibleSpan(projected, anchorIndex, direction, touchedIndices);
+      if (geometry.revision !== actions.getPreviewInteractionRevision(pageIndex)) return;
+    }
     // Un click en un lugar sin palabras no borra la selección que había: solo
     // "otra selección" la reemplaza (ADR-169 §7).
+    const words = wordIndexes
+      .map((index) => pageWords[index])
+      .filter((word): word is Word => word !== undefined);
     if (words.length === 0) return;
-    onSelect({ pageIndex, words });
+    onSelect({
+      pageIndex,
+      words,
+      wordIndexes,
+      interactionRevision: actions.getPreviewInteractionRevision(pageIndex),
+      kind,
+    });
   }
 
   const pageSize =
-    activeMatchBbox !== undefined || selection !== null ? actions.getPageSize(pageIndex) : null;
+    (activeMatchBboxes?.length ?? 0) > 0 || selection !== null
+      ? actions.getPageSize(pageIndex)
+      : null;
   const toScreen = (box: BoundingBox) =>
     pageSize === null
       ? null
@@ -134,7 +254,7 @@ export function WordSelectionOverlay({
           ),
         };
 
-  const highlightRect = activeMatchBbox !== undefined ? toScreen(activeMatchBbox) : null;
+  const highlightRects = (activeMatchBboxes ?? []).map(toScreen).filter((rect) => rect !== null);
   const selectionBox = selection !== null ? wordsBoundingBox(selection.words) : null;
   const selectionRect = selectionBox !== null ? toScreen(selectionBox) : null;
 
@@ -150,17 +270,18 @@ export function WordSelectionOverlay({
 
   return (
     <div
-      className="absolute inset-0 cursor-crosshair select-none"
+      className={`absolute inset-0 select-none ${kind === "original" || interactionGeometry !== undefined ? "cursor-crosshair" : "pointer-events-none"}`}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
     >
-      {highlightRect ? (
+      {highlightRects.map((rect, index) => (
         <div
+          key={index}
           className="pointer-events-none absolute border-2 border-warning-strong bg-warning/30"
-          style={highlightRect}
+          style={rect}
         />
-      ) : null}
+      ))}
       {dragRect ? (
         <div
           className="pointer-events-none absolute border border-accent bg-accent/20"
@@ -184,6 +305,11 @@ export function WordSelectionOverlay({
             value={selection.words.map((word) => word.text).join(" ")}
             left={selectionRect.left}
             top={selectionRect.top + selectionRect.height + 10}
+            pageIndex={pageIndex}
+            wordIndexes={selection.wordIndexes}
+            interactionRevision={selection.interactionRevision}
+            kind={selection.kind}
+            {...(interactionGeometry !== undefined ? { interactionGeometry } : {})}
             onClose={onClearSelection}
           />
         </>
@@ -201,11 +327,21 @@ function SelectionPopover({
   value,
   left,
   top,
+  pageIndex,
+  wordIndexes,
+  interactionRevision,
+  kind,
+  interactionGeometry,
   onClose,
 }: {
   readonly value: string;
   readonly left: number;
   readonly top: number;
+  readonly pageIndex: number;
+  readonly wordIndexes: ReadonlyArray<number>;
+  readonly interactionRevision: number | null;
+  readonly kind: "original" | "anonymized";
+  readonly interactionGeometry?: PreviewInteractionGeometry;
   readonly onClose: () => void;
 }) {
   const [entityType, setEntityType] = useState<EntityType>(EntityType.Person);
@@ -225,9 +361,30 @@ function SelectionPopover({
 
   async function handleConfirm(): Promise<void> {
     setSubmitting(true);
+    if (
+      interactionRevision !== null &&
+      (interactionRevision !== actions.getPreviewInteractionRevision(pageIndex) ||
+        (kind === "anonymized" && interactionGeometry?.revision !== interactionRevision))
+    ) {
+      setSubmitting(false);
+      onClose();
+      return;
+    }
+    const currentWords = actions.getPageWords(pageIndex);
+    const projected =
+      kind === "original" || interactionGeometry === undefined
+        ? currentWords.map((word) => ({ word, covered: false }))
+        : projectWords(currentWords, interactionGeometry);
+    const selected = wordIndexes.map((index) => projected[index]);
+    if (selected.some((item) => item === undefined || item.covered)) {
+      setSubmitting(false);
+      onClose();
+      return;
+    }
+    const currentValue = selected.map((item) => item?.word.text ?? "").join(" ");
     // ADR-114 §2: se espera el resultado — "no se encontró" y "se agregaron
     // 18" no pueden verse igual. Con éxito, el toast de ADR-169 §7.
-    const feedback = await addManualEntityWithFeedback({ value, entityType });
+    const feedback = await addManualEntityWithFeedback({ value: currentValue, entityType });
     setSubmitting(false);
     if (feedback === "not-found") {
       setNotFound(true);
