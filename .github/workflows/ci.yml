@@ -217,9 +217,9 @@ jobs:
   test-e2e-shard:
     name: E2E mitad ${{ matrix.shard }}/2
     needs: install
-    # ADR-199: prueba conjunta después de integrar a develop; en PR, solo
-    # antes de promover a main. Los PR cotidianos a develop usan gates rápidos.
-    if: github.event_name != 'pull_request' || github.base_ref == 'main'
+    # ADR-208: corre en todo PR y push a main y develop, y a mano. Un PR a
+    # develop exige los mismos gates que uno a main; antes el E2E solo
+    # aparecía al integrar y el fallo llegaba tarde (ADR-199 §3, enmendado).
     strategy:
       fail-fast: false
       matrix:
@@ -277,7 +277,7 @@ jobs:
   test-e2e:
     name: E2E (Playwright)
     needs: [test-e2e-shard, export-verification]
-    if: always() && (github.event_name != 'pull_request' || github.base_ref == 'main')
+    if: always()
     runs-on: ubuntu-latest
     steps:
       - name: Las dos mitades de E2E pasaron
@@ -297,8 +297,7 @@ jobs:
   export-verification:
     name: Export verification
     needs: install
-    # Mismo filtro de E2E (ADR-199): develop/main pushes, PR hacia main y dispatch.
-    if: github.event_name != 'pull_request' || github.base_ref == 'main'
+    # Mismos eventos que E2E (ADR-208): PR y push a main y develop, y dispatch.
     runs-on: macos-latest
     timeout-minutes: 45
     steps:
@@ -337,7 +336,7 @@ jobs:
   test-perf:
     name: Performance
     needs: install
-    if: github.event_name != 'pull_request' || github.base_ref == 'main'
+    # Mismos eventos que E2E (ADR-208).
     # Perf mide Electron con ventana sobre un target nativo publicado, igual
     # que E2E; Ubuntu sin display medía otro entorno y podía omitir el gate.
     runs-on: macos-latest
