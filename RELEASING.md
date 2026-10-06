@@ -44,28 +44,42 @@ pnpm run version   # sube las versiones y escribe los CHANGELOG
 Tiene que ser `pnpm run version`: `pnpm version` a secas es un comando propio
 de pnpm, que imprime versiones y no toca nada.
 
-**4. Probás la versión y preparás un PR hacia `main`, con Rebase and merge.**
-`main` y `develop` conservan historial lineal y ambas ramas son permanentes.
-Para preparar la promoción sin reescribir `develop`, creá una rama temporal
-desde ella y rebaseala sobre el último `main` antes de abrir el PR:
+**4. Probás la versión y promovés `develop` a `main` con un merge commit.**
+Es el único caso donde se usa Create a merge commit (ADR-209). Así los commits
+de `develop` entran a `main` con el mismo SHA, y la próxima promoción solo trae
+lo nuevo en lugar de volver a encontrar los mismos cambios como commits
+distintos. `develop` sigue lineal: ahí se integra siempre con Rebase and merge
+o squash, y GitHub rechaza un merge commit.
+
+Antes de abrir el PR, mirá si hay conflictos:
 
 ```bash
 git fetch origin
-git switch -c release/1.1.0 origin/develop
-git rebase origin/main
+git merge-tree --write-tree --name-only origin/main origin/develop
 ```
 
-El rebase local omite los patches equivalentes que ya están en `main` y permite
-resolver conflictos en la rama temporal. Revisá el diff final del PR y repetí
-las pruebas afectadas si la resolución cambia el contenido. Después integrá
-ese PR mediante Rebase and merge. No rebasees ni fuerces el push de `develop`.
+- **Sin conflictos** (sale con código 0): abrí el PR de `develop` hacia `main`
+  y usá **Create a merge commit**.
+- **Con conflictos**: prepará una rama temporal desde `main`, resolvelos ahí y
+  abrí su PR hacia `main`, también con **Create a merge commit**:
 
-GitHub crea nuevos SHA al hacer Rebase and merge. Por eso las promociones no
-conservan la misma identidad de commits entre las dos ramas. No hace falta
-reintegrar toda la historia de `main` a `develop` después de cada promoción;
-los hotfixes y cualquier cambio exclusivo de `main` se trasladan por separado.
+  ```bash
+  git switch -c release/1.1.0 origin/main
+  git merge origin/develop       # resolvé los conflictos y commiteá
+  git push -u origin release/1.1.0
+  ```
 
-**5. Esperás CI verde en `main` y tageás el commit validado.** El tag debe coincidir exactamente con `v` + la versión de `apps/desktop-shell/package.json`. La validación del release rechaza un commit fuera de `main`, un tag que no coincide o un SHA sin CI exitosa. El tag dispara el release:
+  Revisá que el diff final sea el esperado y repetí las pruebas afectadas si
+  la resolución cambió contenido. Si `develop` avanza antes de integrar, hacé
+  `git merge origin/develop` en esa rama. Puede eliminarse después del PR.
+
+Nunca uses Rebase and merge ni squash en esta promoción: reescriben los SHA y
+vuelven a separar las dos ramas. Tampoco hagas merge de `main` en `develop`: es
+un merge commit y `develop` lo rechaza, y no hace falta. Después de promover
+no hay nada que sincronizar de vuelta. Los hotfixes y cualquier cambio
+exclusivo de `main` se trasladan por separado (ver «Arreglos urgentes»).
+
+**5. Esperás CI verde en `main` y tageás el commit validado.** Es la punta de `main` tras la promoción, o sea el merge commit: es el SHA que tiene CI de push en `main`. Un commit de `develop` que ya entró a `main` pero no tiene esa CI es rechazado. El tag debe coincidir exactamente con `v` + la versión de `apps/desktop-shell/package.json`. La validación del release rechaza un commit fuera de `main`, un tag que no coincide o un SHA sin CI exitosa. El tag dispara el release:
 
 ```bash
 git switch main
@@ -204,6 +218,7 @@ Los checks se aplican también al administrador y se vinculan a GitHub Actions.
 | Security audit y Security gates                    | requeridos                          | requeridos                          |
 | E2E (Playwright)                                   | requerido                           | requerido                           |
 | Rama actualizada antes del merge                   | requerido                           | requerido                           |
+| Historial lineal                                   | requerido                           | no requerido                        |
 | Performance                                        | en PR, después de integrar y a mano | en PR, después de integrar y a mano |
 | Memory leak y Stress                               | a mano                              | después de integrar y a mano        |
 
@@ -217,10 +232,12 @@ de branch protection. `CODEOWNERS` solicita su revisión de todos los archivos.
 No se exige un segundo revisor para sus propios PRs: GitHub no permite aprobar
 un PR propio. No se otorgan permisos de administración a colaboradores externos.
 
-Los merge commits están deshabilitados y ambas ramas exigen historial lineal.
-Rebase and merge se usa para las promociones; squash sigue disponible para
-las ramas cortas. La protección contra borrado conserva las ramas permanentes
-aunque GitHub elimine automáticamente las ramas mergeadas.
+El repositorio permite Rebase and merge, squash y merge commit. Los merge
+commits solo se usan para promover `develop` a `main` (ADR-209): `develop`
+exige historial lineal y los rechaza, y `main` no lo exige. Hacia `develop` se
+usa Rebase and merge, o squash para las ramas cortas. La protección contra
+borrado conserva las ramas permanentes aunque GitHub elimine automáticamente
+las ramas mergeadas.
 
 ## Arreglos urgentes
 
@@ -231,5 +248,6 @@ el tag como en el flujo anterior. Después creá una rama desde `develop`, llev�
 los commits del parche mediante cherry-pick y abrí PR hacia `develop`. Resolvé
 la versión y los CHANGELOG para conservar el parche junto al trabajo pendiente.
 
-La rama temporal `release/...` se usa para preparar la promoción con historial
-lineal; puede eliminarse después de integrar su PR.
+La rama temporal `release/...` se usa para resolver los conflictos de una
+promoción antes de abrir su PR hacia `main`; puede eliminarse después de
+integrarlo.
