@@ -9,6 +9,8 @@
 import * as RadixSelect from "@radix-ui/react-select";
 import { CheckIcon, ChevronDownIcon } from "lucide-react";
 
+import { useDialogSelectOpenChange } from "./Dialog.js";
+
 export interface SelectOption<T extends string> {
   readonly value: T;
   readonly label: string;
@@ -35,6 +37,7 @@ export function Select<T extends string>({
   ...rest
 }: SelectProps<T>) {
   const ariaLabel = rest["aria-label"];
+  const onOpenChange = useDialogSelectOpenChange();
 
   // Radix tipa onValueChange como (value: string) => void; el valor siempre
   // proviene de `options` (mismo T), así que el narrowing es seguro.
@@ -43,7 +46,12 @@ export function Select<T extends string>({
   }
 
   return (
-    <RadixSelect.Root value={value} onValueChange={handleValueChange} disabled={disabled}>
+    <RadixSelect.Root
+      value={value}
+      onValueChange={handleValueChange}
+      onOpenChange={onOpenChange}
+      disabled={disabled}
+    >
       <RadixSelect.Trigger
         aria-label={ariaLabel}
         className="inline-flex items-center justify-between gap-2 rounded-md border border-border bg-bg-primary px-3 py-1.5 text-sm text-text-primary disabled:opacity-50"
