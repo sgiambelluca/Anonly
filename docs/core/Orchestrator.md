@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=orchestrator | dependencias=adr/ADR-191-Lo-Que-Muestra-La-Vista-Previa-Es-Lo-Que-Se-Exporta.md,adr/ADR-189-El-Preview-Se-Redibuja-A-La-Escala-Que-Se-Ve.md,adr/ADR-145-El-Deposito-No-Expulsa-Lo-Que-Acaba-De-Guardar.md,core/Contracts.md,architecture/03_Data_Model.md,architecture/04_Event_System.md,architecture/05_Worker_Architecture.md,architecture/06_Pipeline.md,adr/ADR-074-Una-Entidad-Partida-En-Varias-Lineas.md,adr/ADR-013-PDF-Engine-Hito2-Inline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md,adr/ADR-015-UI-Channel-Canonical.md,adr/ADR-030-RenderEngine-LoadDocument.md,adr/ADR-031-RenderFailed-ErrorCode-Erratas-Render.md,adr/ADR-032-Export-EncodedPageImage-Requested-Warning.md,adr/ADR-034-Auditoria-Pre-Hito9-Orchestrator.md,adr/ADR-035-Hito9-Pools-InProcess-Retryable.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-041-FuseOcrPage-Funcion-Pura-Sin-Estado-Retenido.md,adr/ADR-044-Preview-Grupos-Mediacion-Orchestrator.md,adr/ADR-049-Errores-Cruzando-Worker-Discriminacion-Por-Code.md,adr/ADR-065-OCR-Por-Region.md,adr/ADR-143-Las-Imagenes-De-OCR-Se-Producen-Cuando-Hay-Lugar.md,adr/ADR-151-La-Primera-Pagina-Ya-Esta-Dibujada-Cuando-Se-Abre-El-Panel.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,adr/ADR-167-El-Modelo-De-NER-Se-Libera-A-Los-15-s-De-Inactividad.md,adr/ADR-171-El-Usuario-Puede-Eliminar-Una-Entidad.md,adr/ADR-172-Deshacer-Y-Rehacer-Exactos.md,adr/ADR-174-Un-Agregado-Manual-Que-Choca-Se-Resuelve-En-El-Momento.md,adr/ADR-175-Un-Choque-Manual-No-Queda-Colgado.md,adr/ADR-176-Un-Choque-Pendiente-Bloquea-El-Export.md | audiencia=IA-implementador | fase=10 (Hito 9 cerrado; transporte de workers Hito 10, ADR-036; método `reanalyze` Hito 10, ADR-038; fusión OCR→PDF como función pura host-side, ADR-041; mediación de grupos→Render para el preview, ADR-044; discriminación de errores por `code` a través del boundary de Worker, ADR-049; §2/§13/§15 en fase 10.8: enrutar las dos formas de OCR —textlessPages vs ocrRegions, disjuntos—, progreso de etapa textlessPages.length + ocrRegions.length, retención de ocrRegions por documento y reanalyze sobre la unión, ADR-065, casos 1/5/20/28/29, item 23); fase 10.9: §14/§15 ítem 22c — `selectLineWords` evalúa por fragmento y no por envolvente, ADR-074 §8; fase 11: §2/§13/§15 por ADR-143 — la etapa OCR arma descriptores y produce bajo demanda en vez de rasterizar todo el documento por adelantado; fase 11: §13 caso 32/§14/§15 ítem 26 por ADR-151 — la página 1 se precalienta al llegar a Ready (fase 12.5: `addManualEntity` llama a `grouping.liftRemoval` antes de `reopenSession` y la re-aplicación de literales no —ADR-171 §4, §13 caso 38—; fase 12.5: `createEditCheckpoint`/`restoreEditCheckpoint`/`discardEditCheckpoints` coordinan Grouping y los literales manuales retenidos, y `reanalyze` los descarta —ADR-172, §13 casos 39-40—) -->
+<!-- CONTEXT: scope=orchestrator | dependencias=adr/ADR-191-Lo-Que-Muestra-La-Vista-Previa-Es-Lo-Que-Se-Exporta.md,adr/ADR-189-El-Preview-Se-Redibuja-A-La-Escala-Que-Se-Ve.md,adr/ADR-145-El-Deposito-No-Expulsa-Lo-Que-Acaba-De-Guardar.md,core/Contracts.md,architecture/03_Data_Model.md,architecture/04_Event_System.md,architecture/05_Worker_Architecture.md,architecture/06_Pipeline.md,adr/ADR-074-Una-Entidad-Partida-En-Varias-Lineas.md,adr/ADR-013-PDF-Engine-Hito2-Inline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md,adr/ADR-015-UI-Channel-Canonical.md,adr/ADR-030-RenderEngine-LoadDocument.md,adr/ADR-031-RenderFailed-ErrorCode-Erratas-Render.md,adr/ADR-032-Export-EncodedPageImage-Requested-Warning.md,adr/ADR-034-Auditoria-Pre-Hito9-Orchestrator.md,adr/ADR-035-Hito9-Pools-InProcess-Retryable.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-041-FuseOcrPage-Funcion-Pura-Sin-Estado-Retenido.md,adr/ADR-044-Preview-Grupos-Mediacion-Orchestrator.md,adr/ADR-049-Errores-Cruzando-Worker-Discriminacion-Por-Code.md,adr/ADR-065-OCR-Por-Region.md,adr/ADR-143-Las-Imagenes-De-OCR-Se-Producen-Cuando-Hay-Lugar.md,adr/ADR-151-La-Primera-Pagina-Ya-Esta-Dibujada-Cuando-Se-Abre-El-Panel.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,adr/ADR-167-El-Modelo-De-NER-Se-Libera-A-Los-15-s-De-Inactividad.md,adr/ADR-171-El-Usuario-Puede-Eliminar-Una-Entidad.md,adr/ADR-172-Deshacer-Y-Rehacer-Exactos.md,adr/ADR-174-Un-Agregado-Manual-Que-Choca-Se-Resuelve-En-El-Momento.md,adr/ADR-175-Un-Choque-Manual-No-Queda-Colgado.md,adr/ADR-176-Un-Choque-Pendiente-Bloquea-El-Export.md,adr/ADR-204-La-Interaccion-Anonimizada-Usa-La-Geometria-Visible.md,adr/ADR-205-El-Resultado-Exportado-Pertenece-A-Una-Revision.md | audiencia=IA-implementador | fase=10 (Hito 9 cerrado; transporte de workers Hito 10, ADR-036; método `reanalyze` Hito 10, ADR-038; fusión OCR→PDF como función pura host-side, ADR-041; mediación de grupos→Render para el preview, ADR-044; discriminación de errores por `code` a través del boundary de Worker, ADR-049; §2/§13/§15 en fase 10.8: enrutar las dos formas de OCR —textlessPages vs ocrRegions, disjuntos—, progreso de etapa textlessPages.length + ocrRegions.length, retención de ocrRegions por documento y reanalyze sobre la unión, ADR-065, casos 1/5/20/28/29, item 23); fase 10.9: §14/§15 ítem 22c — `selectLineWords` evalúa por fragmento y no por envolvente, ADR-074 §8; fase 11: §2/§13/§15 por ADR-143 — la etapa OCR arma descriptores y produce bajo demanda en vez de rasterizar todo el documento por adelantado; fase 11: §13 caso 32/§14/§15 ítem 26 por ADR-151 — la página 1 se precalienta al llegar a Ready (fase 12.5: `addManualEntity` llama a `grouping.liftRemoval` antes de `reopenSession` y la re-aplicación de literales no —ADR-171 §4, §13 caso 38—; fase 12.5: `createEditCheckpoint`/`restoreEditCheckpoint`/`discardEditCheckpoints` coordinan Grouping y los literales manuales retenidos, y `reanalyze` los descarta —ADR-172, §13 casos 39-40—) -->
 
 # Orchestrator — Spec del Componente Host
 
@@ -177,6 +177,7 @@ export interface IPipelineOrchestrator {
   importDocument(input: ImportDocumentInput): Promise<void>;   // dispara etapas 0..7 (hasta Ready)
   retryWithPassword(documentId: string, password: string): Promise<void>;
   reanalyze(documentId: string, patch: ReanalyzeConfigPatch): Promise<void>;
+  getPreviewInteractionRevision(documentId: string, pageIndex: number): number | null; // ADR-204
   // addManualEntity / findText / getPageWords / getPageSize: ver Contracts.md §3.5 (ADR-061).
   previewEdit(documentId: string, request: EditPreviewRequest): EditPreview;   // ADR-170 §2
   createEditCheckpoint(documentId: string): string;                            // ADR-172 §1
@@ -505,6 +506,46 @@ Los tests de contract/unit/edge mockean los motores (interfaces de `Contracts.md
 - [x] 35. (ADR-189 §3) `prewarmFirstPagePreview` solo en el primer `Ready` de cada documento; marca en el estado del documento, borrada por `closeDocument`. Test de §14 (caso 32).
 
 ---
+
+## Enmienda normativa ADR-204 — revisión de interacción por página
+
+Amplía §6 y la mediación de §8. Implementar el nuevo getter de Contracts
+§3.5: `getPreviewInteractionRevision(documentId, pageIndex): number | null`.
+Devuelve 0 inicialmente para una página existente; `null` para documento
+cerrado, índice inválido o página inexistente. No muta ni emite.
+
+La revisión se incrementa síncronamente al marcar una página afectada por
+creación/edición/eliminación de grupo, incluidas habilitación, fusión,
+división, reglas aplicadas y restauración. Usar la unión de páginas previas
+y nuevas del grupo, también al quitar su última ocurrencia. Reemplazar las
+palabras por OCR o reanálisis invalida las páginas afectadas antes de admitir
+otro mapa; conservar la monotonicidad durante toda la vida del documento.
+
+Los inputs mediados de preview llevan la revisión actual. Al volver a
+Ready tras reanálisis, actualizar también páginas que ahora tienen cero
+reemplazos: no conservar `lastAnonymizedInputs` ni geometría de la sesión
+anterior. Preparar síncronamente el input de todas las páginas mediante
+`RenderEngine.preparePreviewInput`; renderizar en el seed solo si tienen
+reemplazos o el método indica una solicitud previa de preview. Refrescar
+esas solicitudes inmediatamente, también las que siguen en vuelo, para
+coalescer con la nueva revisión. Las páginas vacías nunca solicitadas se
+rasterizan al llegar su `RENDER_REQUESTED`, con el input preparado y la
+revisión vigente, que puede ser mayor que 0 después de OCR. No convertir
+el seed en un render anticipado de todo el documento. El flush de páginas
+sucias conserva su comportamiento. No modificar el snapshot full del export.
+
+Close/dispose eliminan revisiones con el resto del estado. El guard de URLs
+tardías permanece (ADR-052); el cliente valida revisión antes de interactuar
+y el Core conserva ownership de los blobs. Los números de revisión no son
+hashes ni se reutilizan para el contador de export del cliente.
+
+Pruebas nuevas para §13: `interaction revision follows group changes and
+removed pages`; `interaction revision invalidates OCR and empty reanalysis
+pages`; `interaction revision disappears on close and rejects stale maps`.
+Cubrir undo/redo, consultas de solo lectura y vuelta de resultados tardíos.
+Agregar `empty preview pages stay lazy through OCR and reanalysis`: el seed
+registra todas las revisiones sin rasterizar vacías nunca solicitadas, limpia
+las que perdieron su última entidad y refresca las solicitudes en vuelo.
 
 ## Referencias
 
