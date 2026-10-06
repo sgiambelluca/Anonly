@@ -1,6 +1,6 @@
 # ADR-199: develop como rama de integración
 
-**Estado:** Aceptado — 2026-10-02. §2 y §3 enmendados por ADR-208 (2026-10-06): `develop` exige los mismos checks que `main`, incluido E2E.
+**Estado:** Aceptado — 2026-10-02. §2 y §3 enmendados por ADR-208 (2026-10-06): `develop` exige los mismos checks que `main`, incluido E2E. §5 enmendado por ADR-209 (2026-10-06): la promoción a `main` usa merge commit.
 
 ## Contexto
 
