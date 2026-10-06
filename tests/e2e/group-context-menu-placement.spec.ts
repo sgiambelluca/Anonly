@@ -3,6 +3,7 @@ import { type ElectronApplication, type Locator, type Page } from "@playwright/t
 import { expect, openApp, test } from "./support/electronApp.js";
 import { textTenPagesFile } from "./support/fixtures.js";
 import { installSettingsOverride } from "./support/settingsOverride.js";
+import { setContentSizeAndWait } from "./support/windowSize.js";
 
 async function menuFitsClippingBoundary(page: Page, menu: Locator): Promise<boolean> {
   const handle = await menu.elementHandle();
@@ -120,18 +121,7 @@ async function resizeToNativeWideArea(
       height: Math.max(700, Math.min(900, workArea.height - 80)),
     };
   });
-  await electronApp.evaluate(({ BrowserWindow }, size) => {
-    BrowserWindow.getAllWindows()[0]?.setContentSize(size.width, size.height);
-  }, requested);
-  const bounds = await electronApp.evaluate(({ BrowserWindow }) => {
-    const window = BrowserWindow.getAllWindows()[0];
-    const { width, height } = window?.getContentBounds() ?? { width: 0, height: 0 };
-    return { width, height };
-  });
-  await expect
-    .poll(() => page.evaluate(() => [innerWidth, innerHeight]))
-    .toEqual([bounds.width, bounds.height]);
-  return bounds;
+  return setContentSizeAndWait(page, electronApp, requested);
 }
 
 async function everyMenuButtonIsReachable(page: Page, menu: Locator): Promise<boolean> {
@@ -157,17 +147,10 @@ test("el menú ⋯ queda visible y alcanzable con tamaño mínimo y nativo", asy
   page,
   electronApp,
 }) => {
-  await electronApp.evaluate(({ BrowserWindow }) => {
-    BrowserWindow.getAllWindows()[0]?.setContentSize(1024, 700);
+  const minimumBounds = await setContentSizeAndWait(page, electronApp, {
+    width: 1024,
+    height: 700,
   });
-  const minimumBounds = await electronApp.evaluate(({ BrowserWindow }) => {
-    const appWindow = BrowserWindow.getAllWindows()[0];
-    const { width, height } = appWindow?.getContentBounds() ?? { width: 0, height: 0 };
-    return { width, height };
-  });
-  await expect
-    .poll(() => page.evaluate(() => [innerWidth, innerHeight]))
-    .toEqual([minimumBounds.width, minimumBounds.height]);
   if (process.platform === "win32") expect(minimumBounds).toEqual({ width: 1024, height: 700 });
   await installSettingsOverride(page, { nerEnabled: false });
   await openApp(page, "networkidle");
@@ -213,17 +196,7 @@ test("el menú ⋯ queda visible y alcanzable con tamaño mínimo y nativo", asy
   expect(nativeWideBounds.width).toBeGreaterThan(0);
   expect(nativeWideBounds.height).toBeGreaterThan(0);
   await everyMenuButtonCanBeReached(page, triggers.first(), menu, tree);
-  await electronApp.evaluate(({ BrowserWindow }) => {
-    BrowserWindow.getAllWindows()[0]?.setContentSize(1024, 700);
-  });
-  const restoredBounds = await electronApp.evaluate(({ BrowserWindow }) => {
-    const appWindow = BrowserWindow.getAllWindows()[0];
-    const { width, height } = appWindow?.getContentBounds() ?? { width: 0, height: 0 };
-    return { width, height };
-  });
-  await expect
-    .poll(() => page.evaluate(() => [innerWidth, innerHeight]))
-    .toEqual([restoredBounds.width, restoredBounds.height]);
+  await setContentSizeAndWait(page, electronApp, { width: 1024, height: 700 });
   await everyMenuButtonCanBeReached(page, triggers.first(), menu, tree);
   await page.keyboard.press("Escape");
   await expect(menu).toHaveCount(0);
