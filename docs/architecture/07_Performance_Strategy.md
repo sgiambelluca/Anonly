@@ -299,15 +299,16 @@ Fixtures pesados (> 5 MB) vía Git LFS o descargados en `postinstall` con hash v
 
 Comando mínimo pre-PR (subset local de esta tabla): `pnpm lint && pnpm typecheck && pnpm test && pnpm test:contract && pnpm format:check`. `format:check` se agregó el 2026-09-29 porque CI ya lo exige en el job Lint; los tests de contrato corren en CI dentro de `pnpm test`, y `test:contract` los aísla en local.
 
-**Selección de ramas en CI (ADR-199, 2026-10-02):** los gates básicos corren en
-PR y pushes a `main` y `develop`. E2E y Performance corren en PR hacia `main`,
-pushes a ambas ramas y ejecuciones manuales; no en PR hacia `develop`. Leak y
-Stress conservan pushes a `main` y ejecuciones manuales. Un PR a `develop`
-exige Lint, Typecheck, Unit + Contract + Snapshot, Build, Security audit y
-Security gates; `main` exige además E2E. La configuración de ADR-148 agrega
-`Export verification` con el filtro de E2E y lo incluye en su check
-agregado; aprobada localmente y verificada en CI/macOS por run 37383499951. La ejecución manual permite probar
-el conjunto completo en `develop` antes de promover una versión a `main`.
+**Selección de ramas en CI (ADR-199, 2026-10-02; enmendado por ADR-208, 2026-10-06):**
+los gates básicos, E2E, Export verification y Performance corren en PR y
+pushes a `main` y `develop`, y en ejecuciones manuales. Leak y Stress
+conservan pushes a `main` y ejecuciones manuales. Un PR a `develop` exige lo
+mismo que uno a `main`: Lint, Typecheck, Unit + Contract + Snapshot, Build,
+Security audit, Security gates y E2E, con la rama actualizada antes del
+merge. Performance corre en ambos pero no es un check requerido. La
+configuración de ADR-148 agrega `Export verification` y lo incluye en el
+check agregado `E2E (Playwright)`; aprobada localmente y verificada en
+CI/macOS por run 37383499951.
 
 Además de los ejecutables, hay **gates de revisión** (no automatizables por comando) definidos en `ai/AI_Development_Guide.md` §4: Diff scope, Spec sync y Prohibiciones.
 
