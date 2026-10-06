@@ -1,3 +1,4 @@
+import { wordsInRect, type Word } from "@anonly/anonymization-core";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -29,6 +30,25 @@ describe("pointerSelectionToPageRect", () => {
       endY: 20,
     });
     expect(rect).toEqual({ x: 5, y: 10, width: 20, height: 20 });
+  });
+
+  it("keeps a horizontal zero-area drag empty under the wordsInRect contract", () => {
+    const rect = pointerSelectionToPageRect({
+      ...BASE,
+      startX: 20,
+      startY: 40,
+      endX: 160,
+      endY: 40,
+    });
+    const word: Word = {
+      text: "visible",
+      bbox: { x: 20, y: 15, width: 30, height: 10 },
+      pageIndex: 0,
+      confidence: 1,
+      source: "pdf",
+    };
+    expect(rect.height).toBe(0);
+    expect(wordsInRect([word], rect)).toEqual([]);
   });
 
   it("expands a click (no drag) into a minimum-size square instead of a zero-area rect", () => {

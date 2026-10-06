@@ -81,6 +81,26 @@ describe("dominantLineWords (ADR-114 §1)", () => {
     expect(words.map((w) => w.text)).toEqual(["CASACIÓN"]);
   });
 
+  it("separates adjacent 90-degree columns and chooses the column the rectangle covered", () => {
+    const columns: ReadonlyArray<Word> = [
+      ...[100, 120, 140].map((y, index) => ({
+        ...word(`izq${index}`, 100, y, 8, 14),
+        bbox: { ...word(`izq${index}`, 100, y, 8, 14).bbox, rotation: 90 as const },
+      })),
+      ...[100, 120, 140].map((y, index) => ({
+        ...word(`der${index}`, 114, y, 8, 14),
+        bbox: { ...word(`der${index}`, 114, y, 8, 14).bbox, rotation: 90 as const },
+      })),
+    ];
+    const rect: BoundingBox = { x: 113, y: 95, width: 10, height: 65 };
+
+    expect(dominantLineWords(columns, columns, rect).map((item) => item.text)).toEqual([
+      "der0",
+      "der1",
+      "der2",
+    ]);
+  });
+
   it("an empty selection stays empty", () => {
     const rect: BoundingBox = { x: 400, y: 400, width: 20, height: 20 };
     expect(dominantLineWords(SELLO, selected(rect), rect)).toEqual([]);

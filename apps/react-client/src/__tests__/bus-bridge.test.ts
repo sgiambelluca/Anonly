@@ -373,6 +373,11 @@ describe("bus-bridge", () => {
   it("PIPELINE_CANCELLED keeps Cancelled visible despite a late NER loading event", () => {
     const bus = createEventBus({ logger: createTestLogger() });
     const unsubscribe = subscribe(bus, stores);
+    bus.emit(EventChannel.Pipeline, EngineEvents.DOCUMENT_IMPORTED, {
+      documentId: "doc-1",
+      name: "a.pdf",
+      sizeBytes: 1,
+    });
 
     bus.emit(EventChannel.Pipeline, EngineEvents.PIPELINE_CANCELLED, {
       documentId: "doc-1",
@@ -417,6 +422,11 @@ describe("bus-bridge", () => {
   it("PIPELINE_CANCELLED of a reanalysis of a Ready document returns to Ready and keeps the counts", () => {
     const bus = createEventBus({ logger: createTestLogger() });
     const unsubscribe = subscribe(bus, stores);
+    bus.emit(EventChannel.Pipeline, EngineEvents.DOCUMENT_IMPORTED, {
+      documentId: "doc-1",
+      name: "a.pdf",
+      sizeBytes: 1,
+    });
 
     bus.emit(EventChannel.Pipeline, EngineEvents.PIPELINE_READY, {
       documentId: "doc-1",
@@ -480,6 +490,11 @@ describe("bus-bridge", () => {
   it("PIPELINE_FAILED sets stage Failed with the serialized error", () => {
     const bus = createEventBus({ logger: createTestLogger() });
     const unsubscribe = subscribe(bus, stores);
+    bus.emit(EventChannel.Pipeline, EngineEvents.DOCUMENT_IMPORTED, {
+      documentId: "doc-1",
+      name: "a.pdf",
+      sizeBytes: 1,
+    });
     const error = makeSerializedError({ message: "PDF invalid" });
 
     bus.emit(EventChannel.Pipeline, EngineEvents.PIPELINE_FAILED, {
@@ -516,6 +531,7 @@ describe("bus-bridge", () => {
 
   it("ENTITY_GROUP_CREATED adds a group to the right type bucket", () => {
     const bus = createEventBus({ logger: createTestLogger() });
+    useDocumentStore.setState({ id: "doc-1" });
     const unsubscribe = subscribe(bus, stores);
     const group = makeGroup();
 
@@ -531,6 +547,7 @@ describe("bus-bridge", () => {
 
   it("ENTITY_GROUP_UPDATED replaces the group in place", () => {
     const bus = createEventBus({ logger: createTestLogger() });
+    useDocumentStore.setState({ id: "doc-1" });
     const unsubscribe = subscribe(bus, stores);
     const group = makeGroup();
     bus.emit(EventChannel.Grouping, EngineEvents.ENTITY_GROUP_CREATED, {
@@ -546,12 +563,20 @@ describe("bus-bridge", () => {
     });
 
     expect(useEntitiesStore.getState().groupsByType.get(EntityType.Person)).toEqual([updated]);
+    const version = usePipelineStore.getState().currentVersion;
+    bus.emit(EventChannel.Grouping, EngineEvents.ENTITY_GROUP_UPDATED, {
+      documentId: "doc-1",
+      group: updated,
+      changes: ["enabled"],
+    });
+    expect(usePipelineStore.getState().currentVersion).toBe(version);
 
     unsubscribe();
   });
 
   it("ENTITY_GROUP_REMOVED removes the group", () => {
     const bus = createEventBus({ logger: createTestLogger() });
+    useDocumentStore.setState({ id: "doc-1" });
     const unsubscribe = subscribe(bus, stores);
     const group = makeGroup();
     bus.emit(EventChannel.Grouping, EngineEvents.ENTITY_GROUP_CREATED, {
@@ -571,6 +596,7 @@ describe("bus-bridge", () => {
 
   it("GROUP_REPLACEMENT_CHANGED updates mode/value on the matching group", () => {
     const bus = createEventBus({ logger: createTestLogger() });
+    useDocumentStore.setState({ id: "doc-1" });
     const unsubscribe = subscribe(bus, stores);
     const group = makeGroup();
     bus.emit(EventChannel.Grouping, EngineEvents.ENTITY_GROUP_CREATED, {
@@ -588,12 +614,23 @@ describe("bus-bridge", () => {
     const [updated] = useEntitiesStore.getState().groupsByType.get(EntityType.Person) ?? [];
     expect(updated?.replacementMode).toBe(ReplacementMode.Redact);
     expect(updated?.replacementValue).toBe("[REDACTED]");
+    expect(usePipelineStore.getState().currentVersion).toBe(2);
+
+    const version = usePipelineStore.getState().currentVersion;
+    bus.emit(EventChannel.Grouping, EngineEvents.GROUP_REPLACEMENT_CHANGED, {
+      documentId: "doc-1",
+      groupId: group.id,
+      mode: ReplacementMode.Redact,
+      value: "[REDACTED]",
+    });
+    expect(usePipelineStore.getState().currentVersion).toBe(version);
 
     unsubscribe();
   });
 
   it("CONFLICT_DETECTED adds a conflict, CONFLICT_RESOLVED marks it resolved", () => {
     const bus = createEventBus({ logger: createTestLogger() });
+    useDocumentStore.setState({ id: "doc-1" });
     const unsubscribe = subscribe(bus, stores);
     const conflict = makeConflict();
 
@@ -609,12 +646,60 @@ describe("bus-bridge", () => {
       entityType: EntityType.Organization,
     });
     expect(useEntitiesStore.getState().conflicts[0]?.resolved).toBe(true);
+    expect(usePipelineStore.getState().currentVersion).toBe(2);
+
+    bus.emit(EventChannel.Grouping, EngineEvents.CONFLICT_DETECTED, {
+      documentId: "doc-1",
+      conflict,
+    });
+    expect(usePipelineStore.getState().currentVersion).toBe(2);
+
+    bus.emit(EventChannel.Grouping, EngineEvents.GROUP_TOGGLED, {
+      documentId: "doc-1",
+      groupId: "group-1",
+      enabled: false,
+    });
+    // Create a real active group and verify that the first toggle changes
+    // effective state; a repeat with the same value is a no-op.
+    const group = makeGroup({ enabled: true });
+    bus.emit(EventChannel.Grouping, EngineEvents.ENTITY_GROUP_CREATED, {
+      documentId: "doc-1",
+      group,
+    });
+    bus.emit(EventChannel.Grouping, EngineEvents.GROUP_TOGGLED, {
+      documentId: "doc-1",
+      groupId: group.id,
+      enabled: false,
+    });
+    expect(usePipelineStore.getState().currentVersion).toBe(4);
+
+    bus.emit(EventChannel.Grouping, EngineEvents.GROUP_TOGGLED, {
+      documentId: "doc-1",
+      groupId: group.id,
+      enabled: false,
+    });
+    expect(usePipelineStore.getState().currentVersion).toBe(4);
+
+    bus.emit(EventChannel.Grouping, EngineEvents.GROUP_TOGGLED, {
+      documentId: "inactive-doc",
+      groupId: "group-1",
+      enabled: true,
+    });
+    expect(usePipelineStore.getState().currentVersion).toBe(4);
+
+    bus.emit(EventChannel.Grouping, EngineEvents.CONFLICT_RESOLVED, {
+      documentId: "doc-1",
+      conflictId: "missing-conflict",
+      entityType: EntityType.Organization,
+    });
+    expect(usePipelineStore.getState().currentVersion).toBe(4);
 
     unsubscribe();
   });
 
   it("PREVIEW_UPDATED stores the blob URL by page/kind", () => {
     const bus = createEventBus({ logger: createTestLogger() });
+    useDocumentStore.setState({ id: "doc-1" });
     const unsubscribe = subscribe(bus, stores);
 
     bus.emit(EventChannel.Render, EngineEvents.PREVIEW_UPDATED, {
@@ -636,6 +721,7 @@ describe("bus-bridge", () => {
     // un preview nuevo. Si esto rompe, la referencia de "anonymized" cambia
     // aunque solo se haya actualizado "original".
     const bus = createEventBus({ logger: createTestLogger() });
+    useDocumentStore.setState({ id: "doc-1" });
     const unsubscribe = subscribe(bus, stores);
 
     const anonymizedMapBefore = useViewerStore.getState().previewByPage.anonymized;
@@ -649,6 +735,33 @@ describe("bus-bridge", () => {
 
     expect(useViewerStore.getState().previewByPage.anonymized).toBe(anonymizedMapBefore);
 
+    unsubscribe();
+  });
+
+  it("rejects stale anonymous geometry and accepts a current map with its image", () => {
+    const bus = createEventBus({ logger: createTestLogger() });
+    useDocumentStore.setState({ id: "doc-1" });
+    const connectedStores: Stores = { ...stores, getPreviewInteractionRevision: () => 2 };
+    const unsubscribe = subscribe(bus, connectedStores);
+    const currentGeometry = { revision: 2, scale: 1.5, wordPositions: [], coveredRegions: [] };
+    bus.emit(EventChannel.Render, EngineEvents.PREVIEW_UPDATED, {
+      documentId: "doc-1",
+      pageIndex: 1,
+      kind: "anonymized",
+      canvasBlobUrl: "blob:current",
+      interactionGeometry: currentGeometry,
+    });
+    expect(useViewerStore.getState().previewByPage.anonymized.get(1)).toBe("blob:current");
+    expect(useViewerStore.getState().interactionGeometryByPage.get(1)).toEqual(currentGeometry);
+    bus.emit(EventChannel.Render, EngineEvents.PREVIEW_UPDATED, {
+      documentId: "doc-1",
+      pageIndex: 1,
+      kind: "anonymized",
+      canvasBlobUrl: "blob:stale",
+      interactionGeometry: { ...currentGeometry, revision: 1 },
+    });
+    expect(useViewerStore.getState().previewByPage.anonymized.get(1)).toBe("blob:current");
+    expect(useViewerStore.getState().interactionGeometryByPage.get(1)).toEqual(currentGeometry);
     unsubscribe();
   });
 
@@ -770,6 +883,12 @@ describe("bus-bridge", () => {
   it("EXPORT_PROGRESS/EXPORT_FINISHED/EXPORT_FAILED update pipeline store", () => {
     const bus = createEventBus({ logger: createTestLogger() });
     const unsubscribe = subscribe(bus, stores);
+    bus.emit(EventChannel.Pipeline, EngineEvents.DOCUMENT_IMPORTED, {
+      documentId: "doc-1",
+      name: "a.pdf",
+      sizeBytes: 1,
+    });
+    usePipelineStore.getState().setState({ exportingVersion: 0 });
 
     bus.emit(EventChannel.Export, EngineEvents.EXPORT_PROGRESS, {
       documentId: "doc-1",
@@ -788,11 +907,13 @@ describe("bus-bridge", () => {
       blobUrl: "blob:export-1",
       sizeBytes: 1024,
     });
+    expect(usePipelineStore.getState().exportedVersion).toBe(0);
     // bug #7 del Escenario 1 E2E (React_Client.md §2.2): EXPORT_FINISHED
     // limpia exportProgress — si no, PipelineStatus queda mostrando
     // "Exportando página N de N…" para siempre.
     expect(usePipelineStore.getState().exportProgress).toBeNull();
 
+    usePipelineStore.getState().setState({ exportingVersion: 0 });
     const error = makeSerializedError({ code: EngineErrorCode.EXPORT_FAILED });
     bus.emit(EventChannel.Export, EngineEvents.EXPORT_FAILED, { documentId: "doc-1", error });
     expect(usePipelineStore.getState().error).toEqual(error);
@@ -803,6 +924,12 @@ describe("bus-bridge", () => {
   it("EXPORT_FAILED clears exportProgress (bug #7 del Escenario 1 E2E, React_Client.md §2.2)", () => {
     const bus = createEventBus({ logger: createTestLogger() });
     const unsubscribe = subscribe(bus, stores);
+    bus.emit(EventChannel.Pipeline, EngineEvents.DOCUMENT_IMPORTED, {
+      documentId: "doc-1",
+      name: "a.pdf",
+      sizeBytes: 1,
+    });
+    usePipelineStore.getState().setState({ exportingVersion: 0 });
 
     bus.emit(EventChannel.Export, EngineEvents.EXPORT_PROGRESS, {
       documentId: "doc-1",
@@ -816,6 +943,49 @@ describe("bus-bridge", () => {
 
     expect(usePipelineStore.getState().error).toEqual(error);
     expect(usePipelineStore.getState().exportProgress).toBeNull();
+
+    unsubscribe();
+  });
+
+  it("ignores export and pipeline terminal events from an inactive document", () => {
+    const bus = createEventBus({ logger: createTestLogger() });
+    const unsubscribe = subscribe(bus, stores);
+    bus.emit(EventChannel.Pipeline, EngineEvents.DOCUMENT_IMPORTED, {
+      documentId: "doc-2",
+      name: "b.pdf",
+      sizeBytes: 1,
+    });
+    usePipelineStore.getState().setState({
+      stage: PipelineStage.Ready,
+      currentVersion: 3,
+      exportingVersion: 2,
+      exportProgress: { current: 1, total: 5 },
+    });
+
+    bus.emit(EventChannel.Export, EngineEvents.EXPORT_PROGRESS, {
+      documentId: "doc-1",
+      current: 5,
+      total: 5,
+    });
+    bus.emit(EventChannel.Export, EngineEvents.EXPORT_FAILED, {
+      documentId: "doc-1",
+      error: makeSerializedError({ code: EngineErrorCode.EXPORT_FAILED }),
+    });
+    bus.emit(EventChannel.Pipeline, EngineEvents.PIPELINE_CANCELLED, {
+      documentId: "doc-1",
+      reason: "late cancellation",
+    });
+    bus.emit(EventChannel.Pipeline, EngineEvents.PIPELINE_FAILED, {
+      documentId: "doc-1",
+      error: makeSerializedError({ message: "late failure" }),
+    });
+
+    expect(usePipelineStore.getState()).toMatchObject({
+      stage: PipelineStage.Ready,
+      currentVersion: 3,
+      exportingVersion: 2,
+      exportProgress: { current: 1, total: 5 },
+    });
 
     unsubscribe();
   });
