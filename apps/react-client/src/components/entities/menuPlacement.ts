@@ -11,6 +11,11 @@
 
 export type MenuPlacement = "bottom" | "top";
 
+export interface ClippingBoundary {
+  readonly top: number;
+  readonly bottom: number;
+}
+
 export interface MenuPlacementInput {
   /** Borde superior e inferior del disparador, en coordenadas de ventana. */
   readonly triggerTop: number;
@@ -20,6 +25,20 @@ export interface MenuPlacementInput {
   /** El área donde el menú se ve entero: lo que recorta, o la ventana. */
   readonly boundaryTop: number;
   readonly boundaryBottom: number;
+}
+
+/** Ventana intersectada con los ancestros que recortan contenido vertical. */
+export function clippingBoundary(element: HTMLElement): ClippingBoundary {
+  let top = 0;
+  let bottom = window.innerHeight;
+  for (let node = element.parentElement; node !== null; node = node.parentElement) {
+    const overflowY = window.getComputedStyle(node).overflowY;
+    if (overflowY === "visible") continue;
+    const rect = node.getBoundingClientRect();
+    top = Math.max(top, rect.top);
+    bottom = Math.min(bottom, rect.bottom);
+  }
+  return { top, bottom };
 }
 
 /**

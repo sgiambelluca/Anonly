@@ -31,7 +31,7 @@ import type { ReplacementMode, ReplacementPreviews } from "@anonly/anonymization
 import { CheckIcon } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
-import { resolveMenuPlacement, type MenuPlacement } from "./menuPlacement.js";
+import { clippingBoundary, resolveMenuPlacement, type MenuPlacement } from "./menuPlacement.js";
 import {
   REPLACEMENT_MODE_DESCRIPTION,
   REPLACEMENT_MODE_LABEL,
@@ -62,23 +62,6 @@ export interface ModeSelectMenuProps {
 
 /** La separación entre el disparador y el menú (`mt-1` / `mb-1`). */
 const MENU_GAP_PX = 4;
-
-/**
- * El área donde el menú se ve entero: la ventana, recortada por cada ancestro
- * que scrollea o esconde lo que se sale.
- */
-function clippingBoundary(element: HTMLElement): { readonly top: number; readonly bottom: number } {
-  let top = 0;
-  let bottom = window.innerHeight;
-  for (let node = element.parentElement; node !== null; node = node.parentElement) {
-    const overflowY = window.getComputedStyle(node).overflowY;
-    if (overflowY === "visible") continue;
-    const rect = node.getBoundingClientRect();
-    top = Math.max(top, rect.top);
-    bottom = Math.min(bottom, rect.bottom);
-  }
-  return { top, bottom };
-}
 
 export function ModeSelectMenu({
   current,
