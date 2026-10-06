@@ -31,6 +31,7 @@ import type {
   EntityGroup,
   ExportOptions,
   Occurrence,
+  PreviewInteractionGeometry,
   Rule,
 } from "./types.js";
 
@@ -218,6 +219,8 @@ export interface PreviewUpdated {
    * anonimizado.
    */
   readonly degraded?: ReadonlyArray<Annotation>;
+  /** Sparse geometry projected by the same anonymized preview render. */
+  readonly interactionGeometry?: PreviewInteractionGeometry;
 }
 export interface PreviewPageFailed {
   readonly documentId: string;

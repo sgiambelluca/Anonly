@@ -48,6 +48,27 @@ export interface BoundingBox {
   readonly rotation?: 0 | 90 | 180 | 270;
 }
 
+/** Position of an original word in the rendered anonymized preview. */
+export interface PreviewWordPosition {
+  readonly sourceBbox: BoundingBox;
+  readonly bbox: BoundingBox;
+}
+
+/** A replacement-painted region and the original source region it covers. */
+export interface PreviewCoveredRegion {
+  readonly occurrenceId: string;
+  readonly sourceBbox: BoundingBox;
+  readonly bbox: BoundingBox;
+}
+
+/** Interaction map emitted together with a specific anonymized preview. */
+export interface PreviewInteractionGeometry {
+  readonly revision: number;
+  readonly scale: number;
+  readonly wordPositions: ReadonlyArray<PreviewWordPosition>;
+  readonly coveredRegions: ReadonlyArray<PreviewCoveredRegion>;
+}
+
 /**
  * ADR-091 §1 (`Contracts.md` §5) — léxico de nombres de pila. Valor por
  * nombre: determinado (`"f"`/`"m"`) o `"ambiguous"`, que es el nombre marcado
@@ -521,6 +542,8 @@ export interface RenderPagePayload {
   readonly annotations?: ReadonlyArray<Annotation>;
   readonly scale?: number;
   readonly imageFormat?: "png" | "jpeg";
+  /** ADR-204: host-owned geometry revision; absent means 0 for direct calls. */
+  readonly interactionRevision?: number;
   // ADR-058 §5: palabras que comparten línea con algún reemplazo de esta página,
   // seleccionadas host-side por una función pura del Orchestrator desde Page.words
   // (precedente de reparto: fuseOcrPage, ADR-041). El kernel las usa para calibrar

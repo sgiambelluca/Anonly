@@ -16,7 +16,13 @@
  * caller, igual que grouping-engine hace con GroupingConfig.
  */
 
-import type { Annotation, EncodedPageImage, Replacement, Word } from "@anonly/shared";
+import type {
+  Annotation,
+  EncodedPageImage,
+  PreviewInteractionGeometry,
+  Replacement,
+  Word,
+} from "@anonly/shared";
 
 export interface RenderPageInput {
   readonly documentId: string;
@@ -35,6 +41,8 @@ export interface RenderPageInput {
    * nunca es un error (el kernel cae a shrink-to-fit, ADR-058 §1).
    */
   readonly lineWords?: ReadonlyArray<Word>;
+  /** ADR-204: page revision attached to anonymized preview geometry. */
+  readonly interactionRevision?: number;
 }
 
 export interface RenderPageOutput {
@@ -55,4 +63,6 @@ export interface RenderPageOutput {
    */
   readonly encoded?: EncodedPageImage;
   readonly durationMs: number;
+  /** Present only for anonymized previews, including previews with no replacements. */
+  readonly interactionGeometry?: PreviewInteractionGeometry;
 }
