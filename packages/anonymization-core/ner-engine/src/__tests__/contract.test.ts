@@ -255,6 +255,78 @@ describe("NerEngine — contract tests", () => {
     });
   });
 
+  // Caso 34 (ADR-212): la dirección incluye la altura que la sigue.
+  describe("extended address (caso 34, ADR-212)", () => {
+    it("extended address maps value, normalized value and geometry to street and number", async () => {
+      asPipelineMock(pipeline).mockResolvedValue(
+        mockTokenClassificationPipeline(() =>
+          Promise.resolve([nerToken("B-LOC", "Maipú", 0.87, 2)]),
+        ),
+      );
+      await engine.init(ctx);
+      const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+      const input = makeNerPageInput("doc-extended-address", 0, [
+        "Estuvo",
+        "en",
+        "Maipú",
+        "N°",
+        "1434",
+        "ayer",
+      ]);
+      const output = await engine.processPage(input, ctx);
+
+      expect(output.occurrences).toHaveLength(1);
+      const occurrence = output.occurrences[0];
+      expect(occurrence?.entityType).toBe(EntityType.Address);
+      expect(occurrence?.source).toBe(DetectionSource.NER);
+      // `value` sale del texto de la página, conector incluido.
+      expect(occurrence?.value).toBe("Maipú N° 1434");
+      // `normalizedValue` se recalcula sobre el valor extendido.
+      expect(occurrence?.normalizedValue).toBe("maipu n° 1434");
+      // La confianza es la del span del modelo.
+      expect(occurrence?.confidence).toBeCloseTo(0.87, 5);
+      // La geometría abarca desde la calle hasta la palabra del número.
+      expect(occurrence?.wordSpan).toEqual({ startIndex: 2, endIndexExclusive: 5 });
+      const first = input.words[2];
+      const last = input.words[4];
+      expect(first).toBeDefined();
+      expect(last).toBeDefined();
+      expect(occurrence?.bbox).toEqual({
+        x: first!.bbox.x,
+        y: first!.bbox.y,
+        width: last!.bbox.x + last!.bbox.width - first!.bbox.x,
+        height: first!.bbox.height,
+      });
+      expect(occurrence?.fragments).toBeUndefined();
+
+      // Una sola ocurrencia, una sola ENTITY_FOUND, y es la extendida.
+      const entityFound = busEmitSpy.mock.calls.filter(
+        ([, event]) => event === EngineEvents.ENTITY_FOUND,
+      );
+      expect(entityFound).toHaveLength(1);
+      expect((entityFound[0]?.[2] as EntityFound).occurrence.value).toBe("Maipú N° 1434");
+    });
+
+    it("extended address on two lines carries one fragment per line", async () => {
+      asPipelineMock(pipeline).mockResolvedValue(
+        mockTokenClassificationPipeline(() =>
+          Promise.resolve([nerToken("B-LOC", "Maipú", 0.9, 0)]),
+        ),
+      );
+      await engine.init(ctx);
+      const base = makeNerPageInput("doc-extended-address-lines", 0, ["Maipú", "1434"]);
+      const input = {
+        ...base,
+        words: base.words.map((w, i) => (i === 1 ? { ...w, bbox: { ...w.bbox, y: 130 } } : w)),
+      };
+      const output = await engine.processPage(input, ctx);
+
+      expect(output.occurrences).toHaveLength(1);
+      expect(output.occurrences[0]?.value).toBe("Maipú 1434");
+      expect(output.occurrences[0]?.fragments).toHaveLength(2);
+    });
+  });
+
   it("isModelReady() reflects model load state", async () => {
     asPipelineMock(pipeline).mockResolvedValue(
       mockTokenClassificationPipeline(() => Promise.resolve([])),

@@ -23,9 +23,11 @@ vi.mock("@huggingface/transformers", () => ({
   },
 }));
 
+import { extendAddressSpan } from "../address-extension.js";
 import { NerEngine } from "../ner.engine.js";
 import { NerModelMissingError, NerPageFailedError, NerTimeoutError } from "../ner.errors.js";
 
+import { extendedAddressText } from "./fixtures/address-helpers.js";
 import {
   asPipelineMock,
   createEngineContext,
@@ -1289,5 +1291,116 @@ describe("NerEngine — unit tests", () => {
         expect((finishedCall?.[2] as NerFinished).occurrenceCount).toBe(1);
       },
     );
+  });
+
+  // ─── Caso 34 (ADR-212): la dirección incluye la altura que la sigue ───
+
+  describe("extensión de Address hasta la altura (caso 34, ADR-212)", () => {
+    const addressSpan = (
+      pageText: string,
+      spanText: string,
+      overrides?: Partial<NerKernelSpan>,
+    ): NerKernelSpan => {
+      const startIndex = pageText.indexOf(spanText);
+      return {
+        entityType: EntityType.Address,
+        value: spanText,
+        normalizedValue: spanText.toLowerCase(),
+        confidence: 0.83,
+        startIndex,
+        endIndexExclusive: startIndex + spanText.length,
+        ...overrides,
+      };
+    };
+
+    it("address span extends over a following street number", async () => {
+      asPipelineMock(pipeline).mockResolvedValue(
+        mockTokenClassificationPipeline(() =>
+          Promise.resolve([nerToken("B-LOC", "Maipú", 0.9, 3)]),
+        ),
+      );
+      await engine.init(ctx);
+      const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+      // Sin ninguna palabra de dirección cerca: 1434 no parece un año, así que
+      // se suma sin mirar el contexto.
+      const input = makeNerPageInput("doc-address-number", 0, [
+        "Reunión",
+        "en",
+        "la",
+        "Maipú",
+        "1434",
+        "hoy",
+      ]);
+      const output = await engine.processPage(input, ctx);
+
+      expect(output.occurrences).toHaveLength(1);
+      const [occurrence] = output.occurrences;
+      expect(occurrence?.entityType).toBe(EntityType.Address);
+      expect(occurrence?.value).toBe("Maipú 1434");
+      expect(occurrence?.normalizedValue).toBe("maipu 1434");
+      expect(occurrence?.confidence).toBeCloseTo(0.9, 5);
+      expect(occurrence?.wordSpan).toEqual({ startIndex: 3, endIndexExclusive: 5 });
+      const entityFound = busEmitSpy.mock.calls.filter(
+        ([, event]) => event === EngineEvents.ENTITY_FOUND,
+      );
+      expect(entityFound).toHaveLength(1);
+
+      // La misma regla, sin modelo: solo cambian el fin, el valor y la clave.
+      const text = "Reunión en la Maipú 1434 hoy";
+      const span = addressSpan(text, "Maipú");
+      const extended = extendAddressSpan(span, text);
+      expect(extended).toEqual({
+        ...span,
+        value: "Maipú 1434",
+        normalizedValue: "maipu 1434",
+        endIndexExclusive: span.endIndexExclusive + " 1434".length,
+      });
+      expect(extendedAddressText(text, "Maipú")).toBe("Maipú 1434");
+    });
+
+    it("address extension is idempotent and leaves other entity types untouched", async () => {
+      // Idempotencia: el span ya termina en dígitos, no se busca otro número.
+      const text = "sita en Av. Corrientes 1234 5678";
+      const alreadyNumbered = addressSpan(text, "Av. Corrientes 1234");
+      expect(extendAddressSpan(alreadyNumbered, text)).toBe(alreadyNumbered);
+      expect(extendedAddressText(text, "Av. Corrientes 1234")).toBe("Av. Corrientes 1234");
+
+      // Aplicarla dos veces da lo mismo que una.
+      const bare = addressSpan("en Maipú 1434", "Maipú");
+      const once = extendAddressSpan(bare, "en Maipú 1434");
+      expect(extendAddressSpan(once, "en Maipú 1434")).toBe(once);
+
+      // Los demás tipos no se tocan, aunque los siga un número.
+      const personText = "Juan 1434";
+      for (const entityType of [EntityType.Person, EntityType.Organization, EntityType.Date]) {
+        const span = addressSpan(personText, "Juan", { entityType });
+        expect(extendAddressSpan(span, personText)).toBe(span);
+      }
+
+      // Y de punta a punta: una Person y una Organization seguidas de un número.
+      asPipelineMock(pipeline).mockResolvedValue(
+        mockTokenClassificationPipeline(() =>
+          Promise.resolve([nerToken("B-PER", "Juan", 0.9, 0), nerToken("B-ORG", "Acme", 0.9, 2)]),
+        ),
+      );
+      await engine.init(ctx);
+      const input = makeNerPageInput("doc-address-other-types", 0, ["Juan", "1434", "Acme", "55"]);
+      const output = await engine.processPage(input, ctx);
+      expect(output.occurrences.map((o) => o.value)).toEqual(["Juan", "Acme"]);
+    });
+
+    it("leaves a span untouched when its offsets do not fit the page text", () => {
+      const text = "Maipú 1434";
+      const outOfRange = addressSpan(text, "Maipú", { endIndexExclusive: text.length + 5 });
+      expect(extendAddressSpan(outOfRange, text)).toBe(outOfRange);
+      const empty = addressSpan(text, "Maipú", { endIndexExclusive: 0, startIndex: 0 });
+      expect(extendAddressSpan(empty, text)).toBe(empty);
+    });
+
+    it("does not extend a span that ends the page text", () => {
+      const text = "domicilio en Maipú";
+      const span = addressSpan(text, "Maipú");
+      expect(extendAddressSpan(span, text)).toBe(span);
+    });
   });
 });
