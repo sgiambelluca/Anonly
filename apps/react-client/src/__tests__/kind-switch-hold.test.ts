@@ -7,15 +7,22 @@ import {
   type SelectPageImageParams,
 } from "../components/viewer/kindSwitchHold.js";
 
-// ADR-213 §3/§4: qué imagen pinta una página al conmutar de vista.
+// ADR-213 §3/§4: qué imagen pinta una página al conmutar de vista. Hacia Original se
+// sostiene la anonimizada hasta que llega la vigente; hacia Anonimizado NUNCA se pinta
+// la original (enmienda del mantenedor).
 
-const base: SelectPageImageParams = {
+/** Se pasa a Original: `own` es la original, `other` la anonimizada. */
+const toOriginal: SelectPageImageParams = {
+  viewing: "original",
   own: { blobUrl: "blob:own", scale: 1.3 },
   other: { blobUrl: "blob:other" },
   expectedScale: 1.3,
   holdActive: true,
   failed: false,
 };
+
+/** Se pasa a Anonimizado: `own` es la anonimizada, `other` la original. */
+const toAnonymized: SelectPageImageParams = { ...toOriginal, viewing: "anonymized" };
 
 describe("KIND_SWITCH_HOLD_MS", () => {
   it("is half a second (ADR-213 §4)", () => {
@@ -42,31 +49,34 @@ describe("isCurrentImage", () => {
   });
 });
 
-describe("selectPageImage", () => {
+describe("selectPageImage — switching to Original", () => {
   it("paints the own image when it is current, even while the hold is active", () => {
-    expect(selectPageImage(base)).toEqual({ blobUrl: "blob:own", fromOtherKind: false });
+    expect(selectPageImage(toOriginal)).toEqual({ blobUrl: "blob:own", fromOtherKind: false });
   });
 
-  it("keeps painting the image of the other kind while the own one is not current", () => {
-    const choice = selectPageImage({ ...base, own: { blobUrl: "blob:own", scale: 1 } });
+  it("keeps painting the anonymized image while the own one is not current", () => {
+    const choice = selectPageImage({ ...toOriginal, own: { blobUrl: "blob:own", scale: 1 } });
     expect(choice).toEqual({ blobUrl: "blob:other", fromOtherKind: true });
   });
 
-  it("keeps painting the image of the other kind while the own one does not exist yet", () => {
-    const choice = selectPageImage({ ...base, own: { blobUrl: undefined, scale: undefined } });
+  it("keeps painting the anonymized image while the own one does not exist yet", () => {
+    const choice = selectPageImage({
+      ...toOriginal,
+      own: { blobUrl: undefined, scale: undefined },
+    });
     expect(choice).toEqual({ blobUrl: "blob:other", fromOtherKind: true });
   });
 
   it("changes to the own image as soon as the current one arrives", () => {
-    const waiting = selectPageImage({ ...base, own: { blobUrl: "blob:old", scale: 1 } });
-    const arrived = selectPageImage({ ...base, own: { blobUrl: "blob:new", scale: 1.3 } });
+    const waiting = selectPageImage({ ...toOriginal, own: { blobUrl: "blob:old", scale: 1 } });
+    const arrived = selectPageImage({ ...toOriginal, own: { blobUrl: "blob:new", scale: 1.3 } });
     expect(waiting.blobUrl).toBe("blob:other");
     expect(arrived).toEqual({ blobUrl: "blob:new", fromOtherKind: false });
   });
 
   it("paints whatever the own kind has once the hold expired", () => {
     const choice = selectPageImage({
-      ...base,
+      ...toOriginal,
       own: { blobUrl: "blob:own", scale: 1 },
       holdActive: false,
     });
@@ -75,25 +85,25 @@ describe("selectPageImage", () => {
 
   it("does not hold a failed page", () => {
     const choice = selectPageImage({
-      ...base,
+      ...toOriginal,
       own: { blobUrl: undefined, scale: undefined },
       failed: true,
     });
     expect(choice).toEqual({ blobUrl: undefined, fromOtherKind: false });
   });
 
-  it("falls back to the own image when the other kind has none", () => {
+  it("falls back to the own image when there is no anonymized image to hold", () => {
     const choice = selectPageImage({
-      ...base,
+      ...toOriginal,
       own: { blobUrl: "blob:own", scale: 1 },
       other: { blobUrl: undefined },
     });
     expect(choice).toEqual({ blobUrl: "blob:own", fromOtherKind: false });
   });
 
-  it("returns no image when neither kind has one (skeleton)", () => {
+  it("returns no image when neither kind has one (loading state)", () => {
     const choice = selectPageImage({
-      ...base,
+      ...toOriginal,
       own: { blobUrl: undefined, scale: undefined },
       other: { blobUrl: undefined },
     });
@@ -101,9 +111,44 @@ describe("selectPageImage", () => {
   });
 
   it("decides page by page: the same switch holds one page and not the next", () => {
-    const heldPage = selectPageImage({ ...base, own: { blobUrl: "blob:a", scale: 1 } });
-    const readyPage = selectPageImage({ ...base, own: { blobUrl: "blob:b", scale: 1.3 } });
+    const heldPage = selectPageImage({ ...toOriginal, own: { blobUrl: "blob:a", scale: 1 } });
+    const readyPage = selectPageImage({ ...toOriginal, own: { blobUrl: "blob:b", scale: 1.3 } });
     expect(heldPage.fromOtherKind).toBe(true);
     expect(readyPage.fromOtherKind).toBe(false);
+  });
+});
+
+describe("selectPageImage — switching to Anonymized (never paints the original)", () => {
+  it("paints the own anonymized image when it is current", () => {
+    expect(selectPageImage(toAnonymized)).toEqual({ blobUrl: "blob:own", fromOtherKind: false });
+  });
+
+  it("paints the own anonymized image at another scale instead of the original one", () => {
+    const choice = selectPageImage({ ...toAnonymized, own: { blobUrl: "blob:own", scale: 1 } });
+    expect(choice).toEqual({ blobUrl: "blob:own", fromOtherKind: false });
+  });
+
+  it("paints the loading state, not the original, when there is no anonymized image", () => {
+    const choice = selectPageImage({
+      ...toAnonymized,
+      own: { blobUrl: undefined, scale: undefined },
+    });
+    expect(choice).toEqual({ blobUrl: undefined, fromOtherKind: false });
+  });
+
+  it("never returns the other kind's image, whatever the hold, scale or failure state", () => {
+    for (const holdActive of [true, false]) {
+      for (const failed of [true, false]) {
+        for (const own of [
+          { blobUrl: undefined, scale: undefined },
+          { blobUrl: "blob:own", scale: 1 },
+          { blobUrl: "blob:own", scale: 1.3 },
+        ]) {
+          const choice = selectPageImage({ ...toAnonymized, own, holdActive, failed });
+          expect(choice.blobUrl).not.toBe("blob:other");
+          expect(choice.fromOtherKind).toBe(false);
+        }
+      }
+    }
   });
 });

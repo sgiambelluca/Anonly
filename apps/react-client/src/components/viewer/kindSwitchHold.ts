@@ -11,6 +11,13 @@
  * en pantalla), y la cambia cuando llega la vigente. Decisión por página, con un
  * tope de `KIND_SWITCH_HOLD_MS`.
  *
+ * **Solo hacia Original.** Al pasar a Anonimizado nunca se pinta la imagen original
+ * (enmienda del mantenedor a ADR-213): bajo esa pestaña no puede haber datos sin
+ * tapar, ni por un instante. Ahí se pinta la imagen anonimizada que haya, vigente o
+ * no, o el estado de carga de siempre si no hay ninguna. No hay espera, ni tope, ni
+ * capa inerte: una página que pinta su propia imagen anonimizada a otra escala
+ * conserva su interacción, porque su mapa es el de esa imagen.
+ *
  * Una página tiene **imagen vigente** de un `kind` si está en `previewByPage[kind]`
  * y su escala anotada (`previewScaleByPage[kind]`, ADR-213 §2) es la del zoom.
  *
@@ -32,6 +39,8 @@ export interface PageImageState {
 }
 
 export interface SelectPageImageParams {
+  /** El `kind` que se mira (el destino del cambio de vista). */
+  readonly viewing: "original" | "anonymized";
   /** La imagen del `kind` que se mira. */
   readonly own: PageImageState;
   /** La imagen del otro `kind` (la que la página venía mostrando). Su escala no importa. */
@@ -64,14 +73,15 @@ export function isCurrentImage(image: PageImageState, expectedScale: number): bo
  * Qué imagen pinta una página (ADR-213 §3/§4):
  *
  * 1. Si tiene imagen vigente del `kind` que se mira, esa.
- * 2. Si no, y mientras dura el tope, no falló y hay una imagen del otro `kind`:
- *    esa, hasta que llegue la vigente.
+ * 2. Si no, **y se mira Original**, mientras dura el tope, no falló y hay una imagen
+ *    anonimizada: esa, hasta que llegue la vigente.
  * 3. Si no, lo de siempre: lo que haya del `kind` que se mira (puede ser nada).
+ *    Mirando Anonimizado se llega siempre acá: jamás se pinta la original.
  */
 export function selectPageImage(params: SelectPageImageParams): PageImageChoice {
-  const { own, other, expectedScale, holdActive, failed } = params;
+  const { viewing, own, other, expectedScale, holdActive, failed } = params;
   if (isCurrentImage(own, expectedScale)) return { blobUrl: own.blobUrl, fromOtherKind: false };
-  if (holdActive && !failed && other.blobUrl !== undefined) {
+  if (viewing === "original" && holdActive && !failed && other.blobUrl !== undefined) {
     return { blobUrl: other.blobUrl, fromOtherKind: true };
   }
   return { blobUrl: own.blobUrl, fromOtherKind: false };
