@@ -38,7 +38,7 @@ entonces arranca el implementador de `render-engine`.
 | 1 | Memoria | M-M1: pico del perfil Bajo sobre `P2H` | implementador (`tests/perf`) y planificador | **cerrado el 2026-10-07**: máximo 2,05 GB, techo fijado en 2,5 GB, también en el arnés |
 | 2 | Emails | M-E1: línea de base sobre escaneos de 200 y 150 dpi nativos | implementador (`tests/perf`) y planificador | **medido el 2026-10-07**: sin pérdidas a 200 dpi nativos; 2 de 25 a 150 |
 | 3 | Repintado | Implementación desde el spec, capturas, revisor | implementador, mantenedor, revisor | ADR-210 **aceptado**, spec v1.18.0, implementación en `render-engine` y E2E con canvas real **entregados** el 2026-10-07; capturas del preview y del export enviadas al mantenedor. Falta el revisor, que va al final de la branch |
-| 4 | Direcciones | Auditoría de la línea de base; después ADR | planificador | **auditado el 2026-10-07**: el modelo detecta la calle y deja el número afuera. ADR-212 **aceptado a prueba** ese día, spec de NER v1.11.0 e **implementación en `ner-engine` entregada** (139 tests del módulo en verde, 98,8 % de líneas). **Medido el 2026-10-07 (M-D1)**: la regla deja 6 alturas a la vista y tapa 4 años de más; tapar siempre, 0 y 9. Las cuatro direcciones de la línea de base quedan cubiertas. **Espera la decisión del mantenedor**: regla por contexto o tapar siempre |
+| 4 | Direcciones | Auditoría de la línea de base; después ADR | planificador | **auditado el 2026-10-07**: el modelo detecta la calle y deja el número afuera. ADR-212 **aceptado a prueba** ese día, spec de NER v1.11.0 e **implementación en `ner-engine` entregada** (139 tests del módulo en verde, 98,8 % de líneas). **Medido el 2026-10-07 (M-D1)**: la regla deja 6 alturas a la vista y tapa 4 años de más; tapar siempre, 0 y 9. Las cuatro direcciones de la línea de base quedan cubiertas. **Decidido por el mantenedor el 2026-10-07: tapar siempre**, sin volver a medir. ADR-212 y spec de NER v1.12.0 enmendados; sigue el cambio en `ner-engine` y el revisor |
 | 2b | Emails | M-E2: la misma línea de base sobre los textos con degradación de fotocopia | implementador (`tests/perf`) y planificador | **medida el 2026-10-07**: sin pérdidas a 300 y 200 dpi; 4 de 10 a 150, tres de ellas con `Q` y un espacio |
 | 6 | Visor | El cambio de vista pide la imagen a la escala del zoom (frente 5) | implementador (`apps/react-client`) | pedido por el mantenedor el 2026-10-07; **implementado ese día** en el cliente, para el cambio de vista, las ediciones y el reanálisis. Para el instante borroso que quedaba al conmutar: ADR-213 aceptado e **implementado el 2026-10-07**, con la enmienda del mantenedor: bajo «Anonimizado» nunca se muestra la imagen original (20 tests en Electron). Quedan dos hallazgos anotados, sin decidir. Falta el revisor |
 | 5 | Emails | ADR-211 y spec de Regex; después implementación y comparación contra la línea de base | mantenedor, planificador, implementador | ADR-211 **aceptado** el 2026-10-07, con el espacio tras el punto incluido; spec de Regex v1.15.0 e **implementación en `regex-engine` entregada** ese día (190 tests del módulo en verde, 98,7 % de líneas; los tres tests de ADR-181 sin tocar). **Medido el 2026-10-07 (M-E3): de 11 a 2, de 4 a 0 y de 8 a 0 emails perdidos, sin agregados y sin otros cambios.** Cerrado, falta el revisor |
@@ -425,8 +425,23 @@ de 78 entidades, contra 74 de 78. Ninguna otra entidad cambia y los falsos
 positivos son los mismos. El candidato no se promovió: se promueve con la
 regla ya decidida, en commit propio (ADR-147 §5).
 
-**Falta la decisión del mantenedor**: la regla por contexto queda, o se pasa
-a tapar siempre.
+**Decidido por el mantenedor el 2026-10-07: tapar siempre.** El número que
+sigue a una dirección se suma aunque tenga forma de año y no haya ninguna
+palabra de dirección. No se vuelve a medir: los números de «tapar siempre»
+salen de esta misma medición.
+
+Lo que sigue:
+
+1. Hecho: ADR-212 reescrito con la regla final y `NER_Engine.md` v1.12.0
+   (caso 34 sin criterio de año ni lista de palabras; siete tests en §14).
+2. El implementador saca de `ner-engine` el criterio de año y las listas, y
+   ajusta los tests.
+3. En commit propio, el arnés de M-D1 pasa a esperar el resultado de la
+   regla final.
+4. Revisor, con toda la branch.
+
+**Pendiente aparte**: promover el candidato de la línea de base de calidad.
+Pide una medición del producto final y es un cambio revisado (ADR-147 §5).
 
 ## Frente 5 — El visor al cambiar de vista (sumado el 2026-10-07)
 
