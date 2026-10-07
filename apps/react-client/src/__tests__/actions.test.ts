@@ -154,7 +154,7 @@ describe("actions", () => {
     actions.updateRule("rule-1", { enabled: false });
     actions.deleteRule("rule-1");
     actions.resolveConflict("conflict-1", { entityType: EntityType.Organization });
-    actions.requestRender([0, 1], "original");
+    actions.requestRender([0, 1], "original", "preview", 1);
     actions.requestExport({
       imageFormat: "png",
       jpegQuality: 0.9,
@@ -331,14 +331,41 @@ describe("actions", () => {
       });
     });
 
-    it("requestRender omits scale when not provided", () => {
-      actions.requestRender([0, 1], "original", "preview");
+    it("requestRender omits scale for a full render when it is not provided", () => {
+      actions.requestRender([0, 1], "original", "full");
       expect(emit).toHaveBeenCalledWith(EventChannel.UI, EngineEvents.RENDER_REQUESTED, {
         documentId: "doc-1",
         pageIndices: [0, 1],
         kind: "original",
-        mode: "preview",
+        mode: "full",
       });
+    });
+
+    it("requestRender requires the scale of a preview request by types (ADR-213 §6)", () => {
+      // @ts-expect-error — omitir la escala de un preview no compila.
+      const missingScale = (): void => actions.requestRender([0], "original", "preview");
+      // @ts-expect-error — ni dejando el modo por defecto.
+      const missingMode = (): void => actions.requestRender([0], "original");
+      expect(typeof missingScale).toBe("function");
+      expect(typeof missingMode).toBe("function");
+    });
+
+    it("requestRender notes the scale of a preview request per kind in the viewer store (ADR-213 §2)", () => {
+      actions.requestRender([0], "anonymized", "preview", 1.3);
+      expect(useViewerStore.getState().requestedPreviewScale).toEqual({
+        original: 1,
+        anonymized: 1.3,
+      });
+      actions.requestRender([0], "original", "preview", 2);
+      expect(useViewerStore.getState().requestedPreviewScale).toEqual({
+        original: 2,
+        anonymized: 1.3,
+      });
+    });
+
+    it("requestRender does not note the scale of a full render (the export never moves it)", () => {
+      actions.requestRender([0], "anonymized", "full", 2.5);
+      expect(useViewerStore.getState().requestedPreviewScale.anonymized).toBe(1);
     });
 
     it("requestRender includes scale when provided", () => {
@@ -353,12 +380,13 @@ describe("actions", () => {
     });
 
     it("requestRender includes the kind received in the emitted payload (ADR-056 §1)", () => {
-      actions.requestRender([2, 3], "anonymized");
+      actions.requestRender([2, 3], "anonymized", "preview", 1);
       expect(emit).toHaveBeenCalledWith(EventChannel.UI, EngineEvents.RENDER_REQUESTED, {
         documentId: "doc-1",
         pageIndices: [2, 3],
         kind: "anonymized",
         mode: "preview",
+        scale: 1,
       });
     });
 
