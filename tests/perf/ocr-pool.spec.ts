@@ -7,6 +7,7 @@ import type { Page } from "@playwright/test";
 
 import { expect, openApp, test } from "../e2e/support/electronApp.js";
 import { textTenPagesFile, type E2eFilePayload } from "../e2e/support/fixtures.js";
+import { installSettingsOverride } from "../e2e/support/settingsOverride.js";
 import { generateText50p } from "../fixtures/generate.js";
 
 import {
@@ -21,6 +22,10 @@ import { summarizeChain, summarizeDispatches } from "./support/ocrDpiDownChain.j
 import { prepareSynthetic } from "./support/ocrDpiDownFixtures.js";
 import { assertsFullOccupancy, parseArmLabel } from "./support/ocrPoolArms.js";
 import { measureOcrEndStage } from "./support/ocrPoolEndStage.js";
+import {
+  lowProfileMismatches,
+  type EffectiveProfileEvidence,
+} from "./support/ocrPoolLowProfile.js";
 import { buildReservationReport } from "./support/ocrReservation.js";
 import { getOrGenerateScannedFixture } from "./support/scannedFixtureCache.js";
 import { hostIdentity, type TimeRun } from "./support/timeProfile.js";
@@ -156,6 +161,8 @@ function parseRunId(): {
   readonly dpi: number | undefined;
   readonly armLabel: string;
   readonly maxLiveImageBytes: number;
+  /** `low`: el perfil Bajo por el setting del usuario, sin overrides sueltos (fase low-memory). */
+  readonly performancePreset: "low" | undefined;
   readonly fullOccupancy: boolean;
   readonly profile: Profile;
   readonly round: number;
@@ -163,17 +170,21 @@ function parseRunId(): {
 } {
   if (RUN_ID === undefined || RUN_ID === "") throw new Error("ANONLY_OCR_POOL_RUN no definido.");
   const match =
-    /^(memory|time|cancel)-(1|2|3|4|4b|6|6b)-(P1|P2|P2H|R1|R2|R3|SR)(?:-d(\d{2,3}))?-r([0-2])$/.exec(
+    /^(memory|time|cancel)-(1|2|3|4|4b|6|6b|low)-(P1|P2|P2H|R1|R2|R3|SR)(?:-d(\d{2,3}))?-r([0-2])$/.exec(
       RUN_ID,
     );
   const arm = parseArmLabel(match?.[2] ?? "");
   if (match === null || arm === undefined) throw new Error(`Corrida desconocida: ${RUN_ID}`);
+  // El perfil Bajo solo se mide en memoria (RSS natural) y sin DPI pedido: es la fase low-memory.
+  if (arm.performancePreset !== undefined && (match[1] !== "memory" || match[4] !== undefined))
+    throw new Error(`El brazo low solo existe como corrida de memoria sin DPI: ${RUN_ID}`);
   return {
     kind: match[1] as RunKind,
     arm: arm.poolSize,
     dpi: match[4] === undefined ? undefined : Number(match[4]),
     armLabel: arm.label,
     maxLiveImageBytes: arm.maxLiveImageBytes,
+    performancePreset: arm.performancePreset,
     // P2H, SR y toda corrida con DPI pedido no afirman ocupación: el presupuesto puede frenar y eso es lo que se mide.
     fullOccupancy:
       assertsFullOccupancy(arm) &&
@@ -683,6 +694,60 @@ async function readDpiEvidence(page: Page, requestedDpi: number) {
   };
 }
 
+/**
+ * Lo que el Core vivo y el almacenamiento de la app dicen del perfil: solo configuración, nunca
+ * contenido. La lectura es la del motor OCR (`ctx.config` es el EngineConfig completo del Core).
+ */
+async function readEffectiveProfile(page: Page): Promise<EffectiveProfileEvidence> {
+  return page.evaluate(() => {
+    const core = globalThis.__anonlyCore as
+      | {
+          readonly engines?: {
+            readonly ocr?: {
+              readonly ctx?: {
+                readonly config?: {
+                  readonly workerPool?: Readonly<Record<string, unknown>>;
+                  readonly ocr?: { readonly maxLiveImageBytes?: unknown };
+                };
+              };
+            };
+          };
+        }
+      | undefined;
+    const config = core?.engines?.ocr?.ctx?.config;
+    const pool = (key: string): number | null => {
+      const value = config?.workerPool?.[key];
+      return typeof value === "number" ? value : null;
+    };
+    let performancePreset: string | null = null;
+    let engineOverridesPresent = false;
+    try {
+      const rawSettings = globalThis.localStorage.getItem("anonly:settings");
+      const settings: unknown = rawSettings === null ? null : JSON.parse(rawSettings);
+      const preset =
+        typeof settings === "object" && settings !== null
+          ? (settings as { readonly performancePreset?: unknown }).performancePreset
+          : undefined;
+      performancePreset = typeof preset === "string" ? preset : null;
+      engineOverridesPresent = globalThis.localStorage.getItem("anonly:engine-overrides") !== null;
+    } catch {
+      performancePreset = null;
+    }
+    const maxLive = config?.ocr?.maxLiveImageBytes;
+    return {
+      performancePreset,
+      engineOverridesPresent,
+      workerPool: {
+        pdfPoolSize: pool("pdfPoolSize"),
+        ocrPoolSize: pool("ocrPoolSize"),
+        nerPoolSize: pool("nerPoolSize"),
+        renderPoolSize: pool("renderPoolSize"),
+      },
+      maxLiveImageBytes: typeof maxLive === "number" ? maxLive : null,
+    };
+  });
+}
+
 function outputDir(): string {
   if (OUTPUT_DIR === undefined || OUTPUT_DIR === "")
     throw new Error("ANONLY_OCR_POOL_OUTPUT_DIR no definido.");
@@ -705,14 +770,25 @@ test("OCR recognizer pool campaign — selected run", async ({
    * MiB): el arnés no asume qué manda el nivel vigente (ADR-194 §8). Sin esto,
    * un equipo donde Automático resuelve a `ultra` abortaba el control en la
    * comprobación de override efectivo.
+   *
+   * El brazo `low` es la excepción a propósito: es el perfil Bajo tal como lo elige un
+   * usuario, por el setting `performancePreset: "low"` (el init script corre después del
+   * de medium del fixture `page`), sin ningún override suelto. Lo que manda el nivel
+   * (pools de PDF, OCR, NER y render en 1; presupuesto sin enviar) se comprueba abajo.
    */
-  await installEngineOverrides(page, {
-    workerPool: { ocrPoolSize: run.arm },
-    ocr: {
-      maxLiveImageBytes: run.maxLiveImageBytes,
-      ...(run.dpi === undefined ? {} : { dpi: run.dpi }),
-    },
-  });
+  if (run.performancePreset === "low") {
+    if (process.env.ANONLY_OCR_POOL_PHASE !== "pool-rss")
+      throw new Error("El brazo low solo se mide con la fase pool-rss.");
+    await installSettingsOverride(page, { performancePreset: "low" });
+  } else {
+    await installEngineOverrides(page, {
+      workerPool: { ocrPoolSize: run.arm },
+      ocr: {
+        maxLiveImageBytes: run.maxLiveImageBytes,
+        ...(run.dpi === undefined ? {} : { dpi: run.dpi }),
+      },
+    });
+  }
   // Con DPI pedido, el DPI efectivo de cada despacho se demuestra (mismo observador de metadatos en todos los brazos).
   const observeDispatches = run.dpi !== undefined && run.kind !== "cancel";
   if (observeDispatches) await installTransportObserver(page);
@@ -722,6 +798,14 @@ test("OCR recognizer pool campaign — selected run", async ({
     await installDocumentControl(page, "native");
   }
   memoryRuns = [];
+  // Antes de medir: si la configuración efectiva no es el perfil Bajo, la corrida no vale (no se relaja).
+  let effectiveProfile: EffectiveProfileEvidence | undefined;
+  if (run.performancePreset === "low") {
+    effectiveProfile = await readEffectiveProfile(page);
+    const mismatches = lowProfileMismatches(effectiveProfile);
+    if (mismatches.length > 0)
+      throw new Error(`La configuración efectiva no es el perfil Bajo: ${mismatches.join("; ")}`);
+  }
   if (run.kind !== "memory") await installProbe(page, { ...run, runId: RUN_ID ?? "" });
 
   const measurementPhase = process.env.ANONLY_OCR_POOL_PHASE;
@@ -781,6 +865,7 @@ test("OCR recognizer pool campaign — selected run", async ({
           completedAtUtc: new Date().toISOString(),
           host: hostIdentity(),
           probe: observed,
+          ...(effectiveProfile === undefined ? {} : { effectiveProfile }),
           natural,
           endStage,
           dpiEvidence: rssDpiEvidence,
