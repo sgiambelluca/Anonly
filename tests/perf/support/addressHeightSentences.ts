@@ -5,9 +5,9 @@
  * otra manera. Si una no se puede generar tal cual (un glifo que la fuente no tiene), es un hallazgo.
  *
  * Cada página del PDF de prueba lleva exactamente tres renglones: el relleno de antes, la oración y el
- * relleno de después. El relleno es el mismo en todas las páginas y no tiene ninguna palabra de la lista
- * de ADR-212 §4: está para que las ventanas de seis palabras antes y cuatro después de la regla no
- * lleguen a otra oración de prueba, y para que el modelo tenga algo de contexto.
+ * relleno de después. El relleno es el mismo en todas las páginas, no tiene dígitos ni palabras de
+ * dirección («domicilio», «calle», «piso», etc.) y está para que el modelo tenga algo de contexto. Las
+ * categorías B a F se definen por la presencia o ausencia de esas palabras en la propia oración.
  *
  * Todo es inventado: ninguna de estas calles, números ni personas es un dato real.
  */
@@ -35,8 +35,11 @@ export interface AddressHeightSentence {
   readonly number: string;
 }
 
-/** Qué se espera de la regla por contexto de ADR-212 para una oración (ver `expectedContextOutcome`). */
-export type ContextOutcome = "inside" | "visible" | "untouched";
+/**
+ * Qué se espera de la regla vigente de ADR-212 para una oración (ver `expectedOutcome`): el número queda
+ * dentro de la dirección, o sin tocar.
+ */
+export type ExpectedOutcome = "inside" | "untouched";
 
 export const FILLER_BEFORE = "Se deja constancia de lo actuado en el expediente.";
 export const FILLER_AFTER = "Con lo que se dio por terminado el acto.";
@@ -102,7 +105,7 @@ export const ADDRESS_HEIGHT_SENTENCES: ReadonlyArray<AddressHeightSentence> = [
   s("C8", "El remito indica Tucumán 2023, piso 1, como destino.", "Tucumán", "2023"),
   s("C9", "Los bienes se retiraron de Moreno 1975, departamento 6.", "Moreno", "1975"),
 
-  // D: altura con forma de año, sin palabra de dirección (lo que la regla deja a la vista).
+  // D: altura con forma de año, sin palabra de dirección.
   s(
     "D1",
     "La carta documento fue enviada a Belgrano 1950 y volvió sin firmar.",
@@ -118,7 +121,7 @@ export const ADDRESS_HEIGHT_SENTENCES: ReadonlyArray<AddressHeightSentence> = [
   s("D8", "El local de Tucumán 2023 permanece cerrado.", "Tucumán", "2023"),
   s("D9", "El móvil policial llegó a Moreno 1975 a la medianoche.", "Moreno", "1975"),
 
-  // E: lugar y año, sin palabra de dirección (el año no se toca).
+  // E: lugar y año, sin palabra de dirección (el año se tapa de más).
   s("E1", "El congreso se realizó en Rosario 2019 con gran asistencia.", "Rosario", "2019"),
   s("E2", "Se conocieron durante el torneo de Mendoza 2005.", "Mendoza", "2005"),
   s("E3", "La feria Córdoba 2018 reunió a cien expositores.", "Córdoba", "2018"),
@@ -135,7 +138,7 @@ export const ADDRESS_HEIGHT_SENTENCES: ReadonlyArray<AddressHeightSentence> = [
   s("E9", "La muestra Bariloche 2022 fue declarada de interés.", "Bariloche", "2022"),
   s("E10", "El informe compara los datos de Neuquén 2010 con los actuales.", "Neuquén", "2010"),
 
-  // F: lugar y año con una palabra de la lista cerca por otro motivo (el riesgo: año tapado de más).
+  // F: lugar y año con una palabra de dirección cerca por otro motivo (el año se tapa de más).
   s("F1", "Fijó domicilio tras el congreso de Rosario 2019.", "Rosario", "2019"),
   s("F2", "Vive allí desde el torneo de Mendoza 2005.", "Mendoza", "2005"),
   s("F3", "Reside en el país desde Córdoba 2018, cuando llegó a la feria.", "Córdoba", "2018"),
@@ -161,7 +164,7 @@ export const ADDRESS_HEIGHT_SENTENCES: ReadonlyArray<AddressHeightSentence> = [
   s("G10", "El galpón está en Callao al 11050.", "Callao", "11050"),
 
   // H: lugar seguido de un número que no es altura ni año. H4 y H5 no deben extenderse por la forma
-  // del número; el resto mide cuánto se tapa de más con cualquiera de las dos variantes.
+  // del número; el resto mide cuánto se tapa de más.
   s("H1", "Viajó a Mendoza 3 veces durante el año.", "Mendoza", "3"),
   s("H2", "Permaneció en Rosario 15 días por trabajo.", "Rosario", "15"),
   s("H3", "La sucursal de Bariloche 2 cerró sus puertas.", "Bariloche", "2"),
@@ -176,28 +179,18 @@ export const ADDRESS_HEIGHT_SENTENCES: ReadonlyArray<AddressHeightSentence> = [
 const SHAPE_EXCLUDED_IDS: ReadonlySet<string> = new Set(["H4", "H5"]);
 
 /**
- * Qué espera ADR-212 de la regla por contexto («Cómo se decide si la regla alcanza»):
- * A, B, C y G, el número queda dentro de la dirección; D, a la vista; E, sin tocar; F, dentro (tapado
- * de más); H1, H2, H3, H6, H7 y H8, dentro (tapado de más); H4 y H5, sin tocar.
+ * Qué espera ADR-212 de la regla vigente, que suma el número sin mirar el contexto ni su valor: en A a G el
+ * número queda dentro de la dirección (en E y F, un año tapado de más); en H1, H2, H3, H6, H7 y H8, también
+ * (un número tapado de más); H4 y H5, sin tocar por la forma del número.
  */
-export function expectedContextOutcome(sentence: AddressHeightSentence): ContextOutcome {
-  switch (sentence.category) {
-    case "A":
-    case "B":
-    case "C":
-    case "G":
-    case "F":
-      return "inside";
-    case "D":
-      return "visible";
-    case "E":
-      return "untouched";
-    case "H":
-      return SHAPE_EXCLUDED_IDS.has(sentence.id) ? "untouched" : "inside";
-  }
+export function expectedOutcome(sentence: AddressHeightSentence): ExpectedOutcome {
+  return SHAPE_EXCLUDED_IDS.has(sentence.id) ? "untouched" : "inside";
 }
 
-/** «Parece un año» (ADR-212 §3): cuatro dígitos con valor entre 1900 y 2099. */
+/**
+ * Descripción de la oración (no entra en la regla): cuatro dígitos con valor entre 1900 y 2099, la forma
+ * de las categorías B a F.
+ */
 export function isYearLike(digits: string): boolean {
   if (!/^\d{4}$/.test(digits)) return false;
   const value = Number(digits);

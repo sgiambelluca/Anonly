@@ -2,8 +2,7 @@
  * M-D1: la clasificación pura de una oración de prueba a partir de lo que la aplicación dejó después del
  * análisis. Sin Electron, sin disco: recibe el texto de la página tal como lo extrajo la app y todas las
  * ocurrencias de esa página, de cualquier tipo, y dice si el modelo marcó el lugar, si el número quedó
- * dentro de una dirección, si lo cubrió otro tipo y qué cambiaría con «tapar siempre» (ADR-212, «La
- * alternativa que queda en reserva»).
+ * dentro de una dirección y si lo cubrió otro tipo (ADR-212).
  *
  * Posiciones: todo se calcula sobre el texto de la página (`Page.text` es `words.map(w => w.text).join(" ")`).
  * Una ocurrencia se ubica por su `value` dentro de la oración de prueba (el valor de una ocurrencia de NER
@@ -12,11 +11,11 @@
  */
 
 import {
-  expectedContextOutcome,
+  expectedOutcome,
   isYearLike,
   type AddressHeightCategory,
   type AddressHeightSentence,
-  type ContextOutcome,
+  type ExpectedOutcome,
 } from "./addressHeightSentences.js";
 
 const ADDRESS_TYPE = "ADDRESS";
@@ -72,8 +71,8 @@ export interface SentenceRecord {
   /** Tipos de las ocurrencias que no son direcciones y cuyo rango contiene los dígitos. */
   readonly numberCoveredByOther: ReadonlyArray<string>;
   readonly adjacent: boolean;
+  /** El número de la oración tiene forma de año (cuatro dígitos entre 1900 y 2099). */
   readonly yearLike: boolean;
-  readonly alwaysWouldCover: boolean;
 }
 
 const WORD_SEPARATOR = " ";
@@ -182,7 +181,6 @@ export function classifySentence(input: ClassifyInput): SentenceRecord {
       numberInAddress: false,
       numberCoveredByOther: [],
       adjacent: false,
-      alwaysWouldCover: false,
     };
   }
 
@@ -220,21 +218,20 @@ export function classifySentence(input: ClassifyInput): SentenceRecord {
     numberInAddress,
     numberCoveredByOther,
     adjacent,
-    alwaysWouldCover: placeMarked && !numberInAddress && adjacent && yearLike,
   };
 }
 
 export interface ExpectationCheck {
-  /** El resultado coincide con lo que ADR-212 espera de la regla por contexto para su categoría. */
+  /** El resultado coincide con lo que ADR-212 espera de la regla vigente para esa oración. */
   readonly asExpected: boolean;
-  readonly expected: ContextOutcome;
+  readonly expected: ExpectedOutcome;
   readonly reason: string | null;
 }
 
 /**
- * Compara una oración contra lo esperado de ADR-212 para la regla por contexto. Solo tiene sentido si el
- * modelo marcó el lugar: si no lo marcó, es un límite del modelo y no de la regla (`reason` lo dice y
- * `asExpected` es `true`: no se cuenta como desvío de la regla).
+ * Compara una oración contra lo esperado de ADR-212 para la regla vigente (el número se suma siempre, salvo
+ * que su forma lo excluya). Solo tiene sentido si el modelo marcó el lugar: si no lo marcó, es un límite del
+ * modelo y no de la regla (`reason` lo dice y `asExpected` es `true`: no se cuenta como desvío de la regla).
  */
 export function checkExpectation(record: SentenceRecord): ExpectationCheck {
   const sentence: AddressHeightSentence = {
@@ -244,7 +241,7 @@ export function checkExpectation(record: SentenceRecord): ExpectationCheck {
     place: record.place,
     number: record.number,
   };
-  const expected = expectedContextOutcome(sentence);
+  const expected = expectedOutcome(sentence);
   if (!record.placeMarked) {
     return {
       asExpected: true,
@@ -261,14 +258,11 @@ export function checkExpectation(record: SentenceRecord): ExpectationCheck {
         `yearLike=${record.yearLike}, otros tipos que lo cubren: ${record.numberCoveredByOther.join(",") || "ninguno"})`,
     };
   }
-  if (expected !== "inside" && record.numberInAddress) {
+  if (expected === "untouched" && record.numberInAddress) {
     return {
       asExpected: false,
       expected,
-      reason:
-        expected === "visible"
-          ? "esperado: altura a la vista (año sin palabra de dirección); quedó dentro de la dirección"
-          : "esperado: número sin tocar; quedó dentro de la dirección (tapado de más)",
+      reason: "esperado: número sin tocar; quedó dentro de la dirección (tapado de más)",
     };
   }
   return { asExpected: true, expected, reason: null };

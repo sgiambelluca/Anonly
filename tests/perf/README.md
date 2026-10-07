@@ -1619,10 +1619,12 @@ nativos suman `detected` completo. Los registros anteriores no lo tienen y se si
 
 `docs/roadmap/hardening/Confianza_1.0.x_Plan.md` (M-D1) y ADR-212. El modelo de nombres marca la calle y
 deja el número afuera («con domicilio en Maipú 1434» da `Maipú`); `ner-engine` extiende la ocurrencia
-`Address` hasta el número que la sigue, y si ese número parece un año (cuatro dígitos entre 1900 y 2099) lo
-suma solo si hay una palabra de dirección cerca. Este arnés mide, para esa regla y para la alternativa en
-reserva («tapar siempre»), cuántas alturas quedan a la vista y cuántos años quedan tapados de más. Se vuelve
-a correr si la regla o el modelo cambian.
+`Address` hasta el número que la sigue, **siempre**: no mira el contexto ni si el número parece un año. Este
+arnés mide, para esa regla, cuántas alturas quedan a la vista y cuántos años y otros números quedan tapados
+de más, y lista las oraciones cuyo resultado difiere del que la regla espera. Se vuelve a correr si la regla
+o el modelo cambian. La medición original, con la regla por contexto que se descartó, está en
+`docs/roadmap/mediciones/ner/Altura_De_Direcciones_2026-10-07.md`; el arnés ya no calcula «tapar siempre»,
+porque esa alternativa es hoy la regla.
 
 ```bash
 # Humo: una repetición
@@ -1641,21 +1643,25 @@ sintéticos: no usa `ANONLY_REAL_DOC_*`.
 **El documento.** `support/addressHeightFixture.ts` genera un PDF digital (capa de texto, sin OCR) con
 una página por oración de `support/addressHeightSentences.ts` (76 oraciones, categorías A a H, con su
 `place` y su `number`). Cada página lleva tres párrafos: un relleno fijo, la oración y otro relleno fijo.
-El relleno es el mismo en todas, no lleva ninguna palabra de la lista de ADR-212 y está para que las
-ventanas de seis y cuatro palabras de la regla no lleguen a otra oración de prueba. **Las oraciones son
-datos y no se cambian ni se acomodan** para que el resultado salga de una u otra manera; si una no se puede
-generar tal cual es un hallazgo.
+El relleno es el mismo en todas, no lleva dígitos ni palabras de dirección y está para que el modelo tenga
+algo de contexto. **Las oraciones son datos y no se cambian ni se acomodan** para que el resultado salga de
+una u otra manera; si una no se puede generar tal cual es un hallazgo. Las categorías B a F se siguen
+definiendo por la presencia o ausencia de una palabra de dirección en la oración, aunque la regla vigente
+ya no la mira: se conservan para que las mediciones sean comparables.
 
-| Categoría | Qué es | Qué se espera de la regla por contexto |
+| Categoría | Qué es | Qué se espera de la regla vigente |
 | --- | --- | --- |
 | A | altura que no parece año (A1 a A4 con palabra de dirección, A5 a A10 sin) | dentro de la dirección |
 | B | altura con forma de año y palabra de dirección antes | dentro |
 | C | altura con forma de año y palabra de dirección después | dentro |
-| D | altura con forma de año, sin palabra de dirección | **a la vista** (lo que falta cubrir) |
-| E | lugar y año, sin palabra de dirección | año sin tocar |
-| F | lugar y año con una palabra de la lista cerca por otro motivo | dentro (año tapado de más) |
+| D | altura con forma de año, sin palabra de dirección | dentro |
+| E | lugar y año, sin palabra de dirección | dentro (año tapado de más) |
+| F | lugar y año con una palabra de dirección cerca por otro motivo | dentro (año tapado de más) |
 | G | variantes de la altura: «N°», «Nº», «nro.», «número», «No.», «al», cinco dígitos | dentro |
-| H | lugar y un número que no es altura ni año | dentro (tapado de más), salvo H4 y H5 (fecha, importe) |
+| H | lugar y un número que no es altura ni año | dentro (tapado de más), salvo H4 y H5 (fecha, importe), que la forma del número deja sin tocar |
+
+Lo que no se espera nunca es una altura a la vista (A a D, G) cuando el modelo marcó la calle: si queda
+fuera, el resumen la lista como distinta de lo esperado.
 
 | Variable | Qué hace |
 | --- | --- |
@@ -1672,8 +1678,8 @@ página tal como lo extrajo la app; todas las ocurrencias de la página, de cual
   una dirección o de una ocurrencia de otro tipo (se dice cuál);
 - `adjacent`: la dirección que contiene el lugar termina justo antes del número (entre el fin del valor y
   los dígitos hay solo espacio y, si lo hay, el conector);
-- `yearLike` y `alwaysWouldCover = placeMarked && !numberInAddress && adjacent && yearLike`: lo que cambiaría
-  con «tapar siempre». Los números de esa variante salen de los mismos datos.
+- `yearLike`: el número de la oración tiene forma de año (cuatro dígitos entre 1900 y 2099). Es solo una
+  descripción de la oración; la regla no la usa.
 
 `numberInAddress` no distingue si el número lo sumó la regla o lo incluyó el propio modelo (con «Av.» a
 veces lo incluye): es el estado final que ve el usuario, que es lo que importa para la fuga.
@@ -1688,10 +1694,10 @@ página es exactamente el escrito** (tildes, «°» y «º» incluidos).
 registro completo por repetición, con el commit medido), `address-height-run.json`, `validity.json` y
 `caveats.json` si corresponden, `sleep-detection.json`, presión del sistema, `summary.json` y
 `summary-table.txt` (`support/addressHeightSummary.ts` vía `support/summarizeAddressHeightCli.ts`). El
-resumen da, por categoría y en total y para las dos variantes, los lugares marcados y no marcados (estos
-últimos se cuentan aparte: son un límite del modelo, no de la regla), los números dentro de la dirección y
-a la vista, las alturas que quedan a la vista (A, B, C, D, G) y los años y otros números tapados de más
-(E, F, H); la lista de oraciones cuyo resultado no es el esperado de ADR-212, con su `id`, sus
+resumen da, por categoría y en total, los lugares marcados y no marcados (estos últimos se cuentan aparte:
+son un límite del modelo, no de la regla), los números dentro de la dirección y a la vista, las alturas
+que quedan a la vista (A, B, C, D, G) y los años y otros números tapados de más (E, F, H); la lista de
+oraciones cuyo resultado no es el esperado de ADR-212 (la tabla de arriba), con su `id`, sus
 `addressValues` y el motivo; y si las dos repeticiones coinciden oración por oración. Sale con 1 si falta o
 es inválida alguna corrida. Que el resultado no sea el esperado, o que las repeticiones difieran, no es un
 error del instrumento: se informa. Es una medición, no un gate.
