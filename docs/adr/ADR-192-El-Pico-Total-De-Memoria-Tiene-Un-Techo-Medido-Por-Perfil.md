@@ -120,8 +120,9 @@ explícitos»).
 
 > **Hecho en ADR-194 §7 (2026-10-01).** Los perfiles son cinco (se sumó
 > Ultra). Sus techos se fijaron sobre un escenario nuevo, un escaneo de 300
-> dpi, medido con el arnés del pool: 3,5 GB provisorio en Bajo, 3,5 GB en
-> Intermedio, 4,5 GB en Alto y 5,0 GB en Ultra. Los techos de §2 no cambian,
+> dpi, medido con el arnés del pool: 3,5 GB provisorio en Bajo (**2,5 GB
+> desde el 2026-10-07**, ya medido), 3,5 GB en Intermedio, 4,5 GB en Alto y
+> 5,0 GB en Ultra. Los techos de §2 no cambian,
 > y son los del nivel Intermedio: `memory.spec.ts` lo fija de forma explícita,
 > porque Automático ya no da la misma configuración en todos los equipos.
 
