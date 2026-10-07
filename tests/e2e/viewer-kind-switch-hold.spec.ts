@@ -20,6 +20,11 @@
 
 import type { Page } from "@playwright/test";
 
+import {
+  displayLogLength,
+  displayedSince,
+  installDisplaySampler,
+} from "./support/displaySampler.js";
 import { expect, openApp, test } from "./support/electronApp.js";
 import {
   LINE_DOCUMENT_PAGE_WIDTH,
@@ -36,6 +41,7 @@ import {
 import {
   installWorkerMessageDelay,
   pageNow,
+  previewBlobsOf,
   renderRequestCount,
   renderRequestsSince,
   setWorkerMessageDelay,
@@ -72,6 +78,7 @@ const near = (width: number, scale: number): boolean =>
 async function prepare(page: Page): Promise<void> {
   await installSettingsOverride(page, { nerEnabled: false });
   await installPageImageCapture(page);
+  await installDisplaySampler(page);
   await installWorkerMessageDelay(page);
   await openApp(page, "networkidle");
   await startRenderTap(page);
@@ -126,6 +133,9 @@ async function visitBothAt100(page: Page, start: ViewKind): Promise<void> {
   await showView(page, "anonimizado");
   await waitDrawn(page, label(1, "anonimizado"), 1);
   await showView(page, start);
+  // La espera de ADR-213 §4 (500 ms) corre desde ese último cambio de vista y no se ve desde
+  // afuera: se deja vencer para que el zoom que sigue no caiga adentro de ella.
+  await page.waitForTimeout(HOLD_LIMIT_MS + 100);
 }
 
 function viewerScroller(page: Page, kind: ViewKind) {
@@ -189,12 +199,65 @@ async function expectNeverOldScale(
     .toBe(true);
 }
 
-/** Conmuta a `target` y comprueba que el primer dibujo ya está a la escala del zoom. */
-async function switchAndExpectCurrent(page: Page, target: ViewKind): Promise<void> {
-  const mark = await drawLogLength(page);
+/**
+ * Hacia Anonimizado (enmienda del mantenedor a ADR-213): bajo esa pestaña nunca se MUESTRA la
+ * imagen original. Puede dibujarse antes una anonimizada a escala vieja (su propia imagen, con
+ * su propio mapa), pero el canvas rotulado «anonimizado» jamás tiene una imagen del lado
+ * original, y al final aparece la nítida.
+ *
+ * Se mira lo MOSTRADO (`support/displaySampler.ts`, por `blob:`), no solo lo dibujado: el
+ * visor puede sostener la imagen que ya estaba en el canvas sin ningún `drawImage` nuevo. Y se
+ * mira el `src`, no el ancho: una original y una anonimizada a la misma escala miden lo mismo.
+ */
+async function expectNoOriginalImage(
+  page: Page,
+  marks: { readonly draws: number; readonly display: number },
+  clickAt: number,
+  pageLabel: string,
+): Promise<void> {
+  const describe = async (): Promise<{ originals: number; text: string }> => {
+    const shown = await displayedSince(page, marks.display, pageLabel);
+    const originalBlobs = await previewBlobsOf(page, "original");
+    const tagged = shown.map(
+      (record) =>
+        `${record.src === "" ? "carga" : originalBlobs.has(record.src) ? "ORIGINAL" : "anonimizada"} @+${Math.round(record.at - clickAt)}ms`,
+    );
+    return {
+      originals: shown.filter((record) => originalBlobs.has(record.src)).length,
+      text: `lo que muestra «${pageLabel}» tras el cambio de vista: [${tagged.join(", ")}]`,
+    };
+  };
+  try {
+    await expect
+      .poll(
+        async () =>
+          (await drawsSince(page, marks.draws, pageLabel)).some((draw) => near(draw.width, ZOOM)),
+        { timeout: 20_000 },
+      )
+      .toBe(true);
+  } catch (error) {
+    throw new Error(`la imagen nítida nunca se dibujó; ${(await describe()).text}`, {
+      cause: error,
+    });
+  }
+  const { originals, text } = await describe();
+  test.info().annotations.push({ type: "mostrado", description: text });
+  expect(originals, `se mostró la imagen original bajo Anonimizado: ${text}`).toBe(0);
+}
+
+/**
+ * Conmuta a `target`. Hacia Original, el primer dibujo ya está a la escala del zoom; hacia
+ * Anonimizado, no se dibuja nunca la original y termina en la nítida.
+ */
+async function switchAndExpect(page: Page, target: ViewKind, pageNumber = 1): Promise<void> {
+  const marks = { draws: await drawLogLength(page), display: await displayLogLength(page) };
   const clickAt = await pageNow(page);
   await showView(page, target);
-  await expectNeverOldScale(page, mark, clickAt, label(1, target));
+  if (target === "original") {
+    await expectNeverOldScale(page, marks.draws, clickAt, label(pageNumber, target));
+  } else {
+    await expectNoOriginalImage(page, marks, clickAt, label(pageNumber, target));
+  }
 }
 
 // ─── Acciones de edición ───────────────────────────────────────────────────────
@@ -253,17 +316,23 @@ async function viewToSwitchTo(page: Page): Promise<ViewKind> {
   return anonymizedSelected === "true" ? "original" : "anonimizado";
 }
 
-// ─── 1. Después de un zoom, conmutar no dibuja nunca a la escala vieja ─────────
+// ─── 1. Después de un zoom, conmutar no muestra una imagen a otra escala ───────
+// Hacia Original: el primer dibujo ya es nítido. Hacia Anonimizado: nunca la original.
+
+const EXPECTATION: Readonly<Record<ViewKind, string>> = {
+  original: "el primer dibujo del lado nuevo ya es nítido",
+  anonimizado: "nunca se dibuja la imagen original y termina en la nítida",
+};
 
 for (const start of ["original", "anonimizado"] as const) {
-  test(`zoom en ${start} y paso a ${OTHER[start]}: el primer dibujo del lado nuevo ya es nítido`, async ({
+  test(`zoom en ${start} y paso a ${OTHER[start]}: ${EXPECTATION[OTHER[start]]}`, async ({
     page,
   }) => {
     await openLines(page);
     await visitBothAt100(page, start);
     await zoomInThrice(page);
     await waitDrawn(page, label(1, start), ZOOM);
-    await switchAndExpectCurrent(page, OTHER[start]);
+    await switchAndExpect(page, OTHER[start]);
   });
 }
 
@@ -305,7 +374,7 @@ const EDITS: ReadonlyArray<{
 ];
 
 for (const edit of EDITS) {
-  test(`130 % en ${edit.start}, ${edit.name}, y conmutar: el primer dibujo del lado nuevo ya es nítido`, async ({
+  test(`130 % en ${edit.start}, ${edit.name}, y conmutar: la vista nueva no muestra una imagen a otra escala`, async ({
     page,
   }) => {
     await openLines(page);
@@ -313,104 +382,147 @@ for (const edit of EDITS) {
     await zoomInThrice(page);
     await waitDrawn(page, label(1, edit.start), ZOOM);
     await edit.run(page);
-    await switchAndExpectCurrent(page, await viewToSwitchTo(page));
+    await switchAndExpect(page, await viewToSwitchTo(page));
   });
 }
 
 // ─── 2. Conmutar de inmediato tras un zoom, antes de que llegue el otro lado ───
 
-test("conmutar de inmediato tras un zoom mantiene la imagen anterior y después aparece la nítida, sin dibujo a escala vieja", async ({
+test("conmutar a Original de inmediato tras un zoom mantiene la anonimizada y después aparece la nítida, sin dibujo a escala vieja", async ({
   page,
 }) => {
   await openLines(page);
-  await visitBothAt100(page, "original");
+  await visitBothAt100(page, "anonimizado");
   // Los renders llegan 60 ms más tarde: el lado nuevo no está al conmutar, pero llega antes del tope.
   await setWorkerMessageDelay(page, 60);
   await zoomInThrice(page);
 
   const mark = await drawLogLength(page);
   const clickAt = await pageNow(page);
-  await showView(page, "anonimizado");
-  const draws = await firstDrawsSince(page, mark, label(1, "anonimizado"));
-  const detail = `dibujos de «Página 1, anonimizado»: ${describeDraws(draws, clickAt)}`;
+  await showView(page, "original");
+  const draws = await firstDrawsSince(page, mark, label(1, "original"));
+  const detail = `dibujos de «Página 1, original»: ${describeDraws(draws, clickAt)}`;
   test.info().annotations.push({ type: "dibujos", description: detail });
 
   expect(near(draws[0]?.width ?? 0, ZOOM), detail).toBe(true);
   // No se repintó al instante: la imagen anterior siguió en pantalla hasta que llegó la nítida.
   expect((draws[0]?.at ?? 0) - clickAt, detail).toBeGreaterThan(80);
   expect((draws[0]?.at ?? 0) - clickAt, detail).toBeLessThan(HOLD_LIMIT_MS + 400);
-  await expectNeverOldScale(page, mark, clickAt, label(1, "anonimizado"));
+  await expectNeverOldScale(page, mark, clickAt, label(1, "original"));
 });
 
-// ─── 3. Una página a la que se llegó por scroll mirando un solo lado ───────────
-
-test("una página a la que se llegó por scroll mirando solo Original no se ve borrosa al conmutar", async ({
-  page,
-}) => {
-  await openManyPages(page);
-
-  // Anonimizado de la última página, guardada a 100 %.
-  await scrollToEnd(page, "original");
-  await waitDrawn(page, label(PAGE_COUNT, "original"), 1);
-  await showView(page, "anonimizado");
-  await waitDrawn(page, label(PAGE_COUNT, "anonimizado"), 1);
-  await showView(page, "original");
-
-  // Se vuelve arriba (la última página se desmonta, su imagen sigue en el store) y se hace zoom.
-  await scrollToTop(page, "original");
-  await expect(page.getByRole("img", { name: label(PAGE_COUNT, "original") })).toHaveCount(0);
-  await zoomInThrice(page);
-  await waitDrawn(page, label(1, "original"), ZOOM);
-
-  // Se llega a la última página por scroll, mirando solo Original: el zoom no la pidió.
-  await scrollToEnd(page, "original");
-  await waitDrawn(page, label(PAGE_COUNT, "original"), ZOOM);
-
-  const mark = await drawLogLength(page);
-  const clickAt = await pageNow(page);
-  await showView(page, "anonimizado");
-  await expectNeverOldScale(page, mark, clickAt, label(PAGE_COUNT, "anonimizado"));
-});
-
-// ─── 4. El tope de 500 ms ──────────────────────────────────────────────────────
-
-test("con el lado nuevo demorado más que el tope, el visor termina mostrando el lado pedido", async ({
+test("conmutar a Anonimizado de inmediato tras un zoom nunca dibuja la original y termina en la nítida", async ({
   page,
 }) => {
   await openLines(page);
   await visitBothAt100(page, "original");
+  await setWorkerMessageDelay(page, 60);
+  await zoomInThrice(page);
+  await switchAndExpect(page, "anonimizado");
+});
+
+// ─── 3. Una página a la que se llegó por scroll mirando un solo lado ───────────
+
+for (const start of ["original", "anonimizado"] as const) {
+  test(`una página a la que se llegó por scroll mirando solo ${start}: al conmutar a ${OTHER[start]}, ${EXPECTATION[OTHER[start]]}`, async ({
+    page,
+  }) => {
+    await openManyPages(page);
+    const other = OTHER[start];
+
+    // La otra vista de la última página, guardada a 100 %.
+    await scrollToEnd(page, "original");
+    await waitDrawn(page, label(PAGE_COUNT, "original"), 1);
+    await showView(page, "anonimizado");
+    await waitDrawn(page, label(PAGE_COUNT, "anonimizado"), 1);
+    await showView(page, start);
+
+    // Se vuelve arriba (la última página se desmonta, su imagen sigue en el store) y se hace zoom.
+    await scrollToTop(page, start);
+    await expect(page.getByRole("img", { name: label(PAGE_COUNT, start) })).toHaveCount(0);
+    await zoomInThrice(page);
+    await waitDrawn(page, label(1, start), ZOOM);
+
+    // Se llega a la última página por scroll, mirando solo `start`: el zoom no la pidió.
+    await scrollToEnd(page, start);
+    await waitDrawn(page, label(PAGE_COUNT, start), ZOOM);
+
+    await switchAndExpect(page, other, PAGE_COUNT);
+  });
+}
+
+// ─── 4. El tope de 500 ms (hacia Original) ─────────────────────────────────────
+
+test("con la original demorada más que el tope, el visor termina mostrando la original", async ({
+  page,
+}) => {
+  await openLines(page);
+  await visitBothAt100(page, "anonimizado");
   // El lado nuevo tarda mucho más que el tope.
   await setWorkerMessageDelay(page, 1500);
   await zoomInThrice(page);
-  const originalSources = new Set(
-    (await drawsSince(page, 0, label(1, "original"))).map((draw) => draw.src),
-  );
 
   const mark = await drawLogLength(page);
   const clickAt = await pageNow(page);
-  await showView(page, "anonimizado");
-  const draws = await firstDrawsSince(page, mark, label(1, "anonimizado"));
-  const detail = `dibujos de «Página 1, anonimizado»: ${describeDraws(draws, clickAt)}`;
+  await showView(page, "original");
+  const draws = await firstDrawsSince(page, mark, label(1, "original"));
+  const detail = `dibujos de «Página 1, original»: ${describeDraws(draws, clickAt)}`;
   test.info().annotations.push({ type: "dibujos", description: detail });
 
-  // Hasta el tope no se tocó nada (se mantuvo la imagen anterior); vencido, se pintó lo que
-  // había del lado pedido, que es una imagen suya (no la del otro lado).
+  // Hasta el tope no se tocó nada (se mantuvo la anonimizada); vencido, se pintó lo que había
+  // del lado pedido, que es una imagen original (a la escala vieja: no llegó otra).
   const first = draws[0];
   expect((first?.at ?? 0) - clickAt, detail).toBeGreaterThanOrEqual(HOLD_LIMIT_MS - 100);
   expect((first?.at ?? 0) - clickAt, detail).toBeLessThan(1400);
-  expect(originalSources.has(first?.src ?? ""), detail).toBe(false);
+  expect((await previewBlobsOf(page, "original")).has(first?.src ?? ""), detail).toBe(true);
 
   // Y cuando llega la nítida, se cambia.
   await expect
     .poll(
       async () =>
-        (await drawsSince(page, mark, label(1, "anonimizado"))).some((draw) =>
-          near(draw.width, ZOOM),
-        ),
+        (await drawsSince(page, mark, label(1, "original"))).some((draw) => near(draw.width, ZOOM)),
       { message: detail, timeout: 15_000 },
     )
     .toBe(true);
-  await expect(page.getByRole("img", { name: label(1, "anonimizado") })).toBeVisible();
+  await expect(page.getByRole("img", { name: label(1, "original") })).toBeVisible();
+});
+
+// ─── Hacia Anonimizado: nunca la original, tampoco sin imagen anonimizada previa ─
+
+test("al pasar a Anonimizado sin imagen anonimizada previa y con el dibujo demorado, nunca se dibuja la original", async ({
+  page,
+}) => {
+  // Documento sin entidades: no hay preview anonimizado sembrado, la página 1 no tiene ninguno.
+  await openManyPages(page);
+  await waitDrawn(page, label(1, "original"), 1);
+  // Cada render tarda ~3 veces este atraso: la anonimizada llega después del cambio de vista
+  // y antes del reintento del visor (700 ms), que con un atraso mayor la reiniciaría sin fin.
+  await setWorkerMessageDelay(page, 150);
+  await zoomInThrice(page);
+
+  const marks = { draws: await drawLogLength(page), display: await displayLogLength(page) };
+  const clickAt = await pageNow(page);
+  await showView(page, "anonimizado");
+  await expectNoOriginalImage(page, marks, clickAt, label(1, "anonimizado"));
+
+  // Mientras la imagen anonimizada no llegó, la página quedó en su estado de carga: el primer
+  // dibujo es la anonimizada, no un repintado inmediato de otra cosa.
+  const first = (await drawsSince(page, marks.draws, label(1, "anonimizado")))[0];
+  expect((first?.at ?? 0) - clickAt, "primer dibujo bajo Anonimizado").toBeGreaterThan(250);
+});
+
+test("al pasar a Anonimizado, una página con su propia imagen anonimizada a otra escala conserva su interacción", async ({
+  page,
+}) => {
+  await openLines(page);
+  await visitBothAt100(page, "original");
+  await setWorkerMessageDelay(page, 1500);
+  await zoomInThrice(page);
+  await switchTabAfterTwoFrames(page, "Anonimizado");
+
+  // Pinta su propia imagen anonimizada (escala vieja): no hay espera, y su mapa es el de esa imagen.
+  const overlay = await readOverlay(page, label(1, "anonimizado"));
+  expect(overlay.pointerEvents, "capa de la página con su anonimizada vieja").not.toBe("none");
 });
 
 // ─── 5. Qué pide el visor ──────────────────────────────────────────────────────

@@ -28,6 +28,8 @@ export interface RenderRequestRecord {
 export interface PreviewArrivalRecord {
   readonly kind: "original" | "anonymized";
   readonly pageIndex: number;
+  /** El `blob:` de la imagen que trajo el evento: identifica de qué lado salió lo que se dibuja. */
+  readonly blobUrl: string;
   readonly at: number;
 }
 
@@ -115,8 +117,13 @@ export async function startRenderTap(page: Page): Promise<void> {
         });
       });
       scope.__anonlyCore?.bus.on("render", "PREVIEW_UPDATED", (payload) => {
-        const p = payload as { kind: string; pageIndex: number };
-        arrivals.push({ kind: p.kind, pageIndex: p.pageIndex, at: performance.now() });
+        const p = payload as { kind: string; pageIndex: number; canvasBlobUrl: string };
+        arrivals.push({
+          kind: p.kind,
+          pageIndex: p.pageIndex,
+          blobUrl: p.canvasBlobUrl,
+          at: performance.now(),
+        });
       });
     },
     { requests: REQUESTS_NAME, arrivals: ARRIVALS_NAME },
@@ -156,6 +163,19 @@ export async function previewArrivalsSince(
       ),
     { name: ARRIVALS_NAME, since },
   );
+}
+
+/**
+ * Los `blob:` de TODAS las imágenes que el motor entregó para ese `kind`. Un dibujo cuyo
+ * `src` está acá es una imagen de ese lado, sea cual sea el rótulo del canvas donde cayó
+ * (una original y una anonimizada a la misma escala miden lo mismo).
+ */
+export async function previewBlobsOf(
+  page: Page,
+  kind: "original" | "anonymized",
+): Promise<ReadonlySet<string>> {
+  const arrivals = await previewArrivalsSince(page, 0);
+  return new Set(arrivals.filter((arrival) => arrival.kind === kind).map((a) => a.blobUrl));
 }
 
 /** `performance.now()` de la página: la misma base de tiempo que los registros. */
