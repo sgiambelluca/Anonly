@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap-1.x | dependencias=roadmap/Version_1.0.md,roadmap/Version_2.0.md,roadmap/Future_Ideas.md,roadmap/hitos/Post_Hito10.8_Pendientes.md,RELEASING.md,00_Project_Vision.md,architecture/08_Security_Model.md,adr/ADR-009-Export-Strategy.md,adr/ADR-059-Leyenda-Opcional-De-Marcadores.md,adr/ADR-148-Un-Export-Se-Verifica-Leyendo-El-PDF-Exportado.md,adr/ADR-190-Una-Pagina-Con-Tinta-No-Sale-Vacia-En-Silencio.md,roadmap/hardening/Export_Verificado_ADR148_Plan.md,roadmap/hardening/ADR148_Revision_2026-10-05.md,roadmap/hardening/ADR148_Revision_Sol61_2026-10-05.md,roadmap/ocr/Regiones_Pequenas_Investigacion_Plan.md,adr/ADR-202-El-Minimo-De-Region-OCR-Se-Prueba-A-25pt-Antes-De-Adoptarlo.md,roadmap/ocr/Regiones_Pequenas_25pt_Experimento_Plan.md,roadmap/interaccion/Mejoras_Interaccion_2026-10-05.md,adr/ADR-204-La-Interaccion-Anonimizada-Usa-La-Geometria-Visible.md,adr/ADR-205-El-Resultado-Exportado-Pertenece-A-Una-Revision.md,adr/ADR-206-Una-Busqueda-Omitida-No-Confirma-La-Version.md | audiencia=humanos+IA | fase=12 -->
+<!-- CONTEXT: scope=roadmap-1.x | dependencias=roadmap/Version_1.0.md,roadmap/Version_2.0.md,roadmap/Future_Ideas.md,roadmap/hitos/Post_Hito10.8_Pendientes.md,RELEASING.md,00_Project_Vision.md,architecture/08_Security_Model.md,adr/ADR-009-Export-Strategy.md,adr/ADR-059-Leyenda-Opcional-De-Marcadores.md,adr/ADR-148-Un-Export-Se-Verifica-Leyendo-El-PDF-Exportado.md,adr/ADR-190-Una-Pagina-Con-Tinta-No-Sale-Vacia-En-Silencio.md,roadmap/hardening/Export_Verificado_ADR148_Plan.md,roadmap/hardening/ADR148_Revision_2026-10-05.md,roadmap/hardening/ADR148_Revision_Sol61_2026-10-05.md,roadmap/ocr/Regiones_Pequenas_Investigacion_Plan.md,adr/ADR-202-El-Minimo-De-Region-OCR-Se-Prueba-A-25pt-Antes-De-Adoptarlo.md,roadmap/ocr/Regiones_Pequenas_25pt_Experimento_Plan.md,roadmap/interaccion/Mejoras_Interaccion_2026-10-05.md,adr/ADR-204-La-Interaccion-Anonimizada-Usa-La-Geometria-Visible.md,adr/ADR-205-El-Resultado-Exportado-Pertenece-A-Una-Revision.md,adr/ADR-206-Una-Busqueda-Omitida-No-Confirma-La-Version.md,roadmap/interaccion/Revision_ADR204_2026-10-07.md,roadmap/distribucion/SignPath_Postulacion.md,architecture/08_Security_Model.md | audiencia=humanos+IA | fase=12 -->
 
 # Anonly — Roadmap 1.x
 
@@ -94,6 +94,14 @@ Salió de publicar la 1.0.0 y actualizar una 0.9.2 de verdad.
 
 Lo primero, porque es lo que permite tocar la detección sin miedo.
 
+> **Orden decidido por el humano el 2026-10-07.** La próxima branch de trabajo
+> toma cuatro puntos de esta lista: el repintado de línea, los emails en
+> escaneos de baja resolución, las direcciones, y la medición de memoria del
+> perfil Bajo. Cada uno arranca como cualquier hito: auditoría, ADR y spec
+> antes que código. Siguen abiertas, y se deciden al empezar cada punto, las
+> preguntas de sus apartados «Para decidir al llegar». «Validar muestra» y la
+> página escasa y girada quedan para después.
+
 - **Gate que lee el PDF exportado** (ADR-148, primera entrega sin aprobar):
   abre el archivo exportado, lo convierte en imagen y le pasa OCR. Es trabajo
   de tests; no cambia el producto. **Auditado el 2026-10-05:** documentación
@@ -129,7 +137,8 @@ Lo primero, porque es lo que permite tocar la detección sin miedo.
   el humano autorizó commit y push utilizando develop. Los cambios están en
   [PR #52 hacia develop](https://github.com/sgiambelluca/Anonly/pull/52), pues
   la protección exige PR. La primera espera por el incidente de runners
-  quedó superada por el relanzamiento verde; integración todavía pendiente. Ver
+  quedó superada por el relanzamiento verde. **Integrado:** el PR #52 entró a
+  `develop` el 2026-10-05 y el PR #58 lo promovió a `main` el 2026-10-07. Ver
   [evidencia y revisión final](hardening/ADR148_Cierre_ADR203_2026-10-05.md).
 - **«Validar muestra»**: la misma comprobación, al alcance del usuario.
   Después de exportar, la aplicación vuelve a leer el PDF exportado y
@@ -140,14 +149,43 @@ Lo primero, porque es lo que permite tocar la detección sin miedo.
   su propia decisión: dónde se ofrece, qué muestra cuando encuentra algo, y
   cuánto tarda sobre un documento largo. Por el criterio de §1 sale en una
   versión menor, aunque se trabaje dentro de este bloque.
-- **Emails en escaneos de baja resolución**: investigar la causa
-  (`MVP.md`, Hito 11, ítem abierto del 2026-10-01).
+- **Emails en escaneos de baja resolución**: causa encontrada el 2026-10-07.
+  Es la lectura del OCR, no el patrón: de los 11 emails perdidos en la
+  campaña de DPI descendente, en 9 la `@` se leyó como `Q` y en 2 el punto
+  del nombre se leyó como espacio
+  ([informe](mediciones/ocr/DPI_Descendente_Fase1_Windows_2026-10-01.md) §2.1).
+  A 300 dpi no pasa. Sigue sin medir si un escaneo de unos 200 dpi nativos,
+  que hoy se lee a esa resolución (ADR-163), tiene la misma confusión.
+
+  **Para decidir al llegar**: si la detección tolera esa lectura (reconocer
+  `nombre.apellidoQdominio.tld` como email cuando el texto viene del OCR, y
+  extender hacia atrás un email cuyo nombre quedó partido por un espacio), con
+  qué límite para no inventar emails, y si antes se mide sobre un escaneo de
+  200 dpi nativos. Es un cambio de detección: lleva ADR y spec de Regex antes
+  que código, y sale como parche.
 - **Página escasa y girada** (riesgo aceptado de ADR-190): recalibrar el
   criterio de lectura fiable o verificar ángulos en páginas escasas.
 - **Direcciones**: 0 de 4 en la línea de base de calidad.
-- **Firma de Windows con SignPath**: cuando llegue la aprobación
-  (`SignPath_Postulacion.md` §5, que pide su ADR). No condiciona ninguna
-  versión.
+- **Firma de Windows con SignPath: cerrado sin firma.** SignPath rechazó la
+  postulación (informado el 2026-10-07). No hay otra vía gratuita, así que
+  Windows sigue sin Authenticode y pasa a figurar como riesgo aceptado en
+  `08_Security_Model.md` §2.3. Qué cambia y qué no:
+  [`SignPath_Postulacion.md`](distribucion/SignPath_Postulacion.md) §6. No
+  condiciona ninguna versión.
+- **El repintado de línea dibuja con otra tipografía y depende del zoom**
+  (hallazgo del 2026-10-07, sin decidir). Al revisar la interacción en la
+  vista anonimizada (ADR-204, que quedó validada) se midió que el repintado
+  de ADR-058 redibuja el resto del renglón en monoespaciada chica, y que se
+  activa o no según la escala: el mismo renglón cambia con el zoom, y nada
+  garantiza que el export coincida con el preview. No es una fuga de dato.
+  Medición y hallazgos H-1 a H-4:
+  [`Revision_ADR204_2026-10-07.md`](interaccion/Revision_ADR204_2026-10-07.md).
+
+  **Para decidir al llegar**: si el repintado se corrige (calibrar al tamaño
+  real del renglón, con su gate visual y un test con tipografías reales) o se
+  apaga hasta corregirlo, que deja siempre el encogido de ADR-058 §1. Las dos
+  cambian el PDF exportado: por el criterio de §1 es un parche, y las notas de
+  la versión lo dicen.
 - **Memoria**: medir el techo del perfil Bajo en Windows (ADR-194 §7) y
   repetir M2, cuyo margen en P2 es menor que el ruido.
 

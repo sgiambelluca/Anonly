@@ -126,3 +126,13 @@ zoom, cambio de modo, caché de preview, edición mientras hay selección y
 resultado de render tardío. En Electron, el rectángulo y el hit-test deben
 coincidir con la palabra visible. El resaltado nunca se incorpora al PDF
 exportado. Los tests del original conservan su comportamiento.
+
+## Revisión del 2026-10-07
+
+El planificador midió el rectángulo de la lupa contra la tinta del canvas en
+la aplicación de escritorio, con y sin repintado de línea: la posición y el
+hit-test son correctos. Queda una diferencia menor con el punto 1 de la
+decisión: el mapa conserva el tamaño original de una palabra desplazada,
+aunque el repintado la haya dibujado más chica. No se corrige acá, porque
+depende de qué se decida sobre el repintado de ADR-058. Medición y hallazgos:
+`roadmap/interaccion/Revision_ADR204_2026-10-07.md`.
