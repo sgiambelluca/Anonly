@@ -5,6 +5,7 @@ import {
   EntityType,
   InvalidInputError,
   type EngineContext,
+  type BoundingBox,
   type EntityFound,
   type NerModelLoading,
 } from "@anonly/shared";
@@ -23,6 +24,7 @@ vi.mock("@huggingface/transformers", () => ({
 import { NerEngine } from "../ner.engine.js";
 import { NerModelMissingError } from "../ner.errors.js";
 
+import { extendedAddressText } from "./fixtures/address-helpers.js";
 import {
   asPipelineMock,
   createEngineContext,
@@ -403,6 +405,276 @@ describe("NerEngine — edge case tests", () => {
 
         await pooledEngine.dispose();
       }
+    });
+  });
+
+  // ─── Caso 34 (ADR-212): la dirección incluye la altura que la sigue ───
+
+  describe("Caso 34: extensión de Address hasta la altura", () => {
+    /** Lo que abarca el span `span` en `text` tras la extensión. */
+    const extended = extendedAddressText;
+
+    it("address span keeps a year-like number out without an address cue", async () => {
+      // De punta a punta: el modelo marca «Rosario» y el año queda afuera.
+      asPipelineMock(pipeline).mockResolvedValue(
+        mockTokenClassificationPipeline(() =>
+          Promise.resolve([nerToken("B-LOC", "Rosario", 0.9, 2)]),
+        ),
+      );
+      await engine.init(ctx);
+      const input = makeNerPageInput("doc-year-no-cue", 0, [
+        "Se",
+        "realizó",
+        "Rosario",
+        "2019",
+        "y",
+        "otra",
+      ]);
+      const output = await engine.processPage(input, ctx);
+      expect(output.occurrences.map((o) => o.value)).toEqual(["Rosario"]);
+
+      // Los bordes del criterio: 1900 y 2099 son años, 1899 y 2100 no.
+      expect(extended("Se hizo en Rosario 1900 ya", "Rosario")).toBe("Rosario");
+      expect(extended("Se hizo en Rosario 2099 ya", "Rosario")).toBe("Rosario");
+      expect(extended("Se hizo en Rosario 1899 ya", "Rosario")).toBe("Rosario 1899");
+      expect(extended("Se hizo en Rosario 2100 ya", "Rosario")).toBe("Rosario 2100");
+      // Año es exactamente cuatro dígitos: con cinco o con cero a la izquierda no.
+      expect(extended("Se hizo en Rosario 01950 ya", "Rosario")).toBe("Rosario 01950");
+      expect(extended("Se hizo en Rosario 195 ya", "Rosario")).toBe("Rosario 195");
+      // Una palabra de dirección fuera de la ventana no cuenta.
+      expect(extended("domicilio a b c d e f Rosario 2019 ya", "Rosario")).toBe("Rosario");
+      expect(extended("Rosario 2019 a b c d piso", "Rosario")).toBe("Rosario");
+    });
+
+    it("address span takes a year-like number with a cue before or after", () => {
+      const cuesBefore = [
+        "domicilio",
+        "domiciliado",
+        "domiciliada",
+        "domiciliados",
+        "domiciliadas",
+        "calle",
+        "avenida",
+        "av.",
+        "avda.",
+        "sito",
+        "sita",
+        "vive",
+        "viven",
+        "reside",
+        "residen",
+      ];
+      for (const cue of cuesBefore) {
+        expect(extended(`Juan ${cue} Rosario 2019 fin`, "Rosario")).toBe("Rosario 2019");
+      }
+      // Sin distinguir mayúsculas ni tildes, y con la puntuación de los bordes recortada.
+      expect(extended("DOMICILIO Rosario 2019", "Rosario")).toBe("Rosario 2019");
+      expect(extended("Domicilio: Rosario 2019", "Rosario")).toBe("Rosario 2019");
+      expect(extended("SÍTA Rosario 2019", "Rosario")).toBe("Rosario 2019");
+      expect(extended("Av Rosario 2019", "Rosario")).toBe("Rosario 2019");
+      expect(extended("(calle), Rosario 2019", "Rosario")).toBe("Rosario 2019");
+      // Palabra entera: un prefijo o una palabra más larga no es la entrada.
+      expect(extended("domiciliario Rosario 2019", "Rosario")).toBe("Rosario");
+      expect(extended("calles Rosario 2019", "Rosario")).toBe("Rosario");
+
+      // Ventana anterior: seis palabras sí, siete no.
+      expect(extended("domicilio a b c d e Rosario 2019", "Rosario")).toBe("Rosario 2019");
+      expect(extended("domicilio a b c d e f Rosario 2019", "Rosario")).toBe("Rosario");
+      // Como primera palabra del propio span.
+      expect(extended("Juan en calle Rosario 2019", "calle Rosario")).toBe("calle Rosario 2019");
+      expect(extended("Juan en Av. Rosario 2019", "Av. Rosario")).toBe("Av. Rosario 2019");
+      // El resto anterior del tramo donde empieza el span no es una palabra anterior...
+      expect(extended("(Rosario 2019", "Rosario")).toBe("Rosario");
+      expect(extended("domicilio(Rosario 2019", "Rosario")).toBe("Rosario");
+      // ...pero la palabra anterior completa sí cuenta.
+      expect(extended("domicilio (Rosario 2019", "Rosario")).toBe("Rosario 2019");
+
+      const cuesAfter = ["piso", "departamento", "depto.", "dpto."];
+      for (const cue of cuesAfter) {
+        expect(extended(`Juan en Rosario 2019 ${cue} 3`, "Rosario")).toBe("Rosario 2019");
+      }
+      expect(extended("Rosario 2019, PISO 3", "Rosario")).toBe("Rosario 2019");
+      expect(extended("Rosario 2019 Pisó", "Rosario")).toBe("Rosario 2019");
+      expect(extended("Rosario 2019 Dpto, B", "Rosario")).toBe("Rosario 2019");
+      expect(extended("Rosario 2019 de esta ciudad", "Rosario")).toBe("Rosario 2019");
+      expect(extended("Rosario 2019, de la localidad de X", "Rosario")).toBe("Rosario 2019");
+      // Ventana posterior: cuatro palabras sí, cinco no.
+      expect(extended("Rosario 2019 a b c piso", "Rosario")).toBe("Rosario 2019");
+      expect(extended("Rosario 2019 a b c d piso", "Rosario")).toBe("Rosario");
+      // Una secuencia tiene que caber entera en la ventana.
+      expect(extended("Rosario 2019 a de esta ciudad", "Rosario")).toBe("Rosario 2019");
+      expect(extended("Rosario 2019 a b de esta ciudad", "Rosario")).toBe("Rosario");
+      expect(extended("Rosario 2019 a de la localidad", "Rosario")).toBe("Rosario 2019");
+      expect(extended("Rosario 2019 a b de la localidad", "Rosario")).toBe("Rosario");
+      // Palabra entera, y la cola pegada a los dígitos no es una palabra.
+      expect(extended("Rosario 2019 pisos 3", "Rosario")).toBe("Rosario");
+      expect(extended("Rosario 2019piso 3", "Rosario")).toBe("Rosario");
+      expect(extended("Rosario 2019 de esta", "Rosario")).toBe("Rosario");
+      // Un número que no es año no necesita ninguna palabra de dirección.
+      expect(extended("Rosario 3019", "Rosario")).toBe("Rosario 3019");
+    });
+
+    it("address number accepts the N°, nro, número and al connectors", async () => {
+      const connectors = ["N°", "Nº", "No.", "nro", "nro.", "número", "numero", "al"];
+      for (const connector of connectors) {
+        for (const spaces of ["", " ", "  "]) {
+          const tail = `${connector}${spaces}1434`;
+          expect(extended(`Reunión en Maipú ${tail} hoy`, "Maipú")).toBe(`Maipú ${tail}`);
+        }
+        // Sin distinguir mayúsculas; uno o dos espacios entre la calle y el conector.
+        expect(extended(`En Maipú  ${connector.toUpperCase()} 55`, "Maipú")).toBe(
+          `Maipú  ${connector.toUpperCase()} 55`,
+        );
+        // Un conector sin dígitos después no extiende.
+        expect(extended(`Reunión en Maipú ${connector} hoy`, "Maipú")).toBe("Maipú");
+        expect(extended(`Reunión en Maipú ${connector}`, "Maipú")).toBe("Maipú");
+        // Ni con más de dos espacios antes de los dígitos.
+        expect(extended(`Reunión en Maipú ${connector}   1434`, "Maipú")).toBe("Maipú");
+      }
+      // Un conector que no es de la lista no es un conector.
+      expect(extended("Reunión en Maipú no 1434", "Maipú")).toBe("Maipú");
+      expect(extended("Reunión en Maipú alto 1434", "Maipú")).toBe("Maipú");
+      // El año con conector sigue necesitando una palabra de dirección.
+      expect(extended("Reunión en Rosario nro. 2019", "Rosario")).toBe("Rosario");
+      expect(extended("Vive en Rosario nro. 2019", "Rosario")).toBe("Rosario nro. 2019");
+
+      // De punta a punta: el conector queda dentro del valor y de la caja.
+      asPipelineMock(pipeline).mockResolvedValue(
+        mockTokenClassificationPipeline(() =>
+          Promise.resolve([nerToken("B-LOC", "Maipú", 0.9, 2)]),
+        ),
+      );
+      await engine.init(ctx);
+      const input = makeNerPageInput("doc-address-connector", 0, [
+        "En",
+        "la",
+        "Maipú",
+        "nro.",
+        "55",
+      ]);
+      const output = await engine.processPage(input, ctx);
+      expect(output.occurrences.map((o) => o.value)).toEqual(["Maipú nro. 55"]);
+      expect(output.occurrences[0]?.wordSpan).toEqual({ startIndex: 2, endIndexExclusive: 5 });
+    });
+
+    it("address number stops at dates, decimals and ranges", () => {
+      const notAnAltura = [
+        "1434/2",
+        "12/03/2022",
+        "1434,5",
+        "1434.5",
+        "1.434",
+        "1,434",
+        "12-15",
+        "12‐15",
+        "12‑15",
+        "12–15",
+        "12—15",
+        "143456",
+        "1434567",
+      ];
+      for (const tail of notAnAltura) {
+        expect(extended(`Reunión en Maipú ${tail} hoy`, "Maipú")).toBe("Maipú");
+      }
+      // La puntuación sola, sin un dígito después, no impide la altura.
+      expect(extended("En Maipú 1434, piso 3", "Maipú")).toBe("Maipú 1434");
+      expect(extended("En Maipú 1434. Luego", "Maipú")).toBe("Maipú 1434");
+      expect(extended("En Maipú 1434- luego", "Maipú")).toBe("Maipú 1434");
+      expect(extended("En Maipú 1434– luego", "Maipú")).toBe("Maipú 1434");
+      expect(extended("En Maipú 14345 luego", "Maipú")).toBe("Maipú 14345");
+      expect(extended("En Maipú 7", "Maipú")).toBe("Maipú 7");
+      // Lo que sigue al span tiene que ser espacio en blanco: una coma lo corta.
+      expect(extended("En Maipú, 1434", "Maipú")).toBe("Maipú");
+      expect(extended("En Maipú1434", "Maipú")).toBe("Maipú");
+      // Más de dos espacios, o ninguno número, tampoco.
+      expect(extended("En Maipú   1434", "Maipú")).toBe("Maipú");
+      expect(extended("En Maipú  1434", "Maipú")).toBe("Maipú  1434");
+      expect(extended("En Maipú hoy 1434", "Maipú")).toBe("Maipú");
+    });
+
+    type Rotation = NonNullable<BoundingBox["rotation"]>;
+    const ROTATED_ANGLES: ReadonlyArray<Rotation> = [90, 270];
+
+    it("address extension does not cross into a word of a different rotation", async () => {
+      // El modelo ve cada batch por separado (ADR-088 §1): marca «Maipú»
+      // cuando está en el texto del batch.
+      asPipelineMock(pipeline).mockResolvedValue(
+        mockTokenClassificationPipeline((text: string) =>
+          Promise.resolve(text.includes("Maipú") ? [nerToken("B-LOC", "Maipú", 0.9, 0)] : []),
+        ),
+      );
+      await engine.init(ctx);
+
+      const withRotations = (
+        tokens: ReadonlyArray<string>,
+        rotations: ReadonlyArray<Rotation | undefined>,
+      ) => {
+        const base = makeNerPageInput("doc-address-rotation", 0, tokens);
+        return {
+          ...base,
+          words: base.words.map((word, i) => {
+            const rotation = rotations[i];
+            return rotation === undefined ? word : { ...word, bbox: { ...word.bbox, rotation } };
+          }),
+        };
+      };
+
+      // La dirección termina el texto horizontal y la sigue, en Page.text, un
+      // número que pertenece a un run rotado (el folio del margen).
+      for (const angle of ROTATED_ANGLES) {
+        const input = withRotations(
+          ["Vive", "en", "Maipú", "1434"],
+          [undefined, undefined, undefined, angle],
+        );
+        const output = await engine.processPage(input, ctx);
+
+        expect(output.occurrences).toHaveLength(1);
+        const [occurrence] = output.occurrences;
+        expect(occurrence?.value).toBe("Maipú");
+        expect(occurrence?.normalizedValue).toBe("maipu");
+        // Sin caja envolvente: la caja es la de la palabra «Maipú», sin ángulo.
+        expect(occurrence?.bbox).toEqual(input.words[2]?.bbox);
+        expect(occurrence?.bbox.rotation).toBeUndefined();
+        expect(occurrence?.fragments).toBeUndefined();
+        expect(occurrence?.wordSpan).toEqual({ startIndex: 2, endIndexExclusive: 3 });
+      }
+
+      // Lo mismo si lo rotado es el conector y el número (el tramo agregado).
+      const connectorInput = withRotations(
+        ["Vive", "en", "Maipú", "N°", "1434"],
+        [undefined, undefined, undefined, 270, 270],
+      );
+      const connectorOutput = await engine.processPage(connectorInput, ctx);
+      expect(connectorOutput.occurrences.map((o) => o.value)).toEqual(["Maipú"]);
+
+      // Con un solo de los dos del tramo en otro ángulo alcanza para no cruzar.
+      const halfRotatedInput = withRotations(
+        ["Vive", "en", "Maipú", "N°", "1434"],
+        [undefined, undefined, undefined, undefined, 90],
+      );
+      const halfRotatedOutput = await engine.processPage(halfRotatedInput, ctx);
+      expect(halfRotatedOutput.occurrences.map((o) => o.value)).toEqual(["Maipú"]);
+
+      // Con la calle y el número en el mismo ángulo sí se extiende, y la
+      // ocurrencia lleva ese ángulo.
+      for (const angle of ROTATED_ANGLES) {
+        const input = withRotations(
+          ["Vive", "en", "Maipú", "1434"],
+          [undefined, undefined, angle, angle],
+        );
+        const output = await engine.processPage(input, ctx);
+
+        expect(output.occurrences).toHaveLength(1);
+        const [occurrence] = output.occurrences;
+        expect(occurrence?.value).toBe("Maipú 1434");
+        expect(occurrence?.wordSpan).toEqual({ startIndex: 2, endIndexExclusive: 4 });
+        expect(occurrence?.bbox.rotation).toBe(angle);
+      }
+
+      // Y con todo el texto en el mismo ángulo (ninguno rotado) también.
+      const horizontal = withRotations(["Vive", "en", "Maipú", "1434"], []);
+      const horizontalOutput = await engine.processPage(horizontal, ctx);
+      expect(horizontalOutput.occurrences.map((o) => o.value)).toEqual(["Maipú 1434"]);
     });
   });
 });
