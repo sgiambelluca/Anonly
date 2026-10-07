@@ -252,7 +252,7 @@ vez de volver a escribir el texto, y eliminar la calibración de tipografía.
 Pasos:
 
 1. Hecho el 2026-10-07: `Render_Engine.md` v1.18.0 (nota de cabecera,
-   «Enmienda normativa ADR-210» y checklist §15 ítem 30), la enmienda en
+   «Enmienda normativa ADR-210» y checklist §15 ítem 33), la enmienda en
    ADR-058 y el comentario de `lineWords` en `03_Data_Model.md`.
    `UX_Guidelines.md` no cambia: lo que dice del repintado sigue siendo cierto.
 2. El implementador de `render-engine` implementa desde el spec, con los

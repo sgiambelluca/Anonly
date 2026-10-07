@@ -55,6 +55,11 @@ cualquier otro cambio. Contiene:
 No se versiona `.measure/` completo: es salida cruda de una corrida, con lo que
 haya adentro.
 
+> **Precisión del 2026-10-07 (decisión del mantenedor).** `develop` integra por
+> rebase, que reescribe los hashes. En la línea de base versionada, el campo
+> `commit` lleva el encabezado del commit medido y el nombre de la branch o
+> el PR, no el hash. El campo es informativo: el comparador no lo exige.
+
 ### 2. Cada entidad tiene una identidad estable, sin cambiar el formato de los fixtures
 
 `TruthEntity` no tiene `id`, y no hace falta agregárselo a mano en 20 archivos:

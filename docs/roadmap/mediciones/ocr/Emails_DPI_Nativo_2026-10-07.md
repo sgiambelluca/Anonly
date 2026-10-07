@@ -81,7 +81,7 @@ El arnés cuenta, en todo el texto leído, las cadenas con la forma
 - Cambiando la `Q` por `@`, las dos cadenas reconstruyen exactamente el email
   original.
 - No aparece ninguna otra cadena con esa forma en ninguno de los textos,
-  tampoco en `SR`, que tiene 19 páginas leídas. En este corpus, una regla
+  tampoco en `SR`, el corpus más largo. En este corpus, una regla
   tolerante no inventaría ningún email.
 - No hubo ningún caso de punto leído como espacio. Ese caso sí apareció al
   forzar la lectura a 150 dpi (2 de 11 en la campaña anterior).
