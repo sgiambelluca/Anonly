@@ -2,7 +2,7 @@
 
 # ADR-208: develop exige los mismos checks que main
 
-**Estado:** Adoptado por el planificador a pedido del mantenedor — 2026-10-06.
+**Estado:** Adoptado por el planificador a pedido del mantenedor — 2026-10-06. §2 (rama actualizada) enmendado por ADR-209: queda solo en `develop`.
 
 ## Contexto
 

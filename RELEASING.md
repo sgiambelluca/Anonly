@@ -51,30 +51,25 @@ lo nuevo en lugar de volver a encontrar los mismos cambios como commits
 distintos. `develop` sigue lineal: ahí se integra siempre con Rebase and merge
 o squash, y GitHub rechaza un merge commit.
 
-La promoción **siempre** pasa por una rama temporal creada desde `main`, no por
-un PR directo de `develop`: `main` exige estar actualizada y su punta es, tras
-cada promoción, un merge commit que `develop` no contiene.
-
-```bash
-git fetch origin
-git switch -c release/1.1.0 origin/main
-git merge origin/develop       # si hay conflictos, resolvelos y commiteá
-git push -u origin release/1.1.0
-```
-
-Abrí el PR de `release/1.1.0` hacia `main` y usá **Create a merge commit**.
-Para saber de antemano si habrá conflictos:
+Abrí un PR de `develop` hacia `main` y usá **Create a merge commit**. No hace
+falta ninguna rama intermedia: `main` no exige estar actualizada, y GitHub
+mergea a partir de la última punta de `develop` ya promovida, de modo que solo
+entran los commits nuevos aunque `main` tenga un merge commit que `develop` no
+contiene. Para saber de antemano si habrá conflictos:
 `git merge-tree --write-tree --name-only origin/main origin/develop` sale con
-código 1 si los hay y 0 si no. Revisá que el diff final sea el esperado y
-repetí las pruebas afectadas si la resolución cambió contenido. Si `develop`
-avanza antes de integrar, hacé `git merge origin/develop` en esa rama. La rama
-puede eliminarse después del PR.
+código 1 si los hay y 0 si no.
 
 Nunca uses Rebase and merge ni squash en esta promoción: reescriben los SHA y
 vuelven a separar las dos ramas. Tampoco hagas merge de `main` en `develop`: es
 un merge commit y `develop` lo rechaza, y no hace falta. Después de promover
 no hay nada que sincronizar de vuelta. Los hotfixes y cualquier cambio
 exclusivo de `main` se trasladan por separado (ver «Arreglos urgentes»).
+
+La primera promoción tras adoptar este flujo es la excepción: las ramas ya
+habían divergido por rebase y un merge directo da conflictos. Usá la rama
+`release/promote-develop` (merge de `develop` sobre `main` con los conflictos
+resueltos, ADR-209), actualizada con `git merge origin/develop` si `develop`
+avanzó, y abrí su PR hacia `main` con merge commit.
 
 **5. Esperás CI verde en `main` y tageás el commit validado.** Es la punta de `main` tras la promoción, o sea el merge commit: es el SHA que tiene CI de push en `main`. Un commit de `develop` que ya entró a `main` pero no tiene esa CI es rechazado. El tag debe coincidir exactamente con `v` + la versión de `apps/desktop-shell/package.json`. La validación del release rechaza un commit fuera de `main`, un tag que no coincide o un SHA sin CI exitosa. El tag dispara el release:
 
@@ -214,12 +209,12 @@ Los checks se aplican también al administrador y se vinculan a GitHub Actions.
 | Lint, Typecheck, Unit + Contract + Snapshot, Build | requeridos                          | requeridos                          |
 | Security audit y Security gates                    | requeridos                          | requeridos                          |
 | E2E (Playwright)                                   | requerido                           | requerido                           |
-| Rama actualizada antes del merge                   | requerido                           | requerido                           |
+| Rama actualizada antes del merge                   | requerido                           | no requerido                        |
 | Historial lineal                                   | requerido                           | no requerido                        |
 | Performance                                        | en PR, después de integrar y a mano | en PR, después de integrar y a mano |
 | Memory leak y Stress                               | a mano                              | después de integrar y a mano        |
 
-Desde ADR-208 `develop` exige lo mismo que `main`. `E2E (Playwright)` es el
+Desde ADR-208 `develop` exige los mismos checks que `main`, y además la rama actualizada, que `main` no exige (ADR-209). `E2E (Playwright)` es el
 check agregador: exige las dos mitades de E2E y `Export verification`, que hoy
 solo existe en `develop` y llega a `main` con la promoción.
 
@@ -245,5 +240,5 @@ el tag como en el flujo anterior. Después creá una rama desde `develop`, llev�
 los commits del parche mediante cherry-pick y abrí PR hacia `develop`. Resolvé
 la versión y los CHANGELOG para conservar el parche junto al trabajo pendiente.
 
-La rama temporal `release/...` es el camino de toda promoción (paso 4); puede
-eliminarse después de integrar su PR.
+La rama `release/promote-develop` es solo para la primera promoción (paso 4);
+puede eliminarse después de integrar su PR.
