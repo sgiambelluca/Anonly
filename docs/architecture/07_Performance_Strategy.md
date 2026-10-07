@@ -302,10 +302,10 @@ Comando mínimo pre-PR (subset local de esta tabla): `pnpm lint && pnpm typechec
 **Selección de ramas en CI (ADR-199, 2026-10-02; enmendado por ADR-208, 2026-10-06):**
 los gates básicos, E2E, Export verification y Performance corren en PR y
 pushes a `main` y `develop`, y en ejecuciones manuales. Leak y Stress
-conservan pushes a `main` y ejecuciones manuales. Un PR a `develop` exige lo
-mismo que uno a `main`: Lint, Typecheck, Unit + Contract + Snapshot, Build,
-Security audit, Security gates y E2E, con la rama actualizada antes del
-merge. Performance corre en ambos pero no es un check requerido. La
+conservan pushes a `main` y ejecuciones manuales. Un PR a `develop` exige los
+mismos checks que uno a `main`: Lint, Typecheck, Unit + Contract + Snapshot,
+Build, Security audit, Security gates y E2E. Solo `develop` exige además la
+rama actualizada antes del merge (ADR-209). Performance corre en ambos pero no es un check requerido. La
 configuración de ADR-148 agrega `Export verification` y lo incluye en el
 check agregado `E2E (Playwright)`; aprobada localmente y verificada en
 CI/macOS por run 37383499951.
