@@ -1614,3 +1614,84 @@ empareje esa ocurrencia con la verdad, `entityKey` (`ocrDpiDownScoring.ts`) usa 
 normalización es pasar a minúsculas) y en los demás tipos no se usa (una fecha se normaliza a otro
 formato). Las celdas de las corridas nuevas guardan `normalizedValue` en `detected`, y las de emails
 nativos suman `detected` completo. Los registros anteriores no lo tienen y se siguen leyendo igual.
+
+## Altura de las direcciones (`address-height`, M-D1)
+
+`docs/roadmap/hardening/Confianza_1.0.x_Plan.md` (M-D1) y ADR-212. El modelo de nombres marca la calle y
+deja el número afuera («con domicilio en Maipú 1434» da `Maipú`); `ner-engine` extiende la ocurrencia
+`Address` hasta el número que la sigue, y si ese número parece un año (cuatro dígitos entre 1900 y 2099) lo
+suma solo si hay una palabra de dirección cerca. Este arnés mide, para esa regla y para la alternativa en
+reserva («tapar siempre»), cuántas alturas quedan a la vista y cuántos años quedan tapados de más. Se vuelve
+a correr si la regla o el modelo cambian.
+
+```bash
+# Humo: una repetición
+ANONLY_ADDRESS_HEIGHT_SMOKE=1 ./tests/perf/run-address-height.sh
+# Medición: dos repeticiones completas (con el build, unos 2 min)
+./tests/perf/run-address-height.sh
+```
+
+Es un runner propio (`run-address-height.sh`, `address-height.spec.ts`) sobre el preámbulo común
+`support/ocr-campaign-common.sh`: mismas guardas (producto sin cambios en `packages/` y `apps/`, otro
+Playwright o Vitest activos, detección y prevención de suspensión, salida que no se pisa). Una instancia
+fría de Electron por repetición, en serie, con el modelo real y la configuración por defecto: la suite de
+medición solo fija el perfil (ADR-194 §8) y el arnés verifica que no haya overrides de motor. Solo
+sintéticos: no usa `ANONLY_REAL_DOC_*`.
+
+**El documento.** `support/addressHeightFixture.ts` genera un PDF digital (capa de texto, sin OCR) con
+una página por oración de `support/addressHeightSentences.ts` (76 oraciones, categorías A a H, con su
+`place` y su `number`). Cada página lleva tres párrafos: un relleno fijo, la oración y otro relleno fijo.
+El relleno es el mismo en todas, no lleva ninguna palabra de la lista de ADR-212 y está para que las
+ventanas de seis y cuatro palabras de la regla no lleguen a otra oración de prueba. **Las oraciones son
+datos y no se cambian ni se acomodan** para que el resultado salga de una u otra manera; si una no se puede
+generar tal cual es un hallazgo.
+
+| Categoría | Qué es | Qué se espera de la regla por contexto |
+| --- | --- | --- |
+| A | altura que no parece año (A1 a A4 con palabra de dirección, A5 a A10 sin) | dentro de la dirección |
+| B | altura con forma de año y palabra de dirección antes | dentro |
+| C | altura con forma de año y palabra de dirección después | dentro |
+| D | altura con forma de año, sin palabra de dirección | **a la vista** (lo que falta cubrir) |
+| E | lugar y año, sin palabra de dirección | año sin tocar |
+| F | lugar y año con una palabra de la lista cerca por otro motivo | dentro (año tapado de más) |
+| G | variantes de la altura: «N°», «Nº», «nro.», «número», «No.», «al», cinco dígitos | dentro |
+| H | lugar y un número que no es altura ni año | dentro (tapado de más), salvo H4 y H5 (fecha, importe) |
+
+| Variable | Qué hace |
+| --- | --- |
+| `ANONLY_ADDRESS_HEIGHT_SMOKE` | `1`: humo, una repetición |
+| `ANONLY_ADDRESS_HEIGHT_OUTPUT_DIR` | carpeta de salida (por defecto `.measure/address-height/<UTC>/`; no se pisa una existente) |
+
+**Qué registra cada oración** (`support/addressHeightClassify.ts`, función pura con test): el texto de la
+página tal como lo extrajo la app; todas las ocurrencias de la página, de cualquier tipo, con `entityType`,
+`value`, `source`, `confidence`, índices de palabra y posición en el texto; y
+
+- `placeMarked`: hay una ocurrencia `Address` cuyo valor contiene el lugar o se superpone con él;
+- `addressValues`: los valores de las ocurrencias `Address` de la página;
+- `numberInAddress` / `numberCoveredByOther`: los dígitos (la aparición que sigue al lugar) quedan dentro de
+  una dirección o de una ocurrencia de otro tipo (se dice cuál);
+- `adjacent`: la dirección que contiene el lugar termina justo antes del número (entre el fin del valor y
+  los dígitos hay solo espacio y, si lo hay, el conector);
+- `yearLike` y `alwaysWouldCover = placeMarked && !numberInAddress && adjacent && yearLike`: lo que cambiaría
+  con «tapar siempre». Los números de esa variante salen de los mismos datos.
+
+`numberInAddress` no distingue si el número lo sumó la regla o lo incluyó el propio modelo (con «Av.» a
+veces lo incluye): es el estado final que ve el usuario, que es lo que importa para la fuga.
+
+**Validez de la corrida** (una corrida inválida se escribe, se lista y no entra a ningún total; no se
+«arregla»): el pipeline llegó a `Ready` sin fallar, NER terminó, hay una página por oración, el documento
+es de texto y ninguna página pide OCR, `ner.enabled` efectivo es `true`, el perfil de los settings es el que
+fija la suite de medición (`medium`), no hay overrides de motor y **el texto que extrajo la app de cada
+página es exactamente el escrito** (tildes, «°» y «º» incluidos).
+
+**Qué produce** (`.measure/address-height/<UTC>/`, ignorada por git): `address-height-run-r<n>.json` (un
+registro completo por repetición, con el commit medido), `address-height-run.json`, `validity.json` y
+`caveats.json` si corresponden, `sleep-detection.json`, presión del sistema, `summary.json` y
+`summary-table.txt` (`support/addressHeightSummary.ts` vía `support/summarizeAddressHeightCli.ts`). El
+resumen da, por categoría y en total y para las dos variantes, los lugares marcados y no marcados (estos
+últimos se cuentan aparte: son un límite del modelo, no de la regla), los números dentro de la dirección y
+a la vista, las alturas que quedan a la vista (A, B, C, D, G) y los años y otros números tapados de más
+(E, F, H); la lista de oraciones cuyo resultado no es el esperado de ADR-212, con su `id`, sus
+`addressValues` y el motivo; y si las dos repeticiones coinciden oración por oración. Sale con 1 si falta o
+es inválida alguna corrida. Que el resultado no sea el esperado, o que las repeticiones difieran, no es un
+error del instrumento: se informa. Es una medición, no un gate.
