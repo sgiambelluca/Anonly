@@ -158,3 +158,9 @@ Pruebas:
   ningún email agregado que no esté en la verdad; ninguna otra entidad
   perdida. Si un número no se cumple, el cambio no se da por bueno y vuelve
   al mantenedor.
+
+**Medido el 2026-10-07.** Se cumplió: de 11 a 2 perdidos al forzar la
+resolución, y a cero en las dos mediciones a resolución nativa; ningún email
+agregado por el cambio y ninguna otra entidad distinta, con el texto del OCR
+idéntico en las 105 celdas comparadas
+(`roadmap/mediciones/ocr/Emails_DPI_Nativo_2026-10-07.md`, M-E3).
