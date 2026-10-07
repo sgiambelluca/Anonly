@@ -1,6 +1,7 @@
 /**
- * Selección host-side de las palabras de línea para el repintado por
- * calibración (ADR-058 §5, `Orchestrator.md` nota v1.6.0).
+ * Selección host-side de las palabras de línea para el repintado de línea
+ * (ADR-058 §5, `Orchestrator.md` nota v1.6.0). Desde ADR-210 el kernel mueve
+ * los píxeles de estas palabras en lugar de calibrar una tipografía.
  *
  * Función **pura y síncrona**: dado el `Page.words` de una página y sus
  * `Replacement[]`, decide si algún reemplazo de esa página podría no entrar
