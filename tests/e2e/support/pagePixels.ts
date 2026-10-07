@@ -94,7 +94,13 @@ export async function installPageImageCapture(page: Page): Promise<void> {
         const width = image.naturalWidth;
         const height = image.naturalHeight;
         if (width === 0 || height === 0) return;
-        drawLog.push({ label, width, canvasWidth: context.canvas.width });
+        drawLog.push({
+          label,
+          width,
+          canvasWidth: context.canvas.width,
+          src: image.currentSrc || image.src,
+          at: performance.now(),
+        });
         const copy = document.createElement("canvas");
         copy.width = width;
         copy.height = height;
@@ -125,6 +131,10 @@ export interface DrawRecord {
   readonly width: number;
   /** Ancho del canvas del visor en ese momento (`pageLayout.ts`: depende del zoom). */
   readonly canvasWidth: number;
+  /** El `blob:` de la imagen dibujada: dice de qué render salió (dos imágenes distintas, dos URL). */
+  readonly src: string;
+  /** `performance.now()` de la página al dibujar (la misma base que `support/renderTap.ts`). */
+  readonly at: number;
 }
 
 /** Cuántos dibujos hay registrados; sirve de marca para `drawsSince`. */
