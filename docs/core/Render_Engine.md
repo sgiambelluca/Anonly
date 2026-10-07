@@ -5,8 +5,10 @@
 > Renderiza páginas del PDF (original o anonimado) a imágenes usando OffscreenCanvas en Web Workers. Produce highlight de grupos habilitados y aplica reemplazos visualmente según `ReplacementMode`. Soporta preview incremental y render full para export.
 
 **EngineId**: `render`
-**Versión del spec**: 1.17.0
-**Última actualización**: 2026-09-12
+**Versión del spec**: 1.18.0
+**Última actualización**: 2026-10-07
+
+> **Nota (v1.18.0, ADR-210, 2026-10-07 — el repintado de línea mueve píxeles)**: el repintado de ADR-058 §2 volvía a escribir las palabras que siguen al token con una tipografía calibrada. Medido en la aplicación de escritorio, la calibración elegía `monospace` a unos 0,6 o 0,7 cuerpos, y su activación dependía de la escala de render. Desde esta versión las palabras vecinas **no se vuelven a escribir**: el kernel copia sus píxeles y los pega desplazados. **Se elimina la calibración** (los doce candidatos, el umbral y la condición (e) del caso 26). El token se dibuja con la familia de su modo, y la decisión de repintar deja de depender de redondeos a píxeles. No cambia ningún contrato. Lo normativo está en la «Enmienda normativa ADR-210», al final; donde esa enmienda contradice a §2, §6, §13 o §14, manda la enmienda.
 
 > **Nota (v1.16.0, ADR-156, 2026-09-11 — el preview no guarda ni transporta los píxeles que nadie lee)**: verificado sobre todo el repo (condición que el humano puso para aprobar el cambio): ningún consumidor —ni `apps/react-client`, ni el façade, ni el export (que usa `output.encoded`)— lee jamás `RenderPageOutput.imageData`. Dentro del motor lo leían dos cosas: el contador de bytes del cache LRU (§12) y la proyección al output público, que copiaba el campo a un lugar que nadie consultaba. Tres cambios:
 >
@@ -81,7 +83,7 @@ Recibir requests de renderizado por página (`RENDER_REQUESTED` o invocación di
   - `mask` → texto censurado (`XX.XXX.XXX`) sobre bbox.
   - `redact` → fill opaco negro sobre bbox (sin texto).
 - **Garantizar que ningún texto de reemplazo se salga de su ancho disponible** (ADR-058 §1): medir con `measureText` y ajustar el tamaño de fuente hasta que entre, **con el piso de fuente mínima escalado por la escala de render** (ADR-086 §2(b); era un piso absoluto de 8px hasta entonces, lo que aplicaba dos umbrales visuales distintos a la misma decisión según el zoom). Aplica a los tres modos con texto, siempre. Es la única garantía dura de ADR-058; el resto de sus piezas son calidad.
-- Cuando el token **no** entra y las condiciones de ADR-058 §6 se cumplen, **repintar la línea**: tapar de la entidad al fin de línea y redibujar el token más cada palabra siguiente de `lineWords` en su propia x desplazada por el delta, con la tipografía calibrada (§6) y los colores muestreados del canvas. Si el token entra, no se repinta nada.
+- Cuando el token **no** entra y las condiciones de ADR-058 §6 se cumplen, **repintar la línea**: tapar de la entidad al fin de línea, dibujar el token y **mover los píxeles** de las palabras siguientes de `lineWords` a su propia x desplazada por el delta, con los colores muestreados del canvas (ADR-210; antes se volvían a escribir con una tipografía calibrada). Si el token entra, no se repinta nada.
 - Emitir `AnnotationKind.Degraded` sobre las ocurrencias cuyo texto de reemplazo quedó **más angosto que `DEGRADED_FONT_RATIO` de su ancho natural** (ADR-058 §7, criterio reemplazado por **ADR-086 §1**).
 - Rasterizar la **página de leyenda** del export (`renderLegendPage`, ADR-059 §5): dibujo puro de filas de texto sobre un canvas en blanco, sin documento, sin eventos y sin cache. Es el único render de este motor que no corresponde a una página de un PDF.
 - Soportar dos calidades: `preview` (escala baja, rápido) y `full` (escala alta, para export).
@@ -197,9 +199,9 @@ Semántica de `lineWords` y del repintado de línea (ADR-058 §2-§6):
 - **Cuándo llegan**: solo cuando algún token de esa página podría no entrar, estimado con `estimateTokenWidth` (`Contracts.md` §6) y con margen conservador — ante la duda, se adjuntan. En una página donde todo entra van ausentes y el transporte no cambia respecto de antes de ADR-058.
 - **Ausentes nunca es un error.** Si el kernel mide que el token no entra y no tiene `lineWords`, cae al shrink-to-fit (ADR-058 §1) y produce un resultado correcto.
 - **Por qué no las extrae el worker**: el kernel tiene el `pageProxy` y podría llamar `getTextContent()` él mismo, ahorrando el cambio de contrato — pero en un PDF escaneado eso devuelve vacío, y las únicas palabras que existen son las de OCR, que viven en el `Document` del Orchestrator. Sería duplicar acá una responsabilidad de `pdf-engine` para obtener un resultado peor.
-- **Calibración de la tipografía**: se prueban candidatos —familia genérica (`serif`/`sans-serif`/`monospace`) × peso × estilo, tamaño desde `REPLACEMENT_FONT_HEIGHT_RATIO`— y se elige el que minimiza el error entre `measureText` y los anchos reales de las palabras de la línea. **Se ajusta sobre el conjunto de la línea, no palabra por palabra**: ADR-020 prorratea el ancho dentro de cada run, así que la suma es exacta y los individuales aproximados. **Solo familias genéricas**: el kernel corre con `disableFontFace: true` dentro de un Worker (ADR-053), donde no hay Font Loading API. Si el mejor candidato queda por encima del umbral de error, **no se calibra** y se cae al fallback: una calibración mala produce exactamente la costura visible que se quería evitar.
+- **Calibración de la tipografía — eliminada por ADR-210 (v1.18.0).** Lo que sigue describe el comportamiento anterior y queda como registro; no se implementa. Se probaban candidatos —familia genérica (`serif`/`sans-serif`/`monospace`) × peso × estilo, tamaño desde `REPLACEMENT_FONT_HEIGHT_RATIO`— y se elige el que minimiza el error entre `measureText` y los anchos reales de las palabras de la línea. **Se ajusta sobre el conjunto de la línea, no palabra por palabra**: ADR-020 prorratea el ancho dentro de cada run, así que la suma es exacta y los individuales aproximados. **Solo familias genéricas**: el kernel corre con `disableFontFace: true` dentro de un Worker (ADR-053), donde no hay Font Loading API. Si el mejor candidato queda por encima del umbral de error, **no se calibra** y se cae al fallback: una calibración mala produce exactamente la costura visible que se quería evitar.
 - **Colores**: `getImageData` sobre el bbox de la palabra original, **antes** de tapar nada y una sola vez por línea repintada. El píxel más oscuro dentro del glifo es la tinta; el color dominante del borde de la caja es el fondo. `REPLACEMENT_BG_COLOR`/`REPLACEMENT_TEXT_COLOR` dejan de ser constantes fijas en este camino, lo que resuelve de paso los fondos de color y sombreados. En una página sin reemplazos que no entren, este mecanismo no agrega ni una lectura del backing store.
-- **Reposicionamiento, no re-maquetado**: cada palabra se redibuja en su propia x más un desplazamiento **uniforme**. Es lo que evita que el error de calibración se acumule a lo largo del renglón y lo que preserva el espaciado del texto justificado.
+- **Reposicionamiento, no re-maquetado**: cada palabra queda en su propia x más un desplazamiento **uniforme**, que preserva el espaciado del texto justificado. Desde ADR-210 el reposicionamiento es de píxeles, no de texto vuelto a escribir (ver la enmienda).
 
 Validación de `scale` (ADR-037 §2): rango válido `0 < scale ≤ MAX_RENDER_SCALE` (`Contracts.md` §6, default 4). Vía invocación directa (`renderPage`/`renderPages`), `scale` inválido o no finito → `InvalidInputError` — endurece una laguna previa (el campo no declaraba validación). Vía evento (`RENDER_REQUESTED`), `scale` inválido → `warn` + no-op del evento (no hay caller al que lanzarle, mismo tratamiento que documento no cargado).
 
@@ -359,7 +361,7 @@ RenderPageOutput {
 3. **Modo `redact`**: fill opaco negro sobre bbox. El texto debajo no se incluye (se pinta antes del `convertToBlob`).
 4. **Modo `mask`** (reescrito por ADR-058): texto censurado (`XX.XXX.XXX`) sobre el bbox, **ajustado a su ancho disponible** (`measureText` + `maxWidth`, ADR-058 §1). Es el modo con más riesgo de derrame porque sus formatos son de longitud fija por tipo y no se pueden acortar: el `mask` de IBAN son 24 caracteres, quepan o no.
 5. **Modo `placeholder`** (reescrito por ADR-058): `[DNI 01]` sobre bbox, ajustado a su ancho disponible. El label puede llegar ya abreviado por ADR-057 (`[PERS 01]`, `[PRS-01]`); **este motor no elige el nivel, solo dibuja lo que recibe**. Fuente monospace si está disponible, fallback sans-serif — salvo en el camino de repintado, donde la familia sale de la calibración (§6).
-6. **Modo `synthetic`** (reescrito por ADR-058): valor sintético (`39.123.456`) sobre bbox, ajustado a su ancho disponible. En el camino de repintado, la fuente sale de la calibración contra la línea real (§6), que es lo más cerca que se puede estar de "la misma fuente del texto original" sin extraer metadata del PDF.
+6. **Modo `synthetic`** (reescrito por ADR-058): valor sintético (`39.123.456`) sobre bbox, ajustado a su ancho disponible. En el camino de repintado, el token usa la misma familia que fuera de él (ADR-210); el texto que lo sigue conserva su propia tipografía porque se mueven sus píxeles.
 7. **Highlight en `kind = "original"`**: borde color por `AnnotationKind` (ADR-031; `Annotation` no expone `EntityType`) sobre el bbox de cada ocurrencia de grupos habilitados. Sin fill, solo borde.
 8. **Conflicto**: en `kind = "original"`, marca adicional (borde rojo o icono) sobre el bbox en conflicto.
 9. **Página muy grande (A3 o más)**: preview scale reduce, full scale 150 DPI. Si el canvas excede limites del navegador (área máxima), se divide en tiles y se cosen (futuro; MVP limita a A4 150 DPI).
@@ -379,7 +381,7 @@ RenderPageOutput {
 23. **`RENDER_REQUESTED` de un panel no toca al otro (ADR-056 §1)**: un evento con `kind: "original"` produce exactamente los renders de `original` para sus `pageIndices` — cero renders y cero `PREVIEW_UPDATED` de `anonymized`, aunque el otro panel esté mostrando esas mismas páginas. Simétrico para `anonymized`. El motor no tiene ninguna vía para inferir que el otro lado hace falta: si hace falta, el otro panel emite su propio evento.
 24. **Supersede acotado al `kind` pedido (ADR-056 §4)**: un `RENDER_REQUESTED { kind: "original", scale: S }` **no** deja entrada de supersede sobre `(documentId, pageIndex, "anonymized")`. Un render de `anonymized` en vuelo a otra escala, originado por el pedido del otro panel, sobrevive y emite su `PREVIEW_UPDATED` normalmente. Es el caso que protege contra la implementación mecánica del cambio (registrar los dos kinds "porque antes se registraban los dos").
 25. **Token más ancho que su bbox (ADR-058 §1)**: se encoge hasta entrar, con el piso de fuente mínima **escalado por la escala de render** (ADR-086 §2(b)), y **nunca** se dibuja fuera del ancho disponible. Vale para los tres modos con texto, con `lineWords` o sin ellas, se cumplan o no las condiciones de repintado. Es el caso que representa la garantía del ADR: si algún otro caso de esta lista falla, éste tiene que seguir valiendo.
-26. **Condiciones de repintado no cumplidas (ADR-058 §6)**: el repintado se activa de forma conservadora y **cualquier duda cae al caso 25**. Requiere las cinco: (a) `lineWords` trae al menos una palabra a la derecha compartiendo banda vertical; (b) los huecos entre palabras consecutivas están en un rango plausible — un hueco desproporcionado delata una fila de tabla o columnas, no una línea; (c) la línea está alineada a la izquierda, inferido de las posiciones — en una centrada o alineada a la derecha, desplazar hacia la derecha es la operación equivocada; (d) el desplazamiento cabe antes del extremo derecho de la caja de texto inferida; (e) la calibración cerró bajo su umbral de error. En documentos con mucha tabla o mucho texto centrado el repintado casi no se va a activar, y eso es el comportamiento buscado, no una falla.
+26. **Condiciones de repintado no cumplidas (ADR-058 §6)**: el repintado se activa de forma conservadora y **cualquier duda cae al caso 25**. Requiere las cuatro primeras; **la (e) quedó eliminada por ADR-210** junto con la calibración: (a) `lineWords` trae al menos una palabra a la derecha compartiendo banda vertical; (b) los huecos entre palabras consecutivas están en un rango plausible — un hueco desproporcionado delata una fila de tabla o columnas, no una línea; (c) la línea está alineada a la izquierda, inferido de las posiciones — en una centrada o alineada a la derecha, desplazar hacia la derecha es la operación equivocada; (d) el desplazamiento cabe antes del extremo derecho de la caja de texto inferida; ~~(e) la calibración cerró bajo su umbral de error~~. En documentos con mucha tabla o mucho texto centrado el repintado casi no se va a activar, y eso es el comportamiento buscado, no una falla.
 27. **Texto rotado (ADR-058 §6, gap conocido)**: `Word` no lleva rotación. *(Errata ADR-065: esta línea decía además que "`pdf-engine` descarta `transform[0]`/`[3]`", lo cual dejó de ser cierto con ADR-063 — el motor ya deriva el bbox de la matriz completa. La conclusión del caso no cambia: el bbox es correcto, pero `BoundingBox` sigue sin campo de rotación por decisión explícita de ADR-063 §5, así que el repintado sigue sin poder distinguir la orientación.)* El texto a **90°/270°** no pasa la condición (a) del caso 26 (sus palabras no comparten banda vertical) y se filtra solo. El texto a **180°** sí comparte banda y **no es distinguible con los datos disponibles**: gap residual reconocido, no bloqueante — el peor caso es una línea de sello o marca de agua repintada con las palabras corridas hacia el lado equivocado, sin superposición. Se verifica en el E2E manual con un PDF sellado. Cerrarlo requiere extender `Word` con la escala de la matriz, que es trabajo aparte con ADR propio.
 28. **Aviso de degradación (ADR-058 §7, criterio reemplazado por ADR-086)**: si `anchoDisponible / anchoNatural` —donde `anchoNatural` es lo que el texto mediría a `boxHeight × REPLACEMENT_FONT_HEIGHT_RATIO`— cae por debajo de `DEGRADED_FONT_RATIO`, la ocurrencia se marca con `AnnotationKind.Degraded`, que `paintAnnotations` dibuja como cualquier otro `AnnotationKind`. **El umbral es una razón y no un tamaño en píxeles**, deliberadamente: preview y export renderizan a escalas distintas y un piso absoluto los haría discrepar sobre si el mismo reemplazo degrada.
 
@@ -481,13 +483,13 @@ RenderPageOutput {
 | `all three text modes respect the fit; redact is unchanged` | `edge.test.ts` | edge | caso 25 |
 | `line repaint does not trigger when the token fits (current path preserved)` | `unit.test.ts` | unit | ADR-058 §2 — no-regresión |
 | `token that does not fit with lineWords absent falls back without error` | `unit.test.ts` | unit | ADR-058 §5 |
-| `calibration picks the lowest-error candidate over a known set of widths` | `unit.test.ts` | unit | ADR-058 §3 |
+| ~~`calibration picks the lowest-error candidate over a known set of widths`~~ | `unit.test.ts` | unit | **Retirado por ADR-210**: la calibración se elimina |
 | `shift is uniform: relative distances between repainted words are preserved` | `unit.test.ts` | unit | ADR-058 §2 — protege la decisión de reposicionar en vez de re-maquetar |
 | `no trailing word to the right → fallback` | `edge.test.ts` | edge | caso 26 (a) |
 | `disproportionate gap (table row) → fallback` | `edge.test.ts` | edge | caso 26 (b) |
 | `centered line → fallback` | `edge.test.ts` | edge | caso 26 (c) |
 | `no room before the right margin → fallback` | `edge.test.ts` | edge | caso 26 (d) |
-| `calibration error above threshold → fallback` | `edge.test.ts` | edge | caso 26 (e) |
+| ~~`calibration error above threshold → fallback`~~ | `edge.test.ts` | edge | **Retirado por ADR-210**: la condición (e) se elimina |
 | `90° rotated text does not activate repaint (no shared vertical band)` | `edge.test.ts` | edge | caso 27 |
 | `ink and background colours sampled from a page with a non-white background` | `edge.test.ts` | edge | ADR-058 §4 |
 | `OCR words (source: "ocr") drive the repaint like PDF words` | `edge.test.ts` | edge | ADR-058 §5 — la propiedad que hace que los escaneados entren sin código propio |
@@ -504,7 +506,7 @@ RenderPageOutput {
 | `un texto que entra holgado no degrada, y el vacío tampoco` | `kernel.test.ts` | unit | ADR-086 §1 — el `Math.min(1, …)` y la guarda de ancho natural 0 (división por cero) |
 | `fitsNaturally mide contra el tamaño de dibujo: a fullScale un token que no entra repinta` | `unit.test.ts` | unit | ADR-086 §2, **tercera categoría**: `fitsNaturally` es la condición de activación de §2 —no un veredicto— así que mide contra el tamaño de DIBUJO, no contra la referencia. La geometría discrimina las tres variantes sobre el mismo ancho disponible |
 | `fitsNaturally mide contra el tamaño de dibujo: a fullScale un token que entra no repinta` | `unit.test.ts` | unit | La bicondicional de §2 (**"si el token entra, no se repinta nada"**), que hasta ADR-086 no estaba falsificada por ningún test a ninguna escala. El `originalValue` mide exactamente lo que la caja declara: sin esa consistencia la calibración rechaza el plan por la condición (e) y el test pasa sin ejercitar `fitsNaturally` |
-| `line repaint still activates at fullScale on a body-text box` | `unit.test.ts` | unit | ADR-058 §6(e) — **regresión de ADR-086**: el piso escalado se había filtrado a la calibración y apagaba el repintado en el export. Los demás tests de repintado corren a `previewScale: 1`, donde el piso escalado y el absoluto coinciden |
+| `line repaint still activates at fullScale on a body-text box` | `unit.test.ts` | unit | **Se conserva con otra razón (ADR-210)**: sin calibración, lo que protege es que la decisión no dependa de la escala. Razón original — ADR-058 §6(e), **regresión de ADR-086**: el piso escalado se había filtrado a la calibración y apagaba el repintado en el export. Los demás tests de repintado corren a `previewScale: 1`, donde el piso escalado y el absoluto coinciden |
 | `renderLegendPage returns EncodedPageImage with the requested dimensions` | `contract.test.ts` | contract | caso 29 (ADR-059 §5) |
 | `renderLegendPage works without a loaded document` | `contract.test.ts` | contract | caso 29 — la única excepción a la precondición de `loadDocument` |
 | `renderLegendPage emits no events, does not touch the LRU cache nor supersede` | `contract.test.ts` | contract | caso 29 — mismo perfil que `rasterizePage` |
@@ -604,6 +606,120 @@ Fixtures: `tests/fixtures/text-10p.pdf`, `scanned-10p.pdf`, una página con rota
 
 ---
 
+- [ ] 30. (1.0.x, Confianza — **ADR-210**) El repintado de línea mueve píxeles: eliminar la calibración de tipografía (candidatos, función, umbral, condición (e)); tamaño de decisión sin redondear; plan con desplazamiento entero; rectángulo de origen que nunca entra en la caja del dato; orden leer, tapar, pegar, dibujar; token con la familia de su modo; mapa de ADR-204 con el mismo desplazamiento. Los siete tests nuevos de la enmienda con sus nombres exactos, y los dos de calibración retirados. Cobertura del módulo ≥ 85 %.
+
+## Enmienda normativa ADR-210 — el repintado mueve píxeles
+
+Reemplaza, en §2, §6, §13 (casos 6 y 26) y §14, todo lo que describe la
+calibración de tipografía y el redibujado de las palabras vecinas. Las
+condiciones (a) a (d) del caso 26, el muestreo de colores, el límite ante otro
+reemplazo del mismo renglón y la exclusión del texto girado no cambian.
+
+**Qué se elimina del kernel.** Los candidatos de tipografía, la función de
+calibración, su tipo de muestra, el umbral de error y la condición (e). Ningún
+`fillText` dibuja el texto de una palabra vecina.
+
+**Tamaño de decisión.** Para una unidad de pintado, en píxeles y **sin
+redondear**:
+
+```
+tamañoDeDecisión = max(REPLACEMENT_MIN_FONT_PX × scale,
+                       altoDeCaja × REPLACEMENT_FONT_HEIGHT_RATIO)
+anchoDelToken    = measureText(replacementValue) con la familia del modo
+                   a tamañoDeDecisión
+```
+
+Es el tamaño de dibujo de siempre (con el piso escalado de ADR-086 §2(b)),
+menos el redondeo a píxeles enteros.
+
+**Activación.** El token «entra» si `anchoDelToken ≤ largoDisponible`. Si
+entra, no se repinta y se sigue por el camino de siempre, sin un byte
+distinto. Si no entra y el texto no está girado, se evalúa el repintado.
+
+El encogido del caso 25 sigue arrancando del tamaño redondeado. En la franja
+de menos de medio píxel de fuente entre los dos tamaños, un token que entraba
+al redondeado y no al exacto ahora intenta repintar; el caso inverso cae al
+encogido, que no itera. Es la consecuencia buscada de decidir sin redondear.
+
+**Plan.** Con `deltaPx = anchoDelToken − anchoDeCaja` y
+`desplazamientoPx = ceil(deltaPx)`:
+
+- Las palabras vecinas y las condiciones (a), (b) y (c) son las de hoy.
+- (d) se evalúa con el desplazamiento entero: el extremo derecho de la
+  corrida, llevado a píxeles con el mismo `ceil` del rectángulo de origen y
+  corrido `desplazamientoPx`, no supera el límite derecho efectivo (el borde
+  de la página o el próximo reemplazo). Lo pegado nunca pasa de ese límite,
+  ni por una fracción de píxel.
+- Cualquier condición que falle cae al encogido del caso 25, sin error ni
+  warning, como hoy.
+
+**Rectángulo de origen**, en píxeles enteros del canvas:
+
+- izquierda: `ceil(max(x de la primera vecina, borde derecho de la caja del
+  dato) × scale)`. **Nunca empieza a la izquierda del borde derecho de la
+  caja del dato.** El `max` es defensivo: la condición (a) ya exige que una
+  vecina empiece en ese borde o después, así que una palabra de `lineWords`
+  cuya caja se superpone con la del dato no es vecina, no se mueve, y lo que
+  de ella quede en la zona tapada se borra, igual que antes de ADR-210;
+- derecha: `ceil(extremo derecho de la última vecina × scale)`;
+- arriba y abajo: la banda del renglón de hoy (la envolvente vertical de la
+  caja del dato y de las vecinas), con `floor` arriba y `ceil` abajo;
+- recortado a los límites del canvas. Si queda sin área, no hay repintado y
+  se cae al caso 25.
+
+**Orden de las operaciones.** Es normativo:
+
+1. muestrear tinta y fondo sobre la caja del dato (ADR-058 §4);
+2. leer con `getImageData` el rectángulo de origen;
+3. tapar con el fondo muestreado desde `bbox.x` hasta la derecha del
+   rectángulo de origen más `desplazamientoPx`, sobre la misma banda entera;
+4. pegar con `putImageData` lo leído, corrido `desplazamientoPx` hacia la
+   derecha y sin cambio vertical;
+5. dibujar el token con la tinta muestreada, en `bbox.x`, alineado a la
+   izquierda y centrado en vertical como hoy, con la familia de su modo a
+   `tamañoDeDecisión` y `maxWidth = anchoDelToken`.
+
+Los pasos 1 y 2 van antes que el 3. El pegado no usa `drawImage` ni una
+posición fraccionaria: los píxeles movidos tienen que ser los leídos.
+
+**Mapa de interacción (ADR-204).** Cuando el repintado tiene éxito, cada
+vecina se registra con su caja original trasladada `desplazamientoPx / scale`.
+La región del token se registra como hoy, con las métricas del texto
+dibujado. Esto sustituye a «`plan.delta / scale`» en la enmienda de ADR-204.
+
+**Lo que no cambia.** `mode: "full"` usa el mismo camino que el preview.
+El repintado no emite veredicto `Degraded`. `lineWords` ausente o sin
+vecinas útiles nunca es un error. Sin dependencias nuevas.
+
+Nombres de pruebas requeridos en §14, además de los que siguen vigentes:
+
+| Tipo | Nombre | Garantía |
+| --- | --- | --- |
+| Unit | `line repaint moves the neighbor pixels instead of redrawing text` | Una lectura del rectángulo de origen y un pegado corrido; ningún `fillText` con el texto de una vecina. |
+| Unit | `line repaint reads the pixels before erasing and pastes them after` | El orden normativo de los pasos 1 a 5. |
+| Edge | `line repaint never reads or moves pixels inside the replaced box` | El origen empieza en el borde derecho de la caja del dato o después, también cuando la caja de la primera vecina se superpone. |
+| Unit | `line repaint shifts by a whole number of pixels` | `ceil(deltaPx)`; el pegado y el mapa de interacción usan ese mismo valor. |
+| Unit | `line repaint decision does not depend on the render scale` | Con una medición lineal, el mismo renglón da la misma decisión a escala 1, 1,3 y `fullScale`. |
+| Unit | `line repaint draws the token with the font of its mode` | Familia de `placeholder`, `mask` y `synthetic`; ningún candidato calibrado. |
+| Edge | `line repaint with an empty source rectangle falls back` | Origen sin área tras recortar: encogido, sin error. |
+
+Los tests vigentes del repintado se conservan, adaptados a que las vecinas ya
+no se dibujan con `fillText`: `line repaint does not trigger when the token
+fits (current path preserved)`, `token that does not fit with lineWords
+absent falls back without error`, `shift is uniform: relative distances
+between repainted words are preserved`, los cuatro de las condiciones (a) a
+(d), `90° rotated text does not activate repaint (no shared vertical band)`,
+`line repaint sees sibling fragments as independent replacements`,
+`fitsNaturally mide contra el tamaño de dibujo: a fullScale un token que
+entra no repinta`, `line repaint still activates at fullScale on a body-text
+box` y `preview geometry records shifted neighbors and expanded
+replacement`. Los dos de calibración quedan retirados.
+
+Fuera de este motor, en su propio commit (`tests/e2e`): un spec con canvas
+real que comprueba, sobre un documento sintético con las fuentes del repo,
+que el renglón se repinta, que los píxeles movidos son idénticos a los del
+original, y que la decisión es la misma al 100 % y al 130 % de zoom.
+
 ## Enmienda normativa ADR-204 — interacción del preview
 
 Esta enmienda amplía §6, §7, §9–§12 y §14. `RenderPageOutput` gana
@@ -694,5 +810,6 @@ Nuevos nombres de pruebas requeridos en §14:
 - `adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md` (zoom con re-render real, decisiones de la v1.3.0)
 - `adr/ADR-057-Escalera-Abreviaturas-Placeholder-Por-Grupo.md` (quién decide el token que este motor dibuja)
 - `adr/ADR-058-Repintado-De-Linea-Por-Calibracion.md` (la cascada de la v1.9.0)
+- `adr/ADR-210-El-Repintado-De-Linea-Desplaza-Los-Pixeles-Del-Renglon.md` (v1.18.0: el repintado mueve píxeles; reemplaza la calibración)
 - `adr/ADR-041-FuseOcrPage-Funcion-Pura-Sin-Estado-Retenido.md` (precedente del reparto host-side de `lineWords`)
 - `ui/Components.md` §5.2 (`ZoomControls`, CSS inmediato + debounce)
