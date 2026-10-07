@@ -1321,8 +1321,8 @@ describe("NerEngine — unit tests", () => {
       );
       await engine.init(ctx);
       const busEmitSpy = vi.spyOn(ctx.bus, "emit");
-      // Sin ninguna palabra de dirección cerca: 1434 no parece un año, así que
-      // se suma sin mirar el contexto.
+      // Sin ninguna palabra de dirección en la oración: el número se suma
+      // igual, sin mirar el contexto.
       const input = makeNerPageInput("doc-address-number", 0, [
         "Reunión",
         "en",
@@ -1344,6 +1344,21 @@ describe("NerEngine — unit tests", () => {
         ([, event]) => event === EngineEvents.ENTITY_FOUND,
       );
       expect(entityFound).toHaveLength(1);
+
+      // Con «domicilio» en la oración sale igual: una sola ocurrencia.
+      const withCue = await engine.processPage(
+        makeNerPageInput("doc-address-number-cue", 0, [
+          "Con",
+          "domicilio",
+          "en",
+          "Maipú",
+          "1434",
+          "hoy",
+        ]),
+        ctx,
+      );
+      expect(withCue.occurrences.map((o) => o.value)).toEqual(["Maipú 1434"]);
+      expect(withCue.occurrences[0]?.wordSpan).toEqual({ startIndex: 3, endIndexExclusive: 5 });
 
       // La misma regla, sin modelo: solo cambian el fin, el valor y la clave.
       const text = "Reunión en la Maipú 1434 hoy";
