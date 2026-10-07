@@ -192,7 +192,8 @@ const STUB_GLYPH_ADVANCE_RATIO = 0.6;
  *
  * El prefijo de peso es opcional a propósito: `kernel.ts` construye tanto
  * `"12px sans-serif"` como `"bold 16px sans-serif"` (el título de la leyenda,
- * y los candidatos `bold` de la calibración de ADR-058). Con la versión
+ * y —hasta que ADR-210 eliminó la calibración— los candidatos `bold` de
+ * ADR-058). Con la versión
  * anterior —regex anclada al inicio, sin contemplar el peso— cualquier fuente
  * bold medía **0**, así que en los tests "siempre entraba" y el shrink-to-fit
  * nunca se ejercitaba sobre ese camino. Corregido 2026-08-19.
@@ -584,23 +585,22 @@ export function makeMarkerLegendRows(count: number): ReadonlyArray<MarkerLegendR
   );
 }
 
-// ─── ADR-058 §2-§6 (Hito 10.5, PR 5): repintado de línea por calibración ───
+// ─── ADR-058 §2-§6 + ADR-210 (1.0.x): repintado de línea que mueve píxeles ───
 
 /**
- * Tamaño de fuente "natural" con el que arranca la calibración para una caja
- * de `height: 14` (`replacementFontSize(14) = max(8, round(14*0.7)) = 10`,
- * `../worker/kernel.js`, no exportada). Fijo acá porque `makeLineRepaintScenario`
- * construye sus bboxes a esa altura.
+ * Tamaño de fuente con el que se construyen los anchos de las palabras de
+ * `makeLineRepaintScenario` (caja de `height: 14`). Desde ADR-210 el kernel
+ * ya no calibra ninguna tipografía contra estos anchos —el repintado mueve los
+ * píxeles de las vecinas—, así que son solo geometría plausible: palabras con
+ * el ancho que tendrían a una fuente de ese tamaño.
  */
 export const LINE_REPAINT_FONT_SIZE_PX = 10;
 
 /**
- * Ancho "real" de una palabra, consistente con la fórmula del stub de
- * medición (`measureStubTextWidth`) al tamaño de fuente del repintado. Los
- * escenarios de repintado exitoso construyen sus bboxes con este ancho para
- * que la calibración (ADR-058 §3) cierre con error ~0 — los tests que
- * quieren ejercitar la condición (e) rompen esta consistencia a propósito
- * (ver `calibration error above threshold → fallback` en `edge.test.ts`).
+ * Ancho de una palabra del escenario de repintado, con la fórmula del stub de
+ * medición (`measureStubTextWidth`) a `LINE_REPAINT_FONT_SIZE_PX`. Ya no hay
+ * condición de calibración que dependa de esta consistencia (ADR-210
+ * eliminó la (e)); se conserva porque da anchos reproducibles.
  */
 export function lineRepaintWordWidth(text: string): number {
   return measureStubTextWidth(text, `${LINE_REPAINT_FONT_SIZE_PX}px sans-serif`);
@@ -623,9 +623,9 @@ export interface LineRepaintScenarioOverrides {
 }
 
 /**
- * Escenario mínimo donde el repintado de línea de ADR-058 §2-§6 SE ACTIVA:
- * las cinco condiciones de activación (`Render_Engine.md` §13 caso 26) pasan
- * con margen. Reemplazo `Placeholder` cuyo propio token no entra a tamaño
+ * Escenario mínimo donde el repintado de línea de ADR-058 §2-§6 + ADR-210 SE
+ * ACTIVA: las cuatro condiciones de activación (`Render_Engine.md` §13 caso
+ * 26) pasan con margen. Reemplazo `Placeholder` cuyo propio token no entra a tamaño
  * natural en el bbox de "Ana" (angosto a propósito), con dos palabras vecinas
  * a la derecha ("Garcia", "vive") en la misma banda vertical, huecos chicos y
  * plausibles, y una página ancha en proporción al contenido (ni tan angosta
@@ -680,8 +680,8 @@ export function makeLineRepaintScenario(overrides?: LineRepaintScenarioOverrides
     // 260pt de ancho de página: con los valores por defecto de arriba deja
     // margen holgado tanto para la densidad mínima de la condición (c)
     // (~0.36, sobre el piso de 0.3) como para el desplazamiento de la
-    // condición (d) (~35pt de margen tras el delta) — verificado a mano,
-    // ver el reporte final del PR.
+    // condición (d): la corrida termina en x=106 y el token (22 caracteres a
+    // 8,96 px) la corre 101 px, hasta x=207 (~53pt de margen).
     pageWidth: overrides?.pageWidth ?? 260,
     pageHeight: overrides?.pageHeight ?? 50,
   };

@@ -485,14 +485,30 @@ describe("paintReplacements — no-regresión vía kernelRenderPage (ADR-058 §1
     expect(result.interactionGeometry?.revision).toBe(7);
     expect(result.interactionGeometry?.scale).toBe(1);
     expect(result.interactionGeometry?.wordPositions.length).toBeGreaterThan(0);
-    expect(
-      result.interactionGeometry?.wordPositions.every(
-        ({ sourceBbox, bbox }) => bbox.x > sourceBbox.x,
-      ),
-    ).toBe(true);
+    // ADR-210: el mapa usa el MISMO desplazamiento entero que el pegado de
+    // píxeles — `ceil(22 × 8,96 × 0,6 − 18) = 101` a escala 1 — para todas las
+    // vecinas, que conservan su caja (tamaño) original.
+    expect(result.interactionGeometry?.wordPositions).toHaveLength(scenario.lineWords.length);
+    for (const { sourceBbox, bbox } of result.interactionGeometry?.wordPositions ?? []) {
+      expect(bbox.x - sourceBbox.x).toBe(101);
+      expect(bbox.width).toBe(sourceBbox.width);
+      expect(bbox.height).toBe(sourceBbox.height);
+    }
+    const [canvas] = getCreatedCanvases();
+    const paste = canvas!.calls.find((call) => call.op === "putImageData");
+    const read = canvas!.calls.filter((call) => call.op === "getImageData")[1];
+    expect((paste?.args[1] as number) - (read?.args[0] as number)).toBe(101);
     const covered = result.interactionGeometry?.coveredRegions[0];
     expect(covered?.occurrenceId).toBe(scenario.replacement.occurrenceId);
     expect(covered?.bbox.width).toBeGreaterThan(scenario.replacement.bbox.width);
+    // La región del token es la del texto dibujado (118,27 px de ancho a escala 1).
+    expect(covered?.bbox.width).toBeCloseTo(
+      measureStubTextWidth(
+        scenario.replacement.replacementValue,
+        `${14 * REPLACEMENT_FONT_HEIGHT_RATIO}px monospace, sans-serif`,
+      ),
+      6,
+    );
   });
 
   it("preview geometry preserves redact rotated and multiline covered regions", async () => {
