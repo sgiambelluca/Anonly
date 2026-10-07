@@ -46,16 +46,24 @@ Dos datos del diseño actual:
 2. **El visor recuerda a qué escala llegó cada imagen.** Por lado y por
    página, guarda la última escala que había pedido para ese lado cuando la
    imagen llegó.
-3. **Una imagen guardada a otra escala no se muestra al conmutar.** Si la
-   página del lado nuevo no tiene imagen a la escala del zoom, el visor sigue
-   mostrando la imagen del lado anterior hasta que llega la nueva, y recién
-   ahí la cambia. Página por página.
-4. **La espera tiene tope.** Si la imagen nueva no llega en 500 ms, se muestra
+3. **Al pasar a Original, una imagen guardada a otra escala no se muestra.**
+   Si la página no tiene imagen original a la escala del zoom, el visor sigue
+   mostrando la anonimizada hasta que llega la nueva, y recién ahí la cambia.
+   Página por página.
+
+   **Al pasar a Anonimizado nunca se muestra la imagen original** (enmienda
+   del mantenedor, 2026-10-07, al ver la implementación). Bajo la pestaña
+   «Anonimizado» no puede haber datos sin tapar, ni por un instante. En ese
+   sentido se pinta la imagen anonimizada que haya, aunque esté a otra
+   escala, o el estado de carga de siempre si no hay ninguna. El instante
+   borroso vuelve solo en ese sentido y solo cuando el zoom no llegó a
+   actualizar esa vista.
+4. **La espera tiene tope.** Vale para el paso a Original. Si la imagen nueva no llega en 500 ms, se muestra
    lo que haya, como hoy. Una página que falla no deja al visor mostrando el
    lado equivocado.
 5. **Mientras una página espera, no admite selección.** La capa de selección
    y de resaltado de esa página queda inerte: la imagen que se ve es del otro
-   lado.
+   lado. Solo puede pasar al ir a Original.
 6. **El pedido de imagen lleva siempre su escala.** En el cliente, pedir un
    preview sin escala deja de compilar. Un pedido sin escala fue la causa de
    la imagen borrosa después de reanalizar.
@@ -94,6 +102,8 @@ Pruebas, sobre la imagen real que dibuja el visor:
 
 - después de un zoom, conmutar no dibuja nunca una imagen a la escala vieja:
   la primera imagen del lado nuevo que se pinta ya está a la escala del zoom;
+- **al pasar a Anonimizado nunca se dibuja la imagen original**, en ningún
+  caso: ni con el dibujo demorado, ni sin imagen anonimizada previa;
 - lo mismo después de editar una entidad, cambiar un modo, agregar una
   entidad, deshacer y reanalizar;
 - conmutar de inmediato tras un zoom, antes de que llegue el otro lado: se

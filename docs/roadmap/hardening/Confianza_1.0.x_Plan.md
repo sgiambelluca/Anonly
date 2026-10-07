@@ -468,7 +468,10 @@ los 16 pasan con ADR-213. Con zoom al 130 %, al conmutar ya no se dibuja la
 imagen de 595 px antes de la de 773: se dibuja solo la de 773. Tests del
 cliente: 1100 en verde.
 
-**Decisión pendiente del mantenedor.** Al pasar de Original a Anonimizado,
+**Decidido por el mantenedor el 2026-10-07: nunca se muestra la original
+bajo «Anonimizado».** En ese sentido se pinta la anonimizada que haya o el
+estado de carga; ADR-213 y `React_Client.md` §7 quedaron enmendados. Lo que
+sigue es cómo estaba planteado. Al pasar de Original a Anonimizado,
 mientras llega la imagen anonimizada a la escala correcta, la página sigue
 mostrando la imagen **original** bajo la pestaña «Anonimizado». Lo normal
 son 150 a 200 ms; el tope es medio segundo. Es lo que dice la regla 4 de
