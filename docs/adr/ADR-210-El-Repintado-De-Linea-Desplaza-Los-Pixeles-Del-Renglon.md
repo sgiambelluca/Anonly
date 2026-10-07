@@ -89,6 +89,15 @@ imagen (ADR-004, ADR-009).
   resaltado, o tinta de otro renglón que invada la banda. Hoy esa tinta se
   borra; con este cambio se corre. Las condiciones (b) y (c) ya dejan afuera
   las tablas y los renglones que no son texto corrido.
+- **Esa tinta nunca es la de otro dato tapado** (enmienda del 2026-10-07).
+  La banda es tan alta como la palabra más alta del renglón. Con
+  interlineado muy apretado o un escaneo torcido podía alcanzar filas de un
+  dato tapado en otro renglón, y esas filas se corrían fuera de la caja que
+  las tapa. Lo encontró el revisor leyendo el código, antes de que se viera
+  en un documento. Desde la enmienda, si la zona que el repintado borra y
+  pega cruza la caja de otro reemplazo, no se repinta: la etiqueta se achica
+  como antes de este ADR. Queda, por redondeo a píxeles enteros, como mucho
+  una fila en el borde de dos cajas que se tocan.
 - **La zona tapada queda de un solo color**, el fondo muestreado, igual que
   hoy. Sobre un escaneo con grano, la etiqueta queda sobre un parche liso.
 - **El texto girado sigue sin repintado** (ADR-066 §7). Sin cambios.

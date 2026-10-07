@@ -5,8 +5,10 @@
 > Renderiza páginas del PDF (original o anonimado) a imágenes usando OffscreenCanvas en Web Workers. Produce highlight de grupos habilitados y aplica reemplazos visualmente según `ReplacementMode`. Soporta preview incremental y render full para export.
 
 **EngineId**: `render`
-**Versión del spec**: 1.18.0
+**Versión del spec**: 1.19.0
 **Última actualización**: 2026-10-07
+
+> **Nota (v1.19.0, enmienda de ADR-210, 2026-10-07 — la zona que toca el repintado no cruza otro reemplazo)**: la banda del renglón es la envolvente vertical del dato y de sus vecinas. Con una vecina más alta que el dato, la banda podía alcanzar filas de un reemplazo de otro renglón, y esas filas de tinta original se movían con el texto y quedaban fuera de la caja que las tapa. Lo encontró el revisor leyendo el código; antes de ADR-210 esa franja se borraba. Desde esta versión, si la zona que el repintado borra y pega se superpone con la caja de otro reemplazo de la página, no hay repintado y se cae al encogido. Ver «Enmienda normativa ADR-210», condición (e), §14 y §15 ítem 34.
 
 > **Nota (v1.18.0, ADR-210, 2026-10-07 — el repintado de línea mueve píxeles)**: el repintado de ADR-058 §2 volvía a escribir las palabras que siguen al token con una tipografía calibrada. Medido en la aplicación de escritorio, la calibración elegía `monospace` a unos 0,6 o 0,7 cuerpos, y su activación dependía de la escala de render. Desde esta versión las palabras vecinas **no se vuelven a escribir**: el kernel copia sus píxeles y los pega desplazados. **Se elimina la calibración** (los doce candidatos, el umbral y la condición (e) del caso 26). El token se dibuja con la familia de su modo, y la decisión de repintar deja de depender de redondeos a píxeles. No cambia ningún contrato. Lo normativo está en la «Enmienda normativa ADR-210», al final; donde esa enmienda contradice a §2, §6, §13 o §14, manda la enmienda.
 
@@ -360,7 +362,7 @@ RenderPageOutput {
 2. **Grupo `enabled = false`**: las ocurrencias del grupo no se reemplazan en el render anonimizado. Aparecen como texto original.
 3. **Modo `redact`**: fill opaco negro sobre bbox. El texto debajo no se incluye (se pinta antes del `convertToBlob`).
 4. **Modo `mask`** (reescrito por ADR-058): texto censurado (`XX.XXX.XXX`) sobre el bbox, **ajustado a su ancho disponible** (`measureText` + `maxWidth`, ADR-058 §1). Es el modo con más riesgo de derrame porque sus formatos son de longitud fija por tipo y no se pueden acortar: el `mask` de IBAN son 24 caracteres, quepan o no.
-5. **Modo `placeholder`** (reescrito por ADR-058): `[DNI 01]` sobre bbox, ajustado a su ancho disponible. El label puede llegar ya abreviado por ADR-057 (`[PERS 01]`, `[PRS-01]`); **este motor no elige el nivel, solo dibuja lo que recibe**. Fuente monospace si está disponible, fallback sans-serif — salvo en el camino de repintado, donde la familia sale de la calibración (§6).
+5. **Modo `placeholder`** (reescrito por ADR-058): `[DNI 01]` sobre bbox, ajustado a su ancho disponible. El label puede llegar ya abreviado por ADR-057 (`[PERS 01]`, `[PRS-01]`); **este motor no elige el nivel, solo dibuja lo que recibe**. Fuente monospace si está disponible, fallback sans-serif. En el camino de repintado la familia es la misma: desde ADR-210 no hay calibración de tipografía.
 6. **Modo `synthetic`** (reescrito por ADR-058): valor sintético (`39.123.456`) sobre bbox, ajustado a su ancho disponible. En el camino de repintado, el token usa la misma familia que fuera de él (ADR-210); el texto que lo sigue conserva su propia tipografía porque se mueven sus píxeles.
 7. **Highlight en `kind = "original"`**: borde color por `AnnotationKind` (ADR-031; `Annotation` no expone `EntityType`) sobre el bbox de cada ocurrencia de grupos habilitados. Sin fill, solo borde.
 8. **Conflicto**: en `kind = "original"`, marca adicional (borde rojo o icono) sobre el bbox en conflicto.
@@ -604,9 +606,11 @@ Fixtures: `tests/fixtures/text-10p.pdf`, `scanned-10p.pdf`, una página con rota
 
 - [x] 32. (ADR-189) Escala vigente del preview por `(documentId, kind)`: se actualiza con `RENDER_REQUESTED` válido en `mode: "preview"`, la usan las invocaciones directas de preview sin `scale`, un resultado a escala obsoleta se descarta y se redespacha, y se borra con el estado del documento. Tests de §14 (caso 38).
 
----
+- [ ] 33. (1.0.x, Confianza — **ADR-210**) El repintado de línea mueve píxeles: eliminar la calibración de tipografía (candidatos, función, umbral, condición (e)); tamaño de decisión sin redondear; plan con desplazamiento entero; rectángulo de origen que nunca entra en la caja del dato; orden leer, tapar, pegar, dibujar; token con la familia de su modo; mapa de ADR-204 con el mismo desplazamiento. Los siete tests nuevos de la enmienda con sus nombres exactos, y los dos de calibración retirados. Cobertura del módulo ≥ 85 %.
 
-- [ ] 30. (1.0.x, Confianza — **ADR-210**) El repintado de línea mueve píxeles: eliminar la calibración de tipografía (candidatos, función, umbral, condición (e)); tamaño de decisión sin redondear; plan con desplazamiento entero; rectángulo de origen que nunca entra en la caja del dato; orden leer, tapar, pegar, dibujar; token con la familia de su modo; mapa de ADR-204 con el mismo desplazamiento. Los siete tests nuevos de la enmienda con sus nombres exactos, y los dos de calibración retirados. Cobertura del módulo ≥ 85 %.
+- [ ] 34. (1.0.x, Confianza — enmienda de **ADR-210**) Condición (e) del plan de repintado: si la zona tocada (de `bbox.x` al extremo derecho de la última vecina más el desplazamiento, sobre la banda sin redondear) se superpone por `rectsOverlap` con la caja de otro reemplazo de la página, `planLineRepaint` no devuelve plan y se cae al caso 25. Los dos tests de §14 con sus nombres exactos; los vigentes no cambian.
+
+---
 
 ## Enmienda normativa ADR-210 — el repintado mueve píxeles
 
@@ -650,6 +654,15 @@ encogido, que no itera. Es la consecuencia buscada de decidir sin redondear.
   corrido `desplazamientoPx`, no supera el límite derecho efectivo (el borde
   de la página o el próximo reemplazo). Lo pegado nunca pasa de ese límite,
   ni por una fracción de píxel.
+- **(e) La zona tocada no cruza otro reemplazo** (enmienda del 2026-10-07).
+  La zona tocada es, en puntos y sin redondear, el rectángulo que va desde
+  `bbox.x` del dato hasta `extremo derecho de la última vecina +
+  desplazamientoPx / scale`, sobre la banda del renglón (la envolvente
+  vertical de la caja del dato y de las vecinas). Si se superpone con la
+  caja de **cualquier otro** reemplazo de la página —las mismas unidades de
+  pintado que ya se usan para excluir vecinas—, no hay repintado. La
+  superposición es la de `rectsOverlap` de `@anonly/shared`: estricta,
+  tocarse por el borde no cuenta. Se evalúa después de (d).
 - Cualquier condición que falle cae al encogido del caso 25, sin error ni
   warning, como hoy.
 
@@ -702,6 +715,8 @@ Nombres de pruebas requeridos en §14, además de los que siguen vigentes:
 | Unit | `line repaint decision does not depend on the render scale` | Con una medición lineal, el mismo renglón da la misma decisión a escala 1, 1,3 y `fullScale`. |
 | Unit | `line repaint draws the token with the font of its mode` | Familia de `placeholder`, `mask` y `synthetic`; ningún candidato calibrado. |
 | Edge | `line repaint with an empty source rectangle falls back` | Origen sin área tras recortar: encogido, sin error. |
+| Edge | `line repaint falls back when its band crosses another replacement` | Condición (e): una vecina más alta que el dato estira la banda hasta la caja de un reemplazo del renglón de abajo, que no comparte banda con el dato. Ningún `getImageData` ni `putImageData`; el dato se encoge. |
+| Edge | `line repaint still runs when another replacement only touches the band` | Condición (e): la caja del otro reemplazo empieza exactamente donde termina la banda, o exactamente donde termina la zona tocada a la derecha. Se repinta igual. |
 
 Los tests vigentes del repintado se conservan, adaptados a que las vecinas ya
 no se dibujan con `fillText`: `line repaint does not trigger when the token

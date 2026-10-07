@@ -90,11 +90,26 @@ palabra de su lista cerca por otro motivo también tapaba un año.
   3500». Medido en M-D1: 6 de 8 oraciones escritas para eso. Los otros 2
   eran una fecha y un importe con punto, que la forma del número excluye.
 - **Un número que es parte de otro dato** pegado a un lugar: «Belgrano 11
-  4444-5555» sumaría el «11». Si coincide con otra detección, lo resuelve el
-  mecanismo de conflictos de siempre.
+  4444-5555» sumaría el «11». Quedan dos detecciones que se pisan en ese
+  número, la dirección y el teléfono, y las dos se pintan.
 
 En los tres casos el usuario ve la dirección en la lista y la puede
 desactivar o corregir.
+
+## Cuando la dirección extendida choca con un patrón
+
+Al sumar la altura, una dirección puede pasar a contener entera la detección
+de un patrón. Medido con el modelo real: en «AVENIDA DEL MAR 450», en
+mayúsculas, el patrón de patente vieja toma «MAR 450». El agrupador lo
+trataba como un conflicto, ganaba el patrón, y la dirección se descartaba
+entera: «AVENIDA DEL» quedaba a la vista.
+
+La primera redacción de este ADR decía que ese choque lo resolvía el
+mecanismo de conflictos de siempre. Era falso, y lo mostró el revisor. Lo
+corrige
+[ADR-214](ADR-214-La-Que-Pierde-Un-Conflicto-No-Se-Descarta-Si-Cubre-Mas-Texto.md):
+una detección que pierde un conflicto ya no se descarta si cubre texto que
+la ganadora no cubre. Quedan la dirección y la patente.
 
 ## La regla que se probó y se descartó
 
@@ -148,6 +163,10 @@ tiene forma de año, así que el resultado es el mismo con la regla final.
 - Un lugar seguido de un año aparece como una dirección con el año
   adentro.
 - La regla no depende de ninguna lista de palabras.
+- Dos direcciones de la misma calle con alturas parecidas pueden quedar en un
+  mismo grupo, por la agrupación difusa de siempre (visto con «AVENIDA DEL
+  MAR 4500» y «Avenida del Mar 450»). Las dos salen tapadas, con la misma
+  etiqueta.
 
 ## Plan y validación
 

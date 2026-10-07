@@ -4,10 +4,10 @@
 
 ## Resultado
 
-ADR-212 extiende una dirección hasta el número que la sigue. Si el número
-parece un año, lo suma solo cuando hay una palabra de dirección cerca. La
-alternativa en reserva es sumarlo siempre. Sobre 76 oraciones sintéticas,
-con el modelo real:
+ADR-212 extiende una dirección hasta el número que la sigue. Cuando se
+midió, la regla sumaba un número con forma de año solo si había una palabra
+de dirección cerca («regla por contexto»), y la alternativa en reserva era
+sumarlo siempre. Sobre 76 oraciones sintéticas, con el modelo real:
 
 | | Regla por contexto | Tapar siempre |
 |---|---:|---:|
@@ -33,7 +33,8 @@ informe se deriva de las corridas hechas con la regla por contexto.
 
 - **Corpus**: 76 oraciones sintéticas escritas para esto, en ocho
   categorías. Un PDF digital con una oración por página, entre dos renglones
-  de relleno fijos que no llevan ninguna palabra de la lista de ADR-212.
+  de relleno fijos que no llevan ninguna palabra de la lista que usaba la
+  regla por contexto.
 - **Cómo**: por la aplicación de escritorio, con el modelo real y la
   configuración por defecto. Dos corridas completas, cada una con una
   instancia fría.
@@ -43,7 +44,7 @@ informe se deriva de las corridas hechas con la regla por contexto.
 - **«Tapar siempre» se deriva de los mismos datos**: son las oraciones donde
   la dirección termina justo antes de un número con forma de año y la regla
   no lo sumó.
-- **Entorno**: Windows 11 nativo, 12 hilos, 16 GB de RAM. Producto de la
+- **Entorno**: Windows 11 nativo, 12 hilos, 16,9 GB de RAM. Producto de la
   branch `hardening/confianza-1.0.x` del 2026-10-07, con ADR-212
   implementado.
 
