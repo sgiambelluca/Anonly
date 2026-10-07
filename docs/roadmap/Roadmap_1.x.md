@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap-1.x | dependencias=roadmap/Version_1.0.md,roadmap/Version_2.0.md,roadmap/Future_Ideas.md,roadmap/hitos/Post_Hito10.8_Pendientes.md,RELEASING.md,00_Project_Vision.md,architecture/08_Security_Model.md,adr/ADR-009-Export-Strategy.md,adr/ADR-059-Leyenda-Opcional-De-Marcadores.md,adr/ADR-148-Un-Export-Se-Verifica-Leyendo-El-PDF-Exportado.md,adr/ADR-190-Una-Pagina-Con-Tinta-No-Sale-Vacia-En-Silencio.md | audiencia=humanos+IA | fase=12 -->
+<!-- CONTEXT: scope=roadmap-1.x | dependencias=roadmap/Version_1.0.md,roadmap/Version_2.0.md,roadmap/Future_Ideas.md,roadmap/hitos/Post_Hito10.8_Pendientes.md,RELEASING.md,00_Project_Vision.md,architecture/08_Security_Model.md,adr/ADR-009-Export-Strategy.md,adr/ADR-059-Leyenda-Opcional-De-Marcadores.md,adr/ADR-148-Un-Export-Se-Verifica-Leyendo-El-PDF-Exportado.md,adr/ADR-190-Una-Pagina-Con-Tinta-No-Sale-Vacia-En-Silencio.md,roadmap/hardening/Export_Verificado_ADR148_Plan.md,roadmap/hardening/ADR148_Revision_2026-10-05.md,roadmap/hardening/ADR148_Revision_Sol61_2026-10-05.md,roadmap/ocr/Regiones_Pequenas_Investigacion_Plan.md,adr/ADR-202-El-Minimo-De-Region-OCR-Se-Prueba-A-25pt-Antes-De-Adoptarlo.md,roadmap/ocr/Regiones_Pequenas_25pt_Experimento_Plan.md,roadmap/interaccion/Mejoras_Interaccion_2026-10-05.md,adr/ADR-204-La-Interaccion-Anonimizada-Usa-La-Geometria-Visible.md,adr/ADR-205-El-Resultado-Exportado-Pertenece-A-Una-Revision.md,adr/ADR-206-Una-Busqueda-Omitida-No-Confirma-La-Version.md | audiencia=humanos+IA | fase=12 -->
 
 # Anonly — Roadmap 1.x
 
@@ -12,6 +12,14 @@ secciones «Para decidir al llegar» listan lo que ya se sabe que hay que
 resolver; no son decisiones tomadas.**
 
 ## 1. Cómo se numera
+
+La campaña local de [mejoras de interacción](./interaccion/Mejoras_Interaccion_2026-10-05.md)
+está implementada desde develop con ADR-204/205 y aprobada por Sol contra
+`origin/develop` (2026-10-06). Sus pruebas y revisión se registran en ese plan;
+la rama está publicada en el [PR #53](https://github.com/sgiambelluca/Anonly/pull/53)
+hacia develop, sin release ni versión asignada.
+Los tres ajustes reportados después de esa aprobación también están
+implementados y aprobados por Sol; el cierre está en el mismo plan (ADR-206).
 
 | Tipo | Cuándo |
 |---|---|
@@ -86,9 +94,43 @@ Salió de publicar la 1.0.0 y actualizar una 0.9.2 de verdad.
 
 Lo primero, porque es lo que permite tocar la detección sin miedo.
 
-- **Gate que lee el PDF exportado** (ADR-148, decidido y sin implementar):
+- **Gate que lee el PDF exportado** (ADR-148, primera entrega sin aprobar):
   abre el archivo exportado, lo convierte en imagen y le pasa OCR. Es trabajo
-  de tests; no cambia el producto.
+  de tests; no cambia el producto. **Auditado el 2026-10-05:** documentación
+  lista para implementar en
+  [Export_Verificado_ADR148_Plan.md](hardening/Export_Verificado_ADR148_Plan.md), con
+  corpus, comparación, matriz mínima y CI definidos. Primera implementación
+  entregada inicialmente **sin aprobar**: 20/21 en Windows, cero salteados; correcciones
+  mecánicas del arnés cerradas, política del caso mixto pendiente. Ver
+  [la revisión](hardening/ADR148_Revision_2026-10-05.md). CI/macOS no verificada.
+  **Primera revisión independiente Sol 6.1: REJECTED.** El fixture mixto contradice
+  el mínimo por lado de ADR-065. El humano decidió el 2026-10-05 investigar
+  imágenes pequeñas en una tarea propia con calidad y memoria:
+  [plan de investigación](ocr/Regiones_Pequenas_Investigacion_Plan.md).
+  Las mediciones del producto actual y del OCR aislado quedaron registradas
+  en [el informe](mediciones/ocr/Regiones_Pequenas_2026-10-05.md). Sol 6.1
+  aprobó la caracterización limitada y el arnés; candidato experimental
+  de 25 pt autorizado por el humano para investigar. ADR-202 y spec
+  experimental listos en el
+  [plan de 25 pt](ocr/Regiones_Pequenas_25pt_Experimento_Plan.md).
+  El piloto recuperó el mixed pero refutó la exclusión de OCR redundante
+  en tres capas alineadas; campaña larga detenida. Sol aprobó fidelidad,
+  arnés y evidencia; adopción bajo los criterios actuales rechazada.
+  Ver [resultado del piloto](mediciones/ocr/Regiones_Pequenas_25pt_2026-10-05.md).
+  La adopción del umbral quedó rechazada bajo esos criterios. La fila mixed
+  original quedó bloqueada en esa ronda; la corrección del corpus se decidió
+  por separado en ADR-203.
+  **Ronda de cierre ADR-203 autorizada:** mantener 100 pt, versionar un
+  mixed elegible de 300 × 125 pt y preservar el de 300 × 56 pt en
+  caracterización. **Cierre local: 21/21 en Windows, cero fallos/salteados,
+  R-16 verde y Sol 6.1 APPROVED.** **Cierre remoto: 21/21 macOS y CI completa
+  success** en [run 37383499951](https://github.com/sgiambelluca/Anonly/actions/runs/37383499951)
+  sobre HEAD `93f0d3a`;
+  el humano autorizó commit y push utilizando develop. Los cambios están en
+  [PR #52 hacia develop](https://github.com/sgiambelluca/Anonly/pull/52), pues
+  la protección exige PR. La primera espera por el incidente de runners
+  quedó superada por el relanzamiento verde; integración todavía pendiente. Ver
+  [evidencia y revisión final](hardening/ADR148_Cierre_ADR203_2026-10-05.md).
 - **«Validar muestra»**: la misma comprobación, al alcance del usuario.
   Después de exportar, la aplicación vuelve a leer el PDF exportado y
   comprueba que no queda ningún valor original (`Future_Ideas.md` §5.3).

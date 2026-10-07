@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap-indice | dependencias=roadmap/Version_1.0.md,roadmap/Roadmap_1.x.md,roadmap/Version_2.0.md,roadmap/Future_Ideas.md,roadmap/MVP.md | audiencia=humanos+IA | fase=1.0.1 -->
+<!-- CONTEXT: scope=roadmap-indice | dependencias=roadmap/Version_1.0.md,roadmap/Roadmap_1.x.md,roadmap/Version_2.0.md,roadmap/Future_Ideas.md,roadmap/MVP.md,roadmap/hardening/Export_Verificado_ADR148_Plan.md,roadmap/hardening/ADR148_Revision_2026-10-05.md,roadmap/hardening/ADR148_Revision_Sol61_2026-10-05.md,roadmap/ocr/Regiones_Pequenas_Investigacion_Plan.md,adr/ADR-202-El-Minimo-De-Region-OCR-Se-Prueba-A-25pt-Antes-De-Adoptarlo.md,roadmap/ocr/Regiones_Pequenas_25pt_Experimento_Plan.md,roadmap/interaccion/Mejoras_Interaccion_2026-10-05.md,adr/ADR-204-La-Interaccion-Anonimizada-Usa-La-Geometria-Visible.md,adr/ADR-205-El-Resultado-Exportado-Pertenece-A-Una-Revision.md,adr/ADR-206-Una-Busqueda-Omitida-No-Confirma-La-Version.md | audiencia=humanos+IA | fase=1.0.1 -->
 
 # Roadmap — cómo está ordenada esta carpeta
 
@@ -22,12 +22,29 @@ consulta, salvo que su fila diga otra cosa.
 | Carpeta | Qué guarda | Por dónde empezar |
 |---|---|---|
 | [`hitos/`](./hitos/) | Entregas, revisiones y pendientes de los hitos del MVP, y el informe de calidad de detección | [`Post_Hito10.8_Pendientes.md`](./hitos/Post_Hito10.8_Pendientes.md): varios de sus puntos siguen abiertos y `Roadmap_1.x.md` los cita |
-| [`hardening/`](./hardening/) | La revisión por bloques de la campaña de hardening previa a la 1.0, el plan de los gates de fugas y estrés, y el inventario de lógica duplicada | [`Revision_Por_Bloques_Hardening.md`](./hardening/Revision_Por_Bloques_Hardening.md) |
+| [`hardening/`](./hardening/) | La revisión previa a la 1.0, planes de gates e inventario de lógica duplicada. **Abierto en 1.0.x:** gate del PDF exportado (ADR-148), primera entrega sin aprobar | [`ADR148_Revision_2026-10-05.md`](./hardening/ADR148_Revision_2026-10-05.md), [`Export_Verificado_ADR148_Plan.md`](./hardening/Export_Verificado_ADR148_Plan.md); histórico: [`Revision_Por_Bloques_Hardening.md`](./hardening/Revision_Por_Bloques_Hardening.md) |
 | [`memoria/`](./memoria/) | La campaña de memoria: plan, bitácora, instrumento de medición, `ImageData`, márgenes y PDF pesados | [`Optimizacion_De_Memoria_Plan.md`](./memoria/Optimizacion_De_Memoria_Plan.md) |
 | [`rendimiento/`](./rendimiento/) | La campaña de tiempos: perfilados, experimentos, lotes de NER y la revisión que llevó a los perfiles de rendimiento | [`Optimizacion_De_Rendimiento.md`](./rendimiento/Optimizacion_De_Rendimiento.md) |
 | [`ocr/`](./ocr/) | Orientación compartida (T5), fiabilidad de lectura (ADR-190) y las campañas de resolución del OCR | [`T5_OSD_Compartido_Cierre_Final.md`](./ocr/T5_OSD_Compartido_Cierre_Final.md) |
+| Investigación OCR de imágenes pequeñas (abierta, 1.0.x) | Política de regiones menores que el mínimo de ADR-065, con calidad y memoria; decidida por el humano el 2026-10-05 | [`Regiones_Pequenas_Investigacion_Plan.md`](./ocr/Regiones_Pequenas_Investigacion_Plan.md) |
+| Prototipo de mínimo 25 pt (ADR-202, piloto cerrado) | Evidencia/arnés aprobados; mixed recuperado, OCR adicional en capas alineadas; candidato no adoptado, costo no medido | [`Regiones_Pequenas_25pt_Experimento_Plan.md`](./ocr/Regiones_Pequenas_25pt_Experimento_Plan.md) |
+| Cierre del gate de export (ADR-203, local y CI verde) | Política 100 pt, mixed elegible versionado y pequeño histórico preservado; 21/21 Windows/macOS, R-16 verde, Sol APPROVED local y CI completa success | [`ADR148_Cierre_ADR203_2026-10-05.md`](./hardening/ADR148_Cierre_ADR203_2026-10-05.md) |
 | [`distribucion/`](./distribucion/) | La postulación a SignPath para la firma de código de Windows. **Abierta**: enviada el 2026-10-02 | [`SignPath_Postulacion.md`](./distribucion/SignPath_Postulacion.md) |
 | [`mediciones/`](./mediciones/) | Los informes de cada medición, por motor. Cómo correr los arneses: `tests/perf/README.md` | [`mediciones/README.md`](./mediciones/README.md) |
+
+## Campaña de interacción implementada y revisada
+
+[Mejoras de interacción — 2026-10-05](./interaccion/Mejoras_Interaccion_2026-10-05.md):
+ocho cambios implementados, incluidos lupa/selección anonimizada y vigencia
+del export mediante ADR-204/205. Sol aprobó el candidato completo contra
+`origin/develop` el 2026-10-06. Branch `codex/mejoras-interaccion-anonimizado`,
+desde develop; publicada en el [PR #53](https://github.com/sgiambelluca/Anonly/pull/53)
+hacia develop el 2026-10-06, sin release ni versión asignada.
+El estado del PR se registra en el plan.
+Los tres ajustes posteriores (salida del toast, búsqueda omitida en
+desarrollo y arrastre desde blanco) también quedaron implementados y
+aprobados por Sol, con ADR-206 y enmienda de ADR-204. El cierre incluye
+retirada completa de foco y acciones del toast saliente.
 
 ## Convenciones
 

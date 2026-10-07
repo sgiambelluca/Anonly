@@ -107,10 +107,11 @@ describe("shouldReopenOnResult", () => {
     // Regresión: al cerrar el diálogo tras exportar, el blobUrl seguía en
     // `pipeline.store` pero la UI no tenía camino de vuelta a él — reabrir
     // mostraba un formulario en blanco y la única salida era re-exportar.
-    expect(shouldReopenOnResult({ blobUrl: "blob:x" })).toBe(true);
+    expect(shouldReopenOnResult({ blobUrl: "blob:x" }, 2, 2)).toBe(true);
+    expect(shouldReopenOnResult({ blobUrl: "blob:x" }, 3, 2)).toBe(false);
   });
 
   it("sin resultado, reabrir muestra el formulario", () => {
-    expect(shouldReopenOnResult(null)).toBe(false);
+    expect(shouldReopenOnResult(null, 0, null)).toBe(false);
   });
 });

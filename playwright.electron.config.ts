@@ -16,6 +16,7 @@ import { defineConfig } from "@playwright/test";
  */
 export default defineConfig({
   testDir: "./tests/e2e",
+  testIgnore: ["**/export-verification.spec.ts"],
   /*
    * Sin paralelismo. Cada test levanta un proceso de Electron completo —
    * Chromium más los ~243 MB de assets del renderer—, así que correr varios a

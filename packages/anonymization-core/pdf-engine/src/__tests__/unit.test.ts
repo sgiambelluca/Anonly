@@ -2546,6 +2546,90 @@ describe("PdfEngine — unit tests", () => {
       expect(region.bbox.height).toBeGreaterThanOrEqual(100);
     });
 
+    it("production 100pt policy admits clamped bands at the inclusive side boundary", async () => {
+      const horizontal = { x: 50, y: 100, width: 300, height: 100 };
+      const vertical = { x: 50, y: 100, width: 100, height: 300 };
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
+          createMockPdfDocument(2, (pageIndex) =>
+            createMockPage(
+              pageIndex,
+              [{ str: "NativeHeader", x: 500, y: 800, width: 60, height: 12 }],
+              [pageIndex === 0 ? horizontal : vertical],
+            ),
+          ),
+        ),
+      );
+
+      await engine.init(ctx);
+      const output = await engine.process(createValidInput("doc-adr203-100-inclusive"), ctx);
+
+      expect(output.ocrRegions).toHaveLength(2);
+      for (const region of output.ocrRegions) {
+        expect(region.bbox.width).toBeGreaterThanOrEqual(100);
+        expect(region.bbox.height).toBeGreaterThanOrEqual(100);
+        expect(region.bbox.width).toBeLessThanOrEqual(300);
+        expect(region.bbox.height).toBeLessThanOrEqual(300);
+      }
+      expect(
+        output.document.pages.every((item) =>
+          item.words.some((word) => word.text === "NativeHeader"),
+        ),
+      ).toBe(true);
+    });
+
+    it("production 100pt policy rejects clamped bands below either side boundary", async () => {
+      const horizontal = { x: 50, y: 100, width: 300, height: 99.99 };
+      const vertical = { x: 50, y: 100, width: 99.99, height: 300 };
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
+          createMockPdfDocument(2, (pageIndex) =>
+            createMockPage(
+              pageIndex,
+              [{ str: "NativeHeader", x: 500, y: 800, width: 60, height: 12 }],
+              [pageIndex === 0 ? horizontal : vertical],
+            ),
+          ),
+        ),
+      );
+
+      await engine.init(ctx);
+      const output = await engine.process(createValidInput("doc-adr203-99-99-exclusive"), ctx);
+
+      expect(output.ocrRegions).toEqual([]);
+      expect(
+        output.document.pages.every((item) =>
+          item.words.some((word) => word.text === "NativeHeader"),
+        ),
+      ).toBe(true);
+    });
+
+    it("production 100pt policy excludes the historical 300x56 mixed region", async () => {
+      const image = { x: 40, y: 248, width: 300, height: 56 };
+      const pageArea = 595 * 842;
+      expect((image.width * image.height) / pageArea).toBeGreaterThan(0.01);
+
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(
+          createMockPdfDocument(1, () =>
+            createMockPage(
+              0,
+              [{ str: "NativeHeader", x: 500, y: 800, width: 60, height: 12 }],
+              [image],
+            ),
+          ),
+        ),
+      );
+
+      await engine.init(ctx);
+      const output = await engine.process(createValidInput("doc-adr203-small-300x56"), ctx);
+
+      expect(output.ocrRegions).toEqual([]);
+      expect(output.document.pages[0]?.words.some((word) => word.text === "NativeHeader")).toBe(
+        true,
+      );
+    });
+
     it("page with two candidate images yields only the largest", async () => {
       // Dos imágenes candidatas, ninguna con texto nativo encima (la única
       // palabra queda lejos de las dos): se emite solo la de mayor

@@ -113,6 +113,22 @@ describe("viewer.store — estado del visor", () => {
     expect(store().previewByPage.anonymized.has(2)).toBe(false);
   });
 
+  it("guarda URL y geometría en una misma actualización y elimina el mapa si falta", () => {
+    const geometry = { revision: 3, scale: 1, wordPositions: [], coveredRegions: [] };
+    const snapshots: Array<{ url: string | undefined; geometry: unknown }> = [];
+    const unsubscribe = useViewerStore.subscribe((state) => {
+      snapshots.push({
+        url: state.previewByPage.anonymized.get(8),
+        geometry: state.interactionGeometryByPage.get(8),
+      });
+    });
+    store().setPreview(8, "anonymized", "blob:a", geometry);
+    expect(snapshots.at(-1)).toEqual({ url: "blob:a", geometry });
+    store().setPreview(8, "anonymized", "blob:b");
+    expect(snapshots.at(-1)).toEqual({ url: "blob:b", geometry: undefined });
+    unsubscribe();
+  });
+
   it("setPageFailed marca la página, y un preview posterior que prospera limpia la marca", () => {
     store().setPageFailed(3);
     expect(store().failedPages.has(3)).toBe(true);

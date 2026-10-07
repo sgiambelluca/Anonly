@@ -117,6 +117,11 @@ export function peakSumBytes(samples: ReadonlyArray<MemorySample>): number {
   return samples.reduce((max, s) => Math.max(max, s.sumWorkingSetSizeBytes), 0);
 }
 
+/** A missing sample window is unavailable data, never a zero-byte process peak. */
+export function peakSumBytesOrNull(samples: ReadonlyArray<MemorySample>): number | null {
+  return samples.length === 0 ? null : peakSumBytes(samples);
+}
+
 /**
  * El mínimo de `sumWorkingSetSizeBytes` entre las muestras dadas — la línea
  * de base caliente de H-10 lo usa sobre una ventana de asentamiento

@@ -121,7 +121,10 @@ describe("Orchestrator — edge cases", () => {
     }
   });
 
-  function makeOrchestrator(overrides?: { readonly nerEnabled?: boolean }): {
+  function makeOrchestrator(overrides?: {
+    readonly nerEnabled?: boolean;
+    readonly pdfOutput?: ReturnType<typeof createPdfEngineOutput>;
+  }): {
     readonly bus: ReturnType<typeof createRealBus>;
     readonly engines: ReturnType<typeof createMockEngines>;
     readonly orchestrator: PipelineOrchestrator;
@@ -131,7 +134,12 @@ describe("Orchestrator — edge cases", () => {
     wireHappyPathSpies(
       engines,
       bus,
-      overrides?.nerEnabled !== undefined ? { nerEnabled: overrides.nerEnabled } : undefined,
+      overrides !== undefined
+        ? {
+            ...(overrides.nerEnabled !== undefined ? { nerEnabled: overrides.nerEnabled } : {}),
+            ...(overrides.pdfOutput !== undefined ? { pdfOutput: overrides.pdfOutput } : {}),
+          }
+        : undefined,
     );
     const orchestrator = new PipelineOrchestrator({
       bus,
@@ -2098,6 +2106,54 @@ describe("Orchestrator — edge cases", () => {
     // Camino feliz: el guard no rompe el acceso a una página válida.
     expect(orchestrator.getPageWords("doc-1", 0)).toEqual([]);
     expect(orchestrator.getPageSize("doc-1", 0)).toEqual({ width: 595, height: 842 });
+  });
+
+  it("interaction revision follows group changes and removed pages", async () => {
+    const document = createDocument({
+      pageCount: 2,
+      pages: [createPage({ index: 0 }), createPage({ index: 1 })],
+    });
+    const { bus, orchestrator } = makeOrchestrator({
+      pdfOutput: createPdfEngineOutput({ document }),
+    });
+    await orchestrator.importDocument(createImportInput());
+    expect(orchestrator.getPreviewInteractionRevision("doc-1", 0)).toBe(0);
+    expect(orchestrator.getPreviewInteractionRevision("doc-1", 1)).toBe(0);
+    const member = {
+      occurrenceId: "occ-a",
+      value: "Ana",
+      pageIndex: 0,
+      bbox: { x: 1, y: 1, width: 10, height: 5 },
+      source: DetectionSource.Regex,
+    };
+    const group = createEntityGroup({ members: [member] });
+    bus.emit(EventChannel.Grouping, EngineEvents.ENTITY_GROUP_CREATED, {
+      documentId: "doc-1",
+      group,
+    });
+    expect(orchestrator.getPreviewInteractionRevision("doc-1", 0)).toBe(1);
+    bus.emit(EventChannel.Grouping, EngineEvents.ENTITY_GROUP_UPDATED, {
+      documentId: "doc-1",
+      group: { ...group, members: [{ ...member, pageIndex: 1 }] },
+      changes: ["members"],
+    });
+    expect(orchestrator.getPreviewInteractionRevision("doc-1", 0)).toBe(2);
+    expect(orchestrator.getPreviewInteractionRevision("doc-1", 1)).toBe(1);
+    bus.emit(EventChannel.Grouping, EngineEvents.ENTITY_GROUP_REMOVED, {
+      documentId: "doc-1",
+      groupId: group.id,
+    });
+    expect(orchestrator.getPreviewInteractionRevision("doc-1", 1)).toBe(2);
+  });
+
+  it("interaction revision disappears on close and rejects stale maps", async () => {
+    const { orchestrator } = makeOrchestrator();
+    await orchestrator.importDocument(createImportInput());
+    expect(orchestrator.getPreviewInteractionRevision("doc-1", 0)).toBe(0);
+    expect(orchestrator.getPreviewInteractionRevision("missing", 0)).toBeNull();
+    expect(orchestrator.getPreviewInteractionRevision("doc-1", -1)).toBeNull();
+    await orchestrator.closeDocument("doc-1");
+    expect(orchestrator.getPreviewInteractionRevision("doc-1", 0)).toBeNull();
   });
 });
 

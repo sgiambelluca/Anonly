@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=tests-e2e | dependencias=architecture/07_Performance_Strategy.md,adr/ADR-018-First-Party-Assets.md,adr/ADR-048-Cierre-E2E-Hito10-Fixtures-Assets-Escenarios.md | audiencia=humanos+IA | fase=10 -->
+<!-- CONTEXT: scope=tests-e2e | dependencias=architecture/07_Performance_Strategy.md,adr/ADR-018-First-Party-Assets.md,adr/ADR-048-Cierre-E2E-Hito10-Fixtures-Assets-Escenarios.md,adr/ADR-148-Un-Export-Se-Verifica-Leyendo-El-PDF-Exportado.md,roadmap/hardening/Export_Verificado_ADR148_Plan.md,roadmap/hardening/ADR148_Revision_2026-10-05.md,roadmap/hardening/ADR148_Revision_Sol61_2026-10-05.md,roadmap/ocr/Regiones_Pequenas_Investigacion_Plan.md | audiencia=humanos+IA | fase=12 -->
 
 # Tests E2E (Playwright)
 
@@ -56,6 +56,24 @@ La excepción es **`tests/fixtures/protected.pdf`** (Escenario 3): pdf-lib no en
 Ver `tests/fixtures/README.md` para el contenido conocido de `text-10p.pdf` y —importante si vas a escribir aserciones— **qué entidades detecta el pipeline de verdad**, que no es lo mismo que las que el texto contiene.
 
 ## Cómo escribir un escenario acá
+
+### Gate del archivo exportado (ADR-148)
+
+Spec cerrado el 2026-10-05 en
+[`Export_Verificado_ADR148_Plan.md`](../../docs/roadmap/hardening/Export_Verificado_ADR148_Plan.md).
+Primera implementación entregada y **sin aprobar**: 20/21 tests pasan en
+Windows, cero salteados. Hallazgos y correcciones en
+[`ADR148_Revision_2026-10-05.md`](../../docs/roadmap/hardening/ADR148_Revision_2026-10-05.md).
+La segunda revisión de Sol 6.1 sigue en REJECTED: el fixture mixed
+contradice el mínimo de ADR-065 y necesita resolver su política;
+[`informe y decisión humana`](../../docs/roadmap/hardening/ADR148_Revision_Sol61_2026-10-05.md).
+Requiere Electron, motores reales, OCR verificador independiente sobre los
+bytes finales y controles del original. El test de píxeles
+`scanned-rotated-export.spec.ts` aporta un antecedente, pero no cubre ese
+gate. El comando existente y el estado de CI se registran únicamente en
+`docs/architecture/07_Performance_Strategy.md` §11.4.
+
+### Convenciones de escenarios
 
 Convenciones que la suite ya sostiene y conviene no romper:
 

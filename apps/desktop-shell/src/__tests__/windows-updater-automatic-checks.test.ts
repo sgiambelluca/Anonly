@@ -71,14 +71,26 @@ describe("startWindowsUpdater — búsqueda automática (ADR-188)", () => {
     expect(mocks.autoUpdater.checkForUpdates).toHaveBeenCalledTimes(1);
   });
 
-  it("la búsqueda manual funciona con la preferencia apagada", () => {
+  it("la búsqueda manual funciona con la preferencia apagada y comunica un resultado omitido", async () => {
     const handle = startWindowsUpdater(vi.fn(), vi.fn(), { userDataDir: "datos", quit: vi.fn() });
 
     handle.setAutomaticChecks(false);
     expect(mocks.autoUpdater.checkForUpdates).not.toHaveBeenCalled();
 
     // "Buscar actualizaciones ahora" no pasa por la política: siempre funciona.
-    checkWindowsUpdates();
+    const emit = vi.fn();
+    checkWindowsUpdates(emit);
     expect(mocks.autoUpdater.checkForUpdates).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(emit).toHaveBeenCalledWith({ type: "check-unavailable" }));
+  });
+
+  it("maneja el rechazo de la promesa sin emitir un error duplicado", async () => {
+    mocks.autoUpdater.checkForUpdates.mockRejectedValueOnce(new Error("offline"));
+    const emit = vi.fn();
+
+    checkWindowsUpdates(emit);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(emit).not.toHaveBeenCalled();
   });
 });

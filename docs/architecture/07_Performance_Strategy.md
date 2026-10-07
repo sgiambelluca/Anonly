@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=performance | dependencias=adr/ADR-192-El-Pico-Total-De-Memoria-Tiene-Un-Techo-Medido-Por-Perfil.md,05_Worker_Architecture.md,06_Pipeline.md,03_Data_Model.md,adr/ADR-054-Scroll-Independiente-Por-Panel.md,adr/ADR-056-RenderRequested-Kind-Por-Panel.md,adr/ADR-151-La-Primera-Pagina-Ya-Esta-Dibujada-Cuando-Se-Abre-El-Panel.md,adr/ADR-153-El-Gate-De-Tiempos-Se-Mide-Sobre-El-Producto.md,adr/ADR-185-Gates-De-Leak-Y-Stress-En-Electron.md | audiencia=IA+humanos | fase=1 (§3.1 actualizado en el cierre de fase 10: scroll independiente por panel, ADR-054; §11.3 en fase 11: escenario 12 —un panel no dispara el render del otro—, ADR-056; §1/§11.4 en fase 11 por ADR-151/ADR-153 — retira "first preview", agrega las dos filas de página-1-visible e import→panel, y el gate de Performance pasa a correr sobre el shell de Electron empaquetado en vez de un servidor HTTP; §11.4 activa gates Leak/Stress de ADR-185, verdes localmente en macOS, CI pendiente) -->
+<!-- CONTEXT: scope=performance | dependencias=adr/ADR-203-El-Gate-De-Export-Cubre-La-Politica-OCR-Vigente.md,roadmap/hardening/ADR148_Cierre_ADR203_2026-10-05.md,adr/ADR-192-El-Pico-Total-De-Memoria-Tiene-Un-Techo-Medido-Por-Perfil.md,05_Worker_Architecture.md,06_Pipeline.md,03_Data_Model.md,adr/ADR-054-Scroll-Independiente-Por-Panel.md,adr/ADR-056-RenderRequested-Kind-Por-Panel.md,adr/ADR-151-La-Primera-Pagina-Ya-Esta-Dibujada-Cuando-Se-Abre-El-Panel.md,adr/ADR-153-El-Gate-De-Tiempos-Se-Mide-Sobre-El-Producto.md,adr/ADR-185-Gates-De-Leak-Y-Stress-En-Electron.md,roadmap/hardening/ADR148_Revision_2026-10-05.md,roadmap/hardening/ADR148_Revision_Sol61_2026-10-05.md,roadmap/ocr/Regiones_Pequenas_Investigacion_Plan.md | audiencia=IA+humanos | fase=1 (§3.1 actualizado en el cierre de fase 10: scroll independiente por panel, ADR-054; §11.3 en fase 11: escenario 12 —un panel no dispara el render del otro—, ADR-056; §1/§11.4 en fase 11 por ADR-151/ADR-153 — retira "first preview", agrega las dos filas de página-1-visible e import→panel, y el gate de Performance pasa a correr sobre el shell de Electron empaquetado en vez de un servidor HTTP; §11.4 activa gates Leak/Stress de ADR-185, verdes localmente en macOS y CI completa success al 2026-10-05, run 37383499951) -->
 
 # Anonly — Estrategia de Performance (TAD bloque 10)
 
@@ -294,17 +294,21 @@ Fixtures pesados (> 5 MB) vía Git LFS o descargados en `postinstall` con hash v
 | Memoria (M2) | `pnpm exec playwright test --config=playwright.perf.config.ts tests/perf/memory.spec.ts --repeat-each=3`, con la app construida como en la fila Performance | **Local, en Windows nativo, antes de cada release** (ADR-192 §4): el máximo de M2 de tres corridas frías y tres calientes supera el techo de su perfil (P1 2,0 GB, P2 3,0 GB), o hay un OOM o una corrida abortada. Un resultado no disponible es inconcluso, no cumplimiento | manual: `memory.spec.ts` mide y reporta sin afirmar umbrales, y la comparación la hace y la registra quien corre el release. CI no lo aplica (Linux y macOS; macOS es informativo). Automatizarlo con una variable de entorno queda pendiente |
 | Cancel | `pnpm test:cancel` | SLA > 200 ms en cualquier motor | activo; ejecuta o falla (ADR-149 §1): en CI corre siempre, y `scripts/ci/assert-min-tests.mjs` exige un mínimo de tests ejecutados y cero salteados sobre el reporte JSON de Vitest. El control discriminante corre contra `createCore()` real con la cancelación rota (ADR-149 §2) |
 | Security | `pnpm test:security` | `no-recuperability`, `metadata-strip`, `no-network-from-core` o `no-password-in-logs` rojo | auto-activa al existir `tests/security/` (Hito 8+) |
+| Export verification (ADR-148) | `pnpm test:export-verification` | menos de 21 tests ejecutados, cualquier salteado, regresión de integridad/vecinos/objetivos o control inconcluso; el runner también conserva el exit rojo de Playwright | **APPROVED local y CI verde** al 2026-10-05: Sol 6.1 local, 21/21 Windows y macOS, cero fallos/salteados y cinco gates R-16 verdes. [CI completa success, run 37383499951](https://github.com/sgiambelluca/Anonly/actions/runs/37383499951), HEAD `93f0d3a`. ADR-203 conserva política 100 pt y versiona mixed elegible 300 × 125; mixed pequeño 300 × 56 permanece como limitación y caracterización. La primera corrida 20/21 y el piloto 25 pt rechazado para adopción son históricos. Evidencia y revisión en `roadmap/hardening/ADR148_Cierre_ADR203_2026-10-05.md`. Incluye mirror y build; el check agregado E2E exige también este job |
 | Audit | `pnpm audit --audit-level=high` | vulnerabilidad high/critical | activo no bloqueante; bloqueante desde Hito 11 |
 
 Comando mínimo pre-PR (subset local de esta tabla): `pnpm lint && pnpm typecheck && pnpm test && pnpm test:contract && pnpm format:check`. `format:check` se agregó el 2026-09-29 porque CI ya lo exige en el job Lint; los tests de contrato corren en CI dentro de `pnpm test`, y `test:contract` los aísla en local.
 
-**Selección de ramas en CI (ADR-199, 2026-10-02):** los gates básicos corren en
-PR y pushes a `main` y `develop`. E2E y Performance corren en PR hacia `main`,
-pushes a ambas ramas y ejecuciones manuales; no en PR hacia `develop`. Leak y
-Stress conservan pushes a `main` y ejecuciones manuales. Un PR a `develop`
-exige Lint, Typecheck, Unit + Contract + Snapshot, Build, Security audit y
-Security gates; `main` exige además E2E. La ejecución manual permite probar
-el conjunto completo en `develop` antes de promover una versión a `main`.
+**Selección de ramas en CI (ADR-199, 2026-10-02; enmendado por ADR-208, 2026-10-06):**
+los gates básicos, E2E, Export verification y Performance corren en PR y
+pushes a `main` y `develop`, y en ejecuciones manuales. Leak y Stress
+conservan pushes a `main` y ejecuciones manuales. Un PR a `develop` exige los
+mismos checks que uno a `main`: Lint, Typecheck, Unit + Contract + Snapshot,
+Build, Security audit, Security gates y E2E. Solo `develop` exige además la
+rama actualizada antes del merge (ADR-209). Performance corre en ambos pero no es un check requerido. La
+configuración de ADR-148 agrega `Export verification` y lo incluye en el
+check agregado `E2E (Playwright)`; aprobada localmente y verificada en
+CI/macOS por run 37383499951.
 
 Además de los ejecutables, hay **gates de revisión** (no automatizables por comando) definidos en `ai/AI_Development_Guide.md` §4: Diff scope, Spec sync y Prohibiciones.
 

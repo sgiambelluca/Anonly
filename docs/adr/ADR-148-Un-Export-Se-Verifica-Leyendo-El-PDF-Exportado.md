@@ -1,12 +1,36 @@
-<!-- CONTEXT: scope=adr | dependencias=07_Performance_Strategy.md,08_Security_Model.md,core/Render_Engine.md,core/Export_Engine.md,tests/e2e/README.md,adr/ADR-010-Testing-Strategy.md,adr/ADR-130-El-Contenedor-De-Escritorio-Fija-El-Motor.md,adr/ADR-149-Un-Gate-Que-No-Ejecuta-Nada-Es-Rojo.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=adr | dependencias=architecture/07_Performance_Strategy.md,architecture/08_Security_Model.md,core/Render_Engine.md,core/Export_Engine.md,tests/e2e/README.md,roadmap/hardening/Export_Verificado_ADR148_Plan.md,adr/ADR-010-Testing-Strategy.md,adr/ADR-130-El-Contenedor-De-Escritorio-Fija-El-Motor.md,adr/ADR-149-Un-Gate-Que-No-Ejecuta-Nada-Es-Rojo.md,roadmap/hardening/ADR148_Revision_2026-10-05.md,adr/ADR-203-El-Gate-De-Export-Cubre-La-Politica-OCR-Vigente.md | audiencia=humanos+IA | fase=12 -->
 
 # ADR-148 — Un export se verifica leyendo el PDF exportado
+
+> **Ronda de cierre (2026-10-05, ADR-203):** el humano pidió resolver el
+> criterio pendiente y completar la validación. El gate cubre la política
+> vigente de 100 pt con `mixed-eligible-v2-300x125`; el pequeño original
+> `mixed-small-v1-300x56` se conserva en caracterización como limitación.
+> Se retira el candidato de 25 pt del runtime de trabajo, sin adoptarlo.
+> Implementación de esta corrección, **21/21 sin salteados, R-16 y revisión
+> Sol APPROVED local** completados. **CI/macOS 21/21 y corrida completa
+> success** acreditados en [run 37383499951](https://github.com/sgiambelluca/Anonly/actions/runs/37383499951).
+> Ver [ADR-203](ADR-203-El-Gate-De-Export-Cubre-La-Politica-OCR-Vigente.md).
+> [Evidencia y cierre local](../roadmap/hardening/ADR148_Cierre_ADR203_2026-10-05.md).
 
 - **Estado**: Accepted
 - **Fecha**: 2026-09-09
 - **Decidido por**: El planificador, sobre H-03 del plan de campaña de hardening (§5).
 - **Relacionado con**: `08_Security_Model.md` (la propiedad "no recuperabilidad"), ADR-130 (el contenedor, que es donde corren los E2E), ADR-149 (los gates vacíos)
 - **Parte de**: Hito 11 — Hardening
+
+> **Auditoría inicial de implementación (2026-10-05):** decisión aceptada,
+> implementación pendiente. El spec ejecutable está cerrado en
+> [Export_Verificado_ADR148_Plan.md](../roadmap/hardening/Export_Verificado_ADR148_Plan.md):
+> fixtures y cajas independientes de la detección, OCR local independiente,
+> normalización y fragmentos prohibidos, 21 tests mínimos, controles
+> discriminantes, formatos/DPI y wiring de CI. La primera implementación está
+> entregada y **sin aprobar**: 20/21 en Windows, cero salteados; requiere
+> corregir el arnés y diagnosticar el rojo mixto. Ver
+> [la revisión](../roadmap/hardening/ADR148_Revision_2026-10-05.md).
+> CI/macOS no ejecutada; comando y estado en la tabla canónica de gates.
+> La auditoría confirmó que el guard de ADR-140 sigue bloqueando texto nativo
+> rotado; haber implementado la composición de ADR-141 no lo retiró.
 
 ## Contexto
 
@@ -93,7 +117,7 @@ modifica código de producción para producirlo.
 | PDF nativo sin rotación | objetivos en el original, ausentes en el export, vecinos conservados |
 | Escaneo sintético | se ejercita el camino OCR real, no la capa textual del PDF de entrada |
 | Página mixta | se cubren datos nativos y de región OCR |
-| `/Rotate` 90/180/270 | mientras exista el guard de ADR-140: **rechazo explícito**; después de ADR-141: export alineado |
+| `/Rotate` 90/180/270 | texto nativo: **rechazo explícito** mientras exista el guard de ADR-140; escaneo sin capa nativa: export alineado. El cambio a export nativo requiere retirar el guard después de la verificación de ADR-141 §6 |
 | Sello / identificador de causa | regresión específica de H-02, con datos ficticios |
 | PNG/JPEG y escalas acordadas | no confundir artefacto de compresión con ausencia de texto |
 | Modo de reemplazo | los modos que pintan distinto según spec; redacción sólida como control básico |

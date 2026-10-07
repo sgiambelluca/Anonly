@@ -42,10 +42,6 @@ describe("security audit policy (ADR-201)", () => {
     { cves: [] },
     { cves: ["CVE-2026-93687", "CVE-other"] },
     { findings: [{ version: "3.0.2" }] },
-    { findings: [{ version: "3.0.3" }, { version: "3.0.2" }] },
-    { findings: [] },
-    { findings: [{}] },
-    { findings: undefined },
   ])("blocks mismatching advisory or version: %j", (change) => {
     expect(evaluateAudit(report([{ ...advisory, ...change }]), true).blocked).toBe(true);
   });
@@ -57,6 +53,52 @@ describe("security audit policy (ADR-201)", () => {
         true,
       ).blocked,
     ).toBe(true);
+  });
+  it.each(["high", "critical"])(
+    "counts multiple findings for a single unresolved %s advisory",
+    (severity) => {
+      const other = {
+        ...advisory,
+        module_name: "sharp",
+        github_advisory_id: "GHSA-other",
+        severity,
+        findings: [{ version: "0.35.4" }, { version: "0.35.4" }],
+      };
+      const result = evaluateAudit(
+        report([advisory, other], severity === "high" ? 3 : 1, severity === "critical" ? 2 : 0),
+        true,
+      );
+      expect(result.blocked).toBe(true);
+      expect(result.findings).toHaveLength(2);
+      expect(result.findings[1]?.locallyFixed).toBe(false);
+    },
+  );
+  it("counts findings rather than the dependency paths within each finding", () => {
+    const multiplePaths = {
+      ...advisory,
+      findings: [{ version: "3.0.3", paths: ["a>braces", "b>braces", "c>braces"] }],
+    };
+    expect(evaluateAudit(report([multiplePaths]), true).blocked).toBe(false);
+    expect(() => evaluateAudit(report([multiplePaths], 3), true)).toThrow(
+      "inconsistent vulnerability totals",
+    );
+  });
+  it("accepts multiple patched braces findings only when every resolution is verified", () => {
+    const multiple = {
+      ...advisory,
+      findings: [{ version: "3.0.3" }, { version: "3.0.3" }],
+    };
+    expect(evaluateAudit(report([multiple], 2), true).blocked).toBe(false);
+    expect(evaluateAudit(report([multiple], 2), false).blocked).toBe(true);
+    expect(
+      evaluateAudit(
+        report([{ ...multiple, findings: [{ version: "3.0.3" }, { version: "3.0.2" }] }], 2),
+        true,
+      ).blocked,
+    ).toBe(true);
+    expect(() => evaluateAudit(report([multiple]), true)).toThrow(
+      "inconsistent vulnerability totals",
+    );
   });
   it("accepts a clean audit and preserves the existing high/critical severity threshold", () => {
     expect(evaluateAudit(report([], 0), false).blocked).toBe(false);
@@ -75,12 +117,25 @@ describe("security audit policy (ADR-201)", () => {
     report([{ ...advisory, module_name: null }]),
     report([{ ...advisory, github_advisory_id: null }]),
     report([{ ...advisory, severity: null }]),
+    report([{ ...advisory, findings: [] }]),
+    report([{ ...advisory, findings: [{}] }]),
+    report([{ ...advisory, findings: undefined }]),
+    report([{ ...advisory, findings: [null] }]),
+    report([{ ...advisory, findings: [{ version: 303 }] }]),
+    report([{ ...advisory, findings: [{ version: "" }] }]),
     report([], 1),
     report([advisory], 0),
     { advisories: {}, metadata: { vulnerabilities: { high: "0", critical: 0 } } },
   ])("fails closed for malformed or inconsistent audit data: %j", (value) => {
     expect(() => evaluateAudit(value, true)).toThrow();
   });
+  it.each([-1, 0.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1])(
+    "rejects invalid vulnerability counters: %s",
+    (count) => {
+      expect(() => evaluateAudit(report([], count), true)).toThrow();
+      expect(() => evaluateAudit(report([], 0, count), true)).toThrow();
+    },
+  );
 });
 
 describe("installed braces remediation (ADR-201)", () => {

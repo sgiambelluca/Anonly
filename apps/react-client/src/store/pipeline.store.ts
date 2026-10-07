@@ -31,6 +31,9 @@ export interface PipelineSlice {
   readonly lastOcrPageIndex: number | null;
   readonly exportProgress: { current: number; total: number } | null;
   readonly exportResult: { blobUrl: string; sizeBytes: number } | null;
+  readonly currentVersion: number;
+  readonly exportedVersion: number | null;
+  readonly exportingVersion: number | null;
   readonly error: SerializedEngineError | null;
   /**
    * Jobs que fallaron sin tumbar el pipeline, por tipo. Un worker caído
@@ -78,6 +81,9 @@ const initialState: PipelineData = {
   lastOcrPageIndex: null,
   exportProgress: null,
   exportResult: null,
+  currentVersion: 0,
+  exportedVersion: null,
+  exportingVersion: null,
   error: null,
   failedJobs: {},
   failedAtStage: null,

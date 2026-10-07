@@ -76,6 +76,10 @@ export function ExportDialog({ open, onClose }: ExportDialogProps) {
   const unreadableInkPages = useUnreadableInkStore((state) => state.pages);
 
   const exportResult = usePipelineStore((state) => state.exportResult);
+  const currentVersion = usePipelineStore((state) => state.currentVersion);
+  const exportedVersion = usePipelineStore((state) => state.exportedVersion);
+  const exportingVersion = usePipelineStore((state) => state.exportingVersion);
+  const exportError = usePipelineStore((state) => state.error);
 
   const [filename, setFilename] = useState(DEFAULT_EXPORT_FILENAME);
   const [includeMarkerLegend, setIncludeMarkerLegend] = useState(false);
@@ -100,12 +104,12 @@ export function ExportDialog({ open, onClose }: ExportDialogProps) {
   // desde la prueba manual.
   useEffect(() => {
     if (!open) return;
-    const reopenOnResult = shouldReopenOnResult(exportResult);
+    const reopenOnResult = shouldReopenOnResult(exportResult, currentVersion, exportedVersion);
     // El nombre **sobrevive** al reabrir sobre un resultado: es el nombre con
     // el que se exportó, y el ancla "Descargar" lo usa. Resetearlo hacía que
     // reabrir para descargar bajara el archivo como `anonimizado.pdf` en vez
     // del nombre que el usuario había escrito.
-    if (!reopenOnResult) setFilename(DEFAULT_EXPORT_FILENAME);
+    if (exportResult === null) setFilename(DEFAULT_EXPORT_FILENAME);
     setIncludeMarkerLegend(false);
     setPreflightOpen(false);
     setPendingConfirmOpen(false);
@@ -117,18 +121,36 @@ export function ExportDialog({ open, onClose }: ExportDialogProps) {
     // nombre que el usuario acaba de escribir.
   }, [open]);
 
+  useEffect(() => {
+    if (submitted && exportingVersion === null && exportResult === null && exportError === null) {
+      // Cancelación sin resultado: volver al formulario para que no quede un
+      // progreso infinito. Un fallo conserva la vista de error y su reintento.
+      setSubmitted(false);
+      return;
+    }
+    if (
+      submitted &&
+      exportingVersion === null &&
+      exportError === null &&
+      exportedVersion !== null &&
+      currentVersion !== exportedVersion
+    ) {
+      setSubmitted(false);
+    }
+  }, [submitted, exportingVersion, exportedVersion, currentVersion, exportResult, exportError]);
+
   const counts = countGroups(groupsByType);
   const pendingPages = computePendingPages(unreadableInkPages, groupsByType);
 
   function startExport(): void {
-    actions.requestExport(
+    const accepted = actions.requestExport(
       buildExportOptions({
         filename,
         includeMarkerLegend,
         coveredPages: buildCoveredPages(pendingPages, uncheckedPendingPages),
       }),
     );
-    setSubmitted(true);
+    if (accepted) setSubmitted(true);
   }
 
   function proceedPastPendingPages(): void {
@@ -182,7 +204,12 @@ export function ExportDialog({ open, onClose }: ExportDialogProps) {
             <Button variant="secondary" onClick={onClose}>
               Cancelar
             </Button>
-            <Button variant="primary" className="min-w-[6rem]" onClick={handleSubmit}>
+            <Button
+              variant="primary"
+              className="min-w-[6rem]"
+              onClick={handleSubmit}
+              disabled={exportingVersion !== null}
+            >
               Exportar
             </Button>
           </div>
@@ -240,6 +267,11 @@ export function ExportDialog({ open, onClose }: ExportDialogProps) {
             <span className="text-text-secondary">
               Si lo dejás vacío, se usa {DEFAULT_EXPORT_FILENAME}.
             </span>
+            {exportedVersion !== null && currentVersion !== exportedVersion ? (
+              <span role="status" className="text-text-secondary">
+                Ya exportaste este documento anteriormente. Hay cambios pendientes de exportar.
+              </span>
+            ) : null}
           </FormRow>
 
           <div
@@ -316,8 +348,12 @@ export function ExportDialog({ open, onClose }: ExportDialogProps) {
  * `apps/react-client` corren en Node sin jsdom, así que lo que vive dentro de
  * un componente no se testea.
  */
-export function shouldReopenOnResult(exportResult: { readonly blobUrl: string } | null): boolean {
-  return exportResult !== null;
+export function shouldReopenOnResult(
+  exportResult: { readonly blobUrl: string } | null,
+  currentVersion: number,
+  exportedVersion: number | null,
+): boolean {
+  return exportResult !== null && exportedVersion !== null && currentVersion === exportedVersion;
 }
 
 function FormRow({

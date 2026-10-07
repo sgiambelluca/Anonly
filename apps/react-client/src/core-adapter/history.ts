@@ -14,6 +14,7 @@
 
 import { useDocumentStore } from "../store/document.store.js";
 import { createHistoryStore, type EditCheckpointPort } from "../store/history.store.js";
+import { usePipelineStore } from "../store/pipeline.store.js";
 import { useRulesStore } from "../store/rules.store.js";
 
 import { getGroupingSnapshot } from "./snapshots.js";
@@ -30,7 +31,11 @@ const coreCheckpoints: EditCheckpointPort = {
     const documentId = useDocumentStore.getState().id;
     if (documentId === null) throw new Error("Sin documento activo.");
     await getCore().orchestrator.restoreEditCheckpoint(documentId, checkpointId);
-    useRulesStore.getState().replaceRules(getGroupingSnapshot(documentId).rules);
+    if (useDocumentStore.getState().id !== documentId) return;
+    const snapshot = getGroupingSnapshot(documentId);
+    useRulesStore.getState().replaceRules(snapshot.rules);
+    const { currentVersion } = usePipelineStore.getState();
+    usePipelineStore.setState({ currentVersion: currentVersion + 1 });
   },
   discard() {
     const documentId = useDocumentStore.getState().id;

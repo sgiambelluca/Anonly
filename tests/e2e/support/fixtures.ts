@@ -107,6 +107,25 @@ export async function textTenPagesFile(): Promise<E2eFilePayload> {
   return { name: "text-10p.pdf", mimeType: "application/pdf", buffer: Buffer.from(bytes) };
 }
 
+/** One-page deterministic source for interaction and export-version E2E flows. */
+export async function interactionOnePageFile(): Promise<E2eFilePayload> {
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([595, 842]);
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  page.drawText("DNI 34.567.891 Nombre Marina Suarez", {
+    x: 60,
+    y: 750,
+    size: 20,
+    font,
+    color: rgb(0, 0, 0),
+  });
+  return {
+    name: "interaction-source.pdf",
+    mimeType: "application/pdf",
+    buffer: Buffer.from(await doc.save()),
+  };
+}
+
 /** Cinco páginas OCR con rotaciones físicas 0/90/180/0/270; el helper de
  * rasterización se ejecuta en el browser del E2E y no usa `/Rotate`. */
 export async function t5PixelOrientationSourceFile(): Promise<E2eFilePayload> {

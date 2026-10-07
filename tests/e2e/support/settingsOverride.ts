@@ -27,6 +27,7 @@ export interface SettingsOverride {
   readonly performancePreset?: "auto" | "low" | "medium" | "high" | "ultra";
   readonly nerEnabled?: boolean;
   readonly ocrLanguages?: ReadonlyArray<string>;
+  readonly updateMode?: "off" | "notify" | "install";
 }
 
 /**

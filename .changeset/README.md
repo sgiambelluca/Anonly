@@ -27,10 +27,12 @@ juntos; no se publican librerías a npm.
 
    Changesets consume todos los `.changeset/*.md` pendientes, actualiza las versiones y los CHANGELOG y remueve los archivos consumidos. Integrá ese cambio por PR a `develop`.
 
-4. Probá el conjunto y prepará una rama temporal desde `develop`, rebaseada
-   sobre `main`. Abrí su PR hacia `main` y usá Rebase and merge. Conservá
-   `develop` sin reescribirla. Esperá CI exitosa de push en `main` para el SHA
-   que vas a tagear.
+4. Probá el conjunto y promové `develop` a `main` con un PR directo y **Create a
+   merge commit** (ADR-209): así los commits conservan su SHA. No uses Rebase
+   ni squash en la promoción ni mergees `main` en `develop`. La primera
+   promoción es la excepción y usa `release/promote-develop`; los pasos están
+   en `RELEASING.md`. Esperá CI exitosa de push en `main` para el SHA que vas
+   a tagear.
 
 5. Creá y pusheá solo el tag de esa versión, coincidente con
    `apps/desktop-shell/package.json`. El workflow crea un release en borrador;

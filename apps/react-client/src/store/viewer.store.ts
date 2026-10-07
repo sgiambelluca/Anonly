@@ -22,6 +22,7 @@
  * no vive el `stage`.
  */
 
+import type { PreviewInteractionGeometry } from "@anonly/anonymization-core";
 import { create } from "zustand";
 
 /** `"original" | "anonymized"` — qué muestra el visor (ADR-087 §2). */
@@ -39,6 +40,9 @@ export interface ViewerSlice {
   /** Posición del toggle Original/Anonimizado (ADR-087 §2). */
   readonly mode: ViewerKind;
   readonly previewByPage: Readonly<Record<ViewerKind, ReadonlyMap<number, string>>>;
+  /** Geometry paired atomically with each anonymized preview URL. */
+  readonly interactionGeometryByPage: ReadonlyMap<number, PreviewInteractionGeometry>;
+  readonly interactionEpoch: number;
   /**
    * Páginas cuyo render **falló** (`PREVIEW_PAGE_FAILED`).
    *
@@ -86,7 +90,14 @@ export interface ViewerSlice {
   setSearchQuery(query: string): void;
   setZoom(z: number): void;
   setMode(mode: ViewerKind): void;
-  setPreview(pageIndex: number, kind: ViewerKind, blobUrl: string): void;
+  setPreview(
+    pageIndex: number,
+    kind: ViewerKind,
+    blobUrl: string,
+    interactionGeometry?: PreviewInteractionGeometry,
+  ): void;
+  bumpInteractionEpoch(): void;
+  clearInteractionGeometry(pageIndex: number): void;
   setPageFailed(pageIndex: number): void;
   setVisibleRange(start: number, end: number): void;
   requestPageJump(pageIndex: number): void;
@@ -112,6 +123,8 @@ type ViewerData = Pick<
   | "zoom"
   | "mode"
   | "previewByPage"
+  | "interactionGeometryByPage"
+  | "interactionEpoch"
   | "failedPages"
   | "visibleRange"
   | "searchQuery"
@@ -125,6 +138,8 @@ const initialState: ViewerData = {
   // (UX-3b), así que cualquier otro default sería inalcanzable.
   mode: "original",
   previewByPage: { original: new Map(), anonymized: new Map() },
+  interactionGeometryByPage: new Map(),
+  interactionEpoch: 0,
   failedPages: new Set(),
   searchQuery: "",
   visibleRange: { start: 0, end: 0 },
@@ -147,19 +162,44 @@ export const useViewerStore = create<ViewerSlice>((set, get) => ({
   setMode(mode) {
     set({ mode });
   },
-  setPreview(pageIndex, kind, blobUrl) {
+  setPreview(pageIndex, kind, blobUrl, interactionGeometry) {
     set((state) => {
       const next = new Map(state.previewByPage[kind]);
       next.set(pageIndex, blobUrl);
+      const interactionGeometryByPage = new Map(state.interactionGeometryByPage);
+      if (kind === "anonymized" && interactionGeometry !== undefined) {
+        interactionGeometryByPage.set(pageIndex, interactionGeometry);
+      } else if (kind === "anonymized") {
+        interactionGeometryByPage.delete(pageIndex);
+      }
       // Una página que ahora sí renderizó deja de estar fallada: un reintento
       // que prospera tiene que poder limpiar la marca, o el error quedaría
       // pegado sobre una imagen correcta.
       if (!state.failedPages.has(pageIndex)) {
-        return { previewByPage: { ...state.previewByPage, [kind]: next } };
+        return {
+          previewByPage: { ...state.previewByPage, [kind]: next },
+          interactionGeometryByPage,
+        };
       }
       const failed = new Set(state.failedPages);
       failed.delete(pageIndex);
-      return { previewByPage: { ...state.previewByPage, [kind]: next }, failedPages: failed };
+      return {
+        previewByPage: { ...state.previewByPage, [kind]: next },
+        interactionGeometryByPage,
+        failedPages: failed,
+      };
+    });
+  },
+  bumpInteractionEpoch() {
+    set((state) => ({ interactionEpoch: state.interactionEpoch + 1 }));
+  },
+  clearInteractionGeometry(pageIndex) {
+    set((state) => {
+      if (!state.interactionGeometryByPage.has(pageIndex))
+        return { interactionEpoch: state.interactionEpoch + 1 };
+      const next = new Map(state.interactionGeometryByPage);
+      next.delete(pageIndex);
+      return { interactionGeometryByPage: next, interactionEpoch: state.interactionEpoch + 1 };
     });
   },
   setPageFailed(pageIndex) {

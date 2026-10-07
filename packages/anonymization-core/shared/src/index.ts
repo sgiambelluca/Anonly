@@ -64,6 +64,9 @@ export type { PersonGender, PersonGenderChoice, RuleScope, WorkerJobType } from 
 // Modelos de datos (03_Data_Model.md)
 export type {
   BoundingBox,
+  PreviewWordPosition,
+  PreviewCoveredRegion,
+  PreviewInteractionGeometry,
   WordSpan,
   Word,
   Page,

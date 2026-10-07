@@ -122,6 +122,8 @@ export interface IPipelineOrchestrator {
   discardEditCheckpoints(documentId: string): void;
   /** ADR-061 §4: habilitan el hit-test de selección sobre el canvas del original. */
   getPageWords(documentId: string, pageIndex: number): ReadonlyArray<Word>;
+  /** Current geometry revision for an existing page; null if the page is absent. */
+  getPreviewInteractionRevision(documentId: string, pageIndex: number): number | null;
   getPageSize(
     documentId: string,
     pageIndex: number,

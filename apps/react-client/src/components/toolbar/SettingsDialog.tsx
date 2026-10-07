@@ -38,6 +38,7 @@
 
 import {
   CheckIcon,
+  CircleCheckIcon,
   GaugeIcon,
   GlobeIcon,
   InfoIcon,
@@ -45,7 +46,7 @@ import {
   SunMoonIcon,
   TriangleAlertIcon,
 } from "lucide-react";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { actions } from "../../core-adapter/actions.js";
 import { recreateCore } from "../../core-adapter/index.js";
@@ -71,6 +72,7 @@ import {
   getShellUpdater,
   sendAutomaticChecksPreference,
   sendInstallOnQuitPreference,
+  subscribeToUpdateEvents,
 } from "../../updater/index.js";
 import { Button } from "../common/Button.js";
 import { Checkbox } from "../common/Checkbox.js";
@@ -104,6 +106,7 @@ import {
   UPDATE_SECTION_SUBTITLE,
   updateModeDescription,
 } from "./settingsCopy.js";
+import { transitionManualUpdateCheck, type ManualUpdateCheckState } from "./updateCheckState.js";
 import {
   syncAutomaticChecksPreference,
   syncInstallOnQuitPreference,
@@ -182,6 +185,19 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [manualUpdateCheck, setManualUpdateCheck] = useState<ManualUpdateCheckState>("idle");
+  const manualUpdateCheckRef = useRef<ManualUpdateCheckState>("idle");
+
+  // `SettingsDialog` permanece montado desde `SettingsButton`: una sola
+  // suscripción al puente durante su vida, aunque el usuario lo abra/cierre.
+  useEffect(() => {
+    if (shellUpdater === null) return;
+    return subscribeToUpdateEvents(shellUpdater, (event) => {
+      const next = transitionManualUpdateCheck(manualUpdateCheckRef.current, event);
+      manualUpdateCheckRef.current = next;
+      setManualUpdateCheck(next);
+    });
+  }, [shellUpdater]);
 
   // Re-sincroniza el formulario con el store vigente cada vez que se abre.
   useEffect(() => {
@@ -193,6 +209,8 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
     setUpdateMode(current.updateMode);
     setTheme(current.theme);
     setSaveError(null);
+    manualUpdateCheckRef.current = "idle";
+    setManualUpdateCheck("idle");
   }, [open]);
 
   function applyToStore(next: {
@@ -572,14 +590,47 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                   {UPDATE_NETWORK_NOTICE_CHECK_OFF}
                 </span>
               </div>
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-sm text-text-secondary">
-                  Versión instalada:{" "}
-                  <b className="font-semibold text-text-primary">{__ANONLY_VERSION__}</b>
-                </span>
-                <Button variant="secondary" onClick={() => shellUpdater.check()}>
-                  Buscar actualizaciones ahora
-                </Button>
+              <div className="flex flex-col gap-1">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-sm text-text-secondary">
+                    Versión instalada:{" "}
+                    <b className="font-semibold text-text-primary">{__ANONLY_VERSION__}</b>
+                  </span>
+                  <Button
+                    variant="secondary"
+                    onClick={() => {
+                      manualUpdateCheckRef.current = "checking";
+                      setManualUpdateCheck("checking");
+                      shellUpdater.check();
+                    }}
+                  >
+                    Buscar actualizaciones ahora
+                  </Button>
+                </div>
+                <p
+                  role="status"
+                  aria-live="polite"
+                  className={`flex min-h-10 items-start gap-1.5 text-sm leading-snug ${
+                    manualUpdateCheck === "up-to-date" || manualUpdateCheck === "unavailable"
+                      ? "text-text-secondary"
+                      : "invisible text-text-secondary"
+                  }`}
+                >
+                  {manualUpdateCheck === "up-to-date" ? (
+                    <>
+                      <CircleCheckIcon
+                        className="mt-0.5 h-3.5 w-3.5 shrink-0 text-success"
+                        aria-hidden
+                      />
+                      Estás utilizando la última versión.
+                    </>
+                  ) : manualUpdateCheck === "unavailable" ? (
+                    <>
+                      <InfoIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+                      Para buscar actualizaciones, abrí la app instalada.
+                    </>
+                  ) : null}
+                </p>
               </div>
             </Section>
           ) : null}

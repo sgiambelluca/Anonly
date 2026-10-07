@@ -169,6 +169,11 @@ describe("bus-bridge: failedAtStage y visitedStages (pipeline.store, ADR-168 §4
   it("PIPELINE_FAILED registra la etapa en la que estaba el pipeline", () => {
     const bus = createEventBus({ logger });
     const unsubscribe = subscribe(bus, stores);
+    bus.emit(EventChannel.Pipeline, EngineEvents.DOCUMENT_IMPORTED, {
+      documentId: "doc-1",
+      name: "a.pdf",
+      sizeBytes: 1,
+    });
 
     bus.emit(EventChannel.Pipeline, EngineEvents.PIPELINE_STAGE_CHANGED, {
       documentId: "doc-1",
@@ -190,6 +195,11 @@ describe("bus-bridge: failedAtStage y visitedStages (pipeline.store, ADR-168 §4
   it("un fallo en Detecting no es de importación", () => {
     const bus = createEventBus({ logger });
     const unsubscribe = subscribe(bus, stores);
+    bus.emit(EventChannel.Pipeline, EngineEvents.DOCUMENT_IMPORTED, {
+      documentId: "doc-1",
+      name: "a.pdf",
+      sizeBytes: 1,
+    });
 
     for (const stage of [
       PipelineStage.Importing,

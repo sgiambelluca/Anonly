@@ -35,7 +35,9 @@ import {
   TagIcon,
   Trash2Icon,
 } from "lucide-react";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+
+import { observeMenuLayout, type MenuLayout } from "./menuPlacement.js";
 
 export interface GroupContextMenuProps {
   readonly onMerge: () => void;
@@ -66,6 +68,12 @@ export function GroupContextMenu({
 }: GroupContextMenuProps) {
   const [open, setOpenState] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [layout, setLayout] = useState<MenuLayout>({
+    placement: "bottom",
+    top: 0,
+    maxHeight: 0,
+  });
   const onOpenChangeRef = useRef(onOpenChange);
   onOpenChangeRef.current = onOpenChange;
 
@@ -73,6 +81,25 @@ export function GroupContextMenu({
     setOpenState(next);
     onOpenChangeRef.current?.(next);
   }
+
+  const contentSignature =
+    Number(onEditReplacement !== undefined) | (Number(onRestoreComputedValue !== undefined) << 1);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    const container = containerRef.current;
+    const menu = menuRef.current;
+    if (container === null || menu === null) return;
+    return observeMenuLayout(container, menu, (next) => {
+      setLayout((previous) =>
+        previous.placement === next.placement &&
+        previous.top === next.top &&
+        previous.maxHeight === next.maxHeight
+          ? previous
+          : next,
+      );
+    });
+  }, [open, contentSignature]);
 
   useEffect(() => {
     if (!open) return;
@@ -123,9 +150,12 @@ export function GroupContextMenu({
       </button>
       {open ? (
         <div
+          ref={menuRef}
           role="group"
           aria-label="Acciones del grupo"
-          className="absolute right-0 top-full z-50 mt-1 w-60 rounded-xl border border-border bg-bg-primary p-1.5 shadow-md"
+          data-placement={layout.placement}
+          style={{ top: `${layout.top}px`, maxHeight: `${layout.maxHeight}px` }}
+          className="absolute right-0 z-50 w-60 overflow-y-auto overscroll-contain rounded-xl border border-border bg-bg-primary p-1.5 shadow-md"
         >
           <MenuItem
             icon={<EyeIcon className="h-4 w-4" aria-hidden />}
