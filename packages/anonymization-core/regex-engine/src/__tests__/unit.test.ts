@@ -8,6 +8,7 @@ import {
 } from "@anonly/shared";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
+import { normalizeEmailReadWithQ, scanEmailReadWithQ } from "../email-q-scanner.js";
 import { scanEmailDefault } from "../email-scanner.js";
 import { DEFAULT_PATTERNS_AR } from "../patterns/default-ar.js";
 import { RegexEngine } from "../regex.engine.js";
@@ -19,7 +20,9 @@ import {
   makePage,
   makePageFromWords,
   makeSinglePageDocument,
+  makeSourcedPage,
   makeWord,
+  processPage,
 } from "./fixtures/test-helpers.js";
 
 async function firstOccurrence(
@@ -1561,6 +1564,237 @@ describe("RegexEngine — unit tests", () => {
 
       expect(matches).toHaveLength(1);
       expect(matches[0]?.text).toBe("O'Brien");
+    });
+  });
+  // Caso 35 (ADR-211): el email que el OCR leyó con la `@` convertida en `Q`.
+  describe("Email leído con Q (ADR-211, caso 35)", () => {
+    it("email read with Q is detected in OCR words only", async () => {
+      const ocr = await processPage(engine, ctx, makeSourcedPage(0, ["juanQexample.com"]));
+      expect(ocr).toHaveLength(1);
+      expect(ocr[0]).toMatchObject({
+        value: "juanQexample.com",
+        entityType: EntityType.Email,
+        source: "regex",
+        confidence: 1,
+        maskFormat: "xxxx@xxxx.xx",
+        wordSpan: { startIndex: 0, endIndexExclusive: 1 },
+      });
+
+      const pdf = await processPage(
+        engine,
+        ctx,
+        makeSourcedPage(0, [{ text: "juanQexample.com", source: "pdf" }]),
+      );
+      expect(pdf).toHaveLength(0);
+
+      // Un span de dos palabras exige las dos de OCR: con una de PDF, en
+      // cualquiera de los dos lugares, no hay ocurrencia.
+      const pdfThenOcr = await processPage(
+        engine,
+        ctx,
+        makeSourcedPage(0, [
+          { text: "contacto.", source: "pdf" },
+          { text: "estudioQexample.org", source: "ocr" },
+        ]),
+      );
+      expect(pdfThenOcr).toHaveLength(0);
+      const ocrThenPdf = await processPage(
+        engine,
+        ctx,
+        makeSourcedPage(0, [
+          { text: "contacto.", source: "ocr" },
+          { text: "estudioQexample.org", source: "pdf" },
+        ]),
+      );
+      expect(ocrThenPdf).toHaveLength(0);
+
+      const bothOcr = await processPage(
+        engine,
+        ctx,
+        makeSourcedPage(0, ["contacto.", "estudioQexample.org"]),
+      );
+      expect(bothOcr).toHaveLength(1);
+      expect(bothOcr[0]?.wordSpan).toEqual({ startIndex: 0, endIndexExclusive: 2 });
+    });
+
+    it("email read with Q normalizes to the real address and keeps the read value", async () => {
+      const read = await processPage(
+        engine,
+        ctx,
+        makeSourcedPage(0, ["Escribir", "a", "contacto.", "estudioQexample.org", "gracias"]),
+      );
+      expect(read).toHaveLength(1);
+      // `value`: el texto como se leyó, con la `Q` y con el espacio.
+      expect(read[0]?.value).toBe("contacto. estudioQexample.org");
+      // `normalizedValue`: la `@` restituida, sin el espacio y en minúsculas.
+      expect(read[0]?.normalizedValue).toBe("contacto.estudio@example.org");
+
+      // El mismo email leído bien cae en la misma clave de agrupado.
+      const wellRead = await processPage(
+        engine,
+        ctx,
+        makeSourcedPage(0, ["Escribir", "a", "Contacto.Estudio@Example.ORG"]),
+      );
+      expect(wellRead).toHaveLength(1);
+      expect(wellRead[0]?.value).toBe("Contacto.Estudio@Example.ORG");
+      expect(wellRead[0]?.normalizedValue).toBe(read[0]?.normalizedValue);
+
+      expect(normalizeEmailReadWithQ("info. contacto. estudioQexample.org")).toBe(
+        "info.contacto.estudio@example.org",
+      );
+    });
+
+    // Auxiliar de la implementación: el escáner lineal contra la expresión de
+    // referencia del caso 35, que acá es solo un oráculo de tamaños acotados.
+    it("Q email scanner matches reference spans and values", () => {
+      const reference =
+        /\b(?:[a-z0-9._%+-]*[a-z0-9]\. ){0,2}[a-z0-9._%+-]*[a-z0-9]Q[a-z0-9][a-z0-9.-]*\.[a-z]{2,}\b/g;
+      const expectedFor = (text: string) => {
+        reference.lastIndex = 0;
+        const expected: Array<{
+          readonly startIndex: number;
+          readonly endIndexExclusive: number;
+          readonly value: string;
+        }> = [];
+        let match: RegExpExecArray | null;
+        while ((match = reference.exec(text)) !== null) {
+          expected.push({
+            startIndex: match.index,
+            endIndexExclusive: match.index + match[0].length,
+            value: match[0],
+          });
+        }
+        return expected;
+      };
+
+      let seed = 0x2d1;
+      const next = (modulo: number): number => {
+        seed = (seed * 48271) % 0x7fffffff;
+        return seed % modulo;
+      };
+
+      const characters = "abz09._%+-QQQ@ \n,A é";
+      const tokens = [
+        "a",
+        "bc",
+        "x9",
+        ".",
+        "-",
+        "Q",
+        "Q",
+        "Q",
+        " ",
+        ". ",
+        "  ",
+        "example",
+        ".org",
+        ".com",
+        "@",
+        "A",
+        "_",
+        "9",
+      ];
+      const generated: string[] = [];
+      for (let sample = 0; sample < 300; sample++) {
+        let text = "";
+        for (let index = next(90); index > 0; index--) {
+          text += characters[next(characters.length)] ?? "x";
+        }
+        generated.push(text);
+      }
+      for (let sample = 0; sample < 600; sample++) {
+        let text = "";
+        for (let index = 3 + next(14); index > 0; index--) {
+          text += tokens[next(tokens.length)] ?? "x";
+        }
+        generated.push(text);
+      }
+
+      // Muestras estructuradas: de 0 a 3 tramos «nombre. », un nombre, la `Q`,
+      // un dominio y un resto, todo con piezas que a veces se corrompen. Sin
+      // ellas casi ninguna muestra al azar llega a ser una coincidencia.
+      const nameParts = ["a", "bc", "x9", "a.b", "m-n", "q_r", "Ab", "9", "z.", ".z"];
+      const domainParts = ["example.org", "x.co", "a.b.cd", "d.e", "ex-ample.com", "a.b", "e.c1"];
+      const separators = [" ", "  ", ", ", " y ", "\n", ""];
+      const pick = (list: ReadonlyArray<string>): string => list[next(list.length)] ?? "";
+      for (let sample = 0; sample < 600; sample++) {
+        let text = "";
+        for (let item = 1 + next(3); item > 0; item--) {
+          for (let segment = next(4); segment > 0; segment--) {
+            text += `${pick(nameParts)}${next(8) === 0 ? "" : ". "}`;
+          }
+          text += `${pick(nameParts)}${next(10) === 0 ? "q" : "Q"}${pick(domainParts)}`;
+          text += next(3) === 0 ? pick(["@x.org", "1", "_", "-", ".", "Q"]) : "";
+          text += pick(separators);
+        }
+        generated.push(text);
+      }
+
+      const corpus = [
+        "juanQgmail.com",
+        "contacto. estudioQexample.org",
+        "uno. dos. tres. estudioQexample.org",
+        "a. b. c. dQexample.org",
+        "aQb.comQc.org",
+        "aQb.com. cQd.org",
+        "aQb.com.ar y cQd.net",
+        "ProQuest.com BanQ.com.ar JUAN.PEREZQGMAIL.COM",
+        "-Qexample.org juanQ.example.org Qexample.org",
+        "a.b.cQd.e.fg",
+        "x. yQa.bc,z. wQd.ef",
+        "juanQexample.org@example.net",
+        "Pro.xQa.com",
+        "name.Qa.com",
+        "name. Qa.com",
+        "contacto.  estudioQexample.org",
+        "contacto.\nestudioQexample.org",
+        "juanQexample.com1 juanQexample.com_ juanQexample.com-",
+        "éjuanQexample.com juanQexample.comé",
+        ...generated,
+      ];
+
+      let totalMatches = 0;
+      let matchesWithSegments = 0;
+      for (const text of corpus) {
+        const expected = expectedFor(text);
+        const actual = scanEmailReadWithQ(text).map((span) => ({
+          ...span,
+          value: text.slice(span.startIndex, span.endIndexExclusive),
+        }));
+        expect(actual, JSON.stringify(text)).toEqual(expected);
+        totalMatches += expected.length;
+        matchesWithSegments += expected.filter((match) => match.value.includes(". ")).length;
+      }
+      // El corpus no es vacuo: encuentra coincidencias, y con tramos previos.
+      expect(totalMatches).toBeGreaterThan(300);
+      expect(matchesWithSegments).toBeGreaterThan(100);
+    });
+
+    // El costo lineal se mide en `tests/perf/regex-worst-case.ts` (caso 35, en
+    // otro commit). Acá, sin umbral temporal, se corre texto adverso de 200 KiB
+    // con muchísimas `Q` y tramos largos: con un escáner cuadrático esto tarda
+    // minutos y revienta el timeout de la suite.
+    it("Q email scanner finishes on long adversarial text", () => {
+      const size = 200_000;
+      const adversarial = [
+        `${"a".repeat(size)}Q`,
+        `${"aQ".repeat(size / 2)}`,
+        `${"a.".repeat(size / 2)}Qexample.org`,
+        `${"a. ".repeat(size / 3)}bQexample.org`,
+        `${"a-".repeat(size / 2)}Qa.b`,
+        `${"aQb.".repeat(size / 4)}`,
+        `${"x. yQz.".repeat(size / 7)}`,
+      ];
+      for (const text of adversarial) {
+        expect(scanEmailReadWithQ(text).length).toBeGreaterThanOrEqual(0);
+      }
+      // Control: el texto adverso con un email legible al final lo encuentra.
+      const withEmail = `${"a. ".repeat(size / 3)}contacto. estudioQexample.org`;
+      const spans = scanEmailReadWithQ(withEmail);
+      expect(spans).toHaveLength(1);
+      expect(withEmail.slice(spans[0]?.startIndex, spans[0]?.endIndexExclusive)).toMatch(
+        /estudioQexample\.org$/,
+      );
     });
   });
 });
