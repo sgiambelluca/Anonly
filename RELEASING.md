@@ -111,10 +111,11 @@ SPKI está horneada en `src/windows-update-signature.ts`; si el secret no
 corresponde a ella, falta o no se genera la metadata `anonlyEd25519`, el release
 falla antes de subir artefactos (ADR-137).
 
-La firma propia protege actualizaciones, no la primera instalación. Hasta que
-se integre Authenticode mediante SignPath, Windows puede mostrar SmartScreen y
-un editor no verificado. Cuando llegue el certificado, el verificador exige
-las dos firmas; la Ed25519 no se retira.
+La firma propia protege actualizaciones, no la primera instalación. El
+instalador no lleva Authenticode: SignPath rechazó la postulación y no hay otra
+vía gratuita (`docs/architecture/08_Security_Model.md` §2.3), así que Windows
+muestra SmartScreen y un editor no verificado. Si el proyecto llega a tener un
+certificado, el verificador exige las dos firmas; la Ed25519 no se retira.
 
 **El release se crea como borrador.** El tag lo arma; publicarlo lo decidís
 vos, desde la página del release. Hasta entonces ningún usuario lo recibe.

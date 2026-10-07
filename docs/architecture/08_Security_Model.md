@@ -36,7 +36,7 @@
 | Recuperación por IndexedDB | escenarios donde se persiste algo | solo modelos y wasm en IndexedDB/Cache; nunca documentos |
 | Supply chain attack | librería comprometida | S-4, S-8, lockfile inmutable, `pnpm audit`, sha256 de `assets.lock.json` |
 | XSS que exfiltra el documento | script injectado | CSP estricta, sin `unsafe-inline` en `script-src`, sin `unsafe-eval`; la única concesión es `'wasm-unsafe-eval'` (acotada a compilar WebAssembly, no habilita `eval()`/`Function()`) — ver §3.2 |
-| Actualización maliciosa | release comprometido, o alguien en el medio | macOS y Windows validan cada actualización con claves Ed25519 propias antes de instalarla (ADR-131 §4, ADR-137). En Windows la firma cubre versión, nombre y SHA-512 del `.exe`, para impedir también el *replay*. Las privadas no están en el repositorio ni se derivan de las públicas horneadas. Cubren a quien altere el artefacto después de CI o adjunte archivos a un release; **no** cubren una cuenta de GitHub con capacidad de ejecutar Actions, porque las privadas son secrets del workflow. La primera instalación de Windows tampoco queda autenticada hasta integrar Authenticode. |
+| Actualización maliciosa | release comprometido, o alguien en el medio | macOS y Windows validan cada actualización con claves Ed25519 propias antes de instalarla (ADR-131 §4, ADR-137). En Windows la firma cubre versión, nombre y SHA-512 del `.exe`, para impedir también el *replay*. Las privadas no están en el repositorio ni se derivan de las públicas horneadas. Cubren a quien altere el artefacto después de CI o adjunte archivos a un release; **no** cubren una cuenta de GitHub con capacidad de ejecutar Actions, porque las privadas son secrets del workflow. La primera instalación de Windows tampoco queda autenticada: no hay firma Authenticode (§2.3). |
 | Fuga de datos por el canal del actualizador | el evento de update lleva algo del documento | gate `updater-payload-clean` (§11): el payload se arma por lista blanca, no por copia |
 | Side channel por timing | – | out of scope MVP; mitigación general: sin telemetría |
 | Reidentificación por patrones | un DNI reemplazado por el mismo valor en todos lados | agrupación por defecto + modos `synthetic` y `placeholder` con índices únicos |
@@ -60,7 +60,18 @@ Lo que queda sin cubrir:
 
 Lo que sigue cubierto: la **descarga** se puede verificar con `SHA256SUMS.txt` y la atestación de procedencia del release (ADR-132 §6), y cada **actualización** se valida con la clave Ed25519 propia de Sparkle (ADR-131 §4).
 
-Se revisa si el proyecto pasa a tener una persona jurídica elegible para la exención, o financiamiento para la cuota. Windows no está en esta situación: la firma de SignPath es gratuita para proyectos open source y sigue pendiente en el Hito 11.5.
+Se revisa si el proyecto pasa a tener una persona jurídica elegible para la exención, o financiamiento para la cuota.
+
+**El instalador de Windows no lleva firma Authenticode.** La única vía gratuita era SignPath Foundation, que firma proyectos open source con un certificado propio. La postulación se envió el 2026-10-02 y fue rechazada (informado por el mantenedor el 2026-10-07; `roadmap/distribucion/SignPath_Postulacion.md` §6). Las alternativas son pagas, y el proyecto no invierte dinero en esto.
+
+Lo que queda sin cubrir:
+
+- **Primera instalación.** Windows muestra SmartScreen y «editor desconocido», y el usuario tiene que elegir «Más información» y «Ejecutar de todas formas». El README explica el paso.
+- **Manipulación de los archivos después de instalar.** Sin una firma verificable, Windows no garantiza que los archivos instalados no se hayan modificado, y desde ADR-187 la app tampoco lo verifica por dentro (§8.2).
+
+Lo que sigue cubierto: la **descarga** se puede verificar con `SHA256SUMS.txt` y la atestación de procedencia del release (ADR-132 §6), y cada **actualización** se valida con la clave Ed25519 propia, que además ata versión, nombre y SHA-512 del instalador (ADR-137).
+
+Se revisa si hay financiamiento para un certificado, o si el proyecto vuelve a postular a SignPath con más trayectoria pública. El plan de integración que valdría para cualquier certificado está en `SignPath_Postulacion.md` §5.
 
 ---
 
@@ -277,7 +288,7 @@ Lo que la reemplaza son dos verificaciones que sí muerden:
 - **sha256 por asset en `assets.lock.json`** (ADR-018). Es la única vía por la que bytes de terceros —modelos, wasm de Tesseract y de onnxruntime— entran al build: `pnpm assets:mirror` descarga, compara contra el pin y **no escribe el archivo** si el hash no coincide. Corre en CI antes de empaquetar.
 - **Procedencia del binario publicado** (ADR-132 §6): el workflow de release publica un `SHA256SUMS.txt` y una atestación de `attest-build-provenance`, que ata criptográficamente cada instalador a este commit y a este workflow. Sin certificado de Apple, esto **es** el argumento de confianza, no un extra.
 
-**No hay verificación de integridad en runtime (ADR-187).** ADR-018 punto 3 la pedía para cubrir la manipulación de un archivo **después** de instalado, pero dentro de la app no puede cumplirlo: los modelos y el JavaScript que los verificaría viven juntos, como archivos sueltos fuera del `asar`, y quien reemplaza uno puede reemplazar el otro. Contra esa amenaza la defensa es la firma de código del instalador (ver el Hito 11.5), no un chequeo interno. En macOS esa firma no existe: es un riesgo aceptado (§2.3). La integridad de los assets se garantiza al construir (mirror contra el pin, arriba) y al distribuir (procedencia del binario).
+**No hay verificación de integridad en runtime (ADR-187).** ADR-018 punto 3 la pedía para cubrir la manipulación de un archivo **después** de instalado, pero dentro de la app no puede cumplirlo: los modelos y el JavaScript que los verificaría viven juntos, como archivos sueltos fuera del `asar`, y quien reemplaza uno puede reemplazar el otro. Contra esa amenaza la defensa es la firma de código del instalador, no un chequeo interno. Esa firma no existe ni en macOS ni en Windows: es un riesgo aceptado (§2.3). La integridad de los assets se garantiza al construir (mirror contra el pin, arriba) y al distribuir (procedencia del binario).
 
 ### 8.3 Modelos IA
 

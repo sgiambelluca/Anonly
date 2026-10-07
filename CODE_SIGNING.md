@@ -1,12 +1,12 @@
 # Code signing policy
 
-> **Status: application to SignPath Foundation pending.** No release
-> published so far is Authenticode-signed, and Windows shows them as coming
-> from an unknown publisher. This policy applies from the first Windows
-> release signed through SignPath.
-
-Windows releases of Anonly:
-Free code signing provided by [SignPath.io](https://signpath.io), certificate by [SignPath Foundation](https://signpath.org).
+> **Status: Windows releases are not Authenticode-signed.** The project
+> applied to the SignPath Foundation open source program on 2026-10-02 and the
+> application was declined. There is no other free way to obtain an
+> Authenticode certificate, and the project does not spend money on
+> distribution, so Windows shows every release as coming from an unknown
+> publisher. This page describes how releases are built and how to verify
+> them without that signature.
 
 ## What Anonly is
 
@@ -18,20 +18,19 @@ under the [MIT license](./LICENSE) and its functionality is described in the
 [README](./README.md) and on each
 [GitHub release](https://github.com/sgiambelluca/Anonly/releases).
 
-## What gets signed
+## How releases are built
 
-Only Windows artifacts built from this repository by the release workflow
-([`.github/workflows/release.yml`](./.github/workflows/release.yml)) are
-submitted for signing:
+Every published artifact is built from this repository by the release
+workflow ([`.github/workflows/release.yml`](./.github/workflows/release.yml)):
 
-- The Windows installer (`Anonly Setup <version>.exe`, NSIS) and the
+- The Windows installer (`Anonly-Setup-<version>.exe`, NSIS) and the
   application files it installs.
+- The macOS application.
 
-Nothing is signed from a developer machine. The release workflow runs on
-GitHub-hosted runners, only from a version tag on `main` whose commit already
-passed CI, and only when the tag matches the version in
-`apps/desktop-shell/package.json`. Every signing request is approved manually
-by an approver (below).
+Nothing is built or signed on a developer machine. The release workflow runs
+on GitHub-hosted runners, only from a version tag on `main` whose commit
+already passed CI, and only when the tag matches the version in
+`apps/desktop-shell/package.json`.
 
 The installer bundles open source components published by their own projects
 (among them the Electron runtime, the Tesseract OCR engine, pdf.js, ONNX
@@ -43,8 +42,20 @@ license texts of every bundled component ship inside the installer, in
 data file, a first-name lexicon under CC-BY-2.5-AR, is credited in `NOTICE`
 and inside the app.
 
-macOS releases are not covered by this policy: they are ad-hoc signed and not
-notarized. See
+## What is and is not signed
+
+|                                   | Signature                          | What it covers                                |
+| --------------------------------- | ---------------------------------- | --------------------------------------------- |
+| Windows installer and application | None (no Authenticode)             | —                                             |
+| macOS application                 | Ad-hoc, not notarized              | Nothing a user can verify against an identity |
+| Updates, Windows and macOS        | Ed25519, with a key of the project | Each update, before it is installed           |
+
+The Ed25519 check runs inside the app. On Windows the signature also binds the
+version, the file name and the SHA-512 of the installer. It protects updates,
+not the first installation: the first time, there is no installed app to
+verify anything.
+
+The risks this leaves open are listed in
 [`docs/architecture/08_Security_Model.md`](./docs/architecture/08_Security_Model.md)
 §2.3.
 
@@ -53,14 +64,12 @@ notarized. See
 Anonly is maintained by a single person, who holds every role:
 
 - **Committers and reviewers:** [Santino Giambelluca](https://github.com/sgiambelluca)
-- **Approvers:** [Santino Giambelluca](https://github.com/sgiambelluca)
+- **Releases:** [Santino Giambelluca](https://github.com/sgiambelluca) creates the version tags and publishes each release
 
 Contributions from anyone else arrive as pull requests and are reviewed by the
 maintainer before they are merged. Development uses AI coding assistants
 under the maintainer's supervision; they have no repository or signing access
 of their own, and every change is reviewed and committed by the maintainer.
-
-All team members use multi-factor authentication on GitHub and on SignPath.
 
 ## Privacy policy
 
@@ -70,10 +79,10 @@ downloads it. The full policy is in [`PRIVACY.md`](./PRIVACY.md).
 
 ## Verifying a download
 
-- **Signature:** right-click the installer → _Properties_ → _Digital
-  Signatures_. The signer must be SignPath Foundation.
-- **Checksum:** every release publishes `SHA256SUMS.txt` with the SHA-256 of
-  each file.
+There is no publisher signature to check, so use the two things every release
+does publish:
+
+- **Checksum:** `SHA256SUMS.txt` has the SHA-256 of each file.
 - **Provenance:** every installer has a build attestation that ties it to the
   commit and workflow run that produced it:
 
@@ -81,9 +90,11 @@ downloads it. The full policy is in [`PRIVACY.md`](./PRIVACY.md).
   gh attestation verify <installer> --repo sgiambelluca/Anonly
   ```
 
-Updates are also verified inside the app, with an Ed25519 key of the project,
-before they are installed. That check does not replace the Authenticode
-signature: it protects updates, not the first installation.
+Download installers only from the
+[GitHub releases](https://github.com/sgiambelluca/Anonly/releases) of this
+repository. No release of Anonly carries a publisher signature (Authenticode
+or Apple Developer ID); treat a file that does as not coming from this
+project.
 
 ## Uninstalling
 
@@ -93,7 +104,7 @@ How to remove the settings left in your user profile is explained in
 
 ## Reporting a problem
 
-Report vulnerabilities, or a signed file you believe did not come from this
-project, through
+Report vulnerabilities, or a file you believe did not come from this project,
+through
 [GitHub's private vulnerability reporting](https://github.com/sgiambelluca/Anonly/security/advisories/new)
 (see [`SECURITY.md`](./SECURITY.md)).
