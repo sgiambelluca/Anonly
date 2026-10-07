@@ -26,10 +26,12 @@
  * - **El zoom es la excepción acotada (ADR-213 §1)**: el emisor debounced pide
  *   primero el `kind` que se mira y después el otro (`zoomRenderKinds.ts`), así
  *   que al conmutar la imagen del otro lado ya está a la escala del zoom.
- * - **Conmutar no muestra una imagen a otra escala (ADR-213 §3-§6)**: una página
- *   sin imagen vigente del lado nuevo sigue pintando la del lado anterior hasta
- *   que llega la vigente, con tope `KIND_SWITCH_HOLD_MS` (`kindSwitchHold.ts`).
- *   Mientras espera, su capa de selección queda inerte.
+ * - **Conmutar no muestra una imagen a otra escala (ADR-213 §3-§6)**: al pasar a
+ *   Original, una página sin imagen vigente sigue pintando la anonimizada hasta
+ *   que llega la vigente, con tope `KIND_SWITCH_HOLD_MS` (`kindSwitchHold.ts`), y
+ *   su capa de selección queda inerte. **Al pasar a Anonimizado nunca se pinta la
+ *   original**: se pinta la anonimizada que haya (aunque sea de otra escala) o el
+ *   estado de carga, sin espera ni capa inerte.
  *
  * Desde ADR-087 §2 hay **un solo** `PdfViewer`, y `kind` sale de
  * `viewer.store.mode`. `RENDER_REQUESTED.kind` sigue requerido y con la misma
@@ -116,8 +118,9 @@ export function PdfViewer({ activeMatch, scrollNonce }: PdfViewerProps) {
   const previewScaleByPage = useViewerStore((state) => state.previewScaleByPage[kind]);
   const otherKind: ViewerKind = kind === "original" ? "anonymized" : "original";
 
-  // ADR-213 §4: tras un cambio de vista, las páginas sin imagen vigente siguen
-  // pintando la del lado anterior durante `KIND_SWITCH_HOLD_MS`. `settledKind` es
+  // ADR-213 §4: tras un cambio de vista hacia Original, las páginas sin imagen
+  // vigente siguen pintando la anonimizada durante `KIND_SWITCH_HOLD_MS` (hacia
+  // Anonimizado no hay espera, ver `kindSwitchHold.ts`). `settledKind` es
   // el `kind` del último render sin espera pendiente: la espera está activa
   // mientras difiere de `kind`, y se calcula **en el mismo render** del cambio
   // (no en un efecto), así que ese primer render ya no pinta la imagen vieja.
@@ -130,8 +133,9 @@ export function PdfViewer({ activeMatch, scrollNonce }: PdfViewerProps) {
   }, [kind, settledKind]);
   // El otro lado solo se lee mientras dura la espera: fuera de ella no hace falta
   // re-renderizar el visor cada vez que llega una imagen de un lado que no se mira.
+  // Y solo mirando Original: mirando Anonimizado nunca se pinta la imagen original.
   const otherPreviewByPage = useViewerStore((state) =>
-    holdActive ? state.previewByPage[otherKind] : NO_PREVIEWS,
+    holdActive && kind === "original" ? state.previewByPage[otherKind] : NO_PREVIEWS,
   );
   const interactionGeometryByPage = useViewerStore((state) => state.interactionGeometryByPage);
   const interactionEpoch = useViewerStore((state) => state.interactionEpoch);
@@ -392,6 +396,7 @@ export function PdfViewer({ activeMatch, scrollNonce }: PdfViewerProps) {
             // ADR-213 §3/§4: la imagen vigente del lado que se mira, o —durante
             // la espera— la del lado anterior hasta que llegue.
             const choice = selectPageImage({
+              viewing: kind,
               own: {
                 blobUrl: previewByPage.get(pageIndex),
                 scale: previewScaleByPage.get(pageIndex),
@@ -448,6 +453,7 @@ export function PdfViewer({ activeMatch, scrollNonce }: PdfViewerProps) {
                   <PageCanvas
                     pageIndex={pageIndex}
                     kind={kind}
+                    imageKind={holding ? otherKind : kind}
                     {...(blobUrl !== undefined ? { blobUrl } : {})}
                     width={pageWidth}
                     height={pageHeight}
