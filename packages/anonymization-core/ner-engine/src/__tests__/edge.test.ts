@@ -414,8 +414,9 @@ describe("NerEngine — edge case tests", () => {
     /** Lo que abarca el span `span` en `text` tras la extensión. */
     const extended = extendedAddressText;
 
-    it("address span keeps a year-like number out without an address cue", async () => {
-      // De punta a punta: el modelo marca «Rosario» y el año queda afuera.
+    it("address span takes a year-like number without any address cue", async () => {
+      // De punta a punta: el modelo marca «Rosario» y el año se suma sin ninguna
+      // palabra de dirección en la página.
       asPipelineMock(pipeline).mockResolvedValue(
         mockTokenClassificationPipeline(() =>
           Promise.resolve([nerToken("B-LOC", "Rosario", 0.9, 2)]),
@@ -431,87 +432,25 @@ describe("NerEngine — edge case tests", () => {
         "otra",
       ]);
       const output = await engine.processPage(input, ctx);
-      expect(output.occurrences.map((o) => o.value)).toEqual(["Rosario"]);
+      expect(output.occurrences.map((o) => o.value)).toEqual(["Rosario 2019"]);
+      expect(output.occurrences[0]?.wordSpan).toEqual({ startIndex: 2, endIndexExclusive: 4 });
 
-      // Los bordes del criterio: 1900 y 2099 son años, 1899 y 2100 no.
-      expect(extended("Se hizo en Rosario 1900 ya", "Rosario")).toBe("Rosario");
-      expect(extended("Se hizo en Rosario 2099 ya", "Rosario")).toBe("Rosario");
-      expect(extended("Se hizo en Rosario 1899 ya", "Rosario")).toBe("Rosario 1899");
-      expect(extended("Se hizo en Rosario 2100 ya", "Rosario")).toBe("Rosario 2100");
-      // Año es exactamente cuatro dígitos: con cinco o con cero a la izquierda no.
+      // El valor del número no importa: los bordes del viejo criterio de año
+      // (1899, 1900, 1950, 2099 y 2100) se suman igual.
+      for (const year of ["1899", "1900", "1950", "2019", "2099", "2100"]) {
+        expect(extended(`El congreso se hizo en Rosario ${year} y siguió`, "Rosario")).toBe(
+          `Rosario ${year}`,
+        );
+      }
+      // Ni la cantidad de dígitos: cinco con un cero a la izquierda, o tres.
       expect(extended("Se hizo en Rosario 01950 ya", "Rosario")).toBe("Rosario 01950");
       expect(extended("Se hizo en Rosario 195 ya", "Rosario")).toBe("Rosario 195");
-      // Una palabra de dirección fuera de la ventana no cuenta.
-      expect(extended("domicilio a b c d e f Rosario 2019 ya", "Rosario")).toBe("Rosario");
-      expect(extended("Rosario 2019 a b c d piso", "Rosario")).toBe("Rosario");
-    });
-
-    it("address span takes a year-like number with a cue before or after", () => {
-      const cuesBefore = [
-        "domicilio",
-        "domiciliado",
-        "domiciliada",
-        "domiciliados",
-        "domiciliadas",
-        "calle",
-        "avenida",
-        "av.",
-        "avda.",
-        "sito",
-        "sita",
-        "vive",
-        "viven",
-        "reside",
-        "residen",
-      ];
-      for (const cue of cuesBefore) {
-        expect(extended(`Juan ${cue} Rosario 2019 fin`, "Rosario")).toBe("Rosario 2019");
-      }
-      // Sin distinguir mayúsculas ni tildes, y con la puntuación de los bordes recortada.
-      expect(extended("DOMICILIO Rosario 2019", "Rosario")).toBe("Rosario 2019");
-      expect(extended("Domicilio: Rosario 2019", "Rosario")).toBe("Rosario 2019");
-      expect(extended("SÍTA Rosario 2019", "Rosario")).toBe("Rosario 2019");
-      expect(extended("Av Rosario 2019", "Rosario")).toBe("Rosario 2019");
-      expect(extended("(calle), Rosario 2019", "Rosario")).toBe("Rosario 2019");
-      // Palabra entera: un prefijo o una palabra más larga no es la entrada.
-      expect(extended("domiciliario Rosario 2019", "Rosario")).toBe("Rosario");
-      expect(extended("calles Rosario 2019", "Rosario")).toBe("Rosario");
-
-      // Ventana anterior: seis palabras sí, siete no.
-      expect(extended("domicilio a b c d e Rosario 2019", "Rosario")).toBe("Rosario 2019");
-      expect(extended("domicilio a b c d e f Rosario 2019", "Rosario")).toBe("Rosario");
-      // Como primera palabra del propio span.
-      expect(extended("Juan en calle Rosario 2019", "calle Rosario")).toBe("calle Rosario 2019");
-      expect(extended("Juan en Av. Rosario 2019", "Av. Rosario")).toBe("Av. Rosario 2019");
-      // El resto anterior del tramo donde empieza el span no es una palabra anterior...
-      expect(extended("(Rosario 2019", "Rosario")).toBe("Rosario");
-      expect(extended("domicilio(Rosario 2019", "Rosario")).toBe("Rosario");
-      // ...pero la palabra anterior completa sí cuenta.
-      expect(extended("domicilio (Rosario 2019", "Rosario")).toBe("Rosario 2019");
-
-      const cuesAfter = ["piso", "departamento", "depto.", "dpto."];
-      for (const cue of cuesAfter) {
-        expect(extended(`Juan en Rosario 2019 ${cue} 3`, "Rosario")).toBe("Rosario 2019");
-      }
-      expect(extended("Rosario 2019, PISO 3", "Rosario")).toBe("Rosario 2019");
-      expect(extended("Rosario 2019 Pisó", "Rosario")).toBe("Rosario 2019");
-      expect(extended("Rosario 2019 Dpto, B", "Rosario")).toBe("Rosario 2019");
-      expect(extended("Rosario 2019 de esta ciudad", "Rosario")).toBe("Rosario 2019");
-      expect(extended("Rosario 2019, de la localidad de X", "Rosario")).toBe("Rosario 2019");
-      // Ventana posterior: cuatro palabras sí, cinco no.
-      expect(extended("Rosario 2019 a b c piso", "Rosario")).toBe("Rosario 2019");
-      expect(extended("Rosario 2019 a b c d piso", "Rosario")).toBe("Rosario");
-      // Una secuencia tiene que caber entera en la ventana.
-      expect(extended("Rosario 2019 a de esta ciudad", "Rosario")).toBe("Rosario 2019");
-      expect(extended("Rosario 2019 a b de esta ciudad", "Rosario")).toBe("Rosario");
-      expect(extended("Rosario 2019 a de la localidad", "Rosario")).toBe("Rosario 2019");
-      expect(extended("Rosario 2019 a b de la localidad", "Rosario")).toBe("Rosario");
-      // Palabra entera, y la cola pegada a los dígitos no es una palabra.
-      expect(extended("Rosario 2019 pisos 3", "Rosario")).toBe("Rosario");
-      expect(extended("Rosario 2019piso 3", "Rosario")).toBe("Rosario");
-      expect(extended("Rosario 2019 de esta", "Rosario")).toBe("Rosario");
-      // Un número que no es año no necesita ninguna palabra de dirección.
-      expect(extended("Rosario 3019", "Rosario")).toBe("Rosario 3019");
+      // Ni lo que haya cerca: una palabra de dirección lejana o cercana da lo mismo.
+      expect(extended("domicilio a b c d e f Rosario 2019 ya", "Rosario")).toBe("Rosario 2019");
+      expect(extended("Rosario 2019 a b c d piso", "Rosario")).toBe("Rosario 2019");
+      expect(extended("Juan vive en Rosario 2019 piso 3", "Rosario")).toBe("Rosario 2019");
+      // Y con conector.
+      expect(extended("Reunión en Rosario nro. 2019", "Rosario")).toBe("Rosario nro. 2019");
     });
 
     it("address number accepts the N°, nro, número and al connectors", async () => {
@@ -534,9 +473,6 @@ describe("NerEngine — edge case tests", () => {
       // Un conector que no es de la lista no es un conector.
       expect(extended("Reunión en Maipú no 1434", "Maipú")).toBe("Maipú");
       expect(extended("Reunión en Maipú alto 1434", "Maipú")).toBe("Maipú");
-      // El año con conector sigue necesitando una palabra de dirección.
-      expect(extended("Reunión en Rosario nro. 2019", "Rosario")).toBe("Rosario");
-      expect(extended("Vive en Rosario nro. 2019", "Rosario")).toBe("Rosario nro. 2019");
 
       // De punta a punta: el conector queda dentro del valor y de la caja.
       asPipelineMock(pipeline).mockResolvedValue(
