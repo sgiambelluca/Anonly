@@ -2,7 +2,7 @@
 
 # ADR-056 — `RenderRequested.kind`: cada panel pide su propio render, y el canvas deja de borrarse
 
-- **Estado**: Accepted
+- **Estado**: Accepted. **Enmendado por ADR-213 (2026-10-07)**: el emisor de zoom pide también el lado que no se mira. El scroll sigue pidiendo solo el que se mira.
 - **Fecha**: 2026-08-05
 - **Decidido por**: El humano, tras reportar que con scroll independiente (ADR-054) y sincronización apagada, scrollear rápido un panel hace que el **otro** panel —el que no tocó— recargue su contenido constantemente. Pidió explícitamente: máxima eficiencia de costo, **sin código muerto**, y comportamiento "lazy" — que solo se refresque el PDF que está consumiendo el scroll.
 - **Relacionado con**: ADR-016 (`PreviewUpdated.kind`), ADR-037 §1/§4 (`RenderRequested.scale`, supersede por página — precedente directo de forma), ADR-044 (preview mediado por invocación directa), ADR-052 (blob URLs tardíos), ADR-054 §1/§7 (scroll independiente; **este ADR corrige su §7**), `Hito10_Observaciones_Revision.md` entrada "ruido de blob URLs revocados al scrollear" (que este ADR cierra: ese ruido **sí** tenía un síntoma visible)
