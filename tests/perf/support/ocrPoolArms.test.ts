@@ -27,18 +27,29 @@ describe("parseArmLabel", () => {
     expect(parseArmLabel("6")?.poolSize).toBe(6);
   });
 
+  it("el brazo low es el perfil Bajo por setting: un reconocedor y 128 MiB, sin overrides sueltos", () => {
+    expect(parseArmLabel("low")).toEqual({
+      label: "low",
+      poolSize: 1,
+      maxLiveImageBytes: 128 * 1024 * 1024,
+      performancePreset: "low",
+    });
+    for (const label of ["1", "2", "3", "4", "4b", "6", "6b"])
+      expect(parseArmLabel(label)).not.toHaveProperty("performancePreset");
+  });
+
   it("rechaza brazos desconocidos", () => {
-    for (const label of ["", "5", "7", "6B", "6c", "b"])
+    for (const label of ["", "5", "7", "6B", "6c", "b", "Low", "lowb"])
       expect(parseArmLabel(label)).toBeUndefined();
   });
 });
 
 describe("assertsFullOccupancy", () => {
-  it("afirma ocupación completa hasta 4 con 128 MiB y solo registra en 4b, 6 y 6b", () => {
-    const asserted = ["1", "2", "3", "4", "4b", "6", "6b"].map((label) => {
+  it("afirma ocupación completa hasta 4 con 128 MiB y solo registra en 4b, 6 y 6b; low afirma uno", () => {
+    const asserted = ["1", "2", "3", "4", "4b", "6", "6b", "low"].map((label) => {
       const arm = parseArmLabel(label);
       return arm !== undefined && assertsFullOccupancy(arm);
     });
-    expect(asserted).toEqual([true, true, true, true, false, false, false]);
+    expect(asserted).toEqual([true, true, true, true, false, false, false, true]);
   });
 });

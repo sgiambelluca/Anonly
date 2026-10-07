@@ -672,6 +672,52 @@ ANONLY_OCR_POOL_PHASE=ultra ANONLY_OCR_POOL_ULTRA_HIDPI=1 caffeinate -dimsu ./te
 ANONLY_OCR_POOL_PHASE=ultra ANONLY_OCR_POOL_ULTRA_HIDPI=1 ANONLY_REAL_DOC_R2='C:\ruta\neutra\R2.pdf' ./tests/perf/run-ocr-pool.sh
 ```
 
+#### Memoria del perfil Bajo (`low-memory`, M-M1)
+
+`ANONLY_OCR_POOL_PHASE=low-memory ./tests/perf/run-ocr-pool.sh` delega en
+`run-ocr-pool-low.sh` (o se lo invoca directo); `ultra` y las demás fases no cambian.
+Mide el pico de RSS del árbol de procesos durante el OCR del perfil `low` sobre `P2H`, contra el
+techo de ADR-194 §7: **2,5 GB**, fijado el 2026-10-07 con esa medición (M-M1, máximo de 2,045 GB).
+Mismo escenario que los otros niveles: Windows nativo, fase `pool-rss` del spec (RSS natural cada 150 ms, sin CDP ni
+barrera), tres instancias frías en serie, y se compara el **máximo**.
+
+El brazo `low` **no es el brazo `1`**. El `1` solo fuerza `workerPool.ocrPoolSize` por override
+sobre la base `medium` de las suites de medición (ADR-194 §8). `low` instala el setting
+`performancePreset: "low"` (el mismo camino que un usuario) y **ningún** override suelto, de
+modo que el cliente deriva `LEVEL_OVERRIDE.low` (`settingsToEngineConfig.ts`): los pools de
+PDF, OCR, NER y render en 1 y `ocr.maxLiveImageBytes` sin enviar (queda el default de 128 MiB).
+
+**Antes de medir**, el spec lee la configuración efectiva (`ctx.config` del motor OCR y lo
+persistido en `localStorage`) y falla si no coincide: `performancePreset` distinto de `low`,
+cualquier valor en `anonly:engine-overrides`, algún pool distinto de 1 o `maxLiveImageBytes`
+distinto de 134217728. La corrida queda inválida (`validity.json`, `playwright-failure`) y no
+escribe artefacto; la comprobación no se relaja. Lo observado se guarda en el artefacto como
+`effectiveProfile`, y el resumen lo vuelve a comprobar.
+
+```bash
+# Humo: una sola corrida fría, para validar el circuito (carpeta aparte)
+ANONLY_OCR_POOL_PHASE=low-memory ANONLY_OCR_POOL_LOW_SMOKE=1 ./tests/perf/run-ocr-pool.sh
+# Tanda: tres corridas frías de memoria sobre P2H
+ANONLY_OCR_POOL_PHASE=low-memory ./tests/perf/run-ocr-pool.sh
+```
+
+Mismas guardas de validez que `ultra` en Windows (preámbulo común
+`support/ocr-campaign-common.sh`): sin otro Playwright ni Vitest activos, producto sin cambios
+en `packages/` y `apps/` (incluido lo que está en stage o sin trackear), prevención y detección
+de suspensión (un evento durante la corrida la invalida), un build único y artefactos que no
+se sobrescriben. Salida en `.measure/ocr-pool/<fecha>-low/` (o `ANONLY_OCR_POOL_OUTPUT_DIR`,
+que tiene que ser nueva): `ocr-pool-pool-rss-low-P2H-r<n>.json`, `ocr-pool-low-run.json`,
+`validity.json`, `caveats.json`, `sleep-detection.json`, `host.json`, `commit.txt`, presión del
+sistema y `summary.json` (`support/ocrPoolLowSummary.ts` vía `support/summarizeOcrPoolLowCli.ts`).
+
+El resumen da, por corrida, el pico de RSS en bytes y en GB decimales, el desglose por tipo de
+proceso en la muestra del pico, la ocupación de reconocedores, el pico de trabajos por tipo de
+worker y los despachos de NER y render que caen dentro de la ventana OCR; y, de la tanda, el
+máximo, el mínimo, la mediana y el margen contra el techo de 2,5 GB (`ceiling`). Que el máximo
+supere el techo **no** hace fallar el instrumento: se informa (`supera=true`) y la decisión es
+del humano (ADR-194 §7: el techo no se sube en silencio). Sale con 1 si falta o es inválida
+alguna corrida. `P2H` es sintético: la salida no lleva rutas ni contenido de documentos.
+
 ## Campaña opt-in Regex y Grouping: peores casos
 
 `regex-worst-case.ts` mide el patrón de email en textos sintéticos de 2–160 KiB,
@@ -1430,3 +1476,95 @@ para el i5-12400: de 1 a 1,5 horas por corpus.
     escriben valores): si el proceso muere a mitad de un corpus real, sus celdas siguientes
     quedan sin comparación y el corpus `indeterminado`. Los sintéticos rehidratan la
     referencia desde el JSON de la celda.
+
+## Emails en escaneos de DPI nativo bajo (`ocr-emails-native`, M-E1)
+
+`docs/roadmap/hardening/Confianza_1.0.x_Plan.md`, Frente 2. La campaña de DPI descendente tomaba
+escaneos de 300 dpi nativos y **forzaba** `ocr.dpi` a 250, 200 o 150, y perdía emails porque el OCR
+leía la `@` como `Q`. Esta campaña es al revés: los mismos textos sintéticos (`SR`, `S12`, `S10` y
+`S8`) se **rasterizan** a 300 (control), 200 y 150 dpi nativos y se leen con la configuración por
+defecto, **sin forzar `ocr.dpi`**. El Core lee a `min(ocr.dpi, tope nativo de la página)` (ADR-163),
+así que un escaneo de 200 dpi se lee a 200. La pregunta: ¿un escaneo cuya resolución nativa ya es
+baja pierde emails, con qué frecuencia y con qué lecturas?
+
+```bash
+# Humo: S10 a 300 y 150 dpi, una repetición
+ANONLY_OCR_EMAILS_NATIVE_SMOKE=1 ./tests/perf/run-ocr-emails-native.sh
+# Campaña: SR S12 S10 S8 x 300, 200 y 150 dpi nativos x 2 repeticiones (24 celdas, unos 14 min)
+./tests/perf/run-ocr-emails-native.sh
+```
+
+Es un runner propio (`run-ocr-emails-native.sh`, `ocr-emails-native.spec.ts`) sobre el preámbulo
+común `support/ocr-campaign-common.sh`: no toca ninguna campaña ni fase existente. Mismas guardas de
+validez (producto sin cambios en `packages/` y `apps/`, otro Playwright o Vitest activos, detección y
+prevención de suspensión, artefactos que no se sobrescriben), una instancia fría de Electron por celda,
+en serie, un reconocedor y NER activado (igual que la campaña anterior, para que los números se
+comparen). Solo sintéticos: no usa `ANONLY_REAL_DOC_*`.
+
+| Variable                          | Qué hace                                                              |
+| --------------------------------- | --------------------------------------------------------------------- |
+| `ANONLY_OCR_EMAILS_NATIVE_SMOKE`  | `1`: humo (`S10`, 300 y 150 dpi, una repetición)                       |
+| `ANONLY_OCR_EMAILS_NATIVE_SET`    | `sd`: M-E2, los textos con degradación de fotocopia `SD1 SD2 SD3 SD4 SD5` (sin valor, M-E1) |
+| `ANONLY_OCR_EMAILS_NATIVE_CORPUS` | Corpus sintéticos, también `SD1` a `SD5` (por defecto los de `SET`: `SR S12 S10 S8`) |
+| `ANONLY_OCR_EMAILS_NATIVE_DPIS`   | DPI nativos (por defecto `300 200 150`)                                |
+
+**M-E2: textos con degradación de fotocopia.** La misma campaña sobre `SD1` a `SD5` (`S10` con la
+receta `photocopy-v2`: desenfoque gaussiano, pérdida de contraste y ruido con semilla fija; las cinco
+variantes difieren solo en la semilla). Se corre con `ANONLY_OCR_EMAILS_NATIVE_SET=sd
+./tests/perf/run-ocr-emails-native.sh` (30 celdas, unos 10 min; el humo, `ANONLY_OCR_EMAILS_NATIVE_SMOKE=1`
+con `SET=sd`, usa `SD1`). Sin `SET` el runner hace lo de M-E1. **Cómo se aplica la degradación a un
+DPI nativo distinto de 300:** la receta es la misma, con los mismos parámetros, y se aplica al
+raster de ese DPI (`scannedPdf.ts`, sobre el canvas ya renderizado a `dpi / 72`). Esos parámetros
+están en **píxeles**, no en milímetros (desenfoque σ = 1 px, ruido σ = 6 niveles por píxel, ambos
+sin escalar): a 200 y 150 dpi el mismo píxel es físicamente más grande (0,127 y 0,169 mm contra 0,085
+mm a 300) y el glifo tiene menos píxeles, así que **la degradación relativa al texto crece al bajar
+el DPI** y las celdas de 200 y 150 no son la «misma fotocopia» que la de 300. Tampoco el ruido: la
+semilla es la misma pero el campo de píxeles es otro. Está fijado en
+`ocrDpiDownFixtures.test.ts` y no se adaptó; si se quiere una receta en unidades físicas es otra
+medición.
+
+**El DPI nativo forma parte de la clave del fixture** (`fixtureCacheKey(truth, nativeDpi)` y la escala
+en el hash de `scannedFixtureHash`): `ocr-dpi-down-<corpus>-fs<pt>-<dpi>dpi-<hash>.pdf` en
+`.measure/fixtures/`. A 300 la clave es la de siempre, así que los fixtures de la campaña anterior se
+reutilizan sin cambios.
+
+**Validez de la celda** (una celda inválida se escribe, se lista y no entra a ningún total; no se
+«arregla»): la cadena de ADR-190 observada (`ready`, OSD leído, NER terminado), pool, tope de imágenes
+vivas y NER como se fijaron, **`ocr.dpi` efectivo del Core igual a 300** (si el default cambia, la
+premisa cambió), el tope nativo de cada página dentro de ±1 dpi del DPI nativo pedido y el DPI de
+**cada** despacho `ocr-page` también dentro de ±1 dpi del nativo. El tope sale de píxeles sobre puntos
+y redondea: un escaneo de «150 dpi» da tope 151 y se despacha a 151; el de 300 da 301 y se despacha a
+300 (`min(300, 301)`).
+
+**Qué registra cada celda** (`ocr-emails-native-cell-<corpus>-n<dpi>-r<n>.json`):
+
+- Emails esperados, detectados, perdidos y agregados contra la verdad del sintético, y lo perdido y
+  agregado de los demás tipos de entidad (con valores: son inventados).
+- Para cada email perdido, cómo lo leyó el OCR, clasificado por
+  `support/ocrEmailsNativeReading.ts::classifyLostEmail` (pura, con tests) sobre el texto de **su**
+  página: `at-as-q` (la `@` leída como `Q`, el resto intacto), `dot-as-space` (cada punto del nombre,
+  antes de la `@`, leído como espacio o como punto seguido de espacio), `at-as-q-and-dot-as-space`
+  (las dos cosas), `intact-in-text` (la dirección está escrita tal cual y no se detectó: la causa no
+  sería el OCR), `other-reading` (cualquier otra, con el fragmento del texto más parecido, por
+  distancia de edición acotada al 40 %) y `not-found` (nada parecido). Se compara sin distinguir
+  mayúsculas; los puntos del dominio no cuentan como «punto del nombre». Se guarda el fragmento leído.
+- **Cota de falsos positivos de una regla tolerante**: las cadenas del texto leído con la forma
+  `^[A-Za-z0-9][A-Za-z0-9._%+-]*Q(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}$` (una cadena entre espacios, sin
+  puntuación en los bordes, con `Q` mayúscula; con varias `Q` vale la última con un dominio a la
+  derecha). Se reconstruyen cambiando la `Q` por `@` y se clasifican contra los emails de la verdad de
+  la página: `recoverable` (es exactamente uno), `partial-of-truth` (es el final de uno: un espacio
+  partió el nombre) y `unrelated` (no es ninguno: la cota de falsos positivos).
+- DPI efectivo de cada despacho, tope de cada página, cadena de ADR-190 (OSD, pasos de recuperación,
+  upscale, tinta ilegible), puntaje de tokens y el texto leído con su hash (sintético: permite
+  reclasificar sin volver a medir).
+
+**Qué produce** (`.measure/ocr-emails-native/<fecha>/`, ignorada por git): las celdas,
+`ocr-emails-native-run.json`, `validity.json` y `caveats.json` si corresponden,
+`sleep-detection.json`, presión del sistema, `summary.json` y `summary-table.txt`
+(`support/ocrEmailsNativeSummary.ts` vía `support/summarizeOcrEmailsNativeCli.ts`). El resumen da una
+fila por corpus, DPI nativo y repetición, los totales por DPI, la lista de emails perdidos con su
+lectura y fragmento, y si las dos repeticiones coinciden (mismos emails perdidos con la misma lectura,
+mismos perdidos y agregados de los demás tipos, mismos candidatos y mismos DPI efectivos;
+`observedTextIdentical` es más fuerte: el texto leído es idéntico). Sale con 1 si falta o es inválida
+alguna celda. Que haya emails perdidos o que las repeticiones difieran no es un error del
+instrumento: se informa, y es la línea de base contra la que se compara cualquier cambio de detección.
