@@ -1,6 +1,6 @@
 <!-- CONTEXT: scope=roadmap-medicion | dependencias=roadmap/hardening/Confianza_1.0.x_Plan.md,roadmap/mediciones/ocr/DPI_Descendente_Fase1_Windows_2026-10-01.md,adr/ADR-163-El-DPI-De-OCR-No-Supera-Al-Raster-Fuente.md,roadmap/Roadmap_1.x.md,tests/perf/README.md | audiencia=humanos+IA | fase=12 (M-E1, línea de base, Windows 2026-10-07) -->
 
-# Emails en escaneos de 200 y 150 dpi nativos — línea de base (M-E1 y M-E2)
+# Emails en escaneos de 200 y 150 dpi nativos — línea de base y resultado de ADR-211 (M-E1, M-E2 y M-E3)
 
 ## Resultado
 
@@ -10,6 +10,9 @@
 - A 300 dpi, el control, no se pierde ninguno.
 - Las dos repeticiones dieron el mismo texto leído, byte a byte, en las 12
   combinaciones.
+- **Después de ADR-211 (M-E3, al final)**: los emails perdidos por la `Q` se
+  recuperan todos, sin ningún email agregado y sin que cambie ninguna otra
+  entidad.
 - **Con degradación de fotocopia (M-E2, más abajo)**: a 300 y a 200 dpi
   tampoco se pierde ninguno; a 150 dpi se pierden 4 de 10, y en 3 de esos 4
   la `Q` viene acompañada de un espacio después del punto del nombre.
@@ -168,3 +171,58 @@ unidades físicas sería otra medición.
 - En `SD4` a 150 dpi la cadena de lectura de ADR-190 probó los otros tres
   ángulos y terminó aceptando la página derecha. Fue el único caso.
 - Ninguna página quedó marcada como tinta ilegible.
+
+## M-E3 — después de ADR-211
+
+Condición del mantenedor para aceptar ADR-211: demostrar el avance midiendo.
+Las tres campañas se volvieron a correr el 2026-10-07 con la regla
+implementada, en el mismo equipo, y se compararon celda por celda contra sus
+corridas anteriores.
+
+### Resultado
+
+Emails contra la verdad, sumando todas las celdas de cada campaña. En M-E1 y
+M-E2 cada email cuenta dos veces, una por repetición.
+
+| Campaña | Celdas | Perdidos antes | Perdidos después | Recuperados | Agregados nuevos | Otras entidades que cambian |
+|---|---:|---:|---:|---:|---:|---:|
+| DPI descendente (lectura forzada) | 51 | 11 | **2** | 9 | 0 | 0 |
+| Nativos, textos limpios (M-E1) | 24 | 4 | **0** | 4 | 0 | 0 |
+| Nativos, textos degradados (M-E2) | 30 | 8 | **0** | 8 | 0 | 0 |
+
+- **Es lo que ADR-211 esperaba**: de 11 a 2, y a cero en las dos mediciones a
+  resolución nativa.
+- **Los 21 recuperados** tienen un valor normalizado igual, letra por letra,
+  al email de la verdad. El valor que se muestra es lo que leyó el OCR, por
+  ejemplo `ricardo.ibarraQexample.org` o `contacto. estudioQexample.org`.
+- **Los 2 que siguen perdidos** son el caso que ADR-211 deja afuera: el punto
+  del nombre leído como espacio, sin `Q` (`marina suarez@example.com`). Solo
+  aparecen al forzar la lectura a 150 dpi, que no es la configuración por
+  defecto. En esos dos casos se sigue detectando `suarez@example.com`, igual
+  que antes del cambio.
+- **Ningún email agregado por el cambio**, en ninguna de las 105 celdas.
+- **Ninguna otra entidad cambió.** En DPI descendente se comparó el conjunto
+  completo de detecciones, incluidas las del modelo de nombres. En M-E1 y
+  M-E2 la línea de base no había guardado ese conjunto, así que se comparó lo
+  perdido y lo agregado contra la verdad, por tipo.
+
+### Validez de la comparación
+
+- El texto leído por el OCR es **idéntico** al de la línea de base en las 105
+  celdas. La diferencia entre antes y después es solo la detección.
+- Las 105 celdas son válidas en las dos corridas.
+- La corrida de referencia de DPI descendente tenía además 5 celdas de un
+  documento real. No se repitieron ni se compararon: esta medición usa solo
+  sintéticos.
+- El arnés pasó a identificar un email por su valor normalizado. Sin eso, un
+  email recuperado se habría contado como perdido y agregado a la vez,
+  porque su valor leído lleva la `Q`. Para un email con `@` la clave es la de
+  antes, y no cambia ninguna cifra de la línea de base.
+
+### Costo de la búsqueda nueva
+
+El test de peores casos, sobre texto adverso de 2 a 160 KiB con muchas `Q`:
+al duplicar la longitud, el tiempo se multiplica entre 1,0 y 1,6. A 160 KiB
+tarda entre 7 y 9 ms. Es lineal.
+
+Cómo se corre la comparación: `tests/perf/README.md`.
