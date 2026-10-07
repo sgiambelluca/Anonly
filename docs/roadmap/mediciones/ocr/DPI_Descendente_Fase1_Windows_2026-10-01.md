@@ -65,6 +65,30 @@ ningún sintético.
 
 Queda como ítem ABIERTO en `MVP.md`, Hito 11.
 
+### 2.1 Causa: es la lectura del OCR (agregado el 2026-10-07)
+
+No hizo falta medir de nuevo. Cada celda de la corrida guardó el texto que
+leyó el OCR (`syntheticDetail.observedText`), y ahí está cómo quedó escrito
+cada email perdido. Sobre las 44 celdas de la corrida `20261001T194929Z`:
+
+| Cómo lo leyó el OCR | Emails | Ejemplo (valores sintéticos) |
+|---|---:|---|
+| La `@` leída como `Q` | 8 | `ricardo.ibarraQexample.org` |
+| La `@` como `Q`, y un espacio después del punto | 1 | `contacto. estudioQexample.org` |
+| El punto del nombre leído como espacio | 2 | `marina suarez@example.com` |
+| **Total** | **11** | |
+
+- Los 11 coinciden con la tabla de arriba: 6 en `SR`, 2 en `S8` y 3 en `S6`.
+- **No es el patrón de Regex.** Sin `@` no hay email que reconocer, y el
+  resto de cada dirección está bien leído.
+- El caso recortado de `S8` a 150 dpi es el del punto leído como espacio: el
+  patrón encuentra `suarez@example.com`, que es lo que quedó pegado a la `@`.
+- A 300 dpi no hay ninguna `@` leída como `Q` en toda la corrida.
+
+Lo que sigue sin medir es lo mismo que arriba: si un escaneo de unos 200 dpi
+nativos produce la misma confusión. Qué hacer con esto es una decisión de
+detección, y está en `Roadmap_1.x.md` §3.
+
 ## 3. Lo que la regla no pudo juzgar
 
 El criterio 1 («el brazo no pierde ninguna entidad que `300` detecta») no
