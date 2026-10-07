@@ -15,7 +15,14 @@ export interface Box {
 
 export interface ObservedEntity {
   readonly type: string;
+  /** El valor tal como lo leyó el OCR (`Occurrence.value`). */
   readonly value: string;
+  /**
+   * `Occurrence.normalizedValue`, si la entidad lo trae. Con ADR-211 un email leído con `Q`
+   * (`ricardo.ibarraQexample.org`) lleva en `value` lo leído y en `normalizedValue` el email restituido:
+   * para los emails la comparación contra la verdad usa este último.
+   */
+  readonly normalizedValue?: string;
   readonly pageIndex: number;
   readonly box: Box | null;
 }
@@ -34,8 +41,18 @@ export function canonicalValue(type: string, value: string): string {
   return reduced;
 }
 
+/**
+ * Clave de emparejamiento. Solo en los emails se prefiere el valor normalizado cuando existe: a una
+ * dirección con `@` le da lo mismo que `value` (la normalización es pasar a minúsculas), y a una leída
+ * con `Q` (ADR-211) le da la dirección real, que es la que está en la verdad. En los demás tipos
+ * `normalizedValue` no es comparable con la verdad (una fecha, por ejemplo, se normaliza a otro formato).
+ */
 export function entityKey(entity: ObservedEntity): string {
-  return `${entity.type}|${entity.pageIndex}|${canonicalValue(entity.type, entity.value)}`;
+  const compared =
+    entity.type === "EMAIL" && entity.normalizedValue !== undefined
+      ? entity.normalizedValue
+      : entity.value;
+  return `${entity.type}|${entity.pageIndex}|${canonicalValue(entity.type, compared)}`;
 }
 
 export interface TypeCounts {

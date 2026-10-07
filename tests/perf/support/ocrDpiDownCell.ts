@@ -36,6 +36,8 @@ export interface RawEntity {
   readonly entityType: string;
   readonly bbox: unknown;
   readonly pageIndex: number;
+  /** Solo las entidades de Regex lo traen (el observador de NER no lo copia). */
+  readonly normalizedValue?: unknown;
 }
 
 export interface CellObservation {
@@ -80,6 +82,9 @@ export function observedEntities(raw: ReadonlyArray<RawEntity>): ReadonlyArray<O
   return raw.map((entity) => ({
     type: entity.entityType,
     value: entity.value,
+    ...(typeof entity.normalizedValue === "string"
+      ? { normalizedValue: entity.normalizedValue }
+      : {}),
     pageIndex: entity.pageIndex,
     box: boxOf(entity.bbox),
   }));
