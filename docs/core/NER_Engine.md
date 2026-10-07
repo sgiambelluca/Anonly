@@ -5,8 +5,10 @@
 > Detecta personas, organizaciones, direcciones y fechas mediante un modelo NER local (Transformers.js + ONNX Runtime Web). Emite `Occurrence[]` con `source: "ner"` y `confidence` según el modelo.
 
 **EngineId**: `ner`
-**Versión del spec**: 1.10.0
-**Última actualización**: 2026-09-30
+**Versión del spec**: 1.11.0
+**Última actualización**: 2026-10-07
+
+> **Nota (v1.11.0, ADR-212, 2026-10-07 — la dirección incluye la altura que la sigue)**: el modelo marca la calle y deja el número afuera (§14.1): «con domicilio en Maipú 1434» daba `Maipú`, con la altura a la vista. Desde esta versión un span de `Address` se **extiende** hasta el número que lo sigue. Un número con forma de año (1900 a 2099) se suma solo si hay una palabra de dirección cerca; sin ella no se toca, para no tapar «Rosario 2019». Es un paso posterior al modelo, sin contrato nuevo. La regla está **a prueba**: el mantenedor decide con una medición si queda o si se pasa a sumar siempre. Ver caso 34, §14, §14.1 y §15 ítem 34.
 
 > **Nota (v1.10.0, enmienda de ADR-167, 2026-09-30 — el despacho in-process también suelta el modelo)**: con un `WorkerPool` real que despacha in-process (`createCore` sin factory para `ner`), una baja del pool reiniciaba `modelWarm` pero dejaba el clasificador cargado en el hilo del motor: la siguiente página lo reusaba sin `model-ready` e `isModelReady()` quedaba en `false`. Ahora el listener de bajas también descarta el kernel in-process si el motor lo cargó, y la siguiente carga espera ese descarte. No cambia el producto empaquetado ni ningún contrato. Ver §6 (puerto `NerJobPool`), §13 caso 33 y §14.
 
@@ -322,6 +324,17 @@ Las `Occurrence` también se emiten vía `ENTITY_FOUND` (incremental).
 31. **Carga antes de que venza `nerIdleDisposeMs`** (ADR-167 §5.3): un documento que llega mientras el pool todavía tiene su worker —el caso de quien procesa una tanda— **reusa el modelo**: sin recarga, sin `NER_MODEL_LOADING` ni `NER_MODEL_READY`. T-8 lo midió con ~1,3 s entre documentos: +8 ms contra el temporizador de 60 s, sin recarga en ninguna ronda.
 32. **Candidato de datos externos** (ADR-179): solo el banco opt-in de `tests/perf/` sirve `model_quantized.onnx` + `model_quantized.onnx_data` y construye un brazo con `use_external_data_format: 1`. La carga ocurre por `app://` con Chromium/WASM y worker real. Antes de medir memoria debe producir `NER_MODEL_READY`, `Ready` y exactamente las mismas ocurrencias, scores y cajas que el brazo ONNX original, sobre el corpus sintético medido. Sidecar ausente, hash distinto, request a terceros, fallo de carga o salida distinta **rechazan el brazo**; no hay fallback silencioso a otro modelo ni cambio del asset normal. Node solo fue una prueba preliminar de compatibilidad. El caso cubre el efecto observable de la evaluación, no introduce un nuevo modo público de NER.
 33. **Baja de un pool que despacha in-process** (enmienda de ADR-167, 2026-09-30): `createCore` sin factory para `ner` (o un `WorkerPool` real sin `workerFactory`). En los tests del motor, P-1 impide importar `WorkerPool` (vive en el façade): se usa un doble cuyo `dispatch` ejecuta `run()` en el mismo hilo con el kernel real, y la baja se notifica como lo hace el pool. Inferir una página, vencer `nerIdleDisposeMs` e inferir otra: la baja descarta el kernel in-process, la segunda página emite `NER_MODEL_LOADING`/`NER_MODEL_READY`, `isModelReady()` es `true` al terminar y el modelo se cargó dos veces. Con una baja que la guarda frena (pool no ocioso) no se descarta nada. La cadena real (`createCore` → `WorkerPool` sin factory → temporizador → guarda) se prueba en el façade, Orchestrator §14; el test del motor cubre el listener con un doble.
+34. **Una dirección se extiende hasta la altura que la sigue** (ADR-212). Paso posterior al modelo, en el host del motor, sobre el **texto completo de la página** y antes de mapear el span a palabras. Aplica solo a spans de `Address`.
+    - **Número candidato.** Inmediatamente después del fin del span: uno o dos caracteres de espacio en blanco; opcionalmente un conector (`N°`, `Nº`, `No.`, `nro` o `nro.`, `número` o `numero`, `al`; sin distinguir mayúsculas) seguido de cero a dos espacios; y de uno a cinco dígitos. Después de los dígitos no puede venir otro dígito, una barra, ni un punto, una coma o un guion seguidos de un dígito. Si no hay número candidato, el span no cambia.
+    - **Parece un año**: exactamente cuatro dígitos con valor entre 1900 y 2099, ambos incluidos.
+    - **Si no parece un año**, el span se extiende hasta el último dígito.
+    - **Si parece un año**, se extiende solo si hay una palabra de dirección. Se compara sin distinguir mayúsculas ni tildes, por palabra entera:
+      - **antes**: en las seis palabras anteriores al comienzo del span, o como primera palabra del propio span: `domicilio`, `domiciliado`, `domiciliada`, `domiciliados`, `domiciliadas`, `calle`, `avenida`, `av.`, `avda.`, `sito`, `sita`, `vive`, `viven`, `reside`, `residen`;
+      - **después**: en las cuatro palabras posteriores al último dígito: `piso`, `departamento`, `depto.`, `dpto.`, o las secuencias `de esta ciudad` y `de la localidad`.
+      Sin ninguna, el span no cambia.
+    - **Idempotencia**: si el span ya termina en dígitos, no se busca número.
+    - **Salida**: una sola ocurrencia. `value` es el texto de la página del span extendido, conector incluido. `normalizedValue` se recalcula sobre ese valor con la misma normalización que usa el motor para sus ocurrencias. `bbox`, `fragments`, `rotation` y `wordSpan` salen de las palabras del span extendido, por el camino de siempre. `confidence` es la del span del modelo.
+    - Los spans de otros tipos no se tocan, y un número que no cumple la forma no extiende nada.
 ---
 
 ## 14. Casos de prueba
@@ -331,6 +344,13 @@ Las `Occurrence` también se emiten vía `ENTITY_FOUND` (incremental).
 | Test | Archivo | Tipo | Descripción |
 |---|---|---|---|
 | `no emite NER_MODEL_LOADING una vez que el modelo ya está listo (ADR-135)` | `unit.test.ts` | edge | ADR-135: pool de dos workers, el segundo reporta su carga después del `model-ready` del primero. Sin la dedup, el indicador de "Preparando el detector de nombres…" quedaba prendido para siempre |
+| `address span extends over a following street number` | `unit.test.ts` | unit | caso 34, ADR-212: «Maipú 1434» sale como una sola ocurrencia `Address`; el número no parece un año y se suma sin mirar el contexto |
+| `address span keeps a year-like number out without an address cue` | `edge.test.ts` | edge | caso 34: «en Rosario 2019» queda `Rosario`; 1900 y 2099 cuentan como año, 1899 y 2100 no |
+| `address span takes a year-like number with a cue before or after` | `edge.test.ts` | edge | caso 34: cada palabra de la lista, antes y después, dentro y fuera de su ventana; sin distinguir mayúsculas ni tildes; como primera palabra del propio span |
+| `address number accepts the N°, nro, número and al connectors` | `edge.test.ts` | edge | caso 34: cada conector, con y sin espacio; un conector sin dígitos después no extiende |
+| `address number stops at dates, decimals and ranges` | `edge.test.ts` | edge | caso 34: dígitos seguidos de otro dígito, de una barra, o de punto, coma o guion con dígito no son una altura; seis dígitos tampoco |
+| `address extension is idempotent and leaves other entity types untouched` | `unit.test.ts` | unit | caso 34: un span que ya termina en dígitos no cambia; `Person` y `Organization` seguidas de un número no se extienden |
+| `extended address maps value, normalized value and geometry to street and number` | `contract.test.ts` | contract | caso 34: `value` del texto de la página con conector, `normalizedValue` recalculado, `bbox`/`wordSpan` abarcando la palabra del número, `confidence` del modelo, una sola `ENTITY_FOUND` |
 | `an in-process pool release unloads the model and the next page reloads it` | `unit.test.ts` | unit | caso 33 (enmienda de ADR-167): doble de pool que ejecuta `run()` en el mismo hilo con el kernel real (P-1 impide importar `WorkerPool`); control que falla contra `768e5d3`. La cadena real la cubre Orchestrator §14 |
 | `apaga Cache Storage: el target es escritorio y el modelo es local (ADR-132 §7)` | `kernel.test.ts` | unit | ADR-132 §7: `env.useBrowserCache = false`, con `allowRemoteModels`/`allowLocalModels` sin cambios |
 | `decodes the remote envelope { spans } from NerWorker` | `unit.test.ts` | unit | pool fake que **ignora `run()`** y resuelve exactamente lo que postea `worker/entry.ts`; se emiten `ENTITY_FOUND × N` y `NER_PAGE_FINISHED` con `occurrenceCount > 0` |
@@ -439,6 +459,8 @@ Y en el otro sentido, el modelo emite topónimos que el ground truth no enumera 
 
 Es la misma limitación vista desde los dos lados: el modelo resuelve **lugares**, y lo que el producto necesita tapar es un **domicilio postal**. Un domicilio anonimizado a medias —con el número a la vista— no cumple el propósito de censura.
 
+> **Actualización del 2026-10-07 (ADR-212).** Se eligió la primera de las tres salidas de abajo: extender el span del modelo hasta el número contiguo, con una regla de contexto para no tapar años. Las cuatro direcciones de arriba se vuelven a medir con la línea de base de calidad después de implementarla. La limitación del modelo sigue siendo la misma; lo que cambia es que el motor la compensa.
+
 **Implicancia para el gate de v1.0** (`MVP.md` §5, recall de NER ≥ 85 %): el recall de `ADDRESS` no lo va a alcanzar con este modelo solo. Las salidas plausibles, ninguna decidida: extender el span del modelo hasta el número contiguo con una regla de post-proceso, cubrir el domicilio con un patrón de `regex-engine` (precedente: ADR-092, la carátula que el modelo veía por debajo del umbral y terminó siendo un patrón), o cambiar de modelo. **Ninguna de las tres está evaluada.**
 
 ### Ruido de bajo valor semántico
@@ -491,6 +513,7 @@ Nada de esto lo frena hoy el umbral de sugerencia de ADR-094 (`MIN_SUGGESTION_CO
 - [x] 31. (ADR-111 §3) `aggregateTokensToSpans`: pasar los spans por `snapSpansToWordBoundaries` antes de devolverlos. Primero `coalesceSpansInsideTheSameWord` (mismo `entityType` y nada entre medio que no sea carácter de palabra → un solo span, con la confianza del trozo más largo); después el inicio se extiende hacia atrás y el fin hacia adelante mientras el carácter contiguo sea `\p{L}`/`\p{N}`, con el inicio topado contra el fin del span anterior y el fin contra el inicio del siguiente. `value` se recorta de `chunkText` y `normalizedValue` se recalcula. **No** tocar la forma de `NerKernelSpan` ni el orden de los spans. Seis filas nuevas en §14, caso 25 de §13.
 
 - [x] 32. (ADR-179 — punto 1 de recursos, opt-in) En `tests/perf/` y su soporte: fijar la herramienta offline y la conversión exacta de ADR-179 §2, verificar los tres hashes, crear los brazos A/B desde la misma revisión con un único parche de opción de carga, gatear carga real `app://`/Chromium/WASM y calidad exacta antes de medir, y ejecutar el A/B intercalado de ADR-179 §5. Entregar resultados crudos y resumen al planificador para el informe de medición. **No** cambiar `NerConfig`, `Contracts.md`, `assets.lock.json`, el asset normal ni el default del kernel durante esta evaluación. Informe: `roadmap/mediciones/ner/Empaquetado_NER_Medicion.md`; se conserva A por señal RSS insuficiente.
+- [ ] 34. (1.0.x, Confianza — **ADR-212**) Extensión de los spans de `Address` hasta la altura que los sigue, como función pura sobre el texto de la página, aplicada en el host antes de `mapSpanToWords`: número candidato con sus conectores y su frontera, criterio de año, palabras de dirección antes y después con sus ventanas, idempotencia, y `value`, `normalizedValue` y geometría del span extendido. Los siete tests de §14 con sus nombres exactos. Cobertura del módulo ≥ 85 %.
 - [x] 33. (Enmienda de ADR-167, 2026-09-30) El listener de `onWorkersReleased` descarta el kernel in-process si el motor lo cargó, y la siguiente carga in-process espera ese descarte. Caso 33.
 
 ---
@@ -507,3 +530,4 @@ Nada de esto lo frena hoy el umbral de sugerencia de ADR-094 (`MIN_SUGGESTION_CO
 - `adr/ADR-067-Orden-De-Lectura-Por-Runs-Rotados.md` §4 (los runs contiguos al final de `Page.text` — la entrada que ADR-088 §1 corta por corrida)
 - `adr/ADR-088-El-Texto-Que-Recibe-El-NER.md` §1 (batch por corrida rotada), §2 (Title Case solo para inferir)
 - `adr/ADR-179-El-Empaquetado-De-NER-Se-Evalua-Sin-Cambiar-El-Modelo.md` (experimento de empaquetado del mismo ONNX, con gates antes de adoptar)
+- `adr/ADR-212-La-Direccion-Incluye-La-Altura-Que-La-Sigue.md` (v1.11.0: extensión de `Address` hasta la altura)
