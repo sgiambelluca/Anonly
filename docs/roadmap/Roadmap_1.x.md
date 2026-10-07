@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap-1.x | dependencias=roadmap/Version_1.0.md,roadmap/Version_2.0.md,roadmap/Future_Ideas.md,roadmap/hitos/Post_Hito10.8_Pendientes.md,RELEASING.md,00_Project_Vision.md,architecture/08_Security_Model.md,adr/ADR-009-Export-Strategy.md,adr/ADR-059-Leyenda-Opcional-De-Marcadores.md,adr/ADR-148-Un-Export-Se-Verifica-Leyendo-El-PDF-Exportado.md,adr/ADR-190-Una-Pagina-Con-Tinta-No-Sale-Vacia-En-Silencio.md,roadmap/hardening/Export_Verificado_ADR148_Plan.md,roadmap/hardening/ADR148_Revision_2026-10-05.md,roadmap/hardening/ADR148_Revision_Sol61_2026-10-05.md,roadmap/ocr/Regiones_Pequenas_Investigacion_Plan.md,adr/ADR-202-El-Minimo-De-Region-OCR-Se-Prueba-A-25pt-Antes-De-Adoptarlo.md,roadmap/ocr/Regiones_Pequenas_25pt_Experimento_Plan.md,roadmap/interaccion/Mejoras_Interaccion_2026-10-05.md,adr/ADR-204-La-Interaccion-Anonimizada-Usa-La-Geometria-Visible.md,adr/ADR-205-El-Resultado-Exportado-Pertenece-A-Una-Revision.md,adr/ADR-206-Una-Busqueda-Omitida-No-Confirma-La-Version.md,roadmap/interaccion/Revision_ADR204_2026-10-07.md,roadmap/hardening/Confianza_1.0.x_Plan.md,adr/ADR-210-El-Repintado-De-Linea-Desplaza-Los-Pixeles-Del-Renglon.md,adr/ADR-211-El-Email-Tolera-La-Arroba-Leida-Como-Q-En-Texto-De-OCR.md,adr/ADR-212-La-Direccion-Incluye-La-Altura-Que-La-Sigue.md,roadmap/mediciones/ocr/Emails_DPI_Nativo_2026-10-07.md,roadmap/distribucion/SignPath_Postulacion.md,architecture/08_Security_Model.md | audiencia=humanos+IA | fase=12 -->
+<!-- CONTEXT: scope=roadmap-1.x | dependencias=roadmap/Version_1.0.md,roadmap/Version_2.0.md,roadmap/Future_Ideas.md,roadmap/hitos/Post_Hito10.8_Pendientes.md,RELEASING.md,00_Project_Vision.md,architecture/08_Security_Model.md,adr/ADR-009-Export-Strategy.md,adr/ADR-059-Leyenda-Opcional-De-Marcadores.md,adr/ADR-148-Un-Export-Se-Verifica-Leyendo-El-PDF-Exportado.md,adr/ADR-190-Una-Pagina-Con-Tinta-No-Sale-Vacia-En-Silencio.md,roadmap/hardening/Export_Verificado_ADR148_Plan.md,roadmap/hardening/ADR148_Revision_2026-10-05.md,roadmap/hardening/ADR148_Revision_Sol61_2026-10-05.md,roadmap/ocr/Regiones_Pequenas_Investigacion_Plan.md,adr/ADR-202-El-Minimo-De-Region-OCR-Se-Prueba-A-25pt-Antes-De-Adoptarlo.md,roadmap/ocr/Regiones_Pequenas_25pt_Experimento_Plan.md,roadmap/interaccion/Mejoras_Interaccion_2026-10-05.md,adr/ADR-204-La-Interaccion-Anonimizada-Usa-La-Geometria-Visible.md,adr/ADR-205-El-Resultado-Exportado-Pertenece-A-Una-Revision.md,adr/ADR-206-Una-Busqueda-Omitida-No-Confirma-La-Version.md,roadmap/interaccion/Revision_ADR204_2026-10-07.md,roadmap/hardening/Confianza_1.0.x_Plan.md,adr/ADR-210-El-Repintado-De-Linea-Desplaza-Los-Pixeles-Del-Renglon.md,adr/ADR-211-El-Email-Tolera-La-Arroba-Leida-Como-Q-En-Texto-De-OCR.md,adr/ADR-212-La-Direccion-Incluye-La-Altura-Que-La-Sigue.md,roadmap/mediciones/ocr/Emails_DPI_Nativo_2026-10-07.md,roadmap/mediciones/ner/Altura_De_Direcciones_2026-10-07.md,roadmap/distribucion/SignPath_Postulacion.md,architecture/08_Security_Model.md | audiencia=humanos+IA | fase=12 -->
 
 # Anonly — Roadmap 1.x
 
@@ -195,6 +195,15 @@ Lo primero, porque es lo que permite tocar la detección sin miedo.
   regla de contexto para no tapar años: un número con forma de año se suma
   solo si hay una palabra de dirección cerca. Si la medición muestra que deja
   escapar alturas, se pasa a tapar siempre.
+
+  **Implementado y medido el 2026-10-07**
+  ([informe](mediciones/ner/Altura_De_Direcciones_2026-10-07.md)): las
+  cuatro direcciones de la línea de base quedan cubiertas, sin otro cambio.
+  Sobre 76 oraciones sintéticas, la regla deja a la vista 6 alturas con
+  forma de año y tapa 4 años de más; tapar siempre deja 0 y tapa 9. **Falta
+  la decisión del mantenedor entre las dos.** Aparte, en 9 de 48 oraciones
+  con un domicilio el modelo no marcó la calle: ese límite no lo cierra
+  ninguna de las dos.
 - **Firma de Windows con SignPath: cerrado sin firma.** SignPath rechazó la
   postulación (informado el 2026-10-07). No hay otra vía gratuita, así que
   Windows sigue sin Authenticode y pasa a figurar como riesgo aceptado en

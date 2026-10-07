@@ -11,7 +11,7 @@ documentos de trabajo. Los arneses que producen estos números están en
 | Carpeta | Qué contiene |
 |---|---|
 | [`ocr/`](./ocr) | `ocr-engine`: reconocedores y pool, OSD compartido, márgenes, `ImageData` en el worker, reproducibilidad entre plataformas |
-| [`ner/`](./ner) | `ner-engine`: hilos de ONNX, empaquetado del modelo, perfilado interno, precarga durante el OCR, liberación del modelo |
+| [`ner/`](./ner) | `ner-engine`: hilos de ONNX, empaquetado del modelo, perfilado interno, precarga durante el OCR, liberación del modelo, altura de las direcciones |
 | [`regex/`](./regex) | `regex-engine`: patrón de email |
 | [`grouping/`](./grouping) | `grouping-engine`: búsqueda difusa |
 | [`transversal/`](./transversal) | La app entera o varios motores a la vez: memoria del renderer, base caliente, ciclos y documentos reales, PDFs pesados hasta el export, tiempo fuera del OCR, comparativa del banco Windows |
@@ -36,6 +36,7 @@ documentos de trabajo. Los arneses que producen estos números están en
 | OCR | [`DPI_Descendente_Fase1_Windows_2026-10-01.md`](./ocr/DPI_Descendente_Fase1_Windows_2026-10-01.md) | DPI descendente (300/250/200/150): ningún brazo pasa; se pierden emails al bajar |
 | OCR | [`Regiones_Pequenas_2026-10-05.md`](./ocr/Regiones_Pequenas_2026-10-05.md) | Admisión, calidad y 12 series de costo; caracterización limitada y arnés aprobados por Sol 6.1, política nueva pendiente |
 | OCR | [`Regiones_Pequenas_25pt_2026-10-05.md`](./ocr/Regiones_Pequenas_25pt_2026-10-05.md) | ADR-202: evidencia/arnés aprobados; mixed recuperado, H2 refutada; candidato no adoptado, costo no medido |
+| NER | [`Altura_De_Direcciones_2026-10-07.md`](./ner/Altura_De_Direcciones_2026-10-07.md) | ADR-212: la altura de las direcciones, regla por contexto contra «tapar siempre» (M-D1) |
 | NER | [`Hilos_NER_Medicion.md`](./ner/Hilos_NER_Medicion.md) | Hilos de ONNX, macOS y Windows nativo |
 | NER | [`Empaquetado_NER_Medicion.md`](./ner/Empaquetado_NER_Medicion.md) | Empaquetado del modelo |
 | NER | [`Perfilado_NER_Interno_Medicion.md`](./ner/Perfilado_NER_Interno_Medicion.md) | Perfilado interno A1/B/A2 |
