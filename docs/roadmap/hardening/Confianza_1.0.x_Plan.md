@@ -38,9 +38,9 @@ entonces arranca el implementador de `render-engine`.
 | 1 | Memoria | M-M1: pico del perfil Bajo sobre `P2H` | implementador (`tests/perf`) y planificador | **cerrado el 2026-10-07**: máximo 2,05 GB, techo fijado en 2,5 GB, también en el arnés |
 | 2 | Emails | M-E1: línea de base sobre escaneos de 200 y 150 dpi nativos | implementador (`tests/perf`) y planificador | **medido el 2026-10-07**: sin pérdidas a 200 dpi nativos; 2 de 25 a 150 |
 | 3 | Repintado | Implementación desde el spec, capturas, revisor | implementador, mantenedor, revisor | ADR-210 **aceptado**, spec v1.18.0, implementación en `render-engine` y E2E con canvas real **entregados** el 2026-10-07; capturas del preview y del export enviadas al mantenedor. Falta el revisor, que va al final de la branch |
-| 4 | Direcciones | Auditoría de la línea de base; después ADR | planificador | **auditado el 2026-10-07**: el modelo detecta la calle y deja el número afuera. ADR-212 **aceptado a prueba** ese día, spec de NER v1.11.0 e **implementación en `ner-engine` entregada** (139 tests del módulo en verde, 98,8 % de líneas). Sigue: medición M-D1 y línea de base de calidad |
+| 4 | Direcciones | Auditoría de la línea de base; después ADR | planificador | **auditado el 2026-10-07**: el modelo detecta la calle y deja el número afuera. ADR-212 **aceptado a prueba** ese día, spec de NER v1.11.0 e **implementación en `ner-engine` entregada** (139 tests del módulo en verde, 98,8 % de líneas). **Medido el 2026-10-07 (M-D1)**: la regla deja 6 alturas a la vista y tapa 4 años de más; tapar siempre, 0 y 9. Las cuatro direcciones de la línea de base quedan cubiertas. **Espera la decisión del mantenedor**: regla por contexto o tapar siempre |
 | 2b | Emails | M-E2: la misma línea de base sobre los textos con degradación de fotocopia | implementador (`tests/perf`) y planificador | **medida el 2026-10-07**: sin pérdidas a 300 y 200 dpi; 4 de 10 a 150, tres de ellas con `Q` y un espacio |
-| 6 | Visor | El cambio de vista pide la imagen a la escala del zoom (frente 5) | implementador (`apps/react-client`) | pedido por el mantenedor el 2026-10-07; **implementado ese día** en el cliente, para el cambio de vista, las ediciones y el reanálisis. Para el instante borroso que quedaba al conmutar: ADR-213 aceptado e **implementado el 2026-10-07** (16 tests en Electron). Queda una decisión: qué se muestra al pasar a Anonimizado mientras llega su imagen |
+| 6 | Visor | El cambio de vista pide la imagen a la escala del zoom (frente 5) | implementador (`apps/react-client`) | pedido por el mantenedor el 2026-10-07; **implementado ese día** en el cliente, para el cambio de vista, las ediciones y el reanálisis. Para el instante borroso que quedaba al conmutar: ADR-213 aceptado e **implementado el 2026-10-07**, con la enmienda del mantenedor: bajo «Anonimizado» nunca se muestra la imagen original (20 tests en Electron). Quedan dos hallazgos anotados, sin decidir. Falta el revisor |
 | 5 | Emails | ADR-211 y spec de Regex; después implementación y comparación contra la línea de base | mantenedor, planificador, implementador | ADR-211 **aceptado** el 2026-10-07, con el espacio tras el punto incluido; spec de Regex v1.15.0 e **implementación en `regex-engine` entregada** ese día (190 tests del módulo en verde, 98,7 % de líneas; los tres tests de ADR-181 sin tocar). **Medido el 2026-10-07 (M-E3): de 11 a 2, de 4 a 0 y de 8 a 0 emails perdidos, sin agregados y sin otros cambios.** Cerrado, falta el revisor |
 
 ## Frente 1 — Memoria del perfil Bajo (M-M1)
@@ -391,6 +391,43 @@ en el caso 34: cómo se cuentan y se comparan las palabras de las ventanas
 sobre una palabra de otro ángulo, para no absorber el número de un folio
 girado en el margen.
 
+### Resultado de M-D1 (2026-10-07)
+
+Informe:
+[`Altura_De_Direcciones_2026-10-07.md`](../mediciones/ner/Altura_De_Direcciones_2026-10-07.md).
+Arnés nuevo: `./tests/perf/run-address-height.sh`.
+
+Se midieron 76 oraciones en ocho categorías, y no las entre 8 y 10 por
+siete del diseño: se sumó una categoría, la de un lugar seguido de un número
+que no es altura ni año.
+
+| | Regla por contexto | Tapar siempre |
+|---|---:|---:|
+| Alturas a la vista, de 39 con la calle marcada | 6 | 0 |
+| Años tapados de más, de 9 con el lugar marcado | 4 | 9 |
+| Otros números tapados de más, de 8 | 6 | 6 |
+
+- La regla hace lo que ADR-212 dice en las 76 oraciones. Las dos corridas
+  coinciden.
+- Las 6 alturas a la vista son alturas con forma de año sin palabra de
+  dirección: el costo aceptado a prueba.
+- **Un límite que no es de la regla**: en 9 de las 48 oraciones con un
+  domicilio el modelo no marcó la calle, y quedan a la vista la calle y la
+  altura con cualquiera de las dos variantes.
+- **Un costo de las dos variantes**: un lugar seguido de un número
+  cualquiera se tapa de más («Viajó a Mendoza 3 veces» da «Mendoza 3»).
+- Las oraciones de la categoría D se escribieron para que la regla fallara:
+  la medición no dice con qué frecuencia aparece ese caso en un documento
+  real.
+
+**Línea de base de calidad.** Las cuatro direcciones pasan a cubiertas: 78
+de 78 entidades, contra 74 de 78. Ninguna otra entidad cambia y los falsos
+positivos son los mismos. El candidato no se promovió: se promueve con la
+regla ya decidida, en commit propio (ADR-147 §5).
+
+**Falta la decisión del mantenedor**: la regla por contexto queda, o se pasa
+a tapar siempre.
+
 ## Frente 5 — El visor al cambiar de vista (sumado el 2026-10-07)
 
 Pedido por el mantenedor: al pasar de Original a Anonimizado, o al revés,
@@ -478,8 +515,29 @@ son 150 a 200 ms; el tope es medio segundo. Es lo que dice la regla 4 de
 ADR-213, pero conviene que lo decida sabiéndolo: la alternativa es que en
 esa dirección nunca se sostenga la original.
 
-**Pendiente menor**: sumar los helpers puros nuevos del visor a los
-thresholds de cobertura (`vitest.config.ts`), como pide `CLAUDE.md`.
+**Implementado el 2026-10-07.** `viewer-kind-switch-hold.spec.ts` pasó a 20
+tests. Tests del cliente: 1108 en verde.
+
+- Al pasar a Anonimizado se pinta la imagen anonimizada que haya, aunque
+  esté a otra escala, o el estado de carga. La espera con tope vale solo al
+  pasar a Original.
+- **Un defecto que apareció al probar**: con la regla ya corregida, el lienzo
+  conservaba los píxeles de la original uno o dos cuadros, mientras cargaba
+  la imagen nueva. Ahora se vacía antes del primer pintado.
+- Los helpers puros nuevos del visor están en los thresholds de cobertura
+  (`vitest.config.ts`), al 100 %.
+
+**Dos hallazgos, sin decidir.** Ninguno muestra datos sin tapar.
+
+- **Un cuadro gris al pasar a Anonimizado.** Dura unos 16 ms y aparece aunque
+  haya una imagen anonimizada guardada: el lienzo se vacía en el acto y la
+  imagen guardada carga de forma asíncrona. Evitarlo pide tener las imágenes
+  ya decodificadas antes de conmutar.
+- **El reintento contra un dibujo lento.** Con el dibujo demorado a propósito
+  1,5 s, el reintento del visor, que corre cada 700 ms, reinicia el dibujo en
+  curso, y una página sin imagen anonimizada no termina de aparecer. Solo se
+  vio con ese atraso artificial; no está medido cuánto tarda un dibujo real
+  en un equipo lento.
 
 ## Reglas para los sub-agentes de esta branch
 

@@ -101,7 +101,9 @@ Van en las notas de la versión. Cada una tiene su lugar en `Roadmap_1.x.md`.
   comunes de oficina. No deja datos a la vista (encontrado el 2026-10-07;
   `interaccion/Revision_ADR204_2026-10-07.md`).
 - **Direcciones.** En la línea de base de calidad, las cuatro direcciones del
-  conjunto de referencia no se detectan.
+  conjunto de referencia no se detectan. Corregido después de la 1.0 con
+  ADR-212: la dirección incluye la altura que la sigue. Sigue siendo un
+  límite que el modelo no marque algunas calles.
 - **Nombres en formas poco comunes.** El modelo puede no reconocer un nombre
   en mayúsculas o con el apellido primero. La red de contención es el
   agregado manual.

@@ -74,6 +74,9 @@ No cambia ningún contrato. Sin dependencias nuevas.
   dirección. A veces el modelo marca alguno por su cuenta.
 - **Una calle que el modelo no marca.** La regla extiende lo que el modelo
   encontró; no encuentra direcciones nuevas.
+- **Un lugar seguido de un número que no es una altura**: «Viajó a Mendoza
+  3 veces» da «Mendoza 3». Se tapa un número de más. Medido en M-D1: 6 de
+  8 oraciones escritas para eso.
 - **Un número que es parte de otro dato** pegado a un lugar. La regla exige
   frontera después de los dígitos, pero un caso como «Belgrano 11
   4444-5555» sumaría el «11». Si coincide con otra detección, lo resuelve el
@@ -119,6 +122,29 @@ Además se vuelve a correr la línea de base de calidad: las cuatro
 direcciones tienen que quedar cubiertas, y ningún otro tipo puede empeorar.
 
 Con ese informe el mantenedor decide si la regla queda o si se tapa siempre.
+
+**Medido el 2026-10-07**
+(`roadmap/mediciones/ner/Altura_De_Direcciones_2026-10-07.md`). Sobre 76 oraciones, con el modelo real:
+
+| | Regla por contexto | Tapar siempre |
+|---|---:|---:|
+| Alturas a la vista, de 39 con la calle marcada | 6 | 0 |
+| Años tapados de más, de 9 con el lugar marcado | 4 | 9 |
+| Otros números tapados de más, de 8 | 6 | 6 |
+
+- La regla se comporta como está escrita en las 76 oraciones.
+- Las 6 alturas a la vista son el primer punto de «Lo que queda sin
+  cubrir».
+- En 9 de 48 oraciones con un domicilio el modelo no marcó la calle. Es el
+  tercer punto de «Lo que queda sin cubrir», y ninguna de las dos variantes
+  lo cambia.
+- La tercera fila es un costo que este ADR no había anotado: un lugar
+  seguido de un número cualquiera («Viajó a Mendoza 3 veces») se extiende
+  igual, con las dos variantes.
+- La línea de base de calidad cubre las cuatro direcciones y no cambia en
+  nada más.
+
+La decisión del mantenedor está pendiente.
 
 ## Consecuencias
 
