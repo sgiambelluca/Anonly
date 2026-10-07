@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap-1.x | dependencias=roadmap/Version_1.0.md,roadmap/Version_2.0.md,roadmap/Future_Ideas.md,roadmap/hitos/Post_Hito10.8_Pendientes.md,RELEASING.md,00_Project_Vision.md,architecture/08_Security_Model.md,adr/ADR-009-Export-Strategy.md,adr/ADR-059-Leyenda-Opcional-De-Marcadores.md,adr/ADR-148-Un-Export-Se-Verifica-Leyendo-El-PDF-Exportado.md,adr/ADR-190-Una-Pagina-Con-Tinta-No-Sale-Vacia-En-Silencio.md,roadmap/hardening/Export_Verificado_ADR148_Plan.md,roadmap/hardening/ADR148_Revision_2026-10-05.md,roadmap/hardening/ADR148_Revision_Sol61_2026-10-05.md,roadmap/ocr/Regiones_Pequenas_Investigacion_Plan.md,adr/ADR-202-El-Minimo-De-Region-OCR-Se-Prueba-A-25pt-Antes-De-Adoptarlo.md,roadmap/ocr/Regiones_Pequenas_25pt_Experimento_Plan.md,roadmap/interaccion/Mejoras_Interaccion_2026-10-05.md,adr/ADR-204-La-Interaccion-Anonimizada-Usa-La-Geometria-Visible.md,adr/ADR-205-El-Resultado-Exportado-Pertenece-A-Una-Revision.md,adr/ADR-206-Una-Busqueda-Omitida-No-Confirma-La-Version.md,roadmap/interaccion/Revision_ADR204_2026-10-07.md,roadmap/distribucion/SignPath_Postulacion.md,architecture/08_Security_Model.md | audiencia=humanos+IA | fase=12 -->
+<!-- CONTEXT: scope=roadmap-1.x | dependencias=roadmap/Version_1.0.md,roadmap/Version_2.0.md,roadmap/Future_Ideas.md,roadmap/hitos/Post_Hito10.8_Pendientes.md,RELEASING.md,00_Project_Vision.md,architecture/08_Security_Model.md,adr/ADR-009-Export-Strategy.md,adr/ADR-059-Leyenda-Opcional-De-Marcadores.md,adr/ADR-148-Un-Export-Se-Verifica-Leyendo-El-PDF-Exportado.md,adr/ADR-190-Una-Pagina-Con-Tinta-No-Sale-Vacia-En-Silencio.md,roadmap/hardening/Export_Verificado_ADR148_Plan.md,roadmap/hardening/ADR148_Revision_2026-10-05.md,roadmap/hardening/ADR148_Revision_Sol61_2026-10-05.md,roadmap/ocr/Regiones_Pequenas_Investigacion_Plan.md,adr/ADR-202-El-Minimo-De-Region-OCR-Se-Prueba-A-25pt-Antes-De-Adoptarlo.md,roadmap/ocr/Regiones_Pequenas_25pt_Experimento_Plan.md,roadmap/interaccion/Mejoras_Interaccion_2026-10-05.md,adr/ADR-204-La-Interaccion-Anonimizada-Usa-La-Geometria-Visible.md,adr/ADR-205-El-Resultado-Exportado-Pertenece-A-Una-Revision.md,adr/ADR-206-Una-Busqueda-Omitida-No-Confirma-La-Version.md,roadmap/interaccion/Revision_ADR204_2026-10-07.md,roadmap/hardening/Confianza_1.0.x_Plan.md,adr/ADR-210-El-Repintado-De-Linea-Desplaza-Los-Pixeles-Del-Renglon.md,adr/ADR-211-El-Email-Tolera-La-Arroba-Leida-Como-Q-En-Texto-De-OCR.md,adr/ADR-212-La-Direccion-Incluye-La-Altura-Que-La-Sigue.md,roadmap/mediciones/ocr/Emails_DPI_Nativo_2026-10-07.md,roadmap/distribucion/SignPath_Postulacion.md,architecture/08_Security_Model.md | audiencia=humanos+IA | fase=12 -->
 
 # Anonly — Roadmap 1.x
 
@@ -101,6 +101,11 @@ Lo primero, porque es lo que permite tocar la detección sin miedo.
 > antes que código. Siguen abiertas, y se deciden al empezar cada punto, las
 > preguntas de sus apartados «Para decidir al llegar». «Validar muestra» y la
 > página escasa y girada quedan para después.
+>
+> Plan de la branch: [`Confianza_1.0.x_Plan.md`](hardening/Confianza_1.0.x_Plan.md).
+> El mismo día el mantenedor decidió que el repintado no se apaga y se corrige
+> (ADR-210, que aceptó ese día), y que en emails primero se mide una línea de
+> base.
 
 - **Gate que lee el PDF exportado** (ADR-148, primera entrega sin aprobar):
   abre el archivo exportado, lo convierte en imagen y le pasa OCR. Es trabajo
@@ -154,18 +159,38 @@ Lo primero, porque es lo que permite tocar la detección sin miedo.
   campaña de DPI descendente, en 9 la `@` se leyó como `Q` y en 2 el punto
   del nombre se leyó como espacio
   ([informe](mediciones/ocr/DPI_Descendente_Fase1_Windows_2026-10-01.md) §2.1).
-  A 300 dpi no pasa. Sigue sin medir si un escaneo de unos 200 dpi nativos,
-  que hoy se lee a esa resolución (ADR-163), tiene la misma confusión.
+  A 300 dpi no pasa. **Línea de base medida el 2026-10-07** sobre sintéticos
+  de 200 y 150 dpi nativos: a 200 no se pierde ninguno, y a 150 se pierden 2
+  de 25, con letra de 8 pt y por la misma `Q`
+  ([informe](mediciones/ocr/Emails_DPI_Nativo_2026-10-07.md)). Los sintéticos
+  son limpios; un escaneo real puede leerse peor.
+
+  **Decidido el 2026-10-07**: se cubre la `@` leída como `Q`, y solo ese
+  caso (ADR-211). La línea de base sobre
+  textos con degradación de fotocopia se midió ese día: sin pérdidas a 300 y
+  a 200 dpi nativos; a 150, 4 de 10, y en tres de ellas la `Q` viene con un
+  espacio después del punto del nombre. Con ese dato el mantenedor aceptó
+  ADR-211 incluyendo el espacio, a condición de medir el avance antes y
+  después. Lo que sigue es cómo estaba planteada la pregunta.
 
   **Para decidir al llegar**: si la detección tolera esa lectura (reconocer
   `nombre.apellidoQdominio.tld` como email cuando el texto viene del OCR, y
   extender hacia atrás un email cuyo nombre quedó partido por un espacio), con
-  qué límite para no inventar emails, y si antes se mide sobre un escaneo de
-  200 dpi nativos. Es un cambio de detección: lleva ADR y spec de Regex antes
+  qué límite para no inventar emails. En la línea de base, ninguna otra
+  cadena del texto tiene esa forma. Es un cambio de detección: lleva ADR y spec de Regex antes
   que código, y sale como parche.
 - **Página escasa y girada** (riesgo aceptado de ADR-190): recalibrar el
   criterio de lectura fiable o verificar ángulos en páginas escasas.
-- **Direcciones**: 0 de 4 en la línea de base de calidad.
+- **Direcciones**: 0 de 4 en la línea de base de calidad. **Auditado el
+  2026-10-07**: en los cuatro casos el modelo detecta la calle y deja afuera
+  el número («Maipú» en lugar de «Maipú 1434»), así que la altura queda a la
+  vista. El camino propuesto es extender la dirección que el modelo ya marca
+  ([plan](hardening/Confianza_1.0.x_Plan.md), frente 4).
+
+  **Decidido el 2026-10-07 (ADR-212, a prueba)**: solo la altura, con una
+  regla de contexto para no tapar años: un número con forma de año se suma
+  solo si hay una palabra de dirección cerca. Si la medición muestra que deja
+  escapar alturas, se pasa a tapar siempre.
 - **Firma de Windows con SignPath: cerrado sin firma.** SignPath rechazó la
   postulación (informado el 2026-10-07). No hay otra vía gratuita, así que
   Windows sigue sin Authenticode y pasa a figurar como riesgo aceptado en
@@ -173,7 +198,10 @@ Lo primero, porque es lo que permite tocar la detección sin miedo.
   [`SignPath_Postulacion.md`](distribucion/SignPath_Postulacion.md) §6. No
   condiciona ninguna versión.
 - **El repintado de línea dibuja con otra tipografía y depende del zoom**
-  (hallazgo del 2026-10-07, sin decidir). Al revisar la interacción en la
+  (hallazgo del 2026-10-07). **Corregido en la branch de Confianza**: ADR-210,
+  aceptado ese día, mueve los píxeles del renglón y elimina la calibración.
+  Implementado y probado en la app; falta el revisor. Lo que sigue es el
+  planteo original. Al revisar la interacción en la
   vista anonimizada (ADR-204, que quedó validada) se midió que el repintado
   de ADR-058 redibuja el resto del renglón en monoespaciada chica, y que se
   activa o no según la escala: el mismo renglón cambia con el zoom, y nada
@@ -186,8 +214,11 @@ Lo primero, porque es lo que permite tocar la detección sin miedo.
   apaga hasta corregirlo, que deja siempre el encogido de ADR-058 §1. Las dos
   cambian el PDF exportado: por el criterio de §1 es un parche, y las notas de
   la versión lo dicen.
-- **Memoria**: medir el techo del perfil Bajo en Windows (ADR-194 §7) y
-  repetir M2, cuyo margen en P2 es menor que el ruido.
+- **Memoria**: el perfil Bajo se midió el 2026-10-07: 2,05 GB de máximo en
+  Windows. El mantenedor fijó su techo en **2,5 GB** ese día, en lugar del
+  provisorio de 3,5 GB (ADR-194 §7;
+  [plan](hardening/Confianza_1.0.x_Plan.md), M-M1). **Cerrado.** Sigue
+  pendiente repetir M2, cuyo margen en P2 es menor que el ruido.
 
 ## 4. 1.1 — Detección a medida del usuario
 
@@ -365,6 +396,17 @@ asignada.
 
 - Patrón para el número de expediente judicial
   (`Post_Hito10.8_Pendientes.md` §26).
+- ~~El visor no vuelve a pedir la imagen al cambiar entre Original y
+  Anonimizado después de un zoom~~: la otra vista quedaba con su imagen
+  anterior estirada hasta el próximo zoom o scroll. Visto el 2026-10-07 al
+  escribir el E2E del repintado. **El mantenedor pidió arreglarlo en la branch
+  de Confianza** ese mismo día, y también el mismo efecto al editar una
+  entidad. Arreglado en el cliente (`hardening/Confianza_1.0.x_Plan.md`,
+  frente 5). Queda un instante borroso de menos de un cuarto de segundo al
+  conmutar, a decidir.
+- En un escaneo quedan restos tenues, no legibles, de la tinta original
+  alrededor de una etiqueta que entra en su caja. Visto el 2026-10-07 en una
+  captura del export; sin medir contra el gate de ADR-148.
 - PDF con rotación de página declarada (`/Rotate ≠ 0`), sin medir (§8).
 - Censura sobre texto superpuesto, como un sello que pisa el cuerpo (§7).
 - Variantes de operaciones de imagen de pdf.js sin cubrir (§9).

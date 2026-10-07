@@ -91,7 +91,8 @@ Van en las notas de la versión. Cada una tiene su lugar en `Roadmap_1.x.md`.
   Riesgo aceptado (ADR-190).
 - **Emails en escaneos de baja resolución.** Leyendo a menos de 300 dpi se
   pierden emails. Un escaneo de unos 200 dpi se lee a esa resolución
-  (ADR-163). La causa es la lectura del OCR: confunde la `@` con una `Q`, o
+  (ADR-163); medido el 2026-10-07 sobre sintéticos, a 200 dpi nativos no se
+  perdió ninguno y a 150 se perdieron 2 de 25. La causa es la lectura del OCR: confunde la `@` con una `Q`, o
   el punto del nombre con un espacio (encontrada el 2026-10-07; sin corregir).
 - **Repintado de línea.** Cuando una etiqueta no entra en el lugar del dato y
   se corre el resto del renglón, ese resto puede quedar dibujado con otra
@@ -112,7 +113,8 @@ Van en las notas de la versión. Cada una tiene su lugar en `Roadmap_1.x.md`.
   (`08_Security_Model.md` §2.3).
 - **macOS**: la aplicación no está notarizada. Gatekeeper la bloquea la
   primera vez. Riesgo aceptado (`08_Security_Model.md` §2.3).
-- **Memoria**: 8 GB como mínimo. El techo del perfil Bajo es provisorio.
+- **Memoria**: 8 GB como mínimo. El techo del perfil Bajo era provisorio al
+  publicar la 1.0; se midió el 2026-10-07 y quedó en 2,5 GB (ADR-194 §7).
 - **Accesibilidad**: sin auditar. El árbol de entidades tiene varios puntos
   de tabulación por fila.
 - **Idioma**: la interfaz está solo en español.

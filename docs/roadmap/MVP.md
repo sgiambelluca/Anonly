@@ -670,7 +670,8 @@ workflow en CI sigue pendiente.
   **Hecha el 2026-10-01 (ADR-194):** cinco perfiles (Bajo, Intermedio, Alto,
   Ultra y Automático), con Automático resolviendo el nivel según la RAM y los
   hilos del equipo y mostrándolo en Configuración. Techos de memoria por
-  perfil en ADR-194 §7; el de Bajo es provisorio hasta medirlo en Windows.
+  perfil en ADR-194 §7; el de Bajo es provisorio hasta medirlo en Windows
+  (medido el 2026-10-07: 2,05 GB de máximo, techo fijado en 2,5 GB).
   La campaña de DPI descendente cerró sin bajar la resolución del OCR.
   Los valores actuales no cambian con este plan; un perfil podrá consumir más
   memoria si la mejora de tiempo lo justifica, con presupuestos explícitos.
@@ -687,7 +688,7 @@ workflow en CI sigue pendiente.
   - Consecuencia ya tomada: la resolución del OCR no se baja por defecto (decisión del humano, 2026-10-01).
   - Sin verificar: la causa (lectura del OCR de la `@` o los puntos, o el patrón de Regex), y si un escaneo real de unos 200 dpi nativos, que hoy se lee a esa resolución (ADR-163), sufre la misma pérdida.
   - Qué falta: investigar la causa con los sintéticos del arnés (`tests/perf/README.md`, «Campaña de DPI descendente»). Si se arregla en la detección, 200 dpi vuelve a ser candidata.
-  - **Causa encontrada el 2026-10-07:** es la lectura del OCR. En 9 de los 11 emails perdidos la `@` se leyó como `Q`, y en 2 el punto del nombre se leyó como espacio (`mediciones/ocr/DPI_Descendente_Fase1_Windows_2026-10-01.md` §2.1). Qué hacer con eso está en `Roadmap_1.x.md` §3.
+  - **Causa encontrada el 2026-10-07:** es la lectura del OCR. En 9 de los 11 emails perdidos la `@` se leyó como `Q`, y en 2 el punto del nombre se leyó como espacio (`mediciones/ocr/DPI_Descendente_Fase1_Windows_2026-10-01.md` §2.1). Qué hacer con eso está en `Roadmap_1.x.md` §3. **Línea de base del 2026-10-07** sobre sintéticos de resolución nativa baja: sin pérdidas a 200 dpi, 2 de 25 a 150 dpi (`mediciones/ocr/Emails_DPI_Nativo_2026-10-07.md`).
 - **ABIERTO — riesgo residual aceptado (ADR-190, 2026-09-29).** Página escasa girada con veredicto OSD equivocado y lectura de basura con confianza ≥ 60: se exporta sin tapar y sin aviso. No apareció en el corpus medido. Candidato para v1.0: recalibrar el criterio de lectura fiable o verificar ángulos en páginas escasas.
   - Qué pasa: en una página con muy poco texto (dos líneas), el OSD de `orientation-kernel.ts` puede elegir un ángulo equivocado con confianza ≥ 1. `MIN_ORIENTATION_CONFIDENCE = 1` es muy bajo: ADR-119 §4 midió entre 1 y 2 de confianza con 0 de 4 ángulos acertados.
   - Por qué era silencioso en ese caso: los ocho fallos medidos superaban el umbral provisional de una palabra con confianza ≥ 60; el OSD no daba veredicto y el `inkRatio` quedaba por debajo de 0,002. Antes de la enmienda, esas lecturas se clasificaban como fiables.
