@@ -126,6 +126,67 @@ export async function interactionOnePageFile(): Promise<E2eFilePayload> {
   };
 }
 
+export interface LineWordGeometry {
+  readonly text: string;
+  /** Borde izquierdo y derecho de la palabra, en puntos de página (métricas AFM de Helvetica). */
+  readonly left: number;
+  readonly right: number;
+}
+
+export interface LineGeometry {
+  readonly text: string;
+  /** Línea base en espacio PDF (origen abajo-izquierda). */
+  readonly baseline: number;
+  readonly size: number;
+  readonly words: ReadonlyArray<LineWordGeometry>;
+}
+
+export const LINE_DOCUMENT_PAGE_WIDTH = 595;
+export const LINE_DOCUMENT_PAGE_HEIGHT = 842;
+
+/**
+ * ADR-210: documento de una página A4 con renglones de cuerpo en Helvetica (las
+ * fuentes estándar de `pdf-lib`, que no dependen de nada instalado), un renglón
+ * por `lines`, todos a `x = 60` y con `step` puntos entre líneas base. Devuelve
+ * también la geometría de cada palabra (ancho AFM de `pdf-lib`, el mismo avance
+ * que usa el motor de PDF para ubicar las palabras) para que un spec calcule
+ * regiones de píxeles sin leer el documento de vuelta.
+ */
+export async function lineDocumentFile(
+  name: string,
+  lines: ReadonlyArray<string>,
+  options: { readonly size?: number; readonly firstBaseline?: number; readonly step?: number } = {},
+): Promise<{ readonly file: E2eFilePayload; readonly lines: ReadonlyArray<LineGeometry> }> {
+  const size = options.size ?? 12;
+  const firstBaseline = options.firstBaseline ?? 750;
+  const step = options.step ?? 50;
+  const x = 60;
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([LINE_DOCUMENT_PAGE_WIDTH, LINE_DOCUMENT_PAGE_HEIGHT]);
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const geometry: LineGeometry[] = [];
+  for (const [index, text] of lines.entries()) {
+    const baseline = firstBaseline - index * step;
+    page.drawText(text, { x, y: baseline, size, font, color: rgb(0, 0, 0) });
+    const words: LineWordGeometry[] = [];
+    let consumed = 0;
+    for (const word of text.split(" ")) {
+      const left = x + font.widthOfTextAtSize(text.slice(0, consumed), size);
+      words.push({ text: word, left, right: left + font.widthOfTextAtSize(word, size) });
+      consumed += word.length + 1;
+    }
+    geometry.push({ text, baseline, size, words });
+  }
+  return {
+    file: {
+      name,
+      mimeType: "application/pdf",
+      buffer: Buffer.from(await doc.save()),
+    },
+    lines: geometry,
+  };
+}
+
 /** Cinco páginas OCR con rotaciones físicas 0/90/180/0/270; el helper de
  * rasterización se ejecuta en el browser del E2E y no usa `/Rotate`. */
 export async function t5PixelOrientationSourceFile(): Promise<E2eFilePayload> {
