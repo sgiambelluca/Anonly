@@ -20,6 +20,8 @@ import {
   makePage,
   makePageFromWords,
   makeSinglePageDocument,
+  makeSourcedPage,
+  processPage,
 } from "./fixtures/test-helpers.js";
 
 describe("RegexEngine — edge case tests", () => {
@@ -596,6 +598,141 @@ describe("RegexEngine — edge case tests", () => {
         .map(([, , payload]) => (payload as EntityFound).occurrence)
         .filter((o) => watchedTypes.has(o.entityType));
       expect(watchedOccurrences, tokens.join(" ")).toHaveLength(0);
+    });
+  });
+  // Caso 35 (ADR-211): el email leído con `Q` en texto de OCR.
+  describe("Caso 35: email leído con Q (ADR-211)", () => {
+    const emailValues = async (tokens: ReadonlyArray<string>): Promise<string[]> => {
+      const occurrences = await processPage(engine, ctx, makeSourcedPage(0, tokens));
+      return occurrences.filter((o) => o.entityType === EntityType.Email).map((o) => o.value);
+    };
+
+    it("email read with Q requires the strict lowercase shape", async () => {
+      // Marcas y nombres con mayúsculas, y una `Q` sin letra o dígito a cada
+      // lado: ninguna coincide.
+      const noMatch: ReadonlyArray<ReadonlyArray<string>> = [
+        ["ProQuest.com"],
+        ["BanQ.com.ar"],
+        ["JUAN.PEREZQGMAIL.COM"],
+        ["JuanQgmail.com"],
+        ["juanQGmail.com"],
+        ["juanQgmail.COM"],
+        ["-Qexample.org"],
+        ["juanQ.example.org"],
+        ["Qexample.org"],
+        ["juan", "Qexample.org"],
+        ["juanQ", "example.org"],
+        ["juanQexample"],
+        ["juanQexample.c"],
+        ["juanQexample.com1"],
+        ["juanQexample.com_"],
+      ];
+      for (const tokens of noMatch) {
+        expect(await emailValues(tokens), tokens.join(" ")).toEqual([]);
+      }
+
+      expect(await emailValues(["juanQgmail.com"])).toEqual(["juanQgmail.com"]);
+      // Dígitos, y los signos del nombre y del dominio, sí.
+      expect(await emailValues(["j.u-a_n+9Qgm-ail9.co.uk"])).toEqual(["j.u-a_n+9Qgm-ail9.co.uk"]);
+    });
+
+    it("email read with Q includes up to two dot-space name segments", async () => {
+      expect(await emailValues(["contacto.", "estudioQexample.org"])).toEqual([
+        "contacto. estudioQexample.org",
+      ]);
+      expect(await emailValues(["info.", "contacto.", "estudioQexample.org"])).toEqual([
+        "info. contacto. estudioQexample.org",
+      ]);
+      // Un tercer tramo queda afuera: entran los dos más cercanos a la `Q`.
+      expect(await emailValues(["uno.", "dos.", "tres.", "estudioQexample.org"])).toEqual([
+        "dos. tres. estudioQexample.org",
+      ]);
+      // Dos espacios, o un espacio sin punto, no extienden.
+      expect(await emailValues(["contacto.", "", "estudioQexample.org"])).toEqual([
+        "estudioQexample.org",
+      ]);
+      expect(await emailValues(["contacto", "estudioQexample.org"])).toEqual([
+        "estudioQexample.org",
+      ]);
+      // Un punto sin espacio no necesita tramo: ya es parte del nombre.
+      expect(await emailValues(["contacto.estudioQexample.org"])).toEqual([
+        "contacto.estudioQexample.org",
+      ]);
+    });
+
+    it("email read with Q yields to an overlapping regular email", async () => {
+      // La forma con `Q` coincide con la parte inicial de un email con `@`:
+      // gana el de la `@`, completo y sin el tramo previo.
+      const occurrences = await processPage(
+        engine,
+        ctx,
+        makeSourcedPage(0, ["contacto.", "estudioQexample.org@example.net"]),
+      );
+      expect(occurrences.map((o) => o.value)).toEqual(["estudioQexample.org@example.net"]);
+      expect(occurrences[0]?.normalizedValue).toBe("estudioqexample.org@example.net");
+
+      // Aun cuando el match con `Q` (con sus dos tramos previos) sea más
+      // largo que el email con `@` que pisa su final: el de la `@` gana, y no
+      // por tamaño. Sin el descarte explícito ganaría el más largo.
+      const longerRead = await processPage(
+        engine,
+        ctx,
+        makeSourcedPage(0, ["info.", "contacto.", "aQb.co@x.io"]),
+      );
+      expect(longerRead.map((o) => o.value)).toEqual(["aQb.co@x.io"]);
+
+      // Sin superposición, conviven y salen en orden de lectura.
+      const both = await processPage(
+        engine,
+        ctx,
+        makeSourcedPage(0, ["juanQexample.com", "ana@example.com"]),
+      );
+      expect(both.map((o) => [o.value, o.normalizedValue])).toEqual([
+        ["juanQexample.com", "juan@example.com"],
+        ["ana@example.com", "ana@example.com"],
+      ]);
+    });
+
+    it("custom pattern named email does not get the Q search", async () => {
+      engine.addPattern({
+        id: "email",
+        entityType: EntityType.Custom,
+        pattern: /\bjuanQexample\.com\b/g,
+        normalizer: (value: string) => value.toLowerCase(),
+        maskFormat: "CUSTOM-XXXX",
+      });
+
+      // Sobre palabras de PDF la forma con `Q` no se busca: lo único que
+      // emite es el patrón custom, con su propio normalizador (sin restituir
+      // la `@`) y su propio tipo.
+      const onPdf = await processPage(
+        engine,
+        ctx,
+        makeSourcedPage(0, [{ text: "juanQexample.com", source: "pdf" }]),
+      );
+      expect(
+        onPdf.map(({ value, normalizedValue, entityType, maskFormat }) => ({
+          value,
+          normalizedValue,
+          entityType,
+          maskFormat,
+        })),
+      ).toEqual([
+        {
+          value: "juanQexample.com",
+          normalizedValue: "juanqexample.com",
+          entityType: EntityType.Custom,
+          maskFormat: "CUSTOM-XXXX",
+        },
+      ]);
+
+      // Sobre OCR, el que restituye la `@` es el email default y con su tipo y
+      // su máscara: el custom no se vuelve un email ni gana la búsqueda.
+      const onOcr = await processPage(engine, ctx, makeSourcedPage(0, ["juanQexample.com"]));
+      expect(onOcr).toHaveLength(1);
+      expect(onOcr[0]?.entityType).toBe(EntityType.Email);
+      expect(onOcr[0]?.maskFormat).toBe("xxxx@xxxx.xx");
+      expect(onOcr[0]?.normalizedValue).toBe("juan@example.com");
     });
   });
 });

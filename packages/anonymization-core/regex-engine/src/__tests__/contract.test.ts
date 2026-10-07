@@ -8,6 +8,7 @@ import {
   EventChannel,
   type EngineContext,
   type EntityFound,
+  type Occurrence,
   type RegexFinished,
   type Unsubscribe,
 } from "@anonly/shared";
@@ -20,7 +21,9 @@ import {
   makeDocument,
   makePageFromWords,
   makeSinglePageDocument,
+  makeSourcedPage,
   makeWord,
+  processPage,
 } from "./fixtures/test-helpers.js";
 
 describe("RegexEngine — contract tests", () => {
@@ -376,5 +379,79 @@ describe("RegexEngine — contract tests", () => {
       expect(engine["activePatterns"]).toBe(activePatternsBefore);
       expect(engine["customPatterns"]).toEqual([]);
     });
+  });
+  // Caso 35 (ADR-211): la segunda búsqueda no toca los emails con `@`.
+  it("regular emails are unchanged by the Q search", async () => {
+    await engine.init(ctx);
+    const tokens = [
+      "Escribir",
+      "a",
+      "juan@example.com,",
+      "o",
+      "a",
+      "ana.lopez@example.org.",
+      "contacto.",
+      "nombre@example.net",
+      "y",
+      "Ana.Perez@Example.COM",
+      "(info@x-y.co.uk)",
+    ];
+
+    // Lo que daría solo la búsqueda con `@`: la expresión de referencia de
+    // ADR-181 sobre el texto de la página.
+    const expected: Array<{ readonly value: string; readonly normalizedValue: string }> = [];
+    const reference = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g;
+    let match: RegExpExecArray | null;
+    while ((match = reference.exec(tokens.join(" "))) !== null) {
+      expected.push({ value: match[0], normalizedValue: match[0].toLowerCase() });
+    }
+    expect(expected.map((e) => e.value)).toEqual([
+      "juan@example.com",
+      "ana.lopez@example.org",
+      "nombre@example.net",
+      "Ana.Perez@Example.COM",
+      "info@x-y.co.uk",
+    ]);
+
+    const summarize = (occurrences: ReadonlyArray<Occurrence>) =>
+      occurrences.map(
+        ({ value, normalizedValue, entityType, bbox, wordSpan, maskFormat, source }) => ({
+          value,
+          normalizedValue,
+          entityType,
+          bbox,
+          wordSpan,
+          maskFormat,
+          source,
+        }),
+      );
+
+    const fromOcr = await processPage(
+      engine,
+      ctx,
+      makeSourcedPage(
+        0,
+        tokens.map((text) => ({ text, source: "ocr" as const })),
+      ),
+    );
+    const fromPdf = await processPage(
+      engine,
+      ctx,
+      makeSourcedPage(
+        0,
+        tokens.map((text) => ({ text, source: "pdf" as const })),
+      ),
+    );
+
+    for (const occurrences of [fromOcr, fromPdf]) {
+      expect(
+        occurrences.map((o) => ({ value: o.value, normalizedValue: o.normalizedValue })),
+      ).toEqual(expected);
+      expect(occurrences.every((o) => o.entityType === EntityType.Email)).toBe(true);
+    }
+    // Mismos spans, valores, orden y eventos en texto de OCR y de PDF.
+    expect(summarize(fromOcr)).toEqual(summarize(fromPdf));
+    // `palabra. nombre@dominio` no se extiende al tramo previo.
+    expect(fromOcr.some((o) => o.value.includes(". "))).toBe(false);
   });
 });

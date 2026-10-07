@@ -6,7 +6,18 @@
  * falta ningún cast de frontera (`as unknown as`) contra una librería de
  * terceros — no hay ninguno en este archivo.
  */
-import type { Document, Page, Word } from "@anonly/shared";
+import {
+  EngineEvents,
+  type Document,
+  type EngineContext,
+  type EntityFound,
+  type Occurrence,
+  type Page,
+  type Word,
+} from "@anonly/shared";
+import { vi } from "vitest";
+
+import type { RegexEngine } from "../../regex.engine.js";
 
 /*
  * ADR-129: los dobles genéricos —logger, cache, bus, `EngineContext` y los
@@ -90,6 +101,47 @@ export function makePageFromWords(pageIndex: number, words: ReadonlyArray<Word>)
     requiresOCR: false,
     ocrCompleted: false,
   };
+}
+
+/**
+ * Variante de `makePageFromWords` donde cada token es una palabra con el
+ * `source` indicado (`"ocr"` por defecto; `"pdf"` para mezclar orígenes), con
+ * la misma geometría que `makePage`. Para el caso 35 (ADR-211), que depende
+ * del origen de las palabras del span.
+ */
+export function makeSourcedPage(
+  pageIndex: number,
+  tokens: ReadonlyArray<string | { readonly text: string; readonly source: "pdf" | "ocr" }>,
+): Page {
+  const words: Word[] = [];
+  let x = 10;
+  for (const token of tokens) {
+    const { text, source } =
+      typeof token === "string" ? { text: token, source: "ocr" as const } : token;
+    words.push(
+      source === "ocr" ? makeOcrWord(text, x, pageIndex) : makeWord(text, x, pageIndex),
+    );
+    x += text.length * 6 + 10;
+  }
+  return makePageFromWords(pageIndex, words);
+}
+
+/**
+ * Corre `process` sobre un documento de una sola página y devuelve las
+ * `Occurrence` de `ENTITY_FOUND` en el orden en que se emitieron.
+ */
+export async function processPage(
+  engine: RegexEngine,
+  ctx: EngineContext,
+  page: Page,
+): Promise<ReadonlyArray<Occurrence>> {
+  const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+  // Vitest 4 reutiliza un mock existente, con sus llamadas anteriores.
+  busEmitSpy.mockClear();
+  await engine.process({ document: makeDocument(`doc-${Math.random()}`, [page]) }, ctx);
+  return busEmitSpy.mock.calls
+    .filter(([, event]) => event === EngineEvents.ENTITY_FOUND)
+    .map(([, , payload]) => (payload as EntityFound).occurrence);
 }
 
 /** Página sin texto (requiresOCR aún pendiente de fusión OCR). */
