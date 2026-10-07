@@ -38,10 +38,10 @@ entonces arranca el implementador de `render-engine`.
 | 1 | Memoria | M-M1: pico del perfil Bajo sobre `P2H` | implementador (`tests/perf`) y planificador | **cerrado el 2026-10-07**: máximo 2,05 GB, techo fijado en 2,5 GB, también en el arnés |
 | 2 | Emails | M-E1: línea de base sobre escaneos de 200 y 150 dpi nativos | implementador (`tests/perf`) y planificador | **medido el 2026-10-07**: sin pérdidas a 200 dpi nativos; 2 de 25 a 150 |
 | 3 | Repintado | Implementación desde el spec, capturas, revisor | implementador, mantenedor, revisor | ADR-210 **aceptado**, spec v1.18.0, implementación en `render-engine` y E2E con canvas real **entregados** el 2026-10-07; capturas del preview y del export enviadas al mantenedor. Falta el revisor, que va al final de la branch |
-| 4 | Direcciones | Auditoría de la línea de base; después ADR | planificador | **auditado el 2026-10-07**: el modelo detecta la calle y deja el número afuera. ADR-212 **aceptado a prueba** ese día y spec de NER v1.11.0 escrito. Sigue: implementación, medición M-D1 y línea de base de calidad |
+| 4 | Direcciones | Auditoría de la línea de base; después ADR | planificador | **auditado el 2026-10-07**: el modelo detecta la calle y deja el número afuera. ADR-212 **aceptado a prueba** ese día, spec de NER v1.11.0 e **implementación en `ner-engine` entregada** (139 tests del módulo en verde, 98,8 % de líneas). Sigue: medición M-D1 y línea de base de calidad |
 | 2b | Emails | M-E2: la misma línea de base sobre los textos con degradación de fotocopia | implementador (`tests/perf`) y planificador | **medida el 2026-10-07**: sin pérdidas a 300 y 200 dpi; 4 de 10 a 150, tres de ellas con `Q` y un espacio |
-| 6 | Visor | El cambio de vista pide la imagen a la escala del zoom (frente 5) | implementador (`apps/react-client`) | pedido por el mantenedor el 2026-10-07; **implementado ese día** en el cliente, para el cambio de vista, las ediciones y el reanálisis. Queda un instante borroso al conmutar, a decidir |
-| 5 | Emails | ADR-211 y spec de Regex; después implementación y comparación contra la línea de base | mantenedor, planificador, implementador | ADR-211 **aceptado** el 2026-10-07, con el espacio tras el punto incluido; spec de Regex v1.15.0 e **implementación en `regex-engine` entregada** ese día (190 tests del módulo en verde, 98,7 % de líneas; los tres tests de ADR-181 sin tocar). Faltan el test de peores casos en `tests/perf` y la medición de antes y después (M-E3), que espera el permiso de commit local |
+| 6 | Visor | El cambio de vista pide la imagen a la escala del zoom (frente 5) | implementador (`apps/react-client`) | pedido por el mantenedor el 2026-10-07; **implementado ese día** en el cliente, para el cambio de vista, las ediciones y el reanálisis. Para el instante borroso que quedaba al conmutar: ADR-213 aceptado e **implementado el 2026-10-07** (16 tests en Electron). Queda una decisión: qué se muestra al pasar a Anonimizado mientras llega su imagen |
+| 5 | Emails | ADR-211 y spec de Regex; después implementación y comparación contra la línea de base | mantenedor, planificador, implementador | ADR-211 **aceptado** el 2026-10-07, con el espacio tras el punto incluido; spec de Regex v1.15.0 e **implementación en `regex-engine` entregada** ese día (190 tests del módulo en verde, 98,7 % de líneas; los tres tests de ADR-181 sin tocar). **Medido el 2026-10-07 (M-E3): de 11 a 2, de 4 a 0 y de 8 a 0 emails perdidos, sin agregados y sin otros cambios.** Cerrado, falta el revisor |
 
 ## Frente 1 — Memoria del perfil Bajo (M-M1)
 
@@ -220,8 +220,28 @@ contra sus corridas anteriores:
 Además: ningún email agregado que no esté en la verdad y ninguna otra
 entidad perdida. Si un número no se cumple, vuelve al mantenedor.
 
-Los arneses exigen el producto commiteado. Para medir el «después» hace
-falta un commit local del cambio, sin push; se le pide al mantenedor.
+Los arneses exigen el producto commiteado. El mantenedor autorizó commits
+locales, sin push, el 2026-10-07.
+
+**Resultado (2026-10-07).** En el informe de M-E1, sección «M-E3».
+
+| Arnés | Antes | Después |
+|---|---:|---:|
+| DPI descendente (lectura forzada) | 11 | 2 |
+| Emails nativos, textos limpios | 4 | 0 |
+| Emails nativos, textos degradados | 8 | 0 |
+
+En las dos de emails nativos cada email cuenta dos veces, una por
+repetición; por eso 4 y 8, y no 2 y 4.
+
+- Los 2 que quedan son el punto leído como espacio sin `Q`, fuera del
+  alcance de ADR-211, y solo aparecen al forzar la lectura a 150 dpi.
+- Ningún email agregado por el cambio y ninguna otra entidad distinta.
+- El texto leído por el OCR es idéntico al de la línea de base en las 105
+  celdas.
+- El test de peores casos de la búsqueda con `Q` es lineal.
+
+Se cumple la condición del mantenedor.
 
 ## Frente 3 — Repintado de línea
 
@@ -362,6 +382,15 @@ la regla alcanza»).
 Corre con el cambio implementado y commiteado en local. Va a
 `mediciones/ner/`.
 
+**Implementación (2026-10-07).** Una función pura en `ner-engine` extiende el
+span sobre el texto de la página, antes de mapear a palabras. Los ocho tests
+del caso 34 están con sus nombres y ningún test existente cambió. Al
+implementar aparecieron dos cosas que el spec no decía y quedaron escritas
+en el caso 34: cómo se cuentan y se comparan las palabras de las ventanas
+(«Domicilio:» cuenta como «domicilio»), y que la dirección no se extiende
+sobre una palabra de otro ángulo, para no absorber el número de un folio
+girado en el margen.
+
 ## Frente 5 — El visor al cambiar de vista (sumado el 2026-10-07)
 
 Pedido por el mantenedor: al pasar de Original a Anonimizado, o al revés,
@@ -426,8 +455,28 @@ llega la nueva. Es consecuencia de dibujar solo el lado que se mira
 escala del lado que no se mira sin tener que dibujarlo, o dibujar los dos
 lados en cada zoom.
 
-**Mejora chica, sin hacer**: que `actions.requestRender` exija la escala
-cuando pide un preview. La omisión fue la causa 2, y así no compilaría.
+**Pedido por el mantenedor el 2026-10-07: eliminar ese instante.**
+[ADR-213](../../adr/ADR-213-Cambiar-De-Vista-No-Muestra-Una-Imagen-A-Otra-Escala.md),
+aceptado ese día, y `React_Client.md` §7 con las reglas: al terminar un zoom se actualizan los dos lados,
+y al conmutar no se muestra una imagen guardada a otra escala, sino que se
+espera la nítida con un tope de medio segundo. Incluye que el pedido de
+imagen lleve siempre su escala. Es todo en el cliente.
+
+**Implementado el 2026-10-07.** `viewer-kind-switch-hold.spec.ts`, 16 tests
+sobre la imagen real que dibuja el visor: 14 fallan con el código anterior y
+los 16 pasan con ADR-213. Con zoom al 130 %, al conmutar ya no se dibuja la
+imagen de 595 px antes de la de 773: se dibuja solo la de 773. Tests del
+cliente: 1100 en verde.
+
+**Decisión pendiente del mantenedor.** Al pasar de Original a Anonimizado,
+mientras llega la imagen anonimizada a la escala correcta, la página sigue
+mostrando la imagen **original** bajo la pestaña «Anonimizado». Lo normal
+son 150 a 200 ms; el tope es medio segundo. Es lo que dice la regla 4 de
+ADR-213, pero conviene que lo decida sabiéndolo: la alternativa es que en
+esa dirección nunca se sostenga la original.
+
+**Pendiente menor**: sumar los helpers puros nuevos del visor a los
+thresholds de cobertura (`vitest.config.ts`), como pide `CLAUDE.md`.
 
 ## Reglas para los sub-agentes de esta branch
 

@@ -171,7 +171,11 @@ Lo primero, porque es lo que permite tocar la detección sin miedo.
   a 200 dpi nativos; a 150, 4 de 10, y en tres de ellas la `Q` viene con un
   espacio después del punto del nombre. Con ese dato el mantenedor aceptó
   ADR-211 incluyendo el espacio, a condición de medir el avance antes y
-  después. Lo que sigue es cómo estaba planteada la pregunta.
+  después. **Implementado y medido ese día**: los emails perdidos pasaron de
+  11 a 2 al forzar la resolución y a cero a resolución nativa, sin ningún
+  email agregado ni otra entidad distinta. Los 2 que quedan son el punto
+  leído como espacio sin `Q`, que solo aparece al forzar la lectura a 150
+  dpi. Falta el revisor. Lo que sigue es cómo estaba planteada la pregunta.
 
   **Para decidir al llegar**: si la detección tolera esa lectura (reconocer
   `nombre.apellidoQdominio.tld` como email cuando el texto viene del OCR, y
@@ -402,8 +406,8 @@ asignada.
   escribir el E2E del repintado. **El mantenedor pidió arreglarlo en la branch
   de Confianza** ese mismo día, y también el mismo efecto al editar una
   entidad. Arreglado en el cliente (`hardening/Confianza_1.0.x_Plan.md`,
-  frente 5). Queda un instante borroso de menos de un cuarto de segundo al
-  conmutar, a decidir.
+  frente 5). El instante borroso de menos de un cuarto de segundo que
+  quedaba al conmutar se elimina con ADR-213, aceptado ese día.
 - En un escaneo quedan restos tenues, no legibles, de la tinta original
   alrededor de una etiqueta que entra en su caja. Visto el 2026-10-07 en una
   captura del export; sin medir contra el gate de ADR-148.
