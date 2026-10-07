@@ -18,11 +18,18 @@
  *   `scale = previewScale × zoom` (`zoomRenderScale.ts`).
  * - Cambio de `kind` (el toggle) → `actions.requestRender` **inmediato** del
  *   rango montado, con la escala del zoom vigente (`kindChangeRender.ts`).
- * - Los cuatro emisores (render inicial al observar `Ready`, cambio de rango
- *   montado, re-render debounced de zoom, cambio de vista) pasan **siempre** el
- *   `kind` de este `PdfViewer`, que desde ADR-087 §2 es `viewer.store.mode` — la
+ * - Los emisores de render inicial al observar `Ready`, de cambio de rango
+ *   montado (scroll), de cambio de vista y el reintento piden **solo** el `kind`
+ *   de este `PdfViewer`, que desde ADR-087 §2 es `viewer.store.mode` — la
  *   posición del `ViewerModeToggle`. Sigue habiendo **una sola** fuente de
  *   verdad sobre qué lado necesita píxeles, que es lo que ADR-056 §2 protege.
+ * - **El zoom es la excepción acotada (ADR-213 §1)**: el emisor debounced pide
+ *   primero el `kind` que se mira y después el otro (`zoomRenderKinds.ts`), así
+ *   que al conmutar la imagen del otro lado ya está a la escala del zoom.
+ * - **Conmutar no muestra una imagen a otra escala (ADR-213 §3-§6)**: una página
+ *   sin imagen vigente del lado nuevo sigue pintando la del lado anterior hasta
+ *   que llega la vigente, con tope `KIND_SWITCH_HOLD_MS` (`kindSwitchHold.ts`).
+ *   Mientras espera, su capa de selección queda inerte.
  *
  * Desde ADR-087 §2 hay **un solo** `PdfViewer`, y `kind` sale de
  * `viewer.store.mode`. `RENDER_REQUESTED.kind` sigue requerido y con la misma
@@ -49,8 +56,10 @@ import { usePipelineStore } from "../../store/pipeline.store.js";
 import { useUnreadableInkStore } from "../../store/unreadableInk.store.js";
 import { useViewerStore, type ViewerKind } from "../../store/viewer.store.js";
 
+import { isAnonymizedAvailable } from "./anonymizedAvailability.js";
 import { projectMatchBoxes } from "./interactionProjection.js";
 import { shouldRenderOnKindChange } from "./kindChangeRender.js";
+import { KIND_SWITCH_HOLD_MS, selectPageImage } from "./kindSwitchHold.js";
 import { PageCanvas } from "./PageCanvas.js";
 import { computePageHeight, computePageWidth } from "./pageLayout.js";
 import { computePageSlots } from "./pageSlots.js";
@@ -67,8 +76,12 @@ import {
 } from "./viewerGestures.js";
 import { computeMountRange, rangeToPageIndices, type VisibleRange } from "./visibleRange.js";
 import { WordSelectionOverlay, type PageSelection } from "./WordSelectionOverlay.js";
+import { kindsToRenderOnZoom } from "./zoomRenderKinds.js";
 import { computeZoomRenderScale } from "./zoomRenderScale.js";
 import { createZoomRenderScheduler } from "./zoomRenderScheduler.js";
+
+/** Mapa vacío compartido: lo que se lee del otro lado cuando no hay espera. */
+const NO_PREVIEWS: ReadonlyMap<number, string> = new Map();
 
 const KIND_LABEL: Readonly<Record<ViewerKind, string>> = {
   original: "Documento original",
@@ -98,6 +111,28 @@ export function PdfViewer({ activeMatch, scrollNonce }: PdfViewerProps) {
   // tienen imágenes distintas de la misma página, y conmutar el toggle pinta
   // la cacheada sin esperar un render nuevo.
   const previewByPage = useViewerStore((state) => state.previewByPage[kind]);
+  // ADR-213 §2/§3: la escala a la que llegó cada imagen de este `kind`, para saber
+  // cuál es la vigente (la del zoom).
+  const previewScaleByPage = useViewerStore((state) => state.previewScaleByPage[kind]);
+  const otherKind: ViewerKind = kind === "original" ? "anonymized" : "original";
+
+  // ADR-213 §4: tras un cambio de vista, las páginas sin imagen vigente siguen
+  // pintando la del lado anterior durante `KIND_SWITCH_HOLD_MS`. `settledKind` es
+  // el `kind` del último render sin espera pendiente: la espera está activa
+  // mientras difiere de `kind`, y se calcula **en el mismo render** del cambio
+  // (no en un efecto), así que ese primer render ya no pinta la imagen vieja.
+  const [settledKind, setSettledKind] = useState<ViewerKind>(kind);
+  const holdActive = settledKind !== kind;
+  useEffect(() => {
+    if (settledKind === kind) return;
+    const timer = window.setTimeout(() => setSettledKind(kind), KIND_SWITCH_HOLD_MS);
+    return () => window.clearTimeout(timer);
+  }, [kind, settledKind]);
+  // El otro lado solo se lee mientras dura la espera: fuera de ella no hace falta
+  // re-renderizar el visor cada vez que llega una imagen de un lado que no se mira.
+  const otherPreviewByPage = useViewerStore((state) =>
+    holdActive ? state.previewByPage[otherKind] : NO_PREVIEWS,
+  );
   const interactionGeometryByPage = useViewerStore((state) => state.interactionGeometryByPage);
   const interactionEpoch = useViewerStore((state) => state.interactionEpoch);
   const failedPages = useViewerStore((state) => state.failedPages);
@@ -204,7 +239,8 @@ export function PdfViewer({ activeMatch, scrollNonce }: PdfViewerProps) {
     // repo que lo exija).
   }, [mountRange.start, mountRange.end]);
 
-  // Cambio de zoom → re-render real debounced (ADR-037 §5). Se salta el
+  // Cambio de zoom → re-render real debounced (ADR-037 §5, y los dos lados desde
+  // ADR-213 §1). Se salta el
   // primer render (valor inicial, no un cambio de usuario): el efecto de
   // arriba ya cubre el render inicial del rango montado.
   const skippedInitialZoomRef = useRef(false);
@@ -218,7 +254,15 @@ export function PdfViewer({ activeMatch, scrollNonce }: PdfViewerProps) {
     scheduler.schedule(() => {
       const indices = mountedPageIndicesRef.current;
       if (indices.length === 0) return;
-      actions.requestRender(indices, kind, "preview", computeZoomRenderScale(zoom));
+      // ADR-213 §1: los dos lados, primero el que se mira. `kind` se lee fresco
+      // del store (no del cierre): el usuario pudo conmutar dentro del debounce.
+      const targets = kindsToRenderOnZoom({
+        viewing: useViewerStore.getState().mode,
+        anonymizedAvailable: isAnonymizedAvailable(usePipelineStore.getState().stage),
+      });
+      for (const target of targets) {
+        actions.requestRender(indices, target, "preview", computeZoomRenderScale(zoom));
+      }
     });
     return () => scheduler.cancel();
   }, [zoom]);
@@ -345,7 +389,22 @@ export function PdfViewer({ activeMatch, scrollNonce }: PdfViewerProps) {
           renderItem={(pageIndex) => {
             // `exactOptionalPropertyTypes`: no se puede pasar `blobUrl` en
             // `undefined` explícito a un `blobUrl?: string`.
-            const blobUrl = previewByPage.get(pageIndex);
+            // ADR-213 §3/§4: la imagen vigente del lado que se mira, o —durante
+            // la espera— la del lado anterior hasta que llegue.
+            const choice = selectPageImage({
+              own: {
+                blobUrl: previewByPage.get(pageIndex),
+                scale: previewScaleByPage.get(pageIndex),
+              },
+              other: { blobUrl: otherPreviewByPage.get(pageIndex) },
+              expectedScale: computeZoomRenderScale(zoom),
+              holdActive,
+              failed: failedPages.has(pageIndex),
+            });
+            const blobUrl = choice.blobUrl;
+            // ADR-213 §5/§6: la imagen que se ve es del otro lado, así que la
+            // capa de selección y el resaltado de la lupa no aplican.
+            const holding = choice.fromOtherKind;
             const candidateGeometry = interactionGeometryByPage.get(pageIndex);
             const interactionGeometry =
               kind === "anonymized" &&
@@ -353,7 +412,7 @@ export function PdfViewer({ activeMatch, scrollNonce }: PdfViewerProps) {
                 ? candidateGeometry
                 : undefined;
             const activeMatchBboxes =
-              activeMatch?.pageIndex !== pageIndex
+              holding || activeMatch?.pageIndex !== pageIndex
                 ? []
                 : kind === "anonymized"
                   ? interactionGeometry === undefined
@@ -400,8 +459,9 @@ export function PdfViewer({ activeMatch, scrollNonce }: PdfViewerProps) {
                     displayHeight={pageHeight}
                     activeMatchBboxes={activeMatchBboxes}
                     kind={kind}
+                    inert={holding}
                     {...(interactionGeometry !== undefined ? { interactionGeometry } : {})}
-                    selection={selection?.pageIndex === pageIndex ? selection : null}
+                    selection={!holding && selection?.pageIndex === pageIndex ? selection : null}
                     onSelect={setSelection}
                     onClearSelection={clearSelection}
                   />

@@ -148,6 +148,53 @@ describe("viewer.store — estado del visor", () => {
     expect(store().failedPages).toBe(failedBefore);
   });
 
+  it("la escala pedida de preview arranca en la del motor y se guarda por kind (ADR-213 §2)", () => {
+    expect(store().requestedPreviewScale).toEqual({ original: 1, anonymized: 1 });
+    store().setRequestedPreviewScale("anonymized", 1.3);
+    expect(store().requestedPreviewScale).toEqual({ original: 1, anonymized: 1.3 });
+    const before = store().requestedPreviewScale;
+    store().setRequestedPreviewScale("anonymized", 1.3);
+    expect(store().requestedPreviewScale).toBe(before); // sin cambio real: misma referencia
+  });
+
+  it("setPreview anota la escala pedida de su kind al llegar la imagen (ADR-213 §2)", () => {
+    store().setRequestedPreviewScale("original", 1.3);
+    store().setPreview(0, "original", "blob:o-0");
+    // El otro lado conserva la escala que tenía pedida.
+    store().setPreview(0, "anonymized", "blob:a-0");
+    expect(store().previewScaleByPage.original.get(0)).toBe(1.3);
+    expect(store().previewScaleByPage.anonymized.get(0)).toBe(1);
+
+    // Una imagen que llega después de otro pedido se anota con la escala de ESE momento.
+    store().setRequestedPreviewScale("original", 2);
+    store().setPreview(1, "original", "blob:o-1");
+    expect(store().previewScaleByPage.original.get(1)).toBe(2);
+    expect(store().previewScaleByPage.original.get(0)).toBe(1.3);
+  });
+
+  it("la imagen y su escala entran en la misma actualización del store (ADR-213 §2)", () => {
+    store().setRequestedPreviewScale("original", 1.5);
+    const snapshots: Array<{ url: string | undefined; scale: number | undefined }> = [];
+    const unsubscribe = useViewerStore.subscribe((state) => {
+      snapshots.push({
+        url: state.previewByPage.original.get(4),
+        scale: state.previewScaleByPage.original.get(4),
+      });
+    });
+    store().setPreview(4, "original", "blob:x");
+    unsubscribe();
+    expect(snapshots).toEqual([{ url: "blob:x", scale: 1.5 }]);
+  });
+
+  it("reset() limpia las escalas pedidas y las anotadas (cambio de documento, ADR-213 §2)", () => {
+    store().setRequestedPreviewScale("anonymized", 2);
+    store().setPreview(0, "anonymized", "blob:x");
+    store().reset();
+    expect(store().requestedPreviewScale).toEqual({ original: 1, anonymized: 1 });
+    expect(store().previewScaleByPage.anonymized.size).toBe(0);
+    expect(store().previewScaleByPage.original.size).toBe(0);
+  });
+
   it("reset() vuelve todo al estado inicial", () => {
     store().setPage(3);
     store().setZoom(2);

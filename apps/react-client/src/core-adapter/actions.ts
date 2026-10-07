@@ -45,6 +45,15 @@ import { deriveEngineConfigOverrides } from "./settingsToEngineConfig.js";
 
 import { getCore, getCoreWhenReady, recreateCoreIfOverridesChanged } from "./index.js";
 
+/**
+ * Modo y escala de un `RENDER_REQUESTED` (ADR-213 §6): con `"preview"` la escala
+ * es obligatoria. Va como `...rest` de `requestRender` para que omitirla sea un
+ * error de tipos.
+ */
+export type RenderRequestMode =
+  | readonly [mode: "preview", scale: number]
+  | readonly [mode: "full", scale?: number];
+
 /** `null` si no hay documento activo; las acciones que lo requieren no-opean en ese caso. */
 function activeDocumentId(): string | null {
   return useDocumentStore.getState().id;
@@ -219,16 +228,24 @@ export const actions = {
   // de `settings.scrollSyncEnabled` (ADR-056 §2: sería una segunda fuente de
   // verdad sobre quién necesita píxeles, capaz de desincronizarse del scroll
   // real).
-  // `scale?` (ADR-037 §1/§5): ausente → previewScale/fullScale según mode;
-  // ZoomControls la pasa como previewScale × zoom tras el debounce de 150 ms.
+  // `scale` (ADR-037 §1/§5, ADR-213 §6): OBLIGATORIA con `mode: "preview"`, por
+  // tipos. Un pedido de preview sin escala hace que el motor dibuje a
+  // `previewScale` (zoom 100 %) y lo recuerde como la escala vigente de ese
+  // lado (ADR-189 §1): fue la causa de la imagen borrosa tras un reanálisis.
+  // Con `mode: "full"` sigue siendo opcional (ausente → `fullScale`).
+  // ADR-213 §2: un pedido de preview anota su escala en el store del visor, por
+  // `kind`, para saber a qué escala llega cada imagen.
   requestRender(
     pageIndices: ReadonlyArray<number>,
     kind: ViewerKind,
-    mode: "preview" | "full" = "preview",
-    scale?: number,
+    ...request: RenderRequestMode
   ): void {
     const documentId = activeDocumentId();
     if (documentId === null) return;
+    const [mode, scale] = request;
+    if (mode === "preview") {
+      useViewerStore.getState().setRequestedPreviewScale(kind, request[1]);
+    }
     getCore().bus.emit(EventChannel.UI, EngineEvents.RENDER_REQUESTED, {
       documentId,
       pageIndices,

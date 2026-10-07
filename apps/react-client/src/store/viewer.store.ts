@@ -25,6 +25,8 @@
 import type { PreviewInteractionGeometry } from "@anonly/anonymization-core";
 import { create } from "zustand";
 
+import { PREVIEW_SCALE_DEFAULT } from "../components/viewer/zoomRenderScale.js";
+
 /** `"original" | "anonymized"` — qué muestra el visor (ADR-087 §2). */
 export type ViewerKind = "original" | "anonymized";
 
@@ -40,6 +42,21 @@ export interface ViewerSlice {
   /** Posición del toggle Original/Anonimizado (ADR-087 §2). */
   readonly mode: ViewerKind;
   readonly previewByPage: Readonly<Record<ViewerKind, ReadonlyMap<number, string>>>;
+  /**
+   * ADR-213 §2: la última escala pedida en un `RENDER_REQUESTED` de preview, por
+   * `kind` (la anota `actions.requestRender`). Antes del primer pedido de un
+   * lado vale la escala por defecto del motor, que es la que ese lado tiene
+   * hasta entonces (ADR-189 §1: «o `previewScale` si no hay vigente»).
+   */
+  readonly requestedPreviewScale: Readonly<Record<ViewerKind, number>>;
+  /**
+   * ADR-213 §2: la escala a la que llegó cada imagen de `previewByPage`, por
+   * `kind` y página: `requestedPreviewScale[kind]` en el momento del
+   * `PREVIEW_UPDATED`. El evento no la trae (ADR-189 descartó agregarla), pero
+   * el cliente es el único emisor con escala y el motor nunca entrega una imagen
+   * a una escala que no sea la vigente de su lado (ADR-189 §2).
+   */
+  readonly previewScaleByPage: Readonly<Record<ViewerKind, ReadonlyMap<number, number>>>;
   /** Geometry paired atomically with each anonymized preview URL. */
   readonly interactionGeometryByPage: ReadonlyMap<number, PreviewInteractionGeometry>;
   readonly interactionEpoch: number;
@@ -90,6 +107,8 @@ export interface ViewerSlice {
   setSearchQuery(query: string): void;
   setZoom(z: number): void;
   setMode(mode: ViewerKind): void;
+  /** Anota la escala de un pedido de preview de `kind` (ADR-213 §2). */
+  setRequestedPreviewScale(kind: ViewerKind, scale: number): void;
   setPreview(
     pageIndex: number,
     kind: ViewerKind,
@@ -123,6 +142,8 @@ type ViewerData = Pick<
   | "zoom"
   | "mode"
   | "previewByPage"
+  | "requestedPreviewScale"
+  | "previewScaleByPage"
   | "interactionGeometryByPage"
   | "interactionEpoch"
   | "failedPages"
@@ -138,6 +159,8 @@ const initialState: ViewerData = {
   // (UX-3b), así que cualquier otro default sería inalcanzable.
   mode: "original",
   previewByPage: { original: new Map(), anonymized: new Map() },
+  requestedPreviewScale: { original: PREVIEW_SCALE_DEFAULT, anonymized: PREVIEW_SCALE_DEFAULT },
+  previewScaleByPage: { original: new Map(), anonymized: new Map() },
   interactionGeometryByPage: new Map(),
   interactionEpoch: 0,
   failedPages: new Set(),
@@ -162,10 +185,21 @@ export const useViewerStore = create<ViewerSlice>((set, get) => ({
   setMode(mode) {
     set({ mode });
   },
+  setRequestedPreviewScale(kind, scale) {
+    set((state) =>
+      state.requestedPreviewScale[kind] === scale
+        ? {}
+        : { requestedPreviewScale: { ...state.requestedPreviewScale, [kind]: scale } },
+    );
+  },
   setPreview(pageIndex, kind, blobUrl, interactionGeometry) {
     set((state) => {
       const next = new Map(state.previewByPage[kind]);
       next.set(pageIndex, blobUrl);
+      // ADR-213 §2: la imagen y su escala entran en la misma actualización.
+      const scales = new Map(state.previewScaleByPage[kind]);
+      scales.set(pageIndex, state.requestedPreviewScale[kind]);
+      const previewScaleByPage = { ...state.previewScaleByPage, [kind]: scales };
       const interactionGeometryByPage = new Map(state.interactionGeometryByPage);
       if (kind === "anonymized" && interactionGeometry !== undefined) {
         interactionGeometryByPage.set(pageIndex, interactionGeometry);
@@ -178,6 +212,7 @@ export const useViewerStore = create<ViewerSlice>((set, get) => ({
       if (!state.failedPages.has(pageIndex)) {
         return {
           previewByPage: { ...state.previewByPage, [kind]: next },
+          previewScaleByPage,
           interactionGeometryByPage,
         };
       }
@@ -185,6 +220,7 @@ export const useViewerStore = create<ViewerSlice>((set, get) => ({
       failed.delete(pageIndex);
       return {
         previewByPage: { ...state.previewByPage, [kind]: next },
+        previewScaleByPage,
         interactionGeometryByPage,
         failedPages: failed,
       };
