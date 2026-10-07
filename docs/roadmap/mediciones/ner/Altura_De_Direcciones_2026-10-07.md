@@ -25,7 +25,9 @@ con el modelo real:
 - **Línea de base de calidad**: las cuatro direcciones pasan a cubiertas, 78
   de 78 entidades contra 74 de 78, sin ningún otro cambio.
 
-Con esto el mantenedor decide si la regla queda o si se tapa siempre.
+**Decidido por el mantenedor el 2026-10-07: tapar siempre.** ADR-212 quedó
+con esa regla. No se volvió a medir: la columna «Tapar siempre» de este
+informe se deriva de las corridas hechas con la regla por contexto.
 
 ## Qué se midió
 
@@ -221,4 +223,4 @@ detectada en la página.
 
 `./tests/perf/run-address-height.sh`. Detalle en `tests/perf/README.md`,
 «Altura de las direcciones». Se vuelve a correr si cambian la regla o el
-modelo.
+modelo. Desde la decisión, el arnés espera el resultado de tapar siempre.

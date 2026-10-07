@@ -200,8 +200,9 @@ Lo primero, porque es lo que permite tocar la detección sin miedo.
   ([informe](mediciones/ner/Altura_De_Direcciones_2026-10-07.md)): las
   cuatro direcciones de la línea de base quedan cubiertas, sin otro cambio.
   Sobre 76 oraciones sintéticas, la regla deja a la vista 6 alturas con
-  forma de año y tapa 4 años de más; tapar siempre deja 0 y tapa 9. **Falta
-  la decisión del mantenedor entre las dos.** Aparte, en 9 de 48 oraciones
+  forma de año y tapa 4 años de más; tapar siempre deja 0 y tapa 9.
+  **Decidido ese día: tapar siempre.** El número que sigue a una dirección
+  se suma aunque tenga forma de año. Aparte, en 9 de 48 oraciones
   con un domicilio el modelo no marcó la calle: ese límite no lo cierra
   ninguna de las dos.
 - **Firma de Windows con SignPath: cerrado sin firma.** SignPath rechazó la
