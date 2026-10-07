@@ -16,11 +16,13 @@
  *   filas (`pageLayout.ts`, `pageSlots.ts`); el re-render real se dispara **debounced**
  *   (`ZOOM_RERENDER_DEBOUNCE_MS`, `zoomRenderScheduler.ts`) con
  *   `scale = previewScale × zoom` (`zoomRenderScale.ts`).
- * - Los tres emisores (render inicial al observar `Ready`, cambio de rango
- *   montado, re-render debounced de zoom) pasan **siempre** el `kind` de este
- *   `PdfViewer`, que desde ADR-087 §2 es `viewer.store.mode` — la posición del
- *   `ViewerModeToggle`. Sigue habiendo **una sola** fuente de verdad sobre qué
- *   lado necesita píxeles, que es lo que ADR-056 §2 protege.
+ * - Cambio de `kind` (el toggle) → `actions.requestRender` **inmediato** del
+ *   rango montado, con la escala del zoom vigente (`kindChangeRender.ts`).
+ * - Los cuatro emisores (render inicial al observar `Ready`, cambio de rango
+ *   montado, re-render debounced de zoom, cambio de vista) pasan **siempre** el
+ *   `kind` de este `PdfViewer`, que desde ADR-087 §2 es `viewer.store.mode` — la
+ *   posición del `ViewerModeToggle`. Sigue habiendo **una sola** fuente de
+ *   verdad sobre qué lado necesita píxeles, que es lo que ADR-056 §2 protege.
  *
  * Desde ADR-087 §2 hay **un solo** `PdfViewer`, y `kind` sale de
  * `viewer.store.mode`. `RENDER_REQUESTED.kind` sigue requerido y con la misma
@@ -48,6 +50,7 @@ import { useUnreadableInkStore } from "../../store/unreadableInk.store.js";
 import { useViewerStore, type ViewerKind } from "../../store/viewer.store.js";
 
 import { projectMatchBoxes } from "./interactionProjection.js";
+import { shouldRenderOnKindChange } from "./kindChangeRender.js";
 import { PageCanvas } from "./PageCanvas.js";
 import { computePageHeight, computePageWidth } from "./pageLayout.js";
 import { computePageSlots } from "./pageSlots.js";
@@ -219,6 +222,30 @@ export function PdfViewer({ activeMatch, scrollNonce }: PdfViewerProps) {
     });
     return () => scheduler.cancel();
   }, [zoom]);
+
+  // Cambio de vista (`kind`) → cuarto emisor (`kindChangeRender.ts`): pide el
+  // rango montado del NUEVO `kind` a la escala del zoom vigente, de inmediato y
+  // sin debounce. La imagen cacheada de ese lado se sigue pintando al instante
+  // (`previewByPage[kind]`); sin este pedido quedaba estirada, a la escala
+  // anterior, hasta el próximo zoom o scroll — el reintento solo pide las
+  // páginas SIN imagen. La ref guarda el `kind` del render anterior: en el
+  // montaje inicial es `null` (ese caso lo cubren los otros emisores).
+  const previousKindRef = useRef<ViewerKind | null>(null);
+  useEffect(() => {
+    const previousKind = previousKindRef.current;
+    previousKindRef.current = kind;
+    const indices = mountedPageIndicesRef.current;
+    if (
+      !shouldRenderOnKindChange({
+        previousKind,
+        kind,
+        mountedPageIndicesCount: indices.length,
+      })
+    ) {
+      return;
+    }
+    actions.requestRender(indices, kind, "preview", computeZoomRenderScale(zoom));
+  }, [kind]);
 
   function handleVisibleRangeChange(range: VisibleRange): void {
     useViewerStore.getState().setVisibleRange(range.start, range.end);

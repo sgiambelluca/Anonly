@@ -345,9 +345,11 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
       // desde ADR-087 §2 (hay un solo visor). Composición extraída a
       // `computeReanalyzeRenderRequest` (misma razón que `canvasDimensions.ts`:
       // testeable sin jsdom).
-      const { visibleRange } = useViewerStore.getState();
-      const { pageIndices, kind } = computeReanalyzeRenderRequest(visibleRange);
-      actions.requestRender(pageIndices, kind);
+      // Con la escala del zoom vigente: sin ella el motor dibuja a 100 % y
+      // recuerda esa escala como la vigente del lado anonimizado (ADR-189 §1).
+      const { visibleRange, zoom } = useViewerStore.getState();
+      const { pageIndices, kind, scale } = computeReanalyzeRenderRequest(visibleRange, zoom);
+      actions.requestRender(pageIndices, kind, "preview", scale);
       setConfirmOpen(false);
       onClose();
     } catch (error) {
