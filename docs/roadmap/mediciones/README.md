@@ -21,6 +21,7 @@ documentos de trabajo. Los arneses que producen estos números están en
 | Motor | Informe | Tema |
 |---|---|---|
 | OCR | [`Reconocedores_OCR_Medicion.md`](./ocr/Reconocedores_OCR_Medicion.md) | Reconocedores OCR LSTM, macOS y Windows nativo |
+| OCR | [`Emails_DPI_Nativo_2026-10-07.md`](./ocr/Emails_DPI_Nativo_2026-10-07.md) | Emails en escaneos de 200 y 150 dpi nativos: línea de base (M-E1) |
 | OCR | [`OCR_Entre_Plataformas_Medicion.md`](./ocr/OCR_Entre_Plataformas_Medicion.md) | El OCR de un escaneo cambia con la plataforma |
 | OCR | [`T5_OSD_Compartido_Resultados.md`](./ocr/T5_OSD_Compartido_Resultados.md) | T-5, OSD compartido: implementación y medición |
 | OCR | [`T5_OSD_Compartido_Resultados_Adelanto.md`](./ocr/T5_OSD_Compartido_Resultados_Adelanto.md) | T-5 con una página de adelanto |

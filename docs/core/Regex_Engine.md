@@ -5,8 +5,10 @@
 > Detecta patrones determinísticos (DNI, CUIT, teléfono, email, IBAN, tarjeta, fecha, matrícula, patente) en el texto de cada página. Emite `Occurrence[]` con `source: "regex"` y `confidence: 1.0`. Es determinista: mismo input → mismo output.
 
 **EngineId**: `regex`
-**Versión del spec**: 1.14.0
-**Última actualización**: 2026-09-24
+**Versión del spec**: 1.15.0
+**Última actualización**: 2026-10-07
+
+> **Nota (v1.15.0, ADR-211, 2026-10-07 — el email tolera la `@` leída como `Q` en texto de OCR)**: en un escaneo de baja resolución el OCR puede leer la `@` como `Q` mayúscula, a veces con un espacio después del punto del nombre (`contacto. estudioQexample.org`). El email default suma una **segunda búsqueda**, que solo corre sobre palabras con `source: "ocr"` y solo acepta una forma estricta en minúsculas. Un email con `@` sale exactamente igual que antes (ADR-181 no cambia). La ocurrencia conserva en `value` el texto como se leyó y lleva en `normalizedValue` el email restituido, así que se agrupa con las apariciones leídas bien. Sin contrato nuevo. Ver caso 35, §14, §15 ítem 23 y la tabla de patrones.
 
 > **Nota (v1.14.0, ADR-181, 2026-09-24 — email default lineal)**: el patrón `email` conserva exactamente el lenguaje, spans, orden, normalización y salida de `\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b` con flag global, pero su recorrido productivo se especializa mediante un escáner lineal por `@`. El `RegExp` queda como oráculo acotado en tests. Se especializa el objeto del **default**, no el id: un custom llamado `email` sigue siendo custom. El hallazgo de 42,5 s sobre 160 KiB sin `@`, los controles R1/R2 y el criterio diferencial están en `roadmap/mediciones/regex/Patron_Email_Regex_Medicion.md` y ADR-181. No cambia ningún contrato público ni la cancelación entre páginas.
 
@@ -339,6 +341,15 @@ Casos de fragmentos y de la tabla de patrones (ADR-074, ADR-075):
 ---
 
 34. **Email default con costo acotado y salida idéntica** (ADR-181): el escáner examina tramos alrededor de cada `@` con índices monótonos, sin volver a intentar el patrón desde cada carácter del prefijo. Sobre texto sin `@` y texto con `@` tardía, duplicar longitud no debe cuadruplicar el trabajo del email. Su lista ordenada de spans/valores es exactamente la del `RegExp` de referencia en corpus de prueba acotados: puntos múltiples, TLD inválido, dígito o `_` pegado al TLD, vecinos Unicode, puntuación y dos emails separados por un tramo continuo que exige respetar `lastIndex` y `\b`. El custom con id `email` conserva la ruta custom, no la especialización. Normalización, bbox, overlaps y eventos permanecen iguales.
+35. **Email leído con `Q` en texto de OCR** (ADR-211). Segunda búsqueda del email default, después de la de ADR-181 y sin alterarla:
+    - **Forma**, sin flags y con `\b` ASCII como el patrón de referencia: `\b(?:[a-z0-9._%+-]*[a-z0-9]\. ){0,2}[a-z0-9._%+-]*[a-z0-9]Q[a-z0-9][a-z0-9.-]*\.[a-z]{2,}\b`. Todo en minúsculas y dígitos salvo una `Q` mayúscula, con letra o dígito a cada lado. El grupo inicial admite hasta dos tramos «nombre, punto, **un** espacio» antes del resto. Entre coincidencias posibles rige la semántica de esa expresión en JavaScript (la más a la izquierda, codiciosa).
+    - **Solo OCR**: la coincidencia se acepta únicamente si **todas** las `Word` de su span tienen `source: "ocr"`. Si alguna es `"pdf"`, no hay ocurrencia.
+    - **Un email con `@` gana**: se descarta la coincidencia que se superpone con un match de la búsqueda normal de email.
+    - **Salida**: `entityType: Email`, `source: Regex`, `confidence: 1.0`, mismo `maskFormat`. `value` es el texto del span tal como está en `Page.text`. `normalizedValue` se obtiene quitando el espacio de cada «punto, espacio» del grupo inicial, cambiando esa `Q` por `@` y pasando a minúsculas: `contacto. estudioQexample.org` → `contacto.estudio@example.org`.
+    - **Costo**: anclada en cada `Q`, con índices monótonos y costo O(caracteres + coincidencias), como el caso 34. Sin reintentar desde cada carácter del prefijo.
+    - **Solo el default**: un patrón custom con id `email` no gana esta búsqueda (misma regla de identidad del caso 34).
+    - El resto del camino es el de cualquier match: guarda de corrida, resolución de overlaps, mapeo a palabras, `fragments`, `rotation` y eventos.
+    - Fuera de alcance, a propósito: mayúsculas en el nombre o el dominio, un espacio sin punto, un tercer tramo, y el espacio tras el punto en un email leído con `@`.
 
 ---
 
@@ -358,6 +369,14 @@ Casos de fragmentos y de la tabla de patrones (ADR-074, ADR-075):
 | `default email scanner keeps events, normalization and bbox` | `contract.test.ts` | contract | caso 34, ADR-181: misma salida pública, incluidos orden y overlaps |
 | `custom pattern named email uses custom path` | `edge.test.ts` | edge | caso 34, ADR-181: especialización por identidad del default; custom mantiene presupuesto y semántica |
 | `long no-at and late-at text use linear email scan` | `tests/perf/regex-worst-case.ts` | perf opt-in | caso 34, ADR-181: curva de 2–160 KiB y cancelación; no gate temporal absoluto |
+| `email read with Q is detected in OCR words only` | `unit.test.ts` | unit | caso 35, ADR-211: mismas palabras con `source: "ocr"` dan una ocurrencia `Email`; con `source: "pdf"`, o mezcladas, ninguna |
+| `email read with Q requires the strict lowercase shape` | `edge.test.ts` | edge | caso 35: `ProQuest.com`, `BanQ.com.ar`, `JUAN.PEREZQGMAIL.COM` y una `Q` sin letra o dígito a cada lado no coinciden; `juanQgmail.com` sí |
+| `email read with Q normalizes to the real address and keeps the read value` | `unit.test.ts` | unit | caso 35: `value` como se leyó; `normalizedValue` con `@`, sin el espacio y en minúsculas; igual al de la misma dirección leída bien |
+| `email read with Q includes up to two dot-space name segments` | `edge.test.ts` | edge | caso 35: uno y dos tramos «nombre. » se incluyen; un tercero queda afuera; dos espacios o un espacio sin punto no extienden |
+| `email read with Q yields to an overlapping regular email` | `edge.test.ts` | edge | caso 35: gana el match con `@` |
+| `regular emails are unchanged by the Q search` | `contract.test.ts` | contract | caso 35: sobre texto de OCR y de PDF, los matches con `@` (spans, valores, orden, eventos) son los mismos que sin la segunda búsqueda; `palabra. nombre@dominio` no se extiende |
+| `custom pattern named email does not get the Q search` | `edge.test.ts` | edge | caso 35: identidad del default, como en el caso 34 |
+| `Q email search stays linear on adversarial text` | `tests/perf/regex-worst-case.ts` | perf opt-in | caso 35: texto largo con muchas `Q` y tramos locales largos; duplicar la longitud no cuadruplica el trabajo |
 | `AR plate vieja and Mercosur both match as Plate` | `edge.test.ts` | edge | caso 7 |
 | `custom invalid regex throws and is discarded` | `edge.test.ts` | edge | caso 8 |
 | `custom catastrophic regex times out and is discarded` | `edge.test.ts` | edge | caso 9 |
@@ -477,6 +496,7 @@ Fixtures: `tests/fixtures/text-10p.pdf` (con DNIs, CUITs, emails, teléfonos con
 - [x] 20. (Hito 10.9, PR 5 — ADR-074 §2/§3) `mapSpanToWords`: partir las `Word` del match en corridas de la misma línea con `sharesVerticalBand` de `@anonly/shared` (§4, `Contracts.md` §6 — **importada, no reimplementada**, mismo criterio que la errata de ADR-061 §2) y emitir un rectángulo por corrida en `Occurrence.fragments`. Con una sola corrida, **no emitir el campo**. Con `rotation` presente en alguna palabra, tampoco. **No** tocar `bbox` (sigue siendo la envolvente), ni `wordSpan`, ni la propagación de `rotation` del item 19. El PR de `shared` que declara el campo (Hito 10.9 PR 4) es precondición. Caso 26 de §13, cinco filas de §14.
 - [x] 21. (Hito 10.9, PR 13 — ADR-075 §1/§2) Dos cambios en la tabla de patrones, en el mismo PR porque son el mismo archivo: **(a)** `date-textual-ar` con su `normalizeTextualDate` (→ `DD/MM/YYYY`, el mismo `normalizedValue` que la fecha numérica) y `checksum: validateDateRange`; **(b)** la guarda de corrida de §6, aplicada a todo match de `process` incluidos los custom, calculada sobre `Page.text` alrededor del span. **No** tocar los `\b` de ADR-022, los checksums, ni la prioridad de match más largo del caso 10. Casos 27-28 de §13, once filas de §14.
 - [x] 22. (Hito 11, ADR-181) Especializar solo el objeto del email default con el escáner lineal por `@` descrito en el ADR. Conservar la expresión como oráculo de tests, la ruta `runPattern`/presupuesto de todo custom, el `RawMatch` y todos los filtros/eventos posteriores. Añadir diferencial exacto de spans/valores, contrato de salida y casos límite de §14; repetir el banco opt-in y R1/R2 reales antes de cerrar el punto.
+- [ ] 23. (1.0.x, Confianza — **ADR-211**) Segunda búsqueda del email default para la forma con `Q` del caso 35: solo sobre palabras de OCR, forma estricta en minúsculas, hasta dos tramos «nombre. », descarte ante un email con `@` superpuesto, `value` como se leyó y `normalizedValue` restituido, costo lineal anclado en cada `Q`, y sin tocar la búsqueda de ADR-181 ni los patrones custom. Los ocho tests de §14 con sus nombres exactos (el de peores casos vive en `tests/perf` y va en su propio commit). Cobertura del módulo ≥ 85 %.
 
 > **Estado Hito 4**: items 1–18 implementados, incluyendo el comportamiento funcional de cancelación
 > cooperativa (chequeo de `abortSignal` entre páginas) y de timeout por patrón custom (1000 ms).
@@ -498,6 +518,7 @@ Los patrones exactos viven en `patterns/default-ar.ts` y son parte del contrato 
 | Phone (AR mobile) | `(?:\+?54[\s-]?)?(?:9[\s-]?)?\b(?:\d{2}[\s-]?\d{4}[\s-]?\d{4}\|\d{3}[\s-]?\d{3}[\s-]?\d{4}\|\d{4}[\s-]?\d{2}[\s-]?\d{4})\b` | – | strip no-digit → "541112345678" |
 | Phone (AR landline) | `\b0\d{1,4}[\s-]?\d{3,4}[\s-]?\d{4}\b` | – | strip no-digit |
 | Email | `\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b` | – | lowercase |
+| Email leído con `Q` (solo palabras de OCR, ADR-211) | `\b(?:[a-z0-9._%+-]*[a-z0-9]\. ){0,2}[a-z0-9._%+-]*[a-z0-9]Q[a-z0-9][a-z0-9.-]*\.[a-z]{2,}\b` | todas las `Word` del span con `source: "ocr"`; sin superposición con un email con `@` | quita el espacio de «punto, espacio», `Q` → `@`, lowercase |
 | IBAN | `\b[A-Z]{2}\d{2}(?:\s?[A-Z0-9]){10,30}\b` | ISO 13616 check | uppercase, strip spaces |
 | CreditCard | `\b(?:\d[ -]*?){13,19}\b` | Luhn | strip non-digit |
 | Date (AR) | `\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b` | validación rango (día 1-31, mes 1-12) | normaliza a "DD/MM/YYYY" |
@@ -558,3 +579,4 @@ guarda no los mira nunca.
 - `adr/ADR-011-Grouping-First.md` (por qué Regex emite a Grouping, no a UI)
 - `adr/ADR-012-Replacement-Modes.md` (maskFormat por tipo)
 - `adr/ADR-022-Regex-Phone-AR-Word-Boundaries.md` (corrección del patrón Phone AR mobile, v1.0.1)
+- `adr/ADR-211-El-Email-Tolera-La-Arroba-Leida-Como-Q-En-Texto-De-OCR.md` (v1.15.0: segunda búsqueda del email para texto de OCR)
