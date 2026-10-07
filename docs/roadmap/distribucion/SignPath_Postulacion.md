@@ -1,6 +1,12 @@
-<!-- CONTEXT: scope=roadmap-release | dependencias=CODE_SIGNING.md,PRIVACY.md,SECURITY.md,adr/ADR-131-El-Actualizador-Es-La-Primera-Salida-De-Red.md,adr/ADR-137-Windows-Verifica-Actualizaciones-Con-Clave-Ed25519-Propia.md,adr/ADR-187-La-Integridad-De-Los-Assets-No-Se-Verifica-En-Runtime.md,architecture/08_Security_Model.md,roadmap/MVP.md | audiencia=humanos+IA | fase=11.5 (preparado 2026-09-26; postulación pendiente del humano) -->
+<!-- CONTEXT: scope=roadmap-release | dependencias=CODE_SIGNING.md,PRIVACY.md,SECURITY.md,adr/ADR-131-El-Actualizador-Es-La-Primera-Salida-De-Red.md,adr/ADR-137-Windows-Verifica-Actualizaciones-Con-Clave-Ed25519-Propia.md,adr/ADR-187-La-Integridad-De-Los-Assets-No-Se-Verifica-En-Runtime.md,architecture/08_Security_Model.md,roadmap/MVP.md | audiencia=humanos+IA | fase=12 (preparado 2026-09-26; enviada 2026-10-02; rechazada, informado 2026-10-07) -->
 
 # Firma de código de Windows con SignPath Foundation — postulación
+
+> **Rechazada.** SignPath Foundation no aceptó el proyecto. El mantenedor lo
+> informó el 2026-10-07; la fecha y el texto de la respuesta no están
+> registrados en este documento. Windows sigue sin firma Authenticode. Qué
+> cambia y qué no: §6. El resto del documento queda como registro de lo que se
+> preparó y se envió, y como base si alguna vez se vuelve a postular.
 
 SignPath Foundation firma gratis los binarios de proyectos open source con un
 certificado propio. Es la única vía gratuita para que el instalador de
@@ -18,7 +24,7 @@ ADR cuando llegue la aprobación (§5).
 Fuente de las condiciones: [signpath.org/terms](https://signpath.org/terms),
 consultada el 2026-09-26.
 
-> **Postulación enviada el 2026-10-02**, con la 1.0.1 publicada. Falta la respuesta de SignPath. El formulario real no coincide con el borrador de §3: pide *Tagline*, *Description* y *Reputation*, y no pide la política de firma. Se envió describiendo al proyecto como nuevo, con un solo mantenedor, y apoyado en lo verificable desde el repositorio (historial, releases construidos en CI con atestación, checks obligatorios, ADR y políticas publicadas). El nombre del instalador desde la 1.0.1 es `Anonly-Setup-<versión>.exe` (ADR-198).
+> **Postulación enviada el 2026-10-02**, con la 1.0.1 publicada. El formulario real no coincide con el borrador de §3: pide *Tagline*, *Description* y *Reputation*, y no pide la política de firma. Se envió describiendo al proyecto como nuevo, con un solo mantenedor, y apoyado en lo verificable desde el repositorio (historial, releases construidos en CI con atestación, checks obligatorios, ADR y políticas publicadas). El nombre del instalador desde la 1.0.1 es `Anonly-Setup-<versión>.exe` (ADR-198).
 >
 > **Estado al 2026-10-02.** Todo lo que dependía del repositorio está hecho; falta lo que solo puede hacer el humano.
 >
@@ -121,7 +127,11 @@ los dos sentidos (§5, punto 5).
 
 ## 5. Después de la aprobación (necesita ADR)
 
-Lo que sigue queda para cuando SignPath entregue la organización y el
+> **No aplica desde el rechazo (§6).** Se conserva porque el orden de firma
+> y el reemplazo de `publisherName` valen igual para cualquier certificado
+> Authenticode que el proyecto llegue a tener, venga de donde venga.
+
+Lo que sigue quedaba para cuando SignPath entregara la organización y el
 proyecto. Se registra acá para no redescubrirlo, y pide un ADR antes de tocar
 `release.yml` (R-19).
 
@@ -169,3 +179,49 @@ proyecto. Se registra acá para no redescubrirlo, y pide un ADR antes de tocar
    - `08_Security_Model.md` §2.3;
    - el ítem SignPath del Hito 11.5 en `MVP.md`;
    - `RELEASING.md`: la aprobación manual pasa a ser un paso del release.
+
+## 6. Después del rechazo
+
+Es el desenlace que §3 anticipaba. No cambia código ni contratos: el
+producto ya funcionaba sin Authenticode.
+
+**Lo que no cambia**
+
+- Las **actualizaciones** de Windows se siguen verificando con la clave
+  Ed25519 propia antes de instalarse (ADR-137). El valor reservado
+  `__ANONLY_ED25519_ONLY__` de `electron-builder.yml` queda como está, sin
+  fecha de reemplazo.
+- Cada release publica `SHA256SUMS.txt` y una atestación de procedencia
+  (ADR-132 §6). Son la forma de comprobar una descarga.
+- `release.yml` no se toca. No hay secret ni paso de firma que agregar.
+
+**Lo que queda sin cubrir**
+
+- La **primera instalación**: Windows muestra SmartScreen y «editor
+  desconocido». El README ya explica cómo seguir.
+- La **manipulación de los archivos después de instalar**: sin firma
+  verificable, Windows no la detecta, y desde ADR-187 la app tampoco.
+
+Las dos pasan a figurar como riesgo residual en `08_Security_Model.md` §2.3,
+junto al de macOS.
+
+**Alternativas**
+
+Todas son pagas: Azure Trusted Signing, un certificado OV o EV, o el
+certificado para open source de Certum. Quedan fuera de alcance mientras el
+proyecto no invierta dinero en distribución. Volver a postular a SignPath más
+adelante, con más trayectoria pública, es posible y no está evaluado: depende
+del motivo del rechazo, que acá no consta.
+
+**Documentación actualizada el 2026-10-07**
+
+- `CODE_SIGNING.md`: describe el estado real y deja de atribuirle la firma a
+  SignPath;
+- `08_Security_Model.md` §2.1, §2.3 y §8.2;
+- `Roadmap_1.x.md` §3, `Version_1.0.md` §4 y el índice de `roadmap/README.md`;
+- `RELEASING.md` y `apps/desktop-shell/README.md`;
+- el ítem del Hito 11.5 en `MVP.md` y una nota en ADR-137 §5.
+
+Los comentarios de `electron-builder.yml` y de `windows-updater.ts` hablan
+de «cuando SignPath llegue». Siguen siendo ciertos como condición y no se
+tocaron: son código, y van en su propio commit si se quieren reescribir.
