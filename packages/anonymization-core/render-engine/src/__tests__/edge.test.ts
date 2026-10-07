@@ -1633,22 +1633,24 @@ describe("RenderEngine — edge cases", () => {
     });
   });
 
-  // ─── ADR-058 §2-§6 (Hito 10.5, PR 5): repintado de línea por calibración ───
+  // ─── ADR-058 §2-§6 + ADR-210 (1.0.x, Confianza): repintado de línea que mueve píxeles ───
   //
   // Cada test de fallback parte de `makeLineRepaintScenario()` (escenario
-  // donde las cinco condiciones de activación pasan con margen, ver
+  // donde las cuatro condiciones de activación pasan con margen, ver
   // fixtures/test-helpers.js) y perturba UN solo parámetro para aislar
-  // exactamente la condición bajo prueba, dejando las otras cuatro intactas.
-  // La aserción común a los cinco: el repintado NO se ejecuta — un solo
-  // `fillText` (el camino de shrink-to-fit de PR1, fondo/texto de los
-  // colores FIJOS) y un solo `getImageData` (la captura final del raster;
-  // `sampleInkAndBackground` de ADR-058 §4 nunca se dispara) — sin error ni
-  // warning (ADR-058 §6: "cualquier duda cae al fallback").
-  describe("repintado de línea por calibración (ADR-058 §2-§6)", () => {
+  // exactamente la condición bajo prueba, dejando las otras intactas.
+  // La aserción común: el repintado NO se ejecuta — un solo `fillText` (el
+  // token, camino de shrink-to-fit de PR1, fondo/texto de los colores FIJOS),
+  // un solo `getImageData` (la captura final del raster: ni el muestreo de
+  // ADR-058 §4 ni la lectura del renglón de ADR-210 se disparan) y ningún
+  // `putImageData` — sin error ni warning (ADR-058 §6: "cualquier duda cae al
+  // fallback").
+  describe("repintado de línea que mueve píxeles (ADR-058 §2-§6, ADR-210)", () => {
     async function renderScenario(
       docId: string,
       scenario: ReturnType<typeof makeLineRepaintScenario>,
       extraReplacements: ReadonlyArray<ReturnType<typeof makeReplacement>> = [],
+      scale?: number,
     ): Promise<void> {
       vi.mocked(getDocument).mockReturnValue(
         mockGetDocumentResult(
@@ -1668,6 +1670,7 @@ describe("RenderEngine — edge cases", () => {
           pageIndex: 0,
           kind: "anonymized",
           mode: "preview",
+          ...(scale !== undefined ? { scale } : {}),
           replacements: [scenario.replacement, ...extraReplacements],
           lineWords: scenario.lineWords,
         }),
@@ -1675,14 +1678,29 @@ describe("RenderEngine — edge cases", () => {
       );
     }
 
-    function expectFallback(): void {
-      const [canvas] = getCreatedCanvases();
-      const fillTextCalls = canvas!.calls.filter((c) => c.op === "fillText");
+    /**
+     * El canvas de PÁGINA de un render es el primero que se crea: `encodeImageData`
+     * crea después otro, solo para codificar. Los tests con más de un render
+     * lo toman y limpian la lista antes del siguiente.
+     */
+    function takePageCanvas(): NonNullable<ReturnType<typeof getCreatedCanvases>[number]> {
+      const canvas = getCreatedCanvases()[0];
+      if (canvas === undefined) throw new Error("el render debía crear el canvas de página");
+      resetCreatedCanvases();
+      return canvas;
+    }
+
+    function expectFallback(
+      canvas: ReturnType<typeof getCreatedCanvases>[number] | undefined = getCreatedCanvases()[0],
+    ): void {
+      if (canvas === undefined) throw new Error("no hay canvas de página");
+      const fillTextCalls = canvas.calls.filter((c) => c.op === "fillText");
       expect(fillTextCalls).toHaveLength(1); // solo el token, camino de PR1
-      const fillRectCalls = canvas!.calls.filter((c) => c.op === "fillRect");
+      const fillRectCalls = canvas.calls.filter((c) => c.op === "fillRect");
       expect(fillRectCalls).toHaveLength(1);
       expect(fillRectCalls[0]!.fillStyle).toBe("#ffffff"); // color fijo, no muestreado
-      expect(canvas!.calls.filter((c) => c.op === "getImageData")).toHaveLength(1); // sin muestreo extra
+      expect(canvas.calls.filter((c) => c.op === "getImageData")).toHaveLength(1); // sin muestreo ni lectura extra
+      expect(canvas.calls.filter((c) => c.op === "putImageData")).toHaveLength(0); // nada se movió
     }
 
     it("no trailing word to the right → fallback", async () => {
@@ -1711,25 +1729,12 @@ describe("RenderEngine — edge cases", () => {
     });
 
     it("no room before the right margin → fallback", async () => {
-      // Página angosta: el desplazamiento uniforme que exige el token
-      // calibrado no cabe antes del margen derecho físico de la página,
-      // aunque la fila de vecinas en sí sea perfectamente plausible.
+      // Página angosta: el desplazamiento ENTERO que exige el token (101 px)
+      // no cabe antes del margen derecho físico de la página (la corrida
+      // termina en 106 y 106 + 101 > 200), aunque la fila de vecinas en sí sea
+      // perfectamente plausible.
       const scenario = makeLineRepaintScenario({ pageWidth: 200 });
       await renderScenario("doc-repaint-no-margin", scenario);
-      expectFallback();
-    });
-
-    it("calibration error above threshold → fallback", async () => {
-      // Se rompe la consistencia SOLO del texto de "Garcia" (su bbox y
-      // posición quedan intactos, así que huecos/densidad/margen no se ven
-      // afectados): un ancho real de vecina que ningún candidato genérico
-      // puede explicar sube el error agregado muy por encima del umbral.
-      const base = makeLineRepaintScenario();
-      const badLineWords = base.lineWords.map((word) =>
-        word.text === "Garcia" ? { ...word, text: "G" } : word,
-      );
-      const scenario = makeLineRepaintScenario({ lineWords: badLineWords });
-      await renderScenario("doc-repaint-bad-calibration", scenario);
       expectFallback();
     });
 
@@ -1753,6 +1758,101 @@ describe("RenderEngine — edge cases", () => {
       expectFallback();
     });
 
+    it("line repaint never reads or moves pixels inside the replaced box", async () => {
+      // Caja del dato {x:20, w:17.5} a escala 1,3 → su borde derecho cae en el
+      // píxel FRACCIONARIO 48,75. La primera vecina "toca" la caja (x = 37,5,
+      // el borde derecho exacto: el caso límite que deja pasar la condición (a),
+      // que exige `word.x ≥ borde derecho del dato`).
+      //
+      // El rectángulo de origen empieza en `ceil(48,75) = 49`: nunca antes del
+      // borde derecho de la caja, ni siquiera por el redondeo. Lo que hay entre
+      // la caja y la primera vecina se tapa, no se mueve — así ningún píxel del
+      // dato original viaja con el renglón.
+      const scale = 1.3;
+      const boxRight = 20 + 17.5;
+      const boxRightPx = boxRight * scale;
+      const base = makeLineRepaintScenario({
+        replacement: { bbox: { x: 20, y: 10, width: 17.5, height: 14 } },
+        gapAfterReplacement: 0,
+      });
+      await renderScenario("doc-repaint-source-right-of-box", base, [], scale);
+
+      const touching = takePageCanvas();
+      const sourceRead = touching.calls.filter((c) => c.op === "getImageData")[1]!;
+      const paste = touching.calls.find((c) => c.op === "putImageData")!;
+      expect(sourceRead.args[0]).toBe(49);
+      expect(sourceRead.args[0] as number).toBeGreaterThanOrEqual(boxRightPx);
+      expect(paste.args[1] as number).toBeGreaterThanOrEqual(boxRightPx);
+      // El tapado, en cambio, SÍ cubre la caja entera: arranca en `bbox.x`.
+      const erase = touching.calls.find((c) => c.op === "fillRect")!;
+      expect(erase.args[0]).toBeCloseTo(20 * scale, 6);
+
+      // Una vecina que se SUPERPONE con la caja (x < borde derecho) no pasa la
+      // condición (a): no es vecina, así que nunca entra en el rectángulo de
+      // origen. El origen arranca en la primera vecina que sí cumple ("vive"),
+      // siempre a la derecha de la caja.
+      const overlapping = makeLineRepaintScenario({
+        replacement: {
+          bbox: { x: 20, y: 10, width: 17.5, height: 14 },
+          replacementValue: "XXXXXXXX", // desplazamiento corto: cabe en la página angosta
+        },
+        pageWidth: 150,
+        lineWords: [
+          {
+            text: "Garcia",
+            bbox: { x: boxRight - 2, y: 10, width: 36, height: 14 },
+            pageIndex: 0,
+            confidence: 1,
+            source: "pdf",
+          },
+          {
+            text: "vive",
+            bbox: { x: boxRight + 6, y: 10, width: 24, height: 14 },
+            pageIndex: 0,
+            confidence: 1,
+            source: "pdf",
+          },
+        ],
+      });
+      await renderScenario("doc-repaint-overlapping-neighbor", overlapping, [], scale);
+      const overlapCanvas = takePageCanvas();
+      const overlapRead = overlapCanvas.calls.filter((c) => c.op === "getImageData")[1]!;
+      expect(overlapRead.args[0] as number).toBeGreaterThanOrEqual(boxRightPx);
+      expect(overlapRead.args[0]).toBe(Math.ceil((boxRight + 6) * scale));
+    });
+
+    it("line repaint with an empty source rectangle falls back", async () => {
+      // 1) La banda del renglón queda ENTERA fuera del canvas (la caja está
+      //    debajo del borde inferior de una página de 50 pt): al recortar a los
+      //    límites del canvas el origen no tiene área.
+      const belowCanvas = makeLineRepaintScenario({
+        replacement: { bbox: { x: 20, y: 100, width: lineRepaintWordWidth("Ana"), height: 14 } },
+        pageHeight: 50,
+      });
+      await renderScenario("doc-repaint-empty-source-below", belowCanvas);
+      expectFallback(takePageCanvas());
+
+      // 2) Las vecinas no tienen ancho: `ceil(izquierda) = ceil(derecha)`. Las
+      //    condiciones (a) a (d) pasan (huecos plausibles, densidad 0,31, el
+      //    desplazamiento de 26 px cabe antes del margen), pero no hay nada que
+      //    leer.
+      const zeroWidth = makeLineRepaintScenario({
+        replacement: { replacementValue: "XXXXXXXX" },
+        pageWidth: 90,
+        lineWords: [
+          {
+            text: "a",
+            bbox: { x: 42, y: 10, width: 0, height: 14 },
+            pageIndex: 0,
+            confidence: 1,
+            source: "pdf",
+          },
+        ],
+      });
+      await renderScenario("doc-repaint-empty-source-zero-width", zeroWidth);
+      expectFallback(takePageCanvas());
+    });
+
     it("ink and background colours sampled from a page with a non-white background", async () => {
       const scenario = makeLineRepaintScenario();
       setImageDataProvider((x, y, w, h) =>
@@ -1767,8 +1867,10 @@ describe("RenderEngine — edge cases", () => {
       await renderScenario("doc-repaint-non-white-bg", scenario);
 
       const [canvas] = getCreatedCanvases();
+      // El repintado sí se activó: el renglón se pegó y solo el token se escribió.
+      expect(canvas!.calls.filter((c) => c.op === "putImageData")).toHaveLength(1);
       const fillTextCalls = canvas!.calls.filter((c) => c.op === "fillText");
-      expect(fillTextCalls).toHaveLength(3); // el repintado sí se activó
+      expect(fillTextCalls).toHaveLength(1);
 
       const fillRectCalls = canvas!.calls.filter((c) => c.op === "fillRect");
       // El tapado de la línea usa el fondo MUESTREADO, no "#ffffff".
@@ -1776,12 +1878,9 @@ describe("RenderEngine — edge cases", () => {
       expect(repaintFillRect).toBeDefined();
       expect(fillRectCalls.some((c) => c.fillStyle === "#ffffff")).toBe(false);
 
-      // El token y las vecinas se dibujan con la tinta MUESTREADA.
-      const tokenCall = fillTextCalls.find(
-        (c) => c.args[0] === scenario.replacement.replacementValue,
-      );
-      expect(tokenCall!.fillStyle).toBe("rgb(10, 10, 120)");
-      expect(fillTextCalls.every((c) => c.fillStyle === "rgb(10, 10, 120)")).toBe(true);
+      // El token se dibuja con la tinta MUESTREADA.
+      expect(fillTextCalls[0]!.args[0]).toBe(scenario.replacement.replacementValue);
+      expect(fillTextCalls[0]!.fillStyle).toBe("rgb(10, 10, 120)");
     });
 
     it('OCR words (source: "ocr") drive the repaint like PDF words', async () => {
@@ -1789,27 +1888,31 @@ describe("RenderEngine — edge cases", () => {
       const ocrLineWords = base.lineWords.map((word) => ({ ...word, source: "ocr" as const }));
       const scenario = makeLineRepaintScenario({ lineWords: ocrLineWords });
 
+      await renderScenario("doc-repaint-pdf-words", base);
+      const pdfCanvas = takePageCanvas();
       await renderScenario("doc-repaint-ocr-words", scenario);
-
-      const [canvas] = getCreatedCanvases();
-      const fillTextCalls = canvas!.calls.filter((c) => c.op === "fillText");
-      // Mismo resultado que con palabras `source: "pdf"`: token + 2 vecinas.
-      expect(fillTextCalls).toHaveLength(3);
-      expect(fillTextCalls.some((c) => c.args[0] === "Garcia")).toBe(true);
-      expect(fillTextCalls.some((c) => c.args[0] === "vive")).toBe(true);
+      const ocrCanvas = takePageCanvas();
+      // Mismo resultado que con palabras `source: "pdf"`: el renglón se pega
+      // (y no se reescribe) y el token se dibuja. `putImageData` lleva un
+      // `ImageData` distinto en cada render: se compara todo salvo ese objeto.
+      const signature = (canvas: typeof pdfCanvas): ReadonlyArray<unknown> =>
+        canvas.calls.map((c) => [c.op, ...(c.op === "putImageData" ? c.args.slice(1) : c.args)]);
+      expect(ocrCanvas.calls.filter((c) => c.op === "putImageData")).toHaveLength(1);
+      expect(ocrCanvas.calls.filter((c) => c.op === "fillText")).toHaveLength(1);
+      expect(signature(ocrCanvas)).toEqual(signature(pdfCanvas));
     });
 
     // Guard defensivo no numerado en ADR-058 §6 (que describe una única
     // ocurrencia por línea; ver el comentario de `otherReplacements` en
     // `planLineRepaint`, worker/kernel.ts): si otro reemplazo de la MISMA
     // página ocupa exactamente el lugar de una palabra vecina, esa palabra
-    // se excluye — el repintado de "Ana" nunca redibuja el texto ORIGINAL
-    // de la entidad vecina (lo que deshacía su propia anonimización si esa
-    // entidad se procesó antes en el array). Con el límite duro agregado más
-    // abajo (`nextReplacementBoundaryPt`), excluir "Garcia" también excluye
-    // "vive" —está más allá de donde empieza el teléfono— así que acá el
-    // repintado de "Ana" queda sin ninguna vecina utilizable y cae entero al
-    // shrink-to-fit: ningún fillText de "Garcia" ni de "vive".
+    // se excluye — el repintado de "Ana" nunca mueve el texto ORIGINAL de la
+    // entidad vecina (lo que deshacía su propia anonimización si esa entidad
+    // se procesó antes en el array). Con el límite duro agregado más abajo
+    // (`nextReplacementBoundaryPt`), excluir "Garcia" también excluye "vive"
+    // —está más allá de donde empieza el teléfono— así que acá el repintado de
+    // "Ana" queda sin ninguna vecina utilizable y cae entero al shrink-to-fit:
+    // ni se lee ni se pega ningún renglón.
     it("repaint excludes a neighbour whose position is occupied by another replacement", async () => {
       const base = makeLineRepaintScenario();
       const garciaWord = base.lineWords.find((word) => word.text === "Garcia");
@@ -1828,14 +1931,19 @@ describe("RenderEngine — edge cases", () => {
       await renderScenario("doc-repaint-protects-other-entity", base, [phoneReplacement]);
 
       const [canvas] = getCreatedCanvases();
-      const fillTextCalls = canvas!.calls.filter((c) => c.op === "fillText");
       // Ni "Garcia" (protegida por la exclusión por solape) ni "vive" (más
-      // allá del límite que impone el teléfono) se redibujan jamás.
-      expect(fillTextCalls.some((c) => c.args[0] === "Garcia")).toBe(false);
-      expect(fillTextCalls.some((c) => c.args[0] === "vive")).toBe(false);
-      // "Ana" cae al shrink-to-fit de PR1 — un solo fillText, el suyo.
+      // allá del límite que impone el teléfono) se leen ni se pegan jamás: el
+      // plan ni siquiera arranca, así que no hay muestreo, ni lectura del
+      // renglón, ni pegado (la captura final es el único `getImageData`).
+      expect(canvas!.calls.filter((c) => c.op === "putImageData")).toHaveLength(0);
+      expect(canvas!.calls.filter((c) => c.op === "getImageData")).toHaveLength(1);
+      // "Ana" cae al shrink-to-fit de PR1 — un solo fillText, el suyo, centrado.
+      const fillTextCalls = canvas!.calls.filter((c) => c.op === "fillText");
       expect(fillTextCalls).toHaveLength(1);
       expect(fillTextCalls[0]!.args[0]).toBe(base.replacement.replacementValue);
+      expect(fillTextCalls[0]!.args[1]).toBe(
+        base.replacement.bbox.x + base.replacement.bbox.width / 2,
+      );
     });
 
     // Caso pedido explícitamente: dos entidades comparten línea y el hueco
@@ -1847,7 +1955,8 @@ describe("RenderEngine — edge cases", () => {
     // medio. Con el límite: "Ana" SÍ se repinta (tiene una vecina válida más
     // cerca, "de"), pero nunca cruza hacia el territorio del teléfono, y
     // "vive" —más allá de ese límite— ni se toca. Se verifica además que el
-    // fill opaco del teléfono no se ve invadido por ningún fillRect de "Ana".
+    // fill opaco del teléfono no se ve invadido por ningún fillRect de "Ana"
+    // ni por el pegado del renglón.
     it("repaint does not erase a nearby replacement even when the resulting gap still looks plausible", async () => {
       const deWord = {
         text: "de",
@@ -1865,8 +1974,8 @@ describe("RenderEngine — edge cases", () => {
       };
       const scenario = makeLineRepaintScenario({
         // Token corto a propósito: no entra en el bbox angosto de "Ana" (18pt)
-        // pero necesita muy poco desplazamiento — lo justo para que quepa
-        // antes del teléfono sin cruzar hacia su territorio.
+        // pero necesita muy poco desplazamiento (4 px) — lo justo para que
+        // quepa antes del teléfono sin cruzar hacia su territorio.
         replacement: { replacementValue: "XXXX" },
         lineWords: [deWord, viveWord],
       });
@@ -1887,11 +1996,16 @@ describe("RenderEngine — edge cases", () => {
       const fillTextCalls = canvas!.calls.filter((c) => c.op === "fillText");
       const fillRectCalls = canvas!.calls.filter((c) => c.op === "fillRect");
 
-      // "Ana" sí se repinta, usando "de" como vecina...
-      expect(fillTextCalls.some((c) => c.args[0] === "XXXX")).toBe(true);
-      expect(fillTextCalls.some((c) => c.args[0] === "de")).toBe(true);
-      // ...pero "vive" —más allá de donde empieza el teléfono— nunca se toca.
-      expect(fillTextCalls.some((c) => c.args[0] === "vive")).toBe(false);
+      // "Ana" sí se repinta: se lee SOLO "de" (x 42..54) — "vive" queda más
+      // allá de donde empieza el teléfono y ni se lee — y se pega 4 px a la
+      // derecha. El token es lo único que se escribe.
+      expect(fillTextCalls.map((c) => c.args[0])).toEqual(["XXXX"]);
+      const reads = canvas!.calls.filter((c) => c.op === "getImageData");
+      expect(reads[1]!.args).toEqual([42, 10, 12, 14]);
+      const paste = canvas!.calls.find((c) => c.op === "putImageData")!;
+      expect(paste.args.slice(1)).toEqual([46, 10]);
+      // Nada de lo pegado (46..58) llega al teléfono (64..94).
+      expect((paste.args[1] as number) + (reads[1]!.args[2] as number)).toBeLessThanOrEqual(64);
 
       // El teléfono sigue pintado con su propio fill opaco, intacto.
       const phoneFillRect = fillRectCalls.find(
