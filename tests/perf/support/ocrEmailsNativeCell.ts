@@ -105,6 +105,12 @@ export interface NativeCellRecord {
     readonly allDispatchesAtNativeDpi: boolean;
   };
   readonly detectedByType: CountsByType;
+  /**
+   * Todo lo detectado, como lo leyó el OCR (`value`) y, si la entidad lo trae, normalizado. Solo
+   * sintéticos. No está en las corridas anteriores a ADR-211 (M-E1 y M-E2 «antes»): la comparación
+   * antes/después usa entonces lo perdido y lo agregado contra la verdad.
+   */
+  readonly detected: ReadonlyArray<ObservedEntity>;
   readonly entitiesVsTruth: EntityCounts;
   readonly emails: {
     readonly expected: number;
@@ -276,6 +282,7 @@ export function buildNativeCellRecord(input: NativeCellInput): NativeCellRecord 
       allDispatchesAtNativeDpi: dispatch.dispatches.length > 0 && offNative.length === 0,
     },
     detectedByType: detectedCounts(entities),
+    detected: entities,
     entitiesVsTruth: { byType: vsTruth.byType, totals: vsTruth.totals },
     emails: {
       expected: emailCounts.expected,

@@ -732,6 +732,21 @@ ANONLY_REAL_DOC_R1=/ruta/neutral/R1.pdf ANONLY_REAL_DOC_R2=/ruta/neutral/R2.pdf 
   caffeinate -dimsu ./tests/perf/run-regex-real-docs.sh
 ```
 
+**Caso `Q email search stays linear on adversarial text` (ADR-211, `Regex_Engine.md` §14).** La
+misma campaña suma tres textos adversos para la segunda búsqueda del email default, la de la `@`
+leída como `Q`, que solo corre sobre palabras con `source: "ocr"` (por eso estas corridas arman el
+documento con palabras de OCR; las demás siguen siendo de PDF): `adversarial-q` (muchas `Q`, tramos de
+nombre largos en minúsculas con dos «punto, espacio» y una cola de dominio que no termina en dos
+letras: ningún email), `adversarial-q-late-domain` (lo mismo y, al final, un único email con `Q` y dos
+tramos de nombre) y `adversarial-q-long-local` (una sola corrida de minúsculas del largo pedido
+seguida de `Qexample.org`). Usa el camino público (`RegexEngine` y `DEFAULT_PATTERNS_AR`), sin
+importar internos del motor. El criterio es el de ADR-181: la curva de 2 a 160 KiB, mediana de las tres
+rondas, y **duplicar el largo no puede cuadruplicar el trabajo** (`support/regexWorstCaseQ.ts`:
+cociente `>= 4` entre tamaños exactamente dobles, con un piso de ruido de 2 ms por debajo del cual el
+cociente no se interpreta; no hay gate temporal absoluto). Además las detecciones tienen que ser las
+esperadas (0, 1 y 1). El script sale con 1 si un paso es superlineal o si una detección no coincide, e
+imprime la curva y los cocientes de cada texto; el reporte numérico lleva `qLinearity`.
+
 `run-grouping-worst-case.sh` ejecuta tres rondas intercaladas de 250–2000
 valores distintos y un control de 24 valores repetidos, seguidas de R1/R2 en
 Electron. Registra tiempos de `processOccurrence`, lookup inclusivo, retraso
@@ -1568,3 +1583,34 @@ mismos perdidos y agregados de los demás tipos, mismos candidatos y mismos DPI 
 `observedTextIdentical` es más fuerte: el texto leído es idéntico). Sale con 1 si falta o es inválida
 alguna celda. Que haya emails perdidos o que las repeticiones difieran no es un error del
 instrumento: se informa, y es la línea de base contra la que se compara cualquier cambio de detección.
+
+### Comparar antes y después de un cambio de detección (M-E3)
+
+`support/compareEmailsBeforeAfterCli.ts` compara, celda por celda, una campaña de línea de base
+con la misma campaña corrida con el cambio (usado para ADR-211, el email que tolera la `@` leída
+como `Q`). Sirve a las tres: la fase 1 de DPI descendente (`dpi-down`) y las de emails nativos
+(`native`, M-E1 y M-E2). Lógica pura en `support/emailsBeforeAfter.ts`, con test.
+
+```bash
+pnpm exec tsx --tsconfig tests/tsconfig.json tests/perf/support/compareEmailsBeforeAfterCli.ts \
+  <dpi-down|native> <carpeta-de-la-linea-de-base> <carpeta-con-el-cambio> [nombre]
+```
+
+Escribe `comparison.json` y `comparison.txt` en la carpeta «con el cambio» y los imprime. Por celda
+compara emails esperados, detectados, perdidos y agregados; qué emails se recuperaron (con cómo los leyó
+el OCR antes, el `value` detectado después, su valor normalizado y si coincide letra por letra con el
+email de la verdad) y cuáles siguen perdidos; los emails agregados que no están en la verdad, separando
+los que ya estaban en la línea de base de los nuevos; cualquier otra entidad que cambie contra la
+verdad (en la fase de DPI descendente y en las celdas con `detected`, también el conjunto de entidades
+detectadas); y si el texto leído por el OCR es idéntico (si no, la comparación de esa celda no es
+limpia). Las celdas de corpus reales (`R2`, `R3`) no se leen. Sale con 0 solo si no hay agregados
+nuevos, ni perdidos nuevos, ni otras entidades que cambien, ni celdas inválidas, ni texto leído distinto;
+si no, con 1: se informa, no se corrige.
+
+**Cambio en el puntaje compartido.** Con ADR-211, el `value` de un email leído con `Q` es lo que leyó
+el OCR (`ricardo.ibarraQexample.org`) y el email restituido va en `normalizedValue`. Para que el arnés
+empareje esa ocurrencia con la verdad, `entityKey` (`ocrDpiDownScoring.ts`) usa `normalizedValue`
+**solo en los emails** y cuando existe; para un email con `@` da la misma clave que antes (la
+normalización es pasar a minúsculas) y en los demás tipos no se usa (una fecha se normaliza a otro
+formato). Las celdas de las corridas nuevas guardan `normalizedValue` en `detected`, y las de emails
+nativos suman `detected` completo. Los registros anteriores no lo tienen y se siguen leyendo igual.
