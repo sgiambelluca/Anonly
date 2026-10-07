@@ -5,7 +5,7 @@ import {
   ADDRESS_HEIGHT_SENTENCES,
   FILLER_AFTER,
   FILLER_BEFORE,
-  expectedContextOutcome,
+  expectedOutcome,
   expectedPageText,
   isYearLike,
 } from "./addressHeightSentences.js";
@@ -72,7 +72,7 @@ describe("addressHeightSentences", () => {
     expect(sentence("G2").text).not.toContain("°");
   });
 
-  it("el relleno no tiene ninguna palabra de la lista de ADR-212 y no tiene dígitos", () => {
+  it("el relleno no tiene ninguna palabra de dirección y no tiene dígitos", () => {
     for (const filler of [FILLER_BEFORE, FILLER_AFTER]) {
       const words = filler.toLowerCase().split(/\s+/);
       for (const cue of CUE_WORDS) expect(words).not.toContain(cue);
@@ -94,15 +94,17 @@ describe("addressHeightSentences", () => {
       expect(isYearLike(other)).toBe(false);
   });
 
-  it("expectedContextOutcome sigue la tabla de ADR-212", () => {
+  it("expectedOutcome sigue la regla vigente de ADR-212: dentro, salvo H4 y H5", () => {
     for (const s of ADDRESS_HEIGHT_SENTENCES) {
-      const expected = expectedContextOutcome(s);
-      if (["A", "B", "C", "G", "F"].includes(s.category)) expect(expected, s.id).toBe("inside");
-      else if (s.category === "D") expect(expected, s.id).toBe("visible");
-      else if (s.category === "E") expect(expected, s.id).toBe("untouched");
-      else if (s.id === "H4" || s.id === "H5") expect(expected, s.id).toBe("untouched");
+      const expected = expectedOutcome(s);
+      if (s.id === "H4" || s.id === "H5") expect(expected, s.id).toBe("untouched");
       else expect(expected, s.id).toBe("inside");
     }
+    // D y E ya no son una excepción: el año se suma, con o sin palabra de dirección.
+    for (const s of ADDRESS_HEIGHT_SENTENCES.filter(
+      (c) => c.category === "D" || c.category === "E",
+    ))
+      expect(expectedOutcome(s), s.id).toBe("inside");
   });
 
   it("la categoría A es la única con alturas que no parecen año; B, C, D y E son años", () => {

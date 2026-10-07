@@ -70,7 +70,6 @@ describe("classifySentence", () => {
     expect(record.numberInAddress).toBe(false);
     expect(record.adjacent).toBe(true);
     expect(record.yearLike).toBe(false);
-    expect(record.alwaysWouldCover).toBe(false);
   });
 
   it("la dirección extendida contiene el número", () => {
@@ -78,28 +77,26 @@ describe("classifySentence", () => {
     expect(record.placeMarked).toBe(true);
     expect(record.numberInAddress).toBe(true);
     expect(record.adjacent).toBe(false);
-    expect(record.alwaysWouldCover).toBe(false);
   });
 
-  it("un año pegado a un lugar sin palabra de dirección: tapar siempre lo cubriría", () => {
+  it("un año pegado a un lugar que la dirección no incluye: queda a la vista y es adyacente", () => {
     const record = classify(ROSARIO, [occurrence("ADDRESS", "Rosario")]);
     expect(record.placeMarked).toBe(true);
     expect(record.numberInAddress).toBe(false);
     expect(record.adjacent).toBe(true);
     expect(record.yearLike).toBe(true);
-    expect(record.alwaysWouldCover).toBe(true);
   });
 
-  it("si la dirección ya incluye el año, tapar siempre no cambia nada", () => {
+  it("si la dirección incluye el año, el número queda dentro", () => {
     const record = classify(ROSARIO, [occurrence("ADDRESS", "Rosario 2019")]);
     expect(record.numberInAddress).toBe(true);
-    expect(record.alwaysWouldCover).toBe(false);
+    expect(record.yearLike).toBe(true);
   });
 
   it("el lugar no marcado por el modelo: nada se cuenta como cubierto", () => {
     const record = classify(BELGRANO_D, []);
     expect(record.placeMarked).toBe(false);
-    expect(record.alwaysWouldCover).toBe(false);
+    expect(record.numberInAddress).toBe(false);
     expect(record.addressValues).toEqual([]);
   });
 
@@ -117,7 +114,6 @@ describe("classifySentence", () => {
     expect(record.numberCoveredByOther).toEqual(["DATE"]);
     expect(record.numberInAddress).toBe(false);
     expect(record.yearLike).toBe(false);
-    expect(record.alwaysWouldCover).toBe(false);
   });
 
   it("adjacent acepta los conectores de ADR-212 y rechaza otro texto entre medio", () => {
@@ -214,16 +210,28 @@ describe("checkExpectation", () => {
     expect(check.reason).toContain("quedó a la vista");
   });
 
-  it("categoría D: la altura a la vista es lo esperado; dentro es un desvío", () => {
-    const visible = checkExpectation(classify(BELGRANO_D, [occurrence("ADDRESS", "Belgrano")]));
-    expect(visible).toEqual({ asExpected: true, expected: "visible", reason: null });
+  it("categoría D: la altura con forma de año dentro es lo esperado; a la vista es un desvío", () => {
     const inside = checkExpectation(classify(BELGRANO_D, [occurrence("ADDRESS", "Belgrano 1950")]));
-    expect(inside.asExpected).toBe(false);
-    expect(inside.reason).toContain("altura a la vista");
+    expect(inside).toEqual({ asExpected: true, expected: "inside", reason: null });
+    const visible = checkExpectation(classify(BELGRANO_D, [occurrence("ADDRESS", "Belgrano")]));
+    expect(visible.asExpected).toBe(false);
+    expect(visible.expected).toBe("inside");
+    expect(visible.reason).toContain("quedó a la vista");
   });
 
-  it("categoría E: el año dentro es tapado de más", () => {
+  it("categoría E: el año dentro es lo esperado (tapado de más); a la vista es un desvío", () => {
     const inside = checkExpectation(classify(ROSARIO, [occurrence("ADDRESS", "Rosario 2019")]));
+    expect(inside).toEqual({ asExpected: true, expected: "inside", reason: null });
+    const visible = checkExpectation(classify(ROSARIO, [occurrence("ADDRESS", "Rosario")]));
+    expect(visible.asExpected).toBe(false);
+    expect(visible.reason).toContain("quedó a la vista");
+  });
+
+  it("H4: el número que la forma excluye se espera sin tocar; dentro es un desvío", () => {
+    const h4 = sentence("H4", "Se reunieron en Salta 12/03/2021 por la mañana.", "Salta", "12");
+    const untouched = checkExpectation(classify(h4, [occurrence("ADDRESS", "Salta")]));
+    expect(untouched).toEqual({ asExpected: true, expected: "untouched", reason: null });
+    const inside = checkExpectation(classify(h4, [occurrence("ADDRESS", "Salta 12")]));
     expect(inside.asExpected).toBe(false);
     expect(inside.reason).toContain("tapado de más");
   });

@@ -1,11 +1,8 @@
 /**
  * M-D1: el resumen de la medición de la regla de direcciones de ADR-212. Pura: recibe los registros de las
- * corridas (`addressHeightRun.ts`) y da, por categoría y en total, para las dos variantes:
- *
- * - la regla por contexto (la implementada): cuántos números quedan dentro de la dirección y cuántos a la
- *   vista;
- * - «tapar siempre» (la reserva): lo mismo sumando las oraciones con `alwaysWouldCover`, que son todas
- *   las que la regla decidió no extender por parecer un año sin palabra de dirección cerca.
+ * corridas (`addressHeightRun.ts`) y da, por categoría y en total, cuántos números quedan dentro de la
+ * dirección y cuántos a la vista, y qué oraciones dan un resultado distinto del que la regla vigente
+ * espera (el número se suma siempre, salvo que su forma lo excluya).
  *
  * Las oraciones donde el modelo no marcó el lugar se cuentan aparte: son un límite del modelo, no de la
  * regla. Esto es una medición: que el resultado no sea el esperado se informa, no es un error.
@@ -22,20 +19,15 @@ const YEAR_CATEGORIES: ReadonlyArray<AddressHeightCategory> = ["E", "F"];
 /** Categoría de lugar y otro número: lo que queda dentro es un número tapado de más. */
 const OTHER_NUMBER_CATEGORIES: ReadonlyArray<AddressHeightCategory> = ["H"];
 
-export interface VariantCounts {
-  /** Números dentro de la dirección, sobre las oraciones con el lugar marcado. */
-  readonly inside: number;
-  /** Números a la vista, sobre las oraciones con el lugar marcado. */
-  readonly visible: number;
-}
-
 export interface CategoryRow {
   readonly category: AddressHeightCategory | "total";
   readonly sentences: number;
   readonly placeMarked: number;
   readonly placeNotMarked: number;
-  readonly context: VariantCounts;
-  readonly always: VariantCounts;
+  /** Números dentro de la dirección, sobre las oraciones con el lugar marcado. */
+  readonly inside: number;
+  /** Números a la vista, sobre las oraciones con el lugar marcado. */
+  readonly visible: number;
   /** Oraciones con el lugar marcado cuyo número cubrió otro tipo de entidad (y cuál). */
   readonly numberCoveredByOther: number;
 }
@@ -43,8 +35,8 @@ export interface CategoryRow {
 export interface HeadlineCounts {
   /** Oraciones de la familia con el lugar marcado. */
   readonly marked: number;
-  readonly context: number;
-  readonly always: number;
+  /** De esas, las que tienen el número del lado que cuenta la familia (a la vista o dentro). */
+  readonly count: number;
 }
 
 export interface UnexpectedItem {
@@ -64,11 +56,11 @@ export interface NotMarkedItem {
 export interface RunTable {
   readonly rows: ReadonlyArray<CategoryRow>;
   readonly total: CategoryRow;
-  /** Alturas (A, B, C, D, G) que quedan a la vista con cada variante. */
+  /** Alturas (A, B, C, D, G) que quedan a la vista. */
   readonly heightsVisible: HeadlineCounts;
-  /** Años (E, F) tapados de más con cada variante. */
+  /** Años (E, F) tapados de más. */
   readonly yearsOverCovered: HeadlineCounts;
-  /** Otros números (H) tapados de más con cada variante. */
+  /** Otros números (H) tapados de más. */
   readonly otherNumbersOverCovered: HeadlineCounts;
   readonly unexpected: ReadonlyArray<UnexpectedItem>;
   readonly notMarked: ReadonlyArray<NotMarkedItem>;
@@ -105,18 +97,14 @@ function rowFor(
   records: ReadonlyArray<SentenceRecord>,
 ): CategoryRow {
   const marked = records.filter((r) => r.placeMarked);
-  const insideContext = marked.filter((r) => r.numberInAddress).length;
-  const extra = marked.filter((r) => r.alwaysWouldCover).length;
+  const inside = marked.filter((r) => r.numberInAddress).length;
   return {
     category,
     sentences: records.length,
     placeMarked: marked.length,
     placeNotMarked: records.length - marked.length,
-    context: { inside: insideContext, visible: marked.length - insideContext },
-    always: {
-      inside: insideContext + extra,
-      visible: marked.length - insideContext - extra,
-    },
+    inside,
+    visible: marked.length - inside,
     numberCoveredByOther: marked.filter((r) => r.numberCoveredByOther.length > 0).length,
   };
 }
@@ -127,12 +115,10 @@ function headline(
   side: "visible" | "inside",
 ): HeadlineCounts {
   const marked = records.filter((r) => r.placeMarked && categories.includes(r.category));
-  const insideContext = marked.filter((r) => r.numberInAddress).length;
-  const insideAlways = insideContext + marked.filter((r) => r.alwaysWouldCover).length;
+  const inside = marked.filter((r) => r.numberInAddress).length;
   return {
     marked: marked.length,
-    context: side === "visible" ? marked.length - insideContext : insideContext,
-    always: side === "visible" ? marked.length - insideAlways : insideAlways,
+    count: side === "visible" ? marked.length - inside : inside,
   };
 }
 
@@ -185,7 +171,6 @@ function repetitionKey(record: SentenceRecord): unknown {
     numberInAddress: record.numberInAddress,
     numberCoveredByOther: record.numberCoveredByOther,
     adjacent: record.adjacent,
-    alwaysWouldCover: record.alwaysWouldCover,
     occurrences: record.occurrences.map((o) => [o.entityType, o.value, o.source]),
   };
 }
@@ -251,15 +236,14 @@ function pad(value: string | number, width: number): string {
   return String(value).padStart(width);
 }
 
-function formatVariantTable(table: RunTable): string[] {
+function formatTable(table: RunTable): string[] {
   const lines = [
-    "Cat  Oraciones  LugarMarcado  NoMarcado | Contexto: dentro  a la vista | Tapar siempre: dentro  a la vista | Cubierto por otro tipo",
+    "Cat  Oraciones  LugarMarcado  NoMarcado | Número: dentro  a la vista | Cubierto por otro tipo",
   ];
   for (const row of [...table.rows, table.total]) {
     lines.push(
       `${row.category.padEnd(5)}${pad(row.sentences, 9)}${pad(row.placeMarked, 14)}${pad(row.placeNotMarked, 11)} |` +
-        `${pad(row.context.inside, 18)}${pad(row.context.visible, 12)} |` +
-        `${pad(row.always.inside, 22)}${pad(row.always.visible, 12)} |${pad(row.numberCoveredByOther, 22)}`,
+        `${pad(row.inside, 15)}${pad(row.visible, 12)} |${pad(row.numberCoveredByOther, 22)}`,
     );
   }
   return lines;
@@ -273,12 +257,12 @@ export function formatSummaryTable(summary: AddressHeightSummary): string {
       `Corrida ${run.repetition}: ${run.valid ? "válida" : `INVÁLIDA (${run.invalidReasons.join("; ")})`}`,
     );
     if (run.table === null) continue;
-    lines.push(...formatVariantTable(run.table));
+    lines.push(...formatTable(run.table));
     const t = run.table;
     lines.push(
-      `Alturas a la vista (A, B, C, D, G; sobre ${t.heightsVisible.marked} con el lugar marcado): contexto ${t.heightsVisible.context}, tapar siempre ${t.heightsVisible.always}`,
-      `Años tapados de más (E, F; sobre ${t.yearsOverCovered.marked}): contexto ${t.yearsOverCovered.context}, tapar siempre ${t.yearsOverCovered.always}`,
-      `Otros números tapados de más (H; sobre ${t.otherNumbersOverCovered.marked}): contexto ${t.otherNumbersOverCovered.context}, tapar siempre ${t.otherNumbersOverCovered.always}`,
+      `Alturas a la vista (A, B, C, D, G; sobre ${t.heightsVisible.marked} con el lugar marcado): ${t.heightsVisible.count}`,
+      `Años tapados de más (E, F; sobre ${t.yearsOverCovered.marked}): ${t.yearsOverCovered.count}`,
+      `Otros números tapados de más (H; sobre ${t.otherNumbersOverCovered.marked}): ${t.otherNumbersOverCovered.count}`,
     );
     lines.push(
       `Lugar no marcado por el modelo (límite del modelo): ${t.notMarked.map((n) => n.id).join(", ") || "ninguna"}`,
@@ -314,7 +298,6 @@ export function resultLine(summary: AddressHeightSummary): string {
   const heights =
     first === undefined || first === null
       ? "sin datos"
-      : `alturas a la vista ${first.heightsVisible.context} (contexto) / ${first.heightsVisible.always} (tapar siempre), ` +
-        `años tapados de más ${first.yearsOverCovered.context} / ${first.yearsOverCovered.always}`;
+      : `alturas a la vista ${first.heightsVisible.count}, años tapados de más ${first.yearsOverCovered.count}`;
   return `M-D1: ${summary.complete ? "completa" : "INCOMPLETA"}; repeticiones ${agree}; ${heights}.`;
 }

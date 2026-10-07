@@ -64,12 +64,12 @@ function run(
   };
 }
 
-// A1 dentro; D1 a la vista (esperado); E1 año sin tocar (tapar siempre lo cubriría); F1 año dentro
-// (tapado de más); H1 dentro; G1 sin marcar por el modelo.
+// A1, E1 (año sin palabra de dirección), F1 y H1 dentro, como espera la regla vigente; D1 a la vista (un
+// desvío: la regla suma el año siempre); G1 sin marcar por el modelo.
 const SAMPLE = [
   record(A1, ["Maipú 742"]),
   record(D1, ["Belgrano"]),
-  record(E1, ["Rosario"]),
+  record(E1, ["Rosario 2019"]),
   record(F1, ["Mendoza 2005"]),
   record(H1, ["Mendoza 3"]),
   record(G1, []),
@@ -84,42 +84,49 @@ describe("buildRunTable", () => {
       sentences: 1,
       placeMarked: 1,
       placeNotMarked: 0,
-      context: { inside: 1, visible: 0 },
-      always: { inside: 1, visible: 0 },
+      inside: 1,
+      visible: 0,
     });
-    expect(byCategory.D).toMatchObject({
-      context: { inside: 0, visible: 1 },
-      always: { inside: 1, visible: 0 },
-    });
-    expect(byCategory.E).toMatchObject({
-      context: { inside: 0, visible: 1 },
-      always: { inside: 1, visible: 0 },
-    });
+    expect(byCategory.D).toMatchObject({ inside: 0, visible: 1 });
+    expect(byCategory.E).toMatchObject({ inside: 1, visible: 0 });
     expect(byCategory.G).toMatchObject({ placeMarked: 0, placeNotMarked: 1 });
-    expect(table.total).toMatchObject({ sentences: 6, placeMarked: 5, placeNotMarked: 1 });
-    expect(table.total.context).toEqual({ inside: 3, visible: 2 });
-    expect(table.total.always).toEqual({ inside: 5, visible: 0 });
+    expect(table.total).toMatchObject({
+      sentences: 6,
+      placeMarked: 5,
+      placeNotMarked: 1,
+      inside: 4,
+      visible: 1,
+    });
   });
 
-  it("alturas a la vista: la regla deja la de D; tapar siempre la cubre", () => {
-    expect(table.heightsVisible).toEqual({ marked: 2, context: 1, always: 0 });
+  it("alturas a la vista: la de D", () => {
+    expect(table.heightsVisible).toEqual({ marked: 2, count: 1 });
   });
 
-  it("años tapados de más: la regla tapa el de F; tapar siempre suma el de E", () => {
-    expect(table.yearsOverCovered).toEqual({ marked: 2, context: 1, always: 2 });
+  it("años tapados de más: el de E y el de F", () => {
+    expect(table.yearsOverCovered).toEqual({ marked: 2, count: 2 });
   });
 
   it("otros números tapados de más: H1", () => {
-    expect(table.otherNumbersOverCovered).toEqual({ marked: 1, context: 1, always: 1 });
+    expect(table.otherNumbersOverCovered).toEqual({ marked: 1, count: 1 });
+  });
+
+  it("no tiene ninguna columna de «tapar siempre»", () => {
+    expect(JSON.stringify(table)).not.toContain("always");
+    expect(JSON.stringify(table)).not.toContain("alwaysWouldCover");
   });
 
   it("lista las no marcadas y los desvíos de la regla con su motivo", () => {
     expect(table.notMarked.map((item) => item.id)).toEqual(["G1"]);
-    // E1 no es desvío (sin tocar); F1 está esperado dentro; el único desvío posible acá es ninguno.
-    expect(table.unexpected).toEqual([]);
-    const withDeviation = buildRunTable([record(A1, ["Maipú"]), record(E1, ["Rosario 2019"])]);
+    // D1 queda a la vista y la regla vigente espera el año dentro: es un desvío.
+    expect(table.unexpected.map((item) => item.id)).toEqual(["D1"]);
+    expect(table.unexpected[0]?.reason).toContain("quedó a la vista");
+    // Un número sin sumar es un desvío en A y en E; con los dos dentro no hay ninguno.
+    const withDeviation = buildRunTable([record(A1, ["Maipú"]), record(E1, ["Rosario"])]);
     expect(withDeviation.unexpected.map((item) => item.id)).toEqual(["A1", "E1"]);
     expect(withDeviation.unexpected[0]?.addressValues).toEqual(["Maipú"]);
+    const clean = buildRunTable([record(A1, ["Maipú 742"]), record(E1, ["Rosario 2019"])]);
+    expect(clean.unexpected).toEqual([]);
   });
 });
 
@@ -168,20 +175,23 @@ describe("summarizeAddressHeight", () => {
     expect(reverse.map((d) => d.id)).toEqual(["E1", "F1", "H1", "G1"]);
   });
 
-  it("la tabla legible y la línea de resultado nombran las dos variantes", () => {
+  it("la tabla legible y la línea de resultado dan una sola medición, sin «tapar siempre»", () => {
     const summary = summarizeAddressHeight({
       expectedRepetitions: 2,
       records: [run(1, SAMPLE), run(2, SAMPLE)],
     });
     const table = formatSummaryTable(summary);
     expect(table).toContain("Corrida 1: válida");
-    expect(table).toContain("Contexto");
-    expect(table).toContain("Tapar siempre");
+    expect(table).toContain("Número: dentro");
+    expect(table).not.toContain("Tapar siempre");
+    expect(table).not.toContain("tapar siempre");
+    expect(table).not.toContain("Contexto");
+    expect(table).toContain("Alturas a la vista (A, B, C, D, G; sobre 2 con el lugar marcado): 1");
+    expect(table).toContain("Años tapados de más (E, F; sobre 2): 2");
     expect(table).toContain("Lugar no marcado por el modelo (límite del modelo): G1");
     expect(table).toContain("Repeticiones: coinciden oración por oración.");
     expect(resultLine(summary)).toBe(
-      "M-D1: completa; repeticiones coinciden; alturas a la vista 1 (contexto) / 0 (tapar siempre), " +
-        "años tapados de más 1 / 2.",
+      "M-D1: completa; repeticiones coinciden; alturas a la vista 1, años tapados de más 2.",
     );
   });
 

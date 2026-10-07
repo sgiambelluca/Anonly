@@ -1,6 +1,6 @@
 /**
- * M-D1 (`docs/roadmap/hardening/Confianza_1.0.x_Plan.md`, ADR-212): ¿alcanza la regla por contexto que suma
- * la altura a la dirección que marcó el modelo, o hay que tapar siempre? Opt-in: la lanza
+ * M-D1 (`docs/roadmap/hardening/Confianza_1.0.x_Plan.md`, ADR-212): ¿cuánto suma y cuánto deja a la vista
+ * la regla que extiende la dirección que marcó el modelo hasta el número que la sigue? Opt-in: la lanza
  * `run-address-height.sh`. Un PDF digital (capa de texto, sin OCR) generado acá, una oración de prueba por
  * página, se importa en la aplicación Electron empaquetada con el modelo real y la configuración por
  * defecto (la suite de medición solo fija el perfil, ADR-194 §8). Una instancia fría de Electron por
