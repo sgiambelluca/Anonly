@@ -44,6 +44,24 @@ pnpm run version   # sube las versiones y escribe los CHANGELOG
 Tiene que ser `pnpm run version`: `pnpm version` a secas es un comando propio
 de pnpm, que imprime versiones y no toca nada.
 
+En la misma rama, **escribí las novedades de la versión** (ADR-216): una
+entrada nueva, arriba de todo, en
+`apps/react-client/src/components/screens/releaseNotes.ts`. Es lo que el
+usuario lee en el menú «Novedades» de la pantalla de inicio, y viaja dentro
+del instalador.
+
+- Dos o tres líneas, escritas para quien usa la aplicación: sin ADR ni
+  nombres internos, una oración por línea, 140 caracteres como máximo.
+- Cada línea lleva su etiqueta: **Nuevo** (antes no se podía), **Mejora** (ya
+  existía y funciona mejor) o **Arreglo** (fallaba).
+- Si cambió la detección, una línea lo dice.
+- La fecha es la del día en que pensás publicar. Si el tag se corre, corregila
+  antes de tagear.
+
+`pnpm test` falla mientras la versión nueva no tenga su entrada. El detalle
+completo y las limitaciones conocidas siguen yendo en las notas del release
+de GitHub.
+
 **4. Probás la versión y promovés `develop` a `main` con un merge commit.**
 Es el único caso donde se usa Create a merge commit (ADR-209). Así los commits
 de `develop` entran a `main` con el mismo SHA, y la próxima promoción solo trae
