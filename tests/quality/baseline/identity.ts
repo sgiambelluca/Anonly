@@ -101,8 +101,20 @@ export async function computeModelId(): Promise<string> {
   return `ner-model@${weights.revision}`;
 }
 
+/**
+ * Campo `identity.commit` (ADR-147 §1, precisión del 2026-10-07): el encabezado
+ * del commit medido y el nombre de la branch, con el formato exacto
+ * `<encabezado> (branch <nombre>)`. No es el hash: `develop` integra por rebase
+ * y los hashes cambian, así que un hash en la línea de base dejaría de
+ * identificar el commit medido. Con `HEAD` suelto (sin branch) `git` informa
+ * `HEAD` como nombre.
+ */
 export function readCommit(): string {
-  return execFileSync("git", ["rev-parse", "HEAD"], { cwd: REPO_ROOT, encoding: "utf-8" }).trim();
+  const git = (args: ReadonlyArray<string>): string =>
+    execFileSync("git", [...args], { cwd: REPO_ROOT, encoding: "utf-8" }).trim();
+  const subject = git(["log", "-1", "--format=%s", "HEAD"]);
+  const branch = git(["rev-parse", "--abbrev-ref", "HEAD"]);
+  return `${subject} (branch ${branch})`;
 }
 
 /** Arma la `BaselineIdentity` completa para una corrida con `runtime` dado. */
