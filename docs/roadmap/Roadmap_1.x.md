@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap-1.x | dependencias=roadmap/Version_1.0.md,roadmap/Version_2.0.md,roadmap/Future_Ideas.md,roadmap/hitos/Post_Hito10.8_Pendientes.md,RELEASING.md,00_Project_Vision.md,architecture/08_Security_Model.md,adr/ADR-009-Export-Strategy.md,adr/ADR-059-Leyenda-Opcional-De-Marcadores.md,adr/ADR-148-Un-Export-Se-Verifica-Leyendo-El-PDF-Exportado.md,adr/ADR-190-Una-Pagina-Con-Tinta-No-Sale-Vacia-En-Silencio.md,roadmap/hardening/Export_Verificado_ADR148_Plan.md,roadmap/hardening/ADR148_Revision_2026-10-05.md,roadmap/hardening/ADR148_Revision_Sol61_2026-10-05.md,roadmap/ocr/Regiones_Pequenas_Investigacion_Plan.md,adr/ADR-202-El-Minimo-De-Region-OCR-Se-Prueba-A-25pt-Antes-De-Adoptarlo.md,roadmap/ocr/Regiones_Pequenas_25pt_Experimento_Plan.md,roadmap/interaccion/Mejoras_Interaccion_2026-10-05.md,adr/ADR-204-La-Interaccion-Anonimizada-Usa-La-Geometria-Visible.md,adr/ADR-205-El-Resultado-Exportado-Pertenece-A-Una-Revision.md,adr/ADR-206-Una-Busqueda-Omitida-No-Confirma-La-Version.md,roadmap/interaccion/Revision_ADR204_2026-10-07.md,roadmap/hardening/Confianza_1.0.x_Plan.md,adr/ADR-210-El-Repintado-De-Linea-Desplaza-Los-Pixeles-Del-Renglon.md,adr/ADR-211-El-Email-Tolera-La-Arroba-Leida-Como-Q-En-Texto-De-OCR.md,adr/ADR-212-La-Direccion-Incluye-La-Altura-Que-La-Sigue.md,roadmap/mediciones/ocr/Emails_DPI_Nativo_2026-10-07.md,roadmap/mediciones/ner/Altura_De_Direcciones_2026-10-07.md,roadmap/distribucion/SignPath_Postulacion.md,architecture/08_Security_Model.md | audiencia=humanos+IA | fase=12 -->
+<!-- CONTEXT: scope=roadmap-1.x | dependencias=roadmap/Version_1.0.md,roadmap/Version_2.0.md,roadmap/Future_Ideas.md,roadmap/hitos/Post_Hito10.8_Pendientes.md,RELEASING.md,00_Project_Vision.md,architecture/08_Security_Model.md,adr/ADR-009-Export-Strategy.md,adr/ADR-059-Leyenda-Opcional-De-Marcadores.md,adr/ADR-148-Un-Export-Se-Verifica-Leyendo-El-PDF-Exportado.md,adr/ADR-190-Una-Pagina-Con-Tinta-No-Sale-Vacia-En-Silencio.md,roadmap/hardening/Export_Verificado_ADR148_Plan.md,roadmap/hardening/ADR148_Revision_2026-10-05.md,roadmap/hardening/ADR148_Revision_Sol61_2026-10-05.md,roadmap/ocr/Regiones_Pequenas_Investigacion_Plan.md,adr/ADR-202-El-Minimo-De-Region-OCR-Se-Prueba-A-25pt-Antes-De-Adoptarlo.md,roadmap/ocr/Regiones_Pequenas_25pt_Experimento_Plan.md,roadmap/interaccion/Mejoras_Interaccion_2026-10-05.md,adr/ADR-204-La-Interaccion-Anonimizada-Usa-La-Geometria-Visible.md,adr/ADR-205-El-Resultado-Exportado-Pertenece-A-Una-Revision.md,adr/ADR-206-Una-Busqueda-Omitida-No-Confirma-La-Version.md,roadmap/interaccion/Revision_ADR204_2026-10-07.md,roadmap/hardening/Confianza_1.0.x_Plan.md,adr/ADR-210-El-Repintado-De-Linea-Desplaza-Los-Pixeles-Del-Renglon.md,adr/ADR-211-El-Email-Tolera-La-Arroba-Leida-Como-Q-En-Texto-De-OCR.md,adr/ADR-212-La-Direccion-Incluye-La-Altura-Que-La-Sigue.md,adr/ADR-213-Cambiar-De-Vista-No-Muestra-Una-Imagen-A-Otra-Escala.md,adr/ADR-214-La-Que-Pierde-Un-Conflicto-No-Se-Descarta-Si-Cubre-Mas-Texto.md,roadmap/mediciones/ocr/Emails_DPI_Nativo_2026-10-07.md,roadmap/mediciones/ner/Altura_De_Direcciones_2026-10-07.md,roadmap/distribucion/SignPath_Postulacion.md,architecture/08_Security_Model.md | audiencia=humanos+IA | fase=12 -->
 
 # Anonly — Roadmap 1.x
 
@@ -205,6 +205,13 @@ Lo primero, porque es lo que permite tocar la detección sin miedo.
   se suma aunque tenga forma de año. Aparte, en 9 de 48 oraciones
   con un domicilio el modelo no marcó la calle: ese límite no lo cierra
   ninguna de las dos.
+
+  **Un defecto que apareció al revisar, y ya estaba en la 1.0**: en texto en
+  mayúsculas, una dirección que chocaba con el patrón de patente («AVENIDA
+  DEL MAR 450») se descartaba entera y la calle quedaba a la vista.
+  Corregido en la misma branch con ADR-214: una detección que pierde un
+  conflicto ya no se descarta si cubre texto que la ganadora no cubre. La
+  línea de base de calidad quedó en 78 de 78.
 - **Firma de Windows con SignPath: cerrado sin firma.** SignPath rechazó la
   postulación (informado el 2026-10-07). No hay otra vía gratuita, así que
   Windows sigue sin Authenticode y pasa a figurar como riesgo aceptado en
@@ -214,8 +221,9 @@ Lo primero, porque es lo que permite tocar la detección sin miedo.
 - **El repintado de línea dibuja con otra tipografía y depende del zoom**
   (hallazgo del 2026-10-07). **Corregido en la branch de Confianza**: ADR-210,
   aceptado ese día, mueve los píxeles del renglón y elimina la calibración.
-  Implementado y probado en la app; falta el revisor. Lo que sigue es el
-  planteo original. Al revisar la interacción en la
+  Implementado, probado en la app y revisado. De la revisión salió una
+  guarda: si la franja que se mueve cruza la caja de otro dato tapado, no se
+  repinta. Lo que sigue es el planteo original. Al revisar la interacción en la
   vista anonimizada (ADR-204, que quedó validada) se midió que el repintado
   de ADR-058 redibuja el resto del renglón en monoespaciada chica, y que se
   activa o no según la escala: el mismo renglón cambia con el zoom, y nada
@@ -421,6 +429,17 @@ asignada.
 - En un escaneo quedan restos tenues, no legibles, de la tinta original
   alrededor de una etiqueta que entra en su caja. Visto el 2026-10-07 en una
   captura del export; sin medir contra el gate de ADR-148.
+- Al pasar a «Anonimizado» se ve un cuadro gris de unos 16 ms aunque haya
+  una imagen guardada. Evitarlo pide tener las imágenes ya decodificadas
+  (2026-10-07, `hardening/Confianza_1.0.x_Plan.md`, frente 5).
+- El reintento del visor, cada 700 ms, reinicia un dibujo que tarda más que
+  eso. Visto solo con un atraso artificial de 1,5 s; falta medir cuánto tarda
+  un dibujo real en un equipo lento.
+- Dos direcciones de la misma calle con alturas parecidas quedan en un mismo
+  grupo, por la agrupación difusa (visto el 2026-10-07 con «AVENIDA DEL MAR
+  4500» y «AVENIDA DEL MAR 450»).
+- El test `interaction geometry does not change full rendering` compara el
+  lienzo de codificación y no el de la página.
 - PDF con rotación de página declarada (`/Rotate ≠ 0`), sin medir (§8).
 - Censura sobre texto superpuesto, como un sello que pisa el cuerpo (§7).
 - Variantes de operaciones de imagen de pdf.js sin cubrir (§9).

@@ -37,8 +37,8 @@ entonces arranca el implementador de `render-engine`.
 |---|---|---|---|---|
 | 1 | Memoria | M-M1: pico del perfil Bajo sobre `P2H` | implementador (`tests/perf`) y planificador | **cerrado el 2026-10-07**: máximo 2,05 GB, techo fijado en 2,5 GB, también en el arnés |
 | 2 | Emails | M-E1: línea de base sobre escaneos de 200 y 150 dpi nativos | implementador (`tests/perf`) y planificador | **medido el 2026-10-07**: sin pérdidas a 200 dpi nativos; 2 de 25 a 150 |
-| 3 | Repintado | Implementación desde el spec, capturas, revisor | implementador, mantenedor, revisor | ADR-210 **aceptado**, spec v1.18.0, implementación en `render-engine` y E2E con canvas real **entregados** el 2026-10-07; capturas del preview y del export enviadas al mantenedor. Falta el revisor, que va al final de la branch |
-| 4 | Direcciones | Auditoría de la línea de base; después ADR | planificador | **auditado el 2026-10-07**: el modelo detecta la calle y deja el número afuera. ADR-212 **aceptado a prueba** ese día, spec de NER v1.11.0 e **implementación en `ner-engine` entregada** (139 tests del módulo en verde, 98,8 % de líneas). **Medido el 2026-10-07 (M-D1)**: la regla deja 6 alturas a la vista y tapa 4 años de más; tapar siempre, 0 y 9. Las cuatro direcciones de la línea de base quedan cubiertas. **Decidido por el mantenedor el 2026-10-07: tapar siempre**, sin volver a medir. ADR-212 y spec de NER v1.12.0 enmendados; sigue el cambio en `ner-engine` y el revisor |
+| 3 | Repintado | Implementación desde el spec, capturas, revisor | implementador, mantenedor, revisor | ADR-210 **aceptado**, spec v1.18.0, implementación en `render-engine` y E2E con canvas real **entregados** el 2026-10-07; capturas del preview y del export enviadas al mantenedor. Revisado el 2026-10-07; de esa revisión salió la condición (e), que no repinta si la zona tocada cruza otro reemplazo |
+| 4 | Direcciones | Auditoría de la línea de base; después ADR | planificador | **auditado el 2026-10-07**: el modelo detecta la calle y deja el número afuera. ADR-212 **aceptado a prueba** ese día, spec de NER v1.11.0 e **implementación en `ner-engine` entregada** (139 tests del módulo en verde, 98,8 % de líneas). **Medido el 2026-10-07 (M-D1)**: la regla deja 6 alturas a la vista y tapa 4 años de más; tapar siempre, 0 y 9. Las cuatro direcciones de la línea de base quedan cubiertas. **Decidido por el mantenedor el 2026-10-07: tapar siempre**, sin volver a medir. ADR-212 y spec de NER v1.12.0 enmendados e implementados. La revisión encontró que la dirección extendida podía descartarse entera al chocar con un patrón: lo corrige ADR-214 en `grouping-engine`, validado con el modelo real. La línea de base de calidad quedó promovida con las cuatro direcciones cubiertas |
 | 2b | Emails | M-E2: la misma línea de base sobre los textos con degradación de fotocopia | implementador (`tests/perf`) y planificador | **medida el 2026-10-07**: sin pérdidas a 300 y 200 dpi; 4 de 10 a 150, tres de ellas con `Q` y un espacio |
 | 6 | Visor | El cambio de vista pide la imagen a la escala del zoom (frente 5) | implementador (`apps/react-client`) | pedido por el mantenedor el 2026-10-07; **implementado ese día** en el cliente, para el cambio de vista, las ediciones y el reanálisis. Para el instante borroso que quedaba al conmutar: ADR-213 aceptado e **implementado el 2026-10-07**, con la enmienda del mantenedor: bajo «Anonimizado» nunca se muestra la imagen original (20 tests en Electron). Quedan dos hallazgos anotados, sin decidir. Falta el revisor |
 | 5 | Emails | ADR-211 y spec de Regex; después implementación y comparación contra la línea de base | mantenedor, planificador, implementador | ADR-211 **aceptado** el 2026-10-07, con el espacio tras el punto incluido; spec de Regex v1.15.0 e **implementación en `regex-engine` entregada** ese día (190 tests del módulo en verde, 98,7 % de líneas; los tres tests de ADR-181 sin tocar). **Medido el 2026-10-07 (M-E3): de 11 a 2, de 4 a 0 y de 8 a 0 emails perdidos, sin agregados y sin otros cambios.** Cerrado, falta el revisor |
@@ -553,6 +553,107 @@ tests. Tests del cliente: 1108 en verde.
   curso, y una página sin imagen anonimizada no termina de aparecer. Solo se
   vio con ese atraso artificial; no está medido cuánto tarda un dibujo real
   en un equipo lento.
+
+## Revisión del lote (2026-10-07)
+
+El revisor miró la branch entera, commit por commit, con los gates completos
+y los E2E afectados.
+
+| Frente | Veredicto |
+|---|---|
+| Repintado (`render-engine`) | aprobado |
+| Emails (`regex-engine`) | aprobado |
+| Direcciones (`ner-engine`) | aprobado contra el spec v1.12.0 |
+| Visor (`apps/react-client`) | aprobado |
+| Arneses (`tests/perf`) | aprobado |
+| Docs | rechazado, por dos correcciones |
+
+- Gates en verde: lint, typecheck, 3904 tests, contratos, formato y
+  cobertura con sus umbrales.
+- E2E: repintado 3 de 3, visor 2 de 2, 7 de 7 y 20 de 20, interacción
+  anonimizada 2 de 2, zoom y scroll. Verificación del export, 21 de 21.
+- Visor: ningún camino deja la imagen original a la vista bajo
+  «Anonimizado».
+- Docs: sin hashes de commit ni datos reales; los números de los informes
+  coinciden entre sí.
+
+### Lo que rechazó, y lo que se hizo
+
+**1. ADR-212 afirmaba algo que el código no hacía.** Decía que el choque de
+una dirección extendida con otra detección lo resolvía el mecanismo de
+conflictos. El revisor mostró que la dirección se descartaba entera.
+
+Medido el mismo día con el modelo real, sobre 12 oraciones sintéticas, dos
+corridas iguales:
+
+| Oración | Antes | Después de ADR-214 |
+|---|---|---|
+| «CON DOMICILIO EN AVENIDA DEL MAR 450 DE ESTA CIUDAD.» | solo la patente «MAR 450»; «AVENIDA DEL» a la vista | dirección y patente |
+| «CON DOMICILIO EN CALLE DEL SOL 123.» | solo la patente; «CALLE DEL» a la vista | dirección y patente |
+| «SE DOMICILIA EN PASAJE LA PAZ 780, PLANTA BAJA.» | solo la patente; «LA» a la vista | dirección y patente |
+| «EL DEMANDADO VIVE EN AVENIDA DEL MAR 450.» | solo la patente; «AVENIDA DEL» a la vista | dirección y patente |
+| «CON DOMICILIO EN AVENIDA DEL MAR 450, DOMINIO ABC 123.» | las dos patentes; «AVENIDA DEL» a la vista | dirección y las dos patentes |
+
+- Pasa en mayúsculas, cuando la calle termina en una palabra de tres letras
+  y la altura tiene tres dígitos. En minúsculas no.
+- En 2 de las 5 ya pasaba sin sumar la altura: el defecto está en la 1.0.
+- La causa estaba en el agrupador: la detección que llegaba y perdía un
+  conflicto se descartaba aunque cubriera más texto.
+
+**Decidido por el mantenedor: arreglarlo en esta branch.**
+[ADR-214](../../adr/ADR-214-La-Que-Pierde-Un-Conflicto-No-Se-Descarta-Si-Cubre-Mas-Texto.md)
+y `Grouping_Engine.md` v1.17.0 (caso 77): la perdedora se descarta solo si
+queda contenida entera en la ganadora. Implementado con cinco tests nuevos;
+ningún test existente cambió. 225 tests del módulo, 94,8 % de líneas.
+
+**2. Un ítem con número repetido** en la lista de `Render_Engine.md` §15.
+Corregido: el de ADR-210 es el 33.
+
+### La observación del repintado
+
+El revisor la encontró leyendo el código, sin reproducirla: con una palabra
+vecina más alta que el dato, la banda del renglón podía alcanzar filas de un
+dato tapado en otro renglón, y esas filas se corrían fuera de su caja.
+
+**Decidido por el mantenedor: poner la guarda ahora.** Enmienda de ADR-210 y
+`Render_Engine.md` v1.19.0, condición (e): si la zona que el repintado
+borra y pega cruza la caja de otro reemplazo, no se repinta. Implementado con
+dos tests nuevos; ningún test existente cambió. 236 tests del módulo. El E2E
+del repintado sigue 3 de 3, así que la condición no se dispara en un
+documento normal.
+
+### Línea de base de calidad
+
+Medida con el código final: 78 de 78 entidades cubiertas, antes 74 de 78.
+Los únicos cambios son las cuatro direcciones; los falsos positivos son los
+mismos. **Promovida** en commit propio.
+
+Por decisión del mantenedor, el campo `commit` de la línea de base lleva el
+encabezado del commit medido y la branch, no el hash, que cambia con el
+rebase (ADR-147 §1). La herramienta que genera el candidato ya lo escribe
+así.
+
+### Quedó anotado, sin hacer
+
+- **Calles en mayúsculas que el modelo no marca.** «CON DOMICILIO EN MAIPU
+  1434» y «CON DOMICILIO EN BELGRANO 1950» salieron sin ninguna detección.
+  Es el límite del modelo de ADR-212, visto también en mayúsculas.
+- **Dos direcciones parecidas en un mismo grupo**: «AVENIDA DEL MAR 4500» y
+  «AVENIDA DEL MAR 450» comparten grupo y etiqueta, por la agrupación difusa.
+  Las dos salen tapadas.
+- **La condición (e) compara en puntos.** Por redondeo a píxeles puede quedar
+  una fila en el borde de dos cajas que se tocan. Y por error de punto
+  flotante, un reemplazo que toca exactamente el borde derecho de la zona
+  podría contar como cruce y apagar el repintado; es el lado seguro.
+- **El visor depende de que React vacíe sus efectos en la misma tarea** para
+  anular la carga tardía de una imagen original. Una comprobación propia en
+  `PageCanvas` la haría local.
+- `reanalyzeRenderRequest.ts` no está en los umbrales de cobertura. Es
+  anterior a la branch.
+- Los restos tenues de tinta en escaneos conviene medirlos contra el gate de
+  ADR-148 antes de un release.
+- La verificación del export no acredita por sí sola un renglón repintado:
+  sus casos usan el modo que tapa sin etiqueta.
 
 ## Reglas para los sub-agentes de esta branch
 
