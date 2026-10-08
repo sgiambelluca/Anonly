@@ -47,13 +47,14 @@ desarrollo y arrastre desde blanco) también quedaron implementados y
 aprobados por Sol, con ADR-206 y enmienda de ADR-204. El cierre incluye
 retirada completa de foco y acciones del toast saliente.
 
-## Avisos y novedades (1.0.2, en implementación)
+## Avisos y novedades (1.0.2, implementado y revisado)
 
 [Avisos y novedades — 2026-10-08](./interaccion/Avisos_Y_Novedades_2026-10-08.md):
 el diálogo del aviso de espacio justo, la confirmación de "Eliminar entidad"
 y el menú "Novedades" del pie de inicio. Aprobados por el humano sobre un
 lienzo de diseño el 2026-10-08, con ADR-215 y ADR-216. Salen en la 1.0.2.
-Branch `feat/avisos-y-novedades`, desde develop.
+Branch `feat/avisos-y-novedades`, desde develop; aprobada por el revisor en
+la segunda entrega. El registro está en el plan.
 
 ## Convenciones
 

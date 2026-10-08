@@ -235,21 +235,25 @@ apps/react-client/src/components/
 - **Render**: encabezado *"Novedades"* con botón de cierre, y las versiones de la más nueva a la más
   vieja, separadas por una línea. Cada versión muestra el número, la fecha en formato largo
   (*"2 de octubre de 2026"*), **"Instalada"** en la que coincide con `__ANONLY_VERSION__`,
-  *"Versión preliminar"* si lo fue, un resumen de una línea si lo tiene, y sus novedades. Cada
+  un resumen de una línea si lo tiene, y sus novedades. Solo figuran las versiones estables. Cada
   novedad lleva una etiqueta de **ancho fijo**: **Nuevo**, **Mejora** o **Arreglo**.
 - **Sin enlaces** y sin red: no agrega ninguna URL a la lista de §2.9.
 - **Datos**: `components/screens/releaseNotes.ts`, un dato `readonly` tipado que se compila con la
   interfaz. Tipos de novedad: `new`, `improvement` y `fix`. Reglas de redacción y contenido inicial:
   ADR-216 §3 y §4.
-- **Test** (ADR-216 §5): la primera entrada tiene la versión de `apps/desktop-shell/package.json`;
-  las versiones no se repiten y van de mayor a menor; las fechas son válidas y no crecen; cada
+- **Test** (ADR-216 §5): la primera entrada tiene la versión de `apps/react-client/package.json`,
+  que coincide con la de `apps/desktop-shell/package.json`; las versiones no se repiten y van de mayor a menor; las fechas son válidas y no crecen; cada
   entrada tiene resumen o al menos una novedad; ningún texto está vacío, supera los 140 caracteres
   ni contiene `ADR-`.
 - **Cierre**: `Escape`, clic afuera, el botón de cierre o el mismo botón de versión. El foco vuelve
-  al botón de versión.
-- **Accesibilidad**: disclosure hecho a mano, como §3.5. El botón lleva `aria-expanded` y
-  `aria-controls`; el panel es una región con nombre. No usa `role="menu"` ni `aria-haspopup`. Las
-  etiquetas se distinguen por su texto y no solo por el color.
+  al botón de versión, salvo con el clic afuera, que lo deja donde se hizo clic.
+- **Accesibilidad**: disclosure hecho a mano, como §3.5. El botón lleva `aria-expanded` y, mientras
+  el panel está abierto, `aria-controls`; el panel es una región con nombre. No usa `role="menu"` ni
+  `aria-haspopup`. Las etiquetas se distinguen por su texto y no solo por el color.
+- **Tamaño y contraste** (`UX_Guidelines.md` §9): ningún texto baja de 14 px, tampoco las etiquetas
+  ni "Instalada". Las tres etiquetas llevan el color del texto principal sobre su fondo atenuado. La
+  palabra *"Novedades"* del botón va en texto secundario solo sobre `bg-primary`: en hover y con el
+  panel abierto pasa al color del texto principal.
 
 ### 2.10 `ScanScreen` (ADR-087 §1/§6, momento ②a)
 
@@ -358,12 +362,15 @@ apps/react-client/src/components/
 - **Render**, de arriba hacia abajo:
   1. `EntityLine` con el símbolo de espacio justo a la derecha.
   2. *"Así queda en el documento"*, con las páginas afectadas a la derecha en un renglón
-     (*"Página 3"*, *"Páginas 3 y 7"*). Debajo, una caja con la frase de la aparición de
+     (*"Página 3"*, *"Páginas 3 y 7"*, *"Páginas 3, 7 y 12"*; con más de tres, las tres primeras y
+     el resto contado: *"Páginas 3, 7, 12 y 5 más"*). Debajo, una caja con la frase de la aparición de
      `tightestMember(group.members)` en dos renglones: **"Hoy"** (el reemplazo vigente dentro del
      ancho del original, achicado) y el resultado de la opción elegida, con su rótulo. Al pie de la
      caja, **un renglón reservado** para la aclaración.
   3. *"¿Qué querés hacer?"*: grupo de opciones de radio con el patrón de `ConflictDialog` (§6.2).
-     Cada opción lleva ícono, título y una línea de descripción. Preselecciona la primera.
+     Cada opción lleva ícono, título y una línea de descripción. Preselecciona la primera. La caja
+     del grupo usa `bg-secondary` y no `bg-tertiary`: la descripción va en texto secundario, y sobre
+     `bg-tertiary` ese par no llega a 4.5:1 (`UX_Guidelines.md` §9).
 
   | Opción | Descripción | Rótulo del segundo renglón | Qué dibuja | Botón |
   |---|---|---|---|---|
@@ -382,8 +389,9 @@ apps/react-client/src/components/
   del botón. Ningún bloque cambia de tamaño ni de lugar.
 - **Acciones**:
   - "Usar un texto más corto" → cierra y abre `EditReplacementDialog` (§3.4e).
-  - "Tapar con negro" → `applyGroupMode(group, ReplacementMode.Redact)`. Sin toast, como el cambio
-    de modo de la fila (§3.11).
+  - "Tapar con negro" → `applyGroupMode(group, ReplacementMode.Redact)`. Confirma como el cambio de
+    modo de la fila (§3.11): toast con "Deshacer" **solo si** `replacementValueUserSet`, con el mismo
+    texto (*"Se descartó el texto que habías escrito para X."*).
   - "Dejarlo a la vista" → deshabilita el grupo y muestra **el mismo toast con "Deshacer"** que la
     casilla de la fila (`UX_Guidelines.md` §3.3b).
 - **Texto sin jerga**: sigue la regla de `degradedMessage.ts`.
@@ -579,7 +587,9 @@ Marca los grupos que **el detector sugirió sin estar seguro**: nacen con `enabl
   2. Una caja con la frase de la primera aparición del grupo, en dos renglones (`ContextPreview`,
      §3.3b): **"Hoy"**, con lo que muestra el documento anonimizado —el reemplazo vigente, el bloque
      en modo `redact`, o el texto original si el grupo ya está deshabilitado—, y **"Si la
-     eliminás"**, con el texto original resaltado.
+     eliminás"**, con el texto original resaltado en el color de error. Sin una aparición
+     utilizable, la caja dice *"No hay una aparición para mostrar."* y la primera consecuencia no
+     menciona la cantidad.
   3. Tres consecuencias, en este orden. La primera va en el color del texto principal y con el ícono
      en `--color-error`; las otras dos, en texto secundario.
      - *"**Su texto queda a la vista** en el documento exportado, en las N apariciones."* Con una
