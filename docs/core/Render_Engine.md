@@ -606,9 +606,9 @@ Fixtures: `tests/fixtures/text-10p.pdf`, `scanned-10p.pdf`, una página con rota
 
 - [x] 32. (ADR-189) Escala vigente del preview por `(documentId, kind)`: se actualiza con `RENDER_REQUESTED` válido en `mode: "preview"`, la usan las invocaciones directas de preview sin `scale`, un resultado a escala obsoleta se descarta y se redespacha, y se borra con el estado del documento. Tests de §14 (caso 38).
 
-- [ ] 33. (1.0.x, Confianza — **ADR-210**) El repintado de línea mueve píxeles: eliminar la calibración de tipografía (candidatos, función, umbral, condición (e)); tamaño de decisión sin redondear; plan con desplazamiento entero; rectángulo de origen que nunca entra en la caja del dato; orden leer, tapar, pegar, dibujar; token con la familia de su modo; mapa de ADR-204 con el mismo desplazamiento. Los siete tests nuevos de la enmienda con sus nombres exactos, y los dos de calibración retirados. Cobertura del módulo ≥ 85 %.
+- [x] 33. (1.0.x, Confianza — **ADR-210**) El repintado de línea mueve píxeles: eliminar la calibración de tipografía (candidatos, función, umbral, condición (e)); tamaño de decisión sin redondear; plan con desplazamiento entero; rectángulo de origen que nunca entra en la caja del dato; orden leer, tapar, pegar, dibujar; token con la familia de su modo; mapa de ADR-204 con el mismo desplazamiento. Los siete tests nuevos de la enmienda con sus nombres exactos, y los dos de calibración retirados. Cobertura del módulo ≥ 85 %.
 
-- [ ] 34. (1.0.x, Confianza — enmienda de **ADR-210**) Condición (e) del plan de repintado: si la zona tocada (de `bbox.x` al extremo derecho de la última vecina más el desplazamiento, sobre la banda sin redondear) se superpone por `rectsOverlap` con la caja de otro reemplazo de la página, `planLineRepaint` no devuelve plan y se cae al caso 25. Los dos tests de §14 con sus nombres exactos; los vigentes no cambian.
+- [x] 34. (1.0.x, Confianza — enmienda de **ADR-210**) Condición (e) del plan de repintado: si la zona tocada (de `bbox.x` al extremo derecho de la última vecina más el desplazamiento, sobre la banda sin redondear) se superpone por `rectsOverlap` con la caja de otro reemplazo de la página, `planLineRepaint` no devuelve plan y se cae al caso 25. Los dos tests de §14 con sus nombres exactos; los vigentes no cambian.
 
 ---
 
