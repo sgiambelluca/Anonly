@@ -104,6 +104,10 @@ Van en las notas de la versión. Cada una tiene su lugar en `Roadmap_1.x.md`.
   conjunto de referencia no se detectan. Corregido después de la 1.0 con
   ADR-212: la dirección incluye la altura que la sigue. Sigue siendo un
   límite que el modelo no marque algunas calles.
+- **Una dirección en mayúsculas que choca con el patrón de patente.** En
+  «AVENIDA DEL MAR 450» se tapaba «MAR 450» como patente y la dirección se
+  descartaba, con «AVENIDA DEL» a la vista (encontrado el 2026-10-07).
+  Corregido después de la 1.0 con ADR-214.
 - **Nombres en formas poco comunes.** El modelo puede no reconocer un nombre
   en mayúsculas o con el apellido primero. La red de contención es el
   agregado manual.

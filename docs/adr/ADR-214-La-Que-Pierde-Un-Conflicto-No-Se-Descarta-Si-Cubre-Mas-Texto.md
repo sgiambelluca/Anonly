@@ -120,3 +120,16 @@ No cambia el umbral que define un conflicto, ni quién gana, ni el evento.
    ninguna palabra de la calle a la vista.
 4. La línea de base de calidad se vuelve a medir: ninguna entidad cubierta
    puede dejar de estarlo, y se anota cuántos falsos positivos suma.
+
+**Validado el 2026-10-07**, con el modelo real y el cambio implementado.
+
+- Las 12 oraciones, dos corridas iguales: en las 5 del caso quedan la
+  dirección y la patente, con un conflicto `disagree` por página resuelto
+  como patente. Ninguna palabra marcada por un detector queda fuera de un
+  grupo habilitado. Las otras 7 oraciones no cambian.
+- Línea de base de calidad: 78 de 78 entidades cubiertas y los mismos
+  falsos positivos que antes del cambio (precisión 78 de 96). En el conjunto
+  de referencia el cambio no suma ruido.
+- Visto en la validación: «AVENIDA DEL MAR 4500» y «AVENIDA DEL MAR 450»
+  quedan en un mismo grupo, por la agrupación difusa de direcciones de
+  siempre. Antes no se veía porque la segunda se descartaba.
