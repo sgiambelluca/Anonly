@@ -3200,7 +3200,22 @@ export class GroupingEngine implements IEngine {
         return;
       }
       this.emitOverlapOrDisagreeConflict(session, existing, occurrence, reason);
-      if (!newWins) return;
+      /*
+       * Caso 77 (§13, ADR-214): la que llega y pierde ya no se descarta
+       * siempre. Descartar solo es inocuo cuando la ganadora ya tapa TODO su
+       * texto: contenida entera, con el criterio geométrico de ADR-117
+       * (`fragmentsContain`, que cuenta como contenidas a dos cajas
+       * idénticas). Si cubre texto que la ganadora no cubre, ese texto
+       * quedaría a la vista, así que se agrupa por el camino de siempre y
+       * quedan las dos, igual que cuando la que llega gana. La ganadora no se
+       * toca y el conflicto ya salió con el mismo payload de siempre.
+       */
+      if (
+        !newWins &&
+        fragmentsContain(existing.bbox, existing.fragments, occurrence.bbox, occurrence.fragments)
+      ) {
+        return;
+      }
     }
 
     this.groupOccurrence(session, occurrence);
