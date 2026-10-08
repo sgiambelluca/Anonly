@@ -5,9 +5,10 @@
 Tres cambios de interfaz pedidos por el humano el 2026-10-08 y aprobados sobre el lienzo de diseño
 "Anonly — Popup de conflicto y changelog".
 
-**Estado al 2026-10-08:** ADR y especificación escritos. El humano autorizó ese día la
-implementación y decidió que los tres cambios salen en la **1.0.2**. Branch
-`feat/avisos-y-novedades`, creada desde `develop`.
+**Estado al 2026-10-08:** implementado y aprobado por el revisor. El humano autorizó ese día la
+implementación, decidió que los tres cambios salen en la **1.0.2** y, con la aprobación del revisor,
+el commit, el push y el PR hacia `develop`. Branch `feat/avisos-y-novedades`, creada desde `develop`.
+El registro está al final.
 
 ## Qué entra
 
@@ -37,9 +38,26 @@ Las implementa un agente `general-purpose` con `model: "sonnet"`, con las reglas
 ## Antes de la revisión
 
 - Subset de gates de `CLAUDE.md`.
-- Los specs E2E afectados, de a uno: `scenario-9-reanalyze-preserves-edits` y `toast-interaction`
-  usan "Eliminar entidad".
+- Los specs E2E afectados, de a uno: `toast-interaction` usa "Eliminar entidad", y
+  `scenario-9-reanalyze-preserves-edits` pasa por el pie de inicio ("Acerca de…").
 - Capturas de la aplicación real en claro y oscuro de los tres cambios, a la vista del humano.
+
+## Registro
+
+- **Capturas al humano** (app de escritorio, claro y oscuro, con un PDF de prueba ficticio): las
+  aprobó y pidió sacar la 0.9.2 de la lista. Desde entonces "Novedades" muestra solo versiones
+  estables (ADR-216 §4).
+- **Primera revisión: REJECTED**, con los cinco gates en verde. Cuatro bloqueantes: texto de 12 px en
+  el menú de novedades, un test que fijaba la lista de versiones y rompía el release siguiente, el
+  rótulo de páginas sin tope, y contraste por debajo de 4.5:1. El planificador cerró los huecos en
+  ADR-215 §1 y §2 y en ADR-216 §2 y §5 antes de los arreglos.
+- **Segunda revisión: APPROVED.** `pnpm lint`, `pnpm typecheck`, `pnpm test` (3974 tests),
+  `pnpm test:contract` (345) y `pnpm format:check` en verde, en Windows nativo.
+- **E2E** sobre el build de la branch, de a uno: `toast-interaction` (2 de 2) y
+  `scenario-9-reanalyze-preserves-edits` (1 de 1).
+- **Deuda anotada por el revisor**, anterior a este lote: el aro del radio no elegido de
+  `ConflictDialog`, que este diálogo reutiliza, queda en 2,27:1 en claro; y `UnreadablePageStrip`
+  todavía usa texto de 12 px, contra `UX_Guidelines.md` §9.
 
 ## Al preparar la 1.0.2
 

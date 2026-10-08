@@ -48,7 +48,9 @@ De arriba hacia abajo:
 1. **La entidad** (`EntityLine`) con el símbolo de espacio justo a la derecha, como en
    `EditReplacementDialog`.
 2. **"Así queda en el documento"**, con las páginas afectadas a la derecha en un renglón
-   (*"Página 3"*, *"Páginas 3 y 7"*). Debajo, una caja con dos renglones de la misma frase:
+   (*"Página 3"*, *"Páginas 3 y 7"*, *"Páginas 3, 7 y 12"*). Con más de tres páginas se listan las
+   tres primeras y se cuenta el resto: *"Páginas 3, 7, 12 y 5 más"*. Debajo, una caja con dos
+   renglones de la misma frase:
    - **"Hoy"**: el reemplazo vigente dibujado dentro del ancho del original, achicado.
    - **El resultado de la opción elegida**, con su rótulo (tabla de abajo).
    - Una ranura de **un renglón** para la aclaración.
@@ -80,10 +82,16 @@ Al aplicar:
 | Opción | Qué hace | Confirmación |
 |---|---|---|
 | Usar un texto más corto | cierra y abre `EditReplacementDialog` | la del propio editor al guardar |
-| Tapar con negro | `applyGroupMode(group, ReplacementMode.Redact)` | ninguna, como el cambio de modo de la fila |
+| Tapar con negro | `applyGroupMode(group, ReplacementMode.Redact)` | la del cambio de modo de la fila (`Components.md` §3.11): toast con "Deshacer" **solo si** el texto estaba escrito a mano, porque se descarta |
 | Dejarlo a la vista | deshabilita el grupo | el mismo toast con "Deshacer" que la casilla de la fila |
 
 La última fila corrige el Contexto §3: `applyLeaveVisible` pasa a confirmar igual que `applyEnabled`.
+El toast de "Tapar con negro" usa el mismo texto que el de la fila: *"Se descartó el texto que
+habías escrito para X."*
+
+**Color de las opciones**: la caja del grupo usa `bg-secondary`, no el `bg-tertiary` de
+`ConflictDialog`. Acá cada opción lleva una descripción en texto secundario, y ese par sobre
+`bg-tertiary` no llega a 4.5:1 (`UX_Guidelines.md` §9).
 
 ### 2. `RemoveEntityDialog`: la confirmación de eliminar
 
@@ -95,7 +103,10 @@ Reemplaza al `ConfirmDialog` genérico **solo** para "Eliminar entidad". `Dialog
 3. **Una caja con dos renglones** de la misma frase, la de la primera aparición del grupo:
    - **"Hoy"**: lo que muestra el documento anonimizado. Es el reemplazo vigente, o el bloque en modo
      `redact`. Si el grupo ya está deshabilitado, es el texto original.
-   - **"Si la eliminás"**: el texto original, resaltado.
+   - **"Si la eliminás"**: el texto original, resaltado en el color de error.
+
+   Sin una aparición utilizable, la caja dice *"No hay una aparición para mostrar."* y la primera
+   consecuencia no menciona la cantidad.
 4. **Tres consecuencias**, en este orden. La primera va en el color del texto principal y con el
    ícono en `--color-error`; las otras dos, en texto secundario.
    - *"**Su texto queda a la vista** en el documento exportado, en las N apariciones."* Con una sola:
@@ -121,8 +132,11 @@ oraciones conservan los tres datos de `removeConfirmMessage`, que deja de usarse
 
 No estaba en el lienzo y el humano puede cambiarlo:
 
-- El toast de "Dejarlo a la vista" (§1), por `UX_Guidelines.md` §3.3b.
-- Qué se dibuja cuando no hay sugerencias o no hay aparición (§1).
+- El toast de "Dejarlo a la vista" (§1), por `UX_Guidelines.md` §3.3b, y el de "Tapar con negro"
+  cuando descarta un texto escrito a mano (§1), por `Components.md` §3.11.
+- Qué se dibuja cuando no hay sugerencias o no hay aparición (§1 y §2).
+- El tope de tres páginas en el rótulo (§1) y el fondo `bg-secondary` de las opciones (§1). Los dos
+  salieron de la revisión del lote.
 - Qué muestra "Hoy" cuando el grupo ya está deshabilitado y el singular de las apariciones (§2).
 - Al abrirse `RemoveEntityDialog`, el foco no cae en "Eliminar".
 
@@ -159,10 +173,12 @@ No estaba en el lienzo y el humano puede cambiarlo:
 ## Validación
 
 - Lógica pura con test: las opciones según el modo del grupo, el rótulo, la aclaración y el botón por
-  opción, el caso sin sugerencias, y la frase de apariciones en singular y plural.
-- `applyLeaveVisible` emite el pedido y muestra el toast.
-- El spec E2E que cubre "Eliminar entidad" y el del aviso de espacio justo se corren en el mismo
-  cambio, de a uno.
+  opción, el caso sin sugerencias, el rótulo de páginas con su tope, y la frase de apariciones en
+  singular y plural.
+- `applyLeaveVisible` emite el pedido y muestra el toast. `applyGroupMode` muestra el suyo solo con
+  el texto escrito a mano.
+- El spec E2E que cubre "Eliminar entidad" (`toast-interaction`) se corre en el mismo cambio. El
+  aviso de espacio justo no tiene spec E2E: se valida con los tests de lógica y las capturas.
 - Capturas de la aplicación real en claro y oscuro, a la vista del humano antes de la revisión.
 - UX-10: abrir cada diálogo y recorrer las opciones sin que nada cambie de tamaño.
 

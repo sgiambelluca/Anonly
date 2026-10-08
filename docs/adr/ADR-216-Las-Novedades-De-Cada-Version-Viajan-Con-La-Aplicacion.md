@@ -41,15 +41,19 @@ Se abre **hacia arriba**, anclado al botón, y no desplaza nada (UX-10).
   muestra:
   - el número y la fecha en formato largo (*"2 de octubre de 2026"*);
   - **"Instalada"** en la versión igual a `__ANONLY_VERSION__`;
-  - *"Versión preliminar"* si lo fue;
   - un resumen de una línea, si lo tiene;
   - sus novedades, cada una con una etiqueta de ancho fijo: **Nuevo**, **Mejora** o **Arreglo**.
 - **Sin enlaces.** El repositorio ya se abre desde "Acerca de…".
 - **Cierre**: `Escape`, clic afuera, el botón de cierre o el mismo botón de versión. El foco vuelve
-  al botón de versión.
+  al botón de versión, salvo con el clic afuera, que lo deja donde se hizo clic.
 - **Accesibilidad**: disclosure hecho a mano, con el criterio de `Components.md` §3.5. El botón lleva
-  `aria-expanded` y `aria-controls`; el panel es una región con nombre. No usa `role="menu"` ni
-  `aria-haspopup`. Las etiquetas se distinguen por su texto y no solo por el color.
+  `aria-expanded` y, mientras el panel está abierto, `aria-controls`; el panel es una región con
+  nombre. No usa `role="menu"` ni `aria-haspopup`. Las etiquetas se distinguen por su texto y no
+  solo por el color.
+- **Tamaño y contraste** (`UX_Guidelines.md` §9): ningún texto baja de 14 px, tampoco las etiquetas
+  ni "Instalada". Las tres etiquetas llevan el color del texto principal sobre su fondo atenuado. La
+  palabra *"Novedades"* del botón va en texto secundario solo sobre `bg-primary`: en hover y con el
+  panel abierto, cuando el fondo es `bg-tertiary`, pasa al color del texto principal.
 
 ### 3. Un archivo propio, escrito para el usuario
 
@@ -57,8 +61,7 @@ Las novedades viven en `apps/react-client/src/components/screens/releaseNotes.ts
 `readonly` tipado. Se compila dentro de la interfaz, igual que el número de versión
 (`__ANONLY_VERSION__`).
 
-Cada versión tiene: número, fecha (`AAAA-MM-DD`), si fue preliminar, un resumen opcional y una lista
-de novedades. Cada novedad tiene un tipo y un texto.
+Cada versión tiene: número, fecha (`AAAA-MM-DD`), un resumen opcional y una lista de novedades. Cada novedad tiene un tipo y un texto.
 
 | Tipo | Etiqueta | Cuándo |
 |---|---|---|
@@ -76,26 +79,29 @@ Reglas de redacción:
 
 ### 4. Contenido inicial
 
-Solo las versiones publicadas. La 0.9.1 no se publicó y no figura.
+Solo las versiones estables publicadas: la lista empieza en la 1.0.0. Las preliminares no figuran
+(decisión del humano, 2026-10-08, al ver las capturas: la 0.9.2 fue una beta y ya no importa). La
+0.9.1 no llegó a publicarse.
 
 | Versión | Fecha | Contenido |
 |---|---|---|
 | 1.0.1 | 2026-10-02 | **Mejora**: *Las actualizaciones muestran el avance de la descarga y se instalan sin asistente.* **Mejora**: *Con «Instalar automáticamente», la actualización se instala al cerrar Anonly (en macOS, al abrirlo).* **Arreglo**: *Si la instalación se corta en Windows, se vuelve a correr sola.* |
 | 1.0.0 | 2026-10-02 | Resumen: *Primera versión estable.* Sin novedades listadas. |
-| 0.9.2 | 2026-09-05 | Versión preliminar. **Arreglo**: *Un solo instalador de macOS, para Intel y Apple Silicon.* |
 
 ### 5. Un test frena el release sin novedades
 
 Un test de `apps/react-client` comprueba:
 
-1. La primera entrada tiene la versión de `apps/desktop-shell/package.json`, la misma que lee
-   `readAppVersion()` en `vite.config.ts`.
+1. La primera entrada tiene la versión de la aplicación: la de `apps/react-client/package.json`, que
+   es la que lee `readAppVersion()` en `vite.config.ts`, y esa coincide con la de
+   `apps/desktop-shell/package.json`, que es la que manda en el release.
 2. Las versiones no se repiten y van de mayor a menor; las fechas son válidas y no crecen.
 3. Cada entrada tiene un resumen o al menos una novedad.
 4. Ningún texto está vacío, supera los 140 caracteres ni contiene `ADR-`.
 
 La condición 1 es el gate: `pnpm run version` sube la versión, y `pnpm test` falla hasta que se
-escribe la entrada.
+escribe la entrada. El test no fija la lista completa de versiones: agregar una entrada no obliga a
+tocarlo.
 
 ### 6. El paso en el release
 
@@ -110,9 +116,9 @@ conocidas (`Roadmap_1.x.md` §2). El menú es un resumen y no la reemplaza.
 No estaba en el lienzo y el humano puede cambiarlo:
 
 - La ubicación y la forma del archivo (§3), el tope de 140 caracteres y las condiciones del test (§5).
-- Que la 0.9.1 no figure y que la 0.9.2 se muestre como "Versión preliminar" (§4).
 - Que las limitaciones conocidas queden solo en GitHub Releases (§6).
-- Los atributos de accesibilidad del panel (§2).
+- Los atributos de accesibilidad del panel y las reglas de tamaño y contraste (§2). Estas últimas
+  salieron de la revisión del lote.
 
 ## Alternativas consideradas
 
@@ -138,7 +144,9 @@ No estaba en el lienzo y el humano puede cambiarlo:
 - Un paso manual más en cada release.
 - El menú muestra hasta la versión instalada. Las novedades de una versión más nueva se ven después
   de actualizar.
-- Una versión preliminar también necesita su entrada, porque el test compara la versión exacta.
+- Las versiones preliminares no figuran, pero el test compara la versión exacta: un instalador
+  preliminar pediría su entrada. Cómo tratarlo se decide al usar ese canal, que hoy no se usa
+  (`Roadmap_1.x.md` §2).
 - La fecha se escribe antes de publicar y puede quedar corrida si el tag se demora.
 
 **Lo que no toca**
