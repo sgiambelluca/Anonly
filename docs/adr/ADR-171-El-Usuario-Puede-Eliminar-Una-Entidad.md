@@ -2,7 +2,7 @@
 
 # ADR-171 — El usuario puede eliminar una entidad
 
-- **Estado**: Accepted — **modificado por ADR-177** (§2 paso 5: los registros conservados sirven solo para el dedup y no ocupan lugar)
+- **Estado**: Accepted — **modificado por ADR-177** (§2 paso 5: los registros conservados sirven solo para el dedup y no ocupan lugar) y **por ADR-215** (§5: la confirmación pasa del `ConfirmDialog` genérico a `RemoveEntityDialog`; qué se pide y los toasts no cambian)
 - **Fecha**: 2026-09-23
 - **Decidido por**: El humano, sobre las pruebas de usuario ("en los tres puntitos, agregar una opción
   que sea «Eliminar entidad» y lo borre completamente de la lista") y, ante la pregunta de qué pasa si

@@ -90,6 +90,24 @@ Salió de publicar la 1.0.0 y actualizar una 0.9.2 de verdad.
 - El comportamiento nuevo se estrena en la actualización **siguiente** a la
   1.0.1: la de la 1.0.0 a la 1.0.1 la ejecuta el código de la 1.0.0.
 
+## 2ter. 1.0.2 — Avisos y novedades
+
+Tres cambios de interfaz pedidos y aprobados por el humano el 2026-10-08
+sobre un lienzo de diseño. **El humano decidió ese día que salen en la
+1.0.2.** «Novedades» es una capacidad nueva que el usuario ve, y por §1
+correspondería a una versión menor: va en este parche por esa decisión.
+
+- **El aviso de espacio justo muestra el resultado de cada salida** y aplica
+  la que el usuario elige (ADR-215 §1).
+- **«Eliminar entidad» confirma con un diálogo propio**, que muestra el dato
+  a la vista y dice que se puede deshacer (ADR-215 §2).
+- **La versión del pie de inicio abre «Novedades»**: lo que trae cada versión
+  publicada, escrito para el usuario y compilado con la aplicación, sin
+  conexión (ADR-216). Suma un paso al release: escribir la entrada de la
+  versión (`RELEASING.md`).
+
+Plan: [`Avisos_Y_Novedades_2026-10-08.md`](interaccion/Avisos_Y_Novedades_2026-10-08.md).
+
 ## 3. 1.0.x — Confianza
 
 Lo primero, porque es lo que permite tocar la detección sin miedo.
