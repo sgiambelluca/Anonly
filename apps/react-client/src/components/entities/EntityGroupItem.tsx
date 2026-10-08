@@ -34,10 +34,9 @@ import { useEntitiesStore } from "../../store/entities.store.js";
 import { usePipelineStore } from "../../store/pipeline.store.js";
 import { useViewerStore } from "../../store/viewer.store.js";
 import { Checkbox } from "../common/Checkbox.js";
-import { ConfirmDialog } from "../common/ConfirmDialog.js";
 import { ConflictBadge } from "../conflicts/ConflictBadge.js";
 
-import { applyEnabled, applyRemove, restoreComputedValue } from "./applyEdits.js";
+import { applyEnabled, restoreComputedValue } from "./applyEdits.js";
 import { ChangeTypeDialog } from "./ChangeTypeDialog.js";
 import { DegradedBadge } from "./DegradedBadge.js";
 import { EditReplacementDialog } from "./EditReplacementDialog.js";
@@ -50,9 +49,9 @@ import { NeedsReviewBadge } from "./NeedsReviewBadge.js";
 import { buildTreeItemAriaLabel, isRowDimmed } from "./needsReviewRow.js";
 import { PersonGenderToggle } from "./PersonGenderToggle.js";
 import { isPersonGenderToggleVisible } from "./personGenderVisibility.js";
+import { RemoveEntityDialog } from "./RemoveEntityDialog.js";
 import { ReplacementModeSelect } from "./ReplacementModeSelect.js";
 import { SplitDialog } from "./SplitDialog.js";
-import { removeConfirmMessage } from "./undoableEdits.js";
 
 /** Cuánto dura el resaltado de "Ver en la lista". */
 const FLASH_MS = 1600;
@@ -205,19 +204,8 @@ function EntityGroupItemImpl({ group, nodeId, activeNodeId }: EntityGroupItemPro
         open={changeTypeOpen}
         onClose={() => setChangeTypeOpen(false)}
       />
-      {/* ADR-171 §5: la única acción del menú que confirma (Components.md §3.11). */}
-      <ConfirmDialog
-        open={removeOpen}
-        title="Eliminar entidad"
-        message={removeConfirmMessage(group.canonicalValue)}
-        confirmLabel="Eliminar"
-        variant="danger"
-        onConfirm={() => {
-          setRemoveOpen(false);
-          applyRemove(group);
-        }}
-        onCancel={() => setRemoveOpen(false)}
-      />
+      {/* ADR-171 §5 + ADR-215 §2: la única acción del menú que confirma (Components.md §3.11). */}
+      <RemoveEntityDialog group={group} open={removeOpen} onClose={() => setRemoveOpen(false)} />
     </div>
   );
 }
