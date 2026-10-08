@@ -1853,6 +1853,109 @@ describe("RenderEngine — edge cases", () => {
       expectFallback(takePageCanvas());
     });
 
+    /**
+     * Escenario de la condición (e) (ADR-210, enmienda del 2026-10-07), a escala
+     * 1 y con coordenadas enteras para que la zona tocada sea exacta. El dato
+     * «Ana» ocupa x 20–38, y 10–24. Dos vecinas: «de» (x 42–62, y 10–24) y
+     * «vive» (x 66–106) con la MISMA x pero 30 pt de alto (y 10–40), que estira
+     * la banda del renglón hasta y = 40.
+     */
+    function makeTallNeighborScenario(): ReturnType<typeof makeLineRepaintScenario> {
+      const word = (text: string, x: number, width: number, height: number) => ({
+        text,
+        bbox: { x, y: 10, width, height },
+        pageIndex: 0,
+        confidence: 1,
+        source: "pdf" as const,
+      });
+      return makeLineRepaintScenario({
+        replacement: { bbox: { x: 20, y: 10, width: 18, height: 14 } },
+        lineWords: [word("de", 42, 20, 14), word("vive", 66, 40, 30)],
+      });
+    }
+
+    /** Otro reemplazo (`redact`: sin texto, no interfiere con la prueba de ajuste). */
+    function makeOtherReplacement(bbox: {
+      readonly x: number;
+      readonly y: number;
+      readonly width: number;
+      readonly height: number;
+    }): ReturnType<typeof makeReplacement> {
+      return makeReplacement({
+        groupId: "g-other",
+        occurrenceId: "occ-other",
+        mode: ReplacementMode.Redact,
+        replacementValue: "",
+        bbox,
+      });
+    }
+
+    function opCount(
+      canvas: NonNullable<ReturnType<typeof getCreatedCanvases>[number]>,
+      op: string,
+    ): number {
+      return canvas.calls.filter((c) => c.op === op).length;
+    }
+
+    // Condición (e) (Render_Engine.md, enmienda ADR-210; §15 ítem 34).
+    it("line repaint falls back when its band crosses another replacement", async () => {
+      const scenario = makeTallNeighborScenario();
+
+      // Control: el otro reemplazo está DEBAJO de la banda (y 44–50, la banda
+      // llega a 40): el repintado corre, se lee el origen y se pega.
+      await renderScenario("doc-repaint-e-control", scenario, [
+        makeOtherReplacement({ x: 22, y: 44, width: 40, height: 6 }),
+      ]);
+      const control = takePageCanvas();
+      expect(opCount(control, "putImageData")).toBe(1);
+      const controlReads = opCount(control, "getImageData");
+
+      // Cruce: el otro reemplazo (y 30–38) no comparte banda con el dato
+      // (y 10–24) pero SÍ con la banda estirada por «vive» (y 10–40), y está
+      // dentro de la zona tocada en x. Sin condición (e) se movería su tinta.
+      await renderScenario("doc-repaint-e-crossing", scenario, [
+        makeOtherReplacement({ x: 22, y: 30, width: 40, height: 8 }),
+      ]);
+      const crossing = takePageCanvas();
+      expect(opCount(crossing, "putImageData")).toBe(0);
+      // Sin muestreo ni lectura del origen: solo queda la captura final.
+      expect(opCount(crossing, "getImageData")).toBe(controlReads - 2);
+      expect(opCount(crossing, "getImageData")).toBe(1);
+      // El dato se encoge (caso 25): un solo fillText, el token, centrado en la caja.
+      const fillTexts = crossing.calls.filter((c) => c.op === "fillText");
+      expect(fillTexts).toHaveLength(1);
+      expect(fillTexts[0]!.args[0]).toBe(scenario.replacement.replacementValue);
+      expect(fillTexts[0]!.args[1]).toBe(
+        scenario.replacement.bbox.x + scenario.replacement.bbox.width / 2,
+      );
+    });
+
+    it("line repaint still runs when another replacement only touches the band", async () => {
+      const scenario = makeTallNeighborScenario();
+
+      // Toca por abajo: el otro reemplazo empieza exactamente donde termina la
+      // banda (y = 40). `rectsOverlap` es estricta: tocarse no cuenta.
+      await renderScenario("doc-repaint-e-touch-below", scenario, [
+        makeOtherReplacement({ x: 22, y: 40, width: 40, height: 6 }),
+      ]);
+      const below = takePageCanvas();
+      expect(opCount(below, "putImageData")).toBe(1);
+
+      // Toca por la derecha: el otro reemplazo (misma banda que el dato)
+      // empieza exactamente donde termina la zona tocada, `106 + desplazamiento`.
+      // El desplazamiento sale del propio pegado: destino − origen.
+      const read = below.calls.filter((c) => c.op === "getImageData")[1]!;
+      const paste = below.calls.find((c) => c.op === "putImageData")!;
+      const shiftPx = (paste.args[1] as number) - (read.args[0] as number);
+      expect(shiftPx).toBeGreaterThan(0);
+      const zoneRight = 106 + shiftPx;
+      await renderScenario("doc-repaint-e-touch-right", scenario, [
+        makeOtherReplacement({ x: zoneRight, y: 10, width: 20, height: 14 }),
+      ]);
+      const right = takePageCanvas();
+      expect(opCount(right, "putImageData")).toBe(1);
+    });
+
     it("ink and background colours sampled from a page with a non-white background", async () => {
       const scenario = makeLineRepaintScenario();
       setImageDataProvider((x, y, w, h) =>

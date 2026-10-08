@@ -163,12 +163,13 @@ interface LineRepaintPlan {
 }
 
 /**
- * ADR-058 §6 + ADR-210 — evalúa las condiciones (a) a (d) de activación del
+ * ADR-058 §6 + ADR-210 — evalúa las condiciones (a) a (e) de activación del
  * repintado y, si TODAS se cumplen, devuelve el plan geométrico (sin tocar el
  * canvas todavía: el muestreo, la lectura y el dibujo viven en `tryRepaintLine`,
  * que sí tiene `context`). Cualquier condición que falle devuelve `undefined` —
- * "cualquier duda cae al fallback" (spec §13 caso 26). La (e), calibración,
- * quedó eliminada por ADR-210.
+ * "cualquier duda cae al fallback" (spec §13 caso 26). La (e) de ADR-058
+ * (calibración de tipografía) quedó eliminada por ADR-210; la (e) de hoy es otra:
+ * la zona tocada no cruza otro reemplazo (enmienda del 2026-10-07).
  *
  * Las condiciones se evalúan en el espacio SIN escalar de
  * `replacement.bbox`/`Word.bbox` (mismo espacio que `selectLineWords` del
@@ -177,7 +178,7 @@ interface LineRepaintPlan {
  *
  * Guard adicional, no numerado en ADR-058 §6 (que describe una única
  * ocurrencia por línea): `otherReplacements` son el resto de los reemplazos
- * de esta página (todos salvo `replacement`). Dos piezas, no una:
+ * de esta página (todos salvo `replacement`). Tres piezas, no una:
  *
  * 1. Cualquier `lineWord` cuyo bbox se solape con el de OTRO reemplazo se
  *    excluye de las vecinas — nunca se MUEVE el texto ORIGINAL de otra
@@ -196,8 +197,23 @@ interface LineRepaintPlan {
  *    `paintReplacements` procesa el array: se calcula siempre desde las
  *    posiciones de `otherReplacements`, nunca desde lo que ya esté pintado en
  *    el canvas.
+ * 3. Condición (e), después de (d): si la ZONA TOCADA (de `bbox.x` del dato al
+ *    extremo derecho de la última vecina más el desplazamiento, sobre la banda
+ *    vertical del dato y las vecinas, en puntos y sin redondear) se superpone
+ *    —estricto— con la caja de CUALQUIER otro reemplazo, no hay plan. Cubre lo
+ *    que las dos piezas anteriores no miran: la pieza 1 filtra palabras que se
+ *    superponen con otro reemplazo (no mueve su texto original) y la pieza 2
+ *    acota el eje horizontal solo para reemplazos que COMPARTEN banda con el
+ *    dato; ninguna mira la altura de la banda. Con una vecina más alta que el
+ *    dato, la banda llega a filas de un reemplazo de otro renglón, que no
+ *    comparte banda con el dato, y su tinta original se movería fuera de la
+ *    caja que la tapa. También retira el repintado cuando otro reemplazo
+ *    pisa la propia caja del dato (dos reemplazos superpuestos). No es un
+ *    límite de píxeles exacto: la zona se mide sin redondear, y por el
+ *    redondeo a enteros del rectángulo real puede quedar, como mucho, una
+ *    fila en el borde de dos cajas que se tocan.
  *
- * Las dos piezas son puramente conservadoras (nunca agregan repintado, solo
+ * Las tres piezas son puramente conservadoras (nunca agregan repintado, solo
  * lo retiran o lo acortan) — mismo espíritu que las condiciones del spec:
  * cualquier duda cae al fallback.
  */
@@ -293,8 +309,28 @@ function planLineRepaint(
   if (sourceRightPx + shiftPx > effectiveRightLimitPt * scale) return undefined;
 
   const allBoxes = [replacement.bbox, ...neighbors.map((word) => word.bbox)];
-  const bandTopPx = Math.floor(Math.min(...allBoxes.map((box) => box.y)) * scale);
-  const bandBottomPx = Math.ceil(Math.max(...allBoxes.map((box) => box.y + box.height)) * scale);
+  const bandTopPt = Math.min(...allBoxes.map((box) => box.y));
+  const bandBottomPt = Math.max(...allBoxes.map((box) => box.y + box.height));
+
+  // (e) — ADR-210, enmienda del 2026-10-07: la zona que el repintado borra y
+  // pega no puede cruzar la caja de OTRO reemplazo. La banda es la envolvente
+  // vertical del dato y de las vecinas: con una vecina más alta que el dato
+  // puede alcanzar filas de un reemplazo de otro renglón, y esas filas de
+  // tinta original se moverían fuera de la caja que las tapa. Se mide en
+  // puntos y SIN redondear (de `bbox.x` del dato al extremo derecho de la
+  // última vecina más el desplazamiento entero llevado a puntos), con la
+  // superposición estricta de `rectsOverlap`: tocarse por el borde no cuenta.
+  // Se evalúa después de (d), y falla igual que las demás: al encogido.
+  const touchedZone: BoundingBox = {
+    x: replacement.bbox.x,
+    y: bandTopPt,
+    width: runEnd + shiftPx / scale - replacement.bbox.x,
+    height: bandBottomPt - bandTopPt,
+  };
+  if (otherReplacements.some((other) => rectsOverlap(touchedZone, other.bbox))) return undefined;
+
+  const bandTopPx = Math.floor(bandTopPt * scale);
+  const bandBottomPx = Math.ceil(bandBottomPt * scale);
 
   // Recortado a los límites del canvas (que es entero: el tamaño del
   // `OffscreenCanvas` trunca el del viewport). Sin área → no hay repintado.
@@ -369,7 +405,7 @@ function sampleInkAndBackground(
 
 /**
  * ADR-058 §2 + ADR-210 — si `planLineRepaint` aprueba las condiciones (a) a
- * (d), ejecuta el repintado **moviendo píxeles**. El orden de las operaciones
+ * (e), ejecuta el repintado **moviendo píxeles**. El orden de las operaciones
  * es normativo (`Render_Engine.md`, enmienda ADR-210) y la lectura va ANTES de
  * tapar, porque tapar destruye lo que hay que mover:
  *
@@ -1083,7 +1119,7 @@ function paintReplacements(
     // largo disponible, camino actual sin cambios — ni un byte distinto de
     // antes (no-regresión, "line repaint does not trigger when the token
     // fits"). Si no entra, se intenta el repintado de línea (condiciones (a) a
-    // (d) de §6); si `tryRepaintLine` devuelve `false` (alguna condición no se
+    // (e) de §6); si `tryRepaintLine` devuelve `false` (alguna condición no se
     // cumple, o `lineWords` vino ausente/sin vecinas útiles), se cae al
     // shrink-to-fit ya existente de PR1 — sin error, sin warning (spec §9:
     // "ausentes nunca es un error"). El repintado de línea queda **fuera de
