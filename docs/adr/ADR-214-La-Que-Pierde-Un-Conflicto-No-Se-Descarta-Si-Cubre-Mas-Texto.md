@@ -36,8 +36,24 @@ altura de tres dígitos:
 | «CON DOMICILIO EN CALLE DEL SOL 123.» | dirección «CALLE DEL SOL 123» | patente «SOL 123» | solo la patente | «CALLE DEL» |
 | «SE DOMICILIA EN PASAJE LA PAZ 780, PLANTA BAJA.» | dirección «LA PAZ 780» | patente «PAZ 780» | solo la patente | «LA» |
 
-Pasó en 5 de las 12 oraciones. En minúsculas no pasa: el patrón pide
-mayúsculas.
+Pasó en 5 de las 12 oraciones: las tres de la tabla, «EL DEMANDADO VIVE EN
+AVENIDA DEL MAR 450.» y «CON DOMICILIO EN AVENIDA DEL MAR 450, DOMINIO ABC
+123.». En minúsculas no pasa: el patrón pide mayúsculas.
+
+Las otras siete, de control:
+
+| Oración | Resultado, igual antes y después |
+|---|---|
+| «CON DOMICILIO EN AVENIDA SAN LUIS 450.» | dirección entera; no hay patente |
+| «CON DOMICILIO EN AVENIDA DEL MAR 4500.» | dirección entera; no hay patente |
+| «CON DOMICILIO EN MAIPU 1434 DE ESTA CIUDAD.» | ninguna detección |
+| «CON DOMICILIO EN BELGRANO 1950.» | ninguna detección |
+| «Con domicilio en Avenida del Mar 450 de esta ciudad.» | dirección entera; no hay patente |
+| «Con domicilio en calle del Sol 123.» | dirección entera; no hay patente |
+| «El vehículo dominio MAR 450 quedó secuestrado.» | solo la patente, sin conflicto |
+
+Cada oración va sola en una página, entre los dos renglones de relleno del
+arnés de M-D1. No quedó un arnés versionado para esta medición.
 
 - **Es anterior a ADR-212.** Por las cajas medidas, en 2 de esas 5 la
   dirección sin la altura ya superaba la mitad de la patente y se
@@ -71,8 +87,10 @@ No cambia el umbral que define un conflicto, ni quién gana, ni el evento.
 
 - Descartar una detección solo es inocuo cuando otra ya tapa todo su texto.
   Es la misma idea de ADR-117, llevada a tipos distintos.
-- El resultado deja de depender del orden: hoy la misma pareja deja dos
-  grupos o uno según cuál llegue primero.
+- Para una pareja en que una cubre más texto que la otra, el resultado deja
+  de depender del orden: hoy deja dos grupos o uno según cuál llegue
+  primero. Con dos cajas idénticas sigue dependiendo, como antes: si llega
+  primero la que pierde, quedan las dos. No cambia lo que se tapa.
 - Las cajas de las dos fuentes salen de las mismas palabras de la página.
   Dos detecciones sobre el mismo texto tienen la misma caja, y ahí no cambia
   nada: la perdedora está contenida y se descarta.
@@ -106,6 +124,12 @@ No cambia el umbral que define un conflicto, ni quién gana, ni el evento.
 - Cambia la detección: es un parche (`Roadmap_1.x.md` §1), y las notas de la
   versión dicen que el mismo documento puede dar un resultado distinto.
 - Puede haber más grupos en la lista y más reemplazos superpuestos.
+- Ruido conocido, sin efecto sobre lo que se tapa ni sobre el export:
+  cada vez que se vuelve a detectar una página, la pareja suma otro aviso
+  de conflicto resuelto sobre el grupo de la ganadora; si se elimina el
+  grupo de la perdedora, el aviso queda en el de la ganadora; y resolver el
+  conflicto con el tipo de la perdedora deja dos grupos del mismo tipo, uno
+  dentro del otro, que se pueden fusionar.
 - Con dos reemplazos superpuestos, el repintado de línea no se activa para
   ninguno de los dos (ADR-210, enmienda del mismo día): la etiqueta se
   achica.

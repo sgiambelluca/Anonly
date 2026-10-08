@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=adr-aceptado | dependencias=core/NER_Engine.md,core/Contracts.md,adr/ADR-023-NER-Config-Canonical-Model-Multilingue.md,adr/ADR-095-La-Regla-De-Matcheo-Es-La-Metrica.md,roadmap/hardening/Confianza_1.0.x_Plan.md,roadmap/Roadmap_1.x.md,roadmap/mediciones/ner/Altura_De_Direcciones_2026-10-07.md | audiencia=humanos+IA | fase=12 -->
+<!-- CONTEXT: scope=adr-aceptado | dependencias=core/NER_Engine.md,core/Contracts.md,adr/ADR-023-NER-Config-Canonical-Model-Multilingue.md,adr/ADR-095-La-Regla-De-Matcheo-Es-La-Metrica.md,roadmap/hardening/Confianza_1.0.x_Plan.md,roadmap/Roadmap_1.x.md,roadmap/mediciones/ner/Altura_De_Direcciones_2026-10-07.md,adr/ADR-214-La-Que-Pierde-Un-Conflicto-No-Se-Descarta-Si-Cubre-Mas-Texto.md | audiencia=humanos+IA | fase=12 -->
 
 # ADR-212 — La dirección incluye la altura que la sigue
 
@@ -165,7 +165,7 @@ tiene forma de año, así que el resultado es el mismo con la regla final.
 - La regla no depende de ninguna lista de palabras.
 - Dos direcciones de la misma calle con alturas parecidas pueden quedar en un
   mismo grupo, por la agrupación difusa de siempre (visto con «AVENIDA DEL
-  MAR 4500» y «Avenida del Mar 450»). Las dos salen tapadas, con la misma
+  MAR 4500» y «AVENIDA DEL MAR 450»). Las dos salen tapadas, con la misma
   etiqueta.
 
 ## Plan y validación

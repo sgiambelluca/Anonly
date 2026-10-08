@@ -175,7 +175,7 @@ Lo primero, porque es lo que permite tocar la detección sin miedo.
   11 a 2 al forzar la resolución y a cero a resolución nativa, sin ningún
   email agregado ni otra entidad distinta. Los 2 que quedan son el punto
   leído como espacio sin `Q`, que solo aparece al forzar la lectura a 150
-  dpi. Falta el revisor. Lo que sigue es cómo estaba planteada la pregunta.
+  dpi. Revisado. Lo que sigue es cómo estaba planteada la pregunta.
 
   **Para decidir al llegar**: si la detección tolera esa lectura (reconocer
   `nombre.apellidoQdominio.tld` como email cuando el texto viene del OCR, y

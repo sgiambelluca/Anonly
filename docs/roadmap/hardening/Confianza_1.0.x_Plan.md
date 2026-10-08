@@ -40,8 +40,8 @@ entonces arranca el implementador de `render-engine`.
 | 3 | Repintado | Implementación desde el spec, capturas, revisor | implementador, mantenedor, revisor | ADR-210 **aceptado**, spec v1.18.0, implementación en `render-engine` y E2E con canvas real **entregados** el 2026-10-07; capturas del preview y del export enviadas al mantenedor. Revisado el 2026-10-07; de esa revisión salió la condición (e), que no repinta si la zona tocada cruza otro reemplazo |
 | 4 | Direcciones | Auditoría de la línea de base; después ADR | planificador | **auditado el 2026-10-07**: el modelo detecta la calle y deja el número afuera. ADR-212 **aceptado a prueba** ese día, spec de NER v1.11.0 e **implementación en `ner-engine` entregada** (139 tests del módulo en verde, 98,8 % de líneas). **Medido el 2026-10-07 (M-D1)**: la regla deja 6 alturas a la vista y tapa 4 años de más; tapar siempre, 0 y 9. Las cuatro direcciones de la línea de base quedan cubiertas. **Decidido por el mantenedor el 2026-10-07: tapar siempre**, sin volver a medir. ADR-212 y spec de NER v1.12.0 enmendados e implementados. La revisión encontró que la dirección extendida podía descartarse entera al chocar con un patrón: lo corrige ADR-214 en `grouping-engine`, validado con el modelo real. La línea de base de calidad quedó promovida con las cuatro direcciones cubiertas |
 | 2b | Emails | M-E2: la misma línea de base sobre los textos con degradación de fotocopia | implementador (`tests/perf`) y planificador | **medida el 2026-10-07**: sin pérdidas a 300 y 200 dpi; 4 de 10 a 150, tres de ellas con `Q` y un espacio |
-| 6 | Visor | El cambio de vista pide la imagen a la escala del zoom (frente 5) | implementador (`apps/react-client`) | pedido por el mantenedor el 2026-10-07; **implementado ese día** en el cliente, para el cambio de vista, las ediciones y el reanálisis. Para el instante borroso que quedaba al conmutar: ADR-213 aceptado e **implementado el 2026-10-07**, con la enmienda del mantenedor: bajo «Anonimizado» nunca se muestra la imagen original (20 tests en Electron). Quedan dos hallazgos anotados, sin decidir. Falta el revisor |
-| 5 | Emails | ADR-211 y spec de Regex; después implementación y comparación contra la línea de base | mantenedor, planificador, implementador | ADR-211 **aceptado** el 2026-10-07, con el espacio tras el punto incluido; spec de Regex v1.15.0 e **implementación en `regex-engine` entregada** ese día (190 tests del módulo en verde, 98,7 % de líneas; los tres tests de ADR-181 sin tocar). **Medido el 2026-10-07 (M-E3): de 11 a 2, de 4 a 0 y de 8 a 0 emails perdidos, sin agregados y sin otros cambios.** Cerrado, falta el revisor |
+| 6 | Visor | El cambio de vista pide la imagen a la escala del zoom (frente 5) | implementador (`apps/react-client`) | pedido por el mantenedor el 2026-10-07; **implementado ese día** en el cliente, para el cambio de vista, las ediciones y el reanálisis. Para el instante borroso que quedaba al conmutar: ADR-213 aceptado e **implementado el 2026-10-07**, con la enmienda del mantenedor: bajo «Anonimizado» nunca se muestra la imagen original (20 tests en Electron). Quedan dos hallazgos anotados, sin decidir. Revisado |
+| 5 | Emails | ADR-211 y spec de Regex; después implementación y comparación contra la línea de base | mantenedor, planificador, implementador | ADR-211 **aceptado** el 2026-10-07, con el espacio tras el punto incluido; spec de Regex v1.15.0 e **implementación en `regex-engine` entregada** ese día (190 tests del módulo en verde, 98,7 % de líneas; los tres tests de ADR-181 sin tocar). **Medido el 2026-10-07 (M-E3): de 11 a 2, de 4 a 0 y de 8 a 0 emails perdidos, sin agregados y sin otros cambios.** Cerrado y revisado |
 
 ## Frente 1 — Memoria del perfil Bajo (M-M1)
 
@@ -555,6 +555,10 @@ tests. Tests del cliente: 1108 en verde.
   en un equipo lento.
 
 ## Revisión del lote (2026-10-07)
+
+**Aprobado en la segunda ronda**, los siete frentes, con los gates completos
+en verde (3912 tests), los E2E afectados y la verificación del export en
+21 de 21. Lo que sigue es la primera ronda y lo que se hizo con ella.
 
 El revisor miró la branch entera, commit por commit, con los gates completos
 y los E2E afectados.
