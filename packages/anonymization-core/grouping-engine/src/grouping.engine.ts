@@ -42,12 +42,16 @@
  * 6. Conflictos `overlap`/`disagree`: se detectan por intersección de bbox
  *    (> 50% del área del menor de los dos rects, misma página, distinto
  *    `entityType`) contra ocurrencias YA agrupadas. Si la ocurrencia NUEVA
- *    pierde la resolución default, se descarta (no se agrupa) y el grupo
- *    existente no se toca. Si la ocurrencia nueva GANA, prosigue el flujo de
- *    agrupación normal para ella pero el grupo del lado perdedor (ya emitido
- *    previamente) no se corrige retroactivamente — el spec no describe un
- *    mecanismo de "desagrupar" un miembro ya emitido, y ningún test de §14 lo
- *    ejercita.
+ *    pierde la resolución default, el grupo existente no se toca y su destino
+ *    depende de qué cubre (caso 77, ADR-214): si es manual queda retenida
+ *    (caso 56); si es automática y queda contenida entera en la ganadora
+ *    (`fragmentsContain`) se descarta sin agruparse; si cubre texto que la
+ *    ganadora no cubre, se agrupa igual y quedan las dos. El
+ *    `CONFLICT_DETECTED` sale en los tres casos. Si la ocurrencia nueva GANA,
+ *    prosigue el flujo de agrupación normal para ella pero el grupo del lado
+ *    perdedor (ya emitido previamente) no se corrige retroactivamente — el
+ *    spec no describe un mecanismo de "desagrupar" un miembro ya emitido, y
+ *    ningún test de §14 lo ejercita.
  * 7. Conflicto `low_confidence`: la ocurrencia NER descartada solo genera
  *    `CONFLICT_DETECTED` cuando existe un grupo candidato (mismo
  *    `entityType`, match exacto/fuzzy) al que asociar `Conflict.groupId`
@@ -68,12 +72,14 @@
  *
  * 9. Dedup por identidad (§13 caso 23): se compara contra
  *    `session.recordedOccurrences` — ocurrencias YA agrupadas — no contra
- *    ocurrencias descartadas por `low_confidence` o por perder un conflicto
- *    `overlap`/`disagree` (esas nunca se registran, nota 6/7 arriba). Esto es
- *    literal con el texto del ADR-038 §3: "identidad ... ya registrada en la
- *    sesión". Una ocurrencia duplicada de otra ya descartada simplemente
- *    vuelve a pasar por el mismo camino (low_confidence/conflict) sin efecto
- *    observable adicional.
+ *    ocurrencias descartadas por `low_confidence` ni las que pierden un
+ *    conflicto `overlap`/`disagree` y quedan contenidas enteras en la ganadora
+ *    (esas no se registran, nota 6/7 arriba; la perdedora que cubre más texto
+ *    se agrupa y sí queda registrada, caso 77). Esto es literal con el texto
+ *    del ADR-038 §3: "identidad ... ya registrada en la sesión". Una
+ *    ocurrencia duplicada de otra ya descartada simplemente vuelve a pasar
+ *    por el mismo camino (low_confidence/conflict) sin efecto observable
+ *    adicional.
  * 10. `dropOccurrences` (§13 casos 24-25, ADR-038 §2): la condición del ADR
  *    "conflictos cuyos candidates referencian ocurrencias eliminadas O cuyo
  *    grupo se eliminó" se implementa como una única condición determinable:
@@ -3189,8 +3195,8 @@ export class GroupingEngine implements IEngine {
       const { existing, reason } = conflictMatch;
       const newWins = this.conflictWinnerIsNew(existing, occurrence, reason);
       /*
-       * Caso 56 (§13, ADR-174 §1): una ocurrencia MANUAL que pierde no se
-       * descarta como cualquier otra perdedora — queda retenida, adjunta al
+       * Caso 56 (§13, ADR-174 §1): una ocurrencia MANUAL que pierde no sigue
+       * el camino de las automáticas (caso 77) — queda retenida, adjunta al
        * conflicto, esperando que el usuario decida (`winner`,
        * `applyConflictResolve`). Una ocurrencia manual que gana sigue el
        * camino de siempre (agruparse, sin retención) — no entra acá.
@@ -3335,8 +3341,10 @@ export class GroupingEngine implements IEngine {
    * Identidad (entityType, pageIndex, bbox, normalizedValue) ya registrada en
    * la sesión (ADR-038 §3). Solo compara contra ocurrencias YA agrupadas
    * (`recordedOccurrences`); las descartadas por low_confidence o por perder
-   * un conflicto overlap/disagree nunca se registran (nota 6/7 del header),
-   * así que un duplicado de esas vuelve a pasar por ese mismo camino.
+   * un conflicto overlap/disagree quedando contenidas enteras en la ganadora
+   * no se registran (nota 6/7 del header; caso 77, ADR-214), así que un
+   * duplicado de esas vuelve a pasar por ese mismo camino. La perdedora que
+   * cubre más texto se agrupa y sí queda registrada.
    *
    * ADR-176 §3: devuelve la anotación de `manualOutcome` en vez de un
    * booleano — el registro que ya estaba (dedup contra `recordedOccurrences`)
