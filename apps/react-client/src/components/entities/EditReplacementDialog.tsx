@@ -23,13 +23,14 @@
 
 import type { EntityGroup } from "@anonly/anonymization-core";
 import { InfoIcon } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { selectDegradedPages, useDegradedStore } from "../../store/degraded.store.js";
 import { Button } from "../common/Button.js";
 import { Dialog } from "../common/Dialog.js";
 
 import { applyReplacementValue, restoreComputedValue } from "./applyEdits.js";
+import { ContextPreview } from "./ContextPreview.js";
 import { EntityLine } from "./EntityLine.js";
 import {
   estimateReplacementFit,
@@ -169,12 +170,22 @@ export function EditReplacementDialog({ group, open, onClose }: EditReplacementD
           <span className="font-semibold text-text-secondary">Así queda en el documento</span>
           <div className="flex flex-col gap-1.5 rounded-lg border border-border bg-bg-secondary px-3.5 py-3">
             {tightest !== null ? (
-              <ContextPreview
-                before={tightest.member.context?.before ?? ""}
-                original={tightest.member.value}
-                after={tightest.member.context?.after ?? ""}
-                replacement={value}
-              />
+              <>
+                <span className="text-text-secondary">Original</span>
+                <ContextPreview
+                  before={tightest.member.context?.before ?? ""}
+                  original={tightest.member.value}
+                  after={tightest.member.context?.after ?? ""}
+                  content={{ kind: "original" }}
+                />
+                <span className="text-text-secondary">Con el cambio</span>
+                <ContextPreview
+                  before={tightest.member.context?.before ?? ""}
+                  original={tightest.member.value}
+                  after={tightest.member.context?.after ?? ""}
+                  content={{ kind: "text", text: value }}
+                />
+              </>
             ) : (
               <span className="text-text-secondary">No hay una aparición para mostrar.</span>
             )}
@@ -191,70 +202,5 @@ export function EditReplacementDialog({ group, open, onClose }: EditReplacementD
         </p>
       </div>
     </Dialog>
-  );
-}
-
-/**
- * La frase de la aparición más apretada, original y con el cambio. El
- * reemplazo se dibuja **dentro del ancho del original**, y se achica
- * (`scaleX`) si no entra — que es lo que hace el render (ADR-058).
- */
-function ContextPreview({
-  before,
-  original,
-  after,
-  replacement,
-}: {
-  readonly before: string;
-  readonly original: string;
-  readonly after: string;
-  readonly replacement: string;
-}) {
-  const originalRef = useRef<HTMLSpanElement>(null);
-  const replacementRef = useRef<HTMLSpanElement>(null);
-  const [slotWidth, setSlotWidth] = useState<number | null>(null);
-  const [scale, setScale] = useState(1);
-
-  useLayoutEffect(() => {
-    const originalWidth = originalRef.current?.offsetWidth ?? null;
-    const naturalWidth = replacementRef.current?.scrollWidth ?? 0;
-    setSlotWidth(originalWidth);
-    setScale(
-      originalWidth !== null && naturalWidth > originalWidth && naturalWidth > 0
-        ? originalWidth / naturalWidth
-        : 1,
-    );
-  }, [original, replacement]);
-
-  const page = "block truncate rounded bg-white px-2 py-1 font-serif text-sm text-[#1f2937]";
-
-  return (
-    <>
-      <span className="text-text-secondary">Original</span>
-      <span className={page}>
-        …{before}
-        <span ref={originalRef} className="rounded-sm bg-[#fde68a] px-px">
-          {original}
-        </span>
-        {after}…
-      </span>
-      <span className="text-text-secondary">Con el cambio</span>
-      <span className={page}>
-        …{before}
-        <span
-          className="inline-block overflow-hidden whitespace-nowrap rounded-sm bg-[#eef0f3] align-bottom"
-          style={slotWidth !== null ? { width: slotWidth } : undefined}
-        >
-          <span
-            ref={replacementRef}
-            className="inline-block origin-left whitespace-nowrap"
-            style={{ transform: `scaleX(${scale})` }}
-          >
-            {replacement}
-          </span>
-        </span>
-        {after}…
-      </span>
-    </>
   );
 }

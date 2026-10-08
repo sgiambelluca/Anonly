@@ -28,7 +28,12 @@ import { removedGroupOverlapReveal } from "../conflicts/conflictResolution.js";
 
 import { editToast, recordEdit } from "./editHistory.js";
 import { typeChangeToastText } from "./editPreviews.js";
-import { enabledToastText, groupsToToggle, removedToastText } from "./undoableEdits.js";
+import {
+  discardedTextToastText,
+  enabledToastText,
+  groupsToToggle,
+  removedToastText,
+} from "./undoableEdits.js";
 
 /**
  * Habilitar/deshabilitar uno o varios grupos. Cubre las dos superficies que
@@ -96,16 +101,27 @@ export function applyPersonGender(params: {
 /**
  * El modo de un grupo puesto desde el aviso de espacio justo (ADR-062 §3):
  * tapar con negro. Entra a la pila como cualquier cambio de modo.
+ *
+ * Confirma como el cambio de modo de la fila (ADR-215 §1, `Components.md`
+ * §3.11): toast con "Deshacer" **solo si** el texto estaba escrito a mano,
+ * porque cambiar el modo lo descarta. Sin texto a mano, no hay toast.
  */
 export function applyGroupMode(group: EntityGroup, mode: ReplacementMode): void {
-  recordEdit(`«${group.canonicalValue}» cambia de modo`);
+  const recorded = recordEdit(`«${group.canonicalValue}» cambia de modo`);
   actions.updateGroup(group.id, { replacementMode: mode });
+  if (!group.replacementValueUserSet) return;
+  showToast(editToast({ title: discardedTextToastText(group.canonicalValue) }, recorded));
 }
 
-/** Dejar un dato a la vista desde el aviso de espacio justo: deshabilitarlo. */
+/**
+ * Dejar un dato a la vista desde el aviso de espacio justo: deshabilitarlo.
+ *
+ * Es el mismo cambio que destildar la casilla de la fila, así que confirma
+ * igual: el toast con "Deshacer" de `applyEnabled` (ADR-215 §1, que corrige el
+ * Contexto §3 — hasta entonces esta salida no avisaba nada).
+ */
 export function applyLeaveVisible(group: EntityGroup): void {
-  recordEdit(`«${group.canonicalValue}» no se anonimiza`);
-  actions.updateGroup(group.id, { enabled: false });
+  applyEnabled({ groups: [group], next: false, label: group.canonicalValue, isType: false });
 }
 
 /** "Cambiar tipo…" (ADR-082 §6). `next` es la vista previa del Core, para el toast. */

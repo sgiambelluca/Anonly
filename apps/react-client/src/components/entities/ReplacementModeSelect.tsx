@@ -44,6 +44,7 @@ import { applyModeAtLevel } from "./applyMode.js";
 import { hasOwnDecision, planApplyGroupMode } from "./modeLevels.js";
 import { ModeSelectMenu } from "./ModeSelectMenu.js";
 import { REPLACEMENT_MODE_LABEL, REPLACEMENT_MODE_SHORT_LABEL } from "./replacementModeOptions.js";
+import { discardedTextToastText } from "./undoableEdits.js";
 
 export interface ReplacementModeSelectProps {
   readonly group: EntityGroup;
@@ -70,7 +71,7 @@ export function ReplacementModeSelect({ group, onOpenChange }: ReplacementModeSe
       // de verdad: cambiar el modo recalcula `replacementValue` y descarta el
       // texto escrito a mano. Con o sin toast, entra a la pila (ADR-172 §3).
       toastText: group.replacementValueUserSet
-        ? `Se descartó el texto que habías escrito para ${group.canonicalValue}.`
+        ? discardedTextToastText(group.canonicalValue)
         : null,
     });
   }

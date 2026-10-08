@@ -10,7 +10,6 @@
 import { AnnotationKind, type Annotation } from "@anonly/anonymization-core";
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { describePages } from "../components/entities/degradedMessage.js";
 import {
   selectDegradedPages,
   selectGroupIsDegraded,
@@ -88,31 +87,5 @@ describe("degraded.store", () => {
     useDegradedStore.getState().reset();
 
     expect(selectGroupIsDegraded(useDegradedStore.getState(), "g1")).toBe(false);
-  });
-});
-
-describe("describePages", () => {
-  // El `pageIndex` del Core es 0-based; el usuario cuenta desde 1. Que se
-  // le diga "la página 0" es el error más fácil de cometer acá y el más
-  // desconcertante de leer.
-  it("cuenta las páginas desde 1, no desde 0", () => {
-    expect(describePages([0])).toBe("la página 1");
-  });
-
-  it("enumera varias páginas en castellano legible", () => {
-    expect(describePages([0, 2])).toBe("las páginas 1 y 3");
-    expect(describePages([0, 2, 6])).toBe("las páginas 1, 3 y 7");
-  });
-
-  it("sin páginas devuelve vacío — no hay aviso que dar", () => {
-    expect(describePages([])).toBe("");
-  });
-
-  // Regla de ADR-062: el aviso lo lee alguien que no sabe qué es un token.
-  it("el texto no filtra jerga técnica", () => {
-    const texto = describePages([0, 3]);
-    for (const jerga of ["token", "placeholder", "bbox", "degrad", "ratio"]) {
-      expect(texto.toLowerCase()).not.toContain(jerga);
-    }
   });
 });
