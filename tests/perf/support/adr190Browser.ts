@@ -3,6 +3,8 @@ import type { Page } from "@playwright/test";
 
 import type { Arm, Capture } from "./adr190Dpi.js";
 
+export type InitScriptPage = Pick<Page, "addInitScript">;
+
 export interface BrowserRun {
   capture: Capture;
   caps: Array<{
@@ -25,11 +27,34 @@ declare global {
 
 /** Observe transport metadata; retain source OSD bytes only for the scale preflight. */
 export async function installTransportObserver(
-  page: Page,
+  page: InitScriptPage,
   options: {
     readonly retainOrientationInputs?: boolean;
     readonly retainOcrPageInputs?: boolean;
     readonly forceOcrPageOrientation?: 0 | 90 | 180 | 270;
+    /**
+     * Reemplaza el resultado de la primera detección de orientación de cada página por un veredicto
+     * válido (`{ orientation, osdHadVerdict: true }`, con el `inkRatio` que midió el worker), antes de
+     * que lo lea el host. A diferencia de `forceOcrPageOrientation`, que cambia solo el payload del
+     * primer `ocr-page` y deja el `osdHadVerdict` real, esto llega al producto como un OSD que afirma el
+     * ángulo (M-O1). No se combina con `forceOcrPageOrientation`.
+     */
+    readonly forceOrientationVerdict?: 0 | 90 | 180 | 270;
+    /**
+     * Al revés que `forceOrientationVerdict` (M-O3): reemplaza el resultado de la detección de orientación
+     * de TODAS las páginas por «sin veredicto» (`osdHadVerdict: false`, orientación 0: el ángulo de fallback
+     * que usa el producto) con el `inkRatio` que midió el worker. Con `raiseInkToThreshold` (brazo C), si la
+     * tinta medida es menor que `INK_PRESENT_RATIO` (0,002) se informa ese umbral. El resultado natural queda
+     * en `naturalResult`. No se combina con las otras opciones de forzado.
+     */
+    readonly forceNoVerdict?: { readonly raiseInkToThreshold: boolean };
+    /**
+     * De un `ocr-page` completado se guarda solo un resumen sin texto (`{ wordCount, reliableWordCount,
+     * confidence, key }`, con `key` un hash de las palabras sin importar el orden) en vez de las palabras:
+     * el observador no retiene el texto de las páginas, que en una medición de memoria sería carga propia y,
+     * en un documento real, contenido.
+     */
+    readonly lightweightResults?: boolean;
   } = {},
 ): Promise<void> {
   await page.addInitScript((options) => {
@@ -49,6 +74,27 @@ export async function installTransportObserver(
     const Original = globalThis.Worker;
     let sequence = 0;
     const forcedOcrPages = new Set<string>();
+    const forcedVerdictPages = new Set<string>();
+    // Fuera de la clase: el constructor de abajo tiene su propio parámetro `options`.
+    const forcedVerdict = options.forceOrientationVerdict;
+    const noVerdict = options.forceNoVerdict;
+    const lightweight = options.lightweightResults === true;
+    // Hash FNV-1a de 52 bits (en dos mitades de 32), sin importar el orden de las palabras. Es de
+    // identidad para emparejar una lectura con la entregada, no criptográfico.
+    const wordsKey = (words: ReadonlyArray<{ text: string; confidence: number }>): string => {
+      const keys = words.map((word) => `${word.confidence}|${word.text}`).sort();
+      let a = 0x811c9dc5;
+      let b = 0x01000193;
+      for (const key of keys) {
+        for (let i = 0; i < key.length; i += 1) {
+          const code = key.charCodeAt(i);
+          a = Math.imul(a ^ code, 0x01000193) >>> 0;
+          b = Math.imul(b + code + 0x9e3779b9, 0x85ebca6b) >>> 0;
+        }
+        a = Math.imul(a ^ 10, 0x01000193) >>> 0;
+      }
+      return `${a.toString(16).padStart(8, "0")}${b.toString(16).padStart(8, "0")}`;
+    };
     globalThis.Worker = class extends Original {
       private readonly observationId: number;
       constructor(url: string | URL, options?: WorkerOptions) {
@@ -82,9 +128,58 @@ export async function installTransportObserver(
                 candidate.terminal === null,
             );
           if (job === undefined) return; // Other engines use the same transport.
+          if (
+            forcedVerdict !== undefined &&
+            job.jobType === "ocr-orient" &&
+            message.type === "COMPLETED" &&
+            typeof message.result === "object" &&
+            message.result !== null &&
+            !forcedVerdictPages.has(`${job.documentId}:${job.pageIndex}`)
+          ) {
+            // Este listener se registró antes que el del pool: el host recibe el mismo objeto ya cambiado.
+            forcedVerdictPages.add(`${job.documentId}:${job.pageIndex}`);
+            job.naturalResult = JSON.parse(JSON.stringify(message.result));
+            Object.assign(message.result, { orientation: forcedVerdict, osdHadVerdict: true });
+          }
+          if (
+            noVerdict !== undefined &&
+            job.jobType === "ocr-orient" &&
+            message.type === "COMPLETED" &&
+            typeof message.result === "object" &&
+            message.result !== null
+          ) {
+            // Todas las páginas, sin excepción: el host recibe el mismo objeto ya cambiado.
+            job.naturalResult = JSON.parse(JSON.stringify(message.result));
+            const result = message.result as { inkRatio?: unknown };
+            const changes: Record<string, unknown> = { orientation: 0, osdHadVerdict: false };
+            if (
+              noVerdict.raiseInkToThreshold &&
+              typeof result.inkRatio === "number" &&
+              result.inkRatio < 0.002
+            )
+              changes.inkRatio = 0.002;
+            Object.assign(message.result, changes);
+          }
           job.finishedAt = Date.now();
           job.terminal = message.type ?? null;
-          job.result = message.result ?? null;
+          if (
+            lightweight &&
+            job.jobType === "ocr-page" &&
+            message.type === "COMPLETED" &&
+            typeof message.result === "object" &&
+            message.result !== null &&
+            "words" in message.result &&
+            Array.isArray(message.result.words)
+          ) {
+            const words = message.result.words as Array<{ text: string; confidence: number }>;
+            const confidence = (message.result as { confidence?: unknown }).confidence;
+            job.result = {
+              wordCount: words.length,
+              reliableWordCount: words.filter((word) => word.confidence >= 0.6).length,
+              confidence: typeof confidence === "number" ? confidence : null,
+              key: wordsKey(words),
+            };
+          } else job.result = message.result ?? null;
           job.error = message.error ?? null;
         });
       }
