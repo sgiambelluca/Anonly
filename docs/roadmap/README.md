@@ -68,13 +68,15 @@ la segunda entrega. El registro está en el plan.
 [Confianza, cierre del bloque — 2026-10-08](./hardening/Confianza_Cierre_2026-10-08.md):
 lo que queda abierto de `Roadmap_1.x.md` §3. RC, el patrón de direcciones y
 la ampliación del gate ya están implementados, medidos y aprobados por Sol
-para commits, push y PR a `develop` el 2026-10-11. La memoria final y las
-repeticiones requeridas sobre el commit siguen pendientes antes del release.
+para commits, push y PR a `develop` el 2026-10-11. La memoria final pasó
+sobre el producto del PR #63: P1 máximo 1606,3 MB y P2 máximo 2820,1 MB,
+ambos bajo sus techos. Las repeticiones requeridas de otras mediciones
+provisionales sobre el commit siguen pendientes antes del release.
 «Validar muestra» se retiró del alcance
 el 2026-10-11, por decisión del mantenedor. Branch
 `hardening/confianza-cierre`, desde develop. M2 se repitió sobre la base
-`develop` del 2026-10-08 y cumplió; falta la repetición sobre el producto final
-del cierre antes de publicar.
+`develop` del 2026-10-08 y cumplió; la repetición final del 2026-10-11 también
+cumplió ([registro](./mediciones/transversal/Memoria_Final_Confianza_2026-10-11.md)).
 
 Retomado en Codex el 2026-10-09: M-O3 terminó el 2026-10-10 con 30/30
 corridas válidas, provisionales. La decisión posterior adopta RC y difiere

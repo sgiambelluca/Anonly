@@ -56,3 +56,4 @@ documentos de trabajo. Los arneses que producen estos números están en
 | Transversal | [`Perfilado_Tiempo_Fuera_OCR_Medicion_M0_M1.md`](./transversal/Perfilado_Tiempo_Fuera_OCR_Medicion_M0_M1.md) | Tiempo fuera del OCR, M-0 a M-3 |
 | Transversal | [`Banco_Windows_Comparativa_Medicion.md`](./transversal/Banco_Windows_Comparativa_Medicion.md) | El hardening contra la 0.9.2, y Windows contra el M1 |
 | Transversal | [`Validar_Muestra_Costo_Lectura_2026-10-10.md`](./transversal/Validar_Muestra_Costo_Lectura_2026-10-10.md) | M-V1 con RC: 36/36 registrados y auditados; 30 flujos exitosos y seis lecturas parciales de R4; aproximación por reimportación; antecedente histórico, función retirada del roadmap el 2026-10-11 |
+| Transversal | [`Memoria_Final_Confianza_2026-10-11.md`](./transversal/Memoria_Final_Confianza_2026-10-11.md) | Producto final del PR #63: nueve pares válidos, P1 máximo 1606,3 MB y P2 máximo 2820,1 MB; cumplen ADR-192 |

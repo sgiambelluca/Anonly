@@ -32,8 +32,10 @@ El objetivo de 1.0.x es que este sea su único punto abierto, con estado
 pendiente de desarrollo.
 RC ya tiene caracterización completa y el gate del export terminó 23/23
 localmente. «Validar muestra» fue retirada del roadmap el 2026-10-11.
-Sol aprobó el lote para PR el 2026-10-11. Memoria final y las repeticiones
-sobre el commit siguen pendientes antes de publicar la versión.
+Sol aprobó el lote para PR el 2026-10-11. La memoria final pasó ese día:
+P1 máximo 1606,3 MB y P2 máximo 2820,1 MB, bajo sus techos. Las repeticiones
+de otras mediciones provisionales sobre el commit siguen pendientes antes
+de publicar la versión.
 La decisión sobre SV/CP no los declara terminados. La autorización posterior
 del 2026-10-11 para commits y PR, condicionada a APPROVED y auditoría de
 privacidad, está registrada en el plan de cierre.
