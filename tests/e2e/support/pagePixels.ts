@@ -38,6 +38,7 @@ export interface ShotInfo {
   readonly key: string;
   readonly width: number;
   readonly height: number;
+  readonly src: string;
 }
 
 export interface ShiftSearchResult {
@@ -63,6 +64,7 @@ export interface RegionMismatch {
 interface StoredShot {
   readonly width: number;
   readonly height: number;
+  readonly src: string;
   readonly data: Uint8ClampedArray;
 }
 
@@ -97,6 +99,7 @@ export async function installPageImageCapture(page: Page): Promise<void> {
         drawLog.push({
           label,
           width,
+          height,
           canvasWidth: context.canvas.width,
           src: image.currentSrc || image.src,
           at: performance.now(),
@@ -108,7 +111,7 @@ export async function installPageImageCapture(page: Page): Promise<void> {
         if (copyContext === null) return;
         original.call(copyContext, image, 0, 0);
         const { data } = copyContext.getImageData(0, 0, width, height);
-        store.set(`${label}@${width}`, { width, height, data });
+        store.set(`${label}@${width}`, { width, height, src: image.currentSrc || image.src, data });
       }
 
       proto.drawImage = function (
@@ -129,6 +132,7 @@ export interface DrawRecord {
   readonly label: string;
   /** Ancho natural de la imagen dibujada: `595 × escala` con la que se renderizó. */
   readonly width: number;
+  readonly height: number;
   /** Ancho del canvas del visor en ese momento (`pageLayout.ts`: depende del zoom). */
   readonly canvasWidth: number;
   /** El `blob:` de la imagen dibujada: dice de qué render salió (dos imágenes distintas, dos URL). */
@@ -184,6 +188,7 @@ export async function listPageShots(page: Page): Promise<ReadonlyArray<ShotInfo>
       key,
       width: shot.width,
       height: shot.height,
+      src: shot.src,
     }));
   }, STORE_NAME);
 }

@@ -30,6 +30,9 @@ export interface PreviewArrivalRecord {
   readonly pageIndex: number;
   /** El `blob:` de la imagen que trajo el evento: identifica de qué lado salió lo que se dibuja. */
   readonly blobUrl: string;
+  /** Same-render ADR-204 geometry revision when the renderer supplied it. */
+  readonly interactionRevision: number | null;
+  readonly interactionScale: number | null;
   readonly at: number;
 }
 
@@ -117,11 +120,22 @@ export async function startRenderTap(page: Page): Promise<void> {
         });
       });
       scope.__anonlyCore?.bus.on("render", "PREVIEW_UPDATED", (payload) => {
-        const p = payload as { kind: string; pageIndex: number; canvasBlobUrl: string };
+        const p = payload as {
+          kind: string;
+          pageIndex: number;
+          canvasBlobUrl: string;
+          interactionGeometry?: { revision?: number; scale?: number };
+        };
         arrivals.push({
           kind: p.kind,
           pageIndex: p.pageIndex,
           blobUrl: p.canvasBlobUrl,
+          interactionRevision:
+            typeof p.interactionGeometry?.revision === "number"
+              ? p.interactionGeometry.revision
+              : null,
+          interactionScale:
+            typeof p.interactionGeometry?.scale === "number" ? p.interactionGeometry.scale : null,
           at: performance.now(),
         });
       });
