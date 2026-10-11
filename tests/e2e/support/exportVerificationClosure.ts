@@ -6,17 +6,27 @@ import type { ElectronApplication, Page, TestInfo } from "@playwright/test";
 
 import { REPLACEMENT_FONT_HEIGHT_RATIO } from "../../../packages/anonymization-core/shared/src/index.js";
 
+import { findEditedPreviewEvidence } from "./editedPreviewEvidence.js";
 import { captureDownload, expect, openApp } from "./electronApp.js";
 import { auditPdfWithIndependentOcr, type OcrAudit } from "./exportVerificationOcr.js";
 import { verifyExport, type OcrDocument } from "./exportVerificationOracle.js";
 import { lineDocumentFile, type LineGeometry } from "./fixtures.js";
 import {
   compareShiftedRegion,
+  drawLogLength,
+  drawsSince,
   findExactShift,
   installPageImageCapture,
   listPageShots,
   type PixelRect,
 } from "./pagePixels.js";
+import {
+  pageNow,
+  previewArrivalsSince,
+  renderRequestCount,
+  renderRequestsSince,
+  startRenderTap,
+} from "./renderTap.js";
 import { rasterizeToScannedPdf, type ScanDegradation } from "./scannedPdf.js";
 import { installSettingsOverride } from "./settingsOverride.js";
 
@@ -64,9 +74,12 @@ interface ClosureProbe {
   parsed: Array<{ pageIndex: number; wordCount: number; requiresOCR: boolean }>;
   ocr: Array<{ pageIndex: number; wordCount: number }>;
   sequence: Array<{
-    event: "PAGE_PARSED" | "OCR_PAGE_FINISHED" | "IDENTIFIER_GROUP";
+    event: "PAGE_PARSED" | "OCR_PAGE_FINISHED" | "IDENTIFIER_GROUP" | "IDENTIFIER_GROUP_UPDATED";
     pageIndex: number;
     count: number;
+    at: number;
+    replacementValue?: string;
+    interactionRevision?: number | null;
   }>;
   exportOptions: {
     dpi: number;
@@ -84,6 +97,9 @@ async function installClosureProbe(page: Page, identifier: string): Promise<void
     const scope = globalThis as typeof globalThis & {
       __anonlyCore?: {
         bus: { on(channel: string, event: string, callback: (payload: unknown) => void): unknown };
+        orchestrator: {
+          getPreviewInteractionRevision(documentId: string, pageIndex: number): number | null;
+        };
       };
     };
     const core = scope.__anonlyCore;
@@ -96,7 +112,10 @@ async function installClosureProbe(page: Page, identifier: string): Promise<void
       exportOptions: null,
     };
     globalThis.__anonlyClosureProbe = state;
-    const observe = (payload: unknown): void => {
+    const observe = (
+      event: "ENTITY_GROUP_CREATED" | "ENTITY_GROUP_UPDATED",
+      payload: unknown,
+    ): void => {
       if (typeof payload !== "object" || payload === null || !("group" in payload)) return;
       const group = payload.group;
       if (
@@ -151,10 +170,26 @@ async function installClosureProbe(page: Page, identifier: string): Promise<void
         replacementMode: group.replacementMode,
         members,
       };
-      state.sequence.push({ event: "IDENTIFIER_GROUP", pageIndex: 0, count: members.length });
+      state.sequence.push({
+        event: event === "ENTITY_GROUP_UPDATED" ? "IDENTIFIER_GROUP_UPDATED" : "IDENTIFIER_GROUP",
+        pageIndex: 0,
+        count: members.length,
+        at: performance.now(),
+        replacementValue: group.replacementValue,
+        interactionRevision:
+          event === "ENTITY_GROUP_UPDATED" &&
+          "documentId" in payload &&
+          typeof payload.documentId === "string"
+            ? core.orchestrator.getPreviewInteractionRevision(payload.documentId, 0)
+            : null,
+      });
     };
-    core.bus.on("grouping", "ENTITY_GROUP_CREATED", observe);
-    core.bus.on("grouping", "ENTITY_GROUP_UPDATED", observe);
+    core.bus.on("grouping", "ENTITY_GROUP_CREATED", (payload) =>
+      observe("ENTITY_GROUP_CREATED", payload),
+    );
+    core.bus.on("grouping", "ENTITY_GROUP_UPDATED", (payload) =>
+      observe("ENTITY_GROUP_UPDATED", payload),
+    );
     core.bus.on("pdf", "PAGE_PARSED", (payload: unknown) => {
       if (
         typeof payload === "object" &&
@@ -175,6 +210,7 @@ async function installClosureProbe(page: Page, identifier: string): Promise<void
           event: "PAGE_PARSED",
           pageIndex: payload.pageIndex,
           count: payload.wordCount,
+          at: performance.now(),
         });
       }
     });
@@ -192,6 +228,7 @@ async function installClosureProbe(page: Page, identifier: string): Promise<void
           event: "OCR_PAGE_FINISHED",
           pageIndex: payload.pageIndex,
           count: payload.wordCount,
+          at: performance.now(),
         });
       }
     });
@@ -236,7 +273,11 @@ function wordsRegion(line: LineGeometry, first: number, last: number): PixelRect
   const bottom = Math.ceil(842 - (line.baseline - 0.25 * line.size));
   return { x, y, width: right - x, height: bottom - y };
 }
-async function shotKey(page: Page, kind: "original" | "anonimizado"): Promise<string> {
+async function shotKey(
+  page: Page,
+  kind: "original" | "anonimizado",
+  requiredSource?: string,
+): Promise<string> {
   let result = "";
   await expect
     .poll(
@@ -246,7 +287,8 @@ async function shotKey(page: Page, kind: "original" | "anonimizado"): Promise<st
             (shot) =>
               shot.key.startsWith(`Página 1, ${kind}@`) &&
               shot.width === 595 &&
-              shot.height === 842,
+              shot.height === 842 &&
+              (requiredSource === undefined || shot.src === requiredSource),
           )?.key ?? "";
         return result;
       },
@@ -259,17 +301,10 @@ async function assertScaleOnePair(page: Page, originalKey: string, anonymizedKey
   const shots = await listPageShots(page);
   const original = shots.find((shot) => shot.key === originalKey);
   const anonymized = shots.find((shot) => shot.key === anonymizedKey);
-  expect(original, "ADR-210 original render missing").toBeDefined();
-  expect(anonymized, "ADR-210 anonymized render missing").toBeDefined();
-  expect(original).toMatchObject({ width: 595, height: 842 });
-  expect(anonymized).toMatchObject({ width: 595, height: 842 });
-  expect({ width: anonymized?.width, height: anonymized?.height }).toEqual({
-    width: original?.width,
-    height: original?.height,
-  });
   return {
-    original: { width: original?.width, height: original?.height },
-    anonymized: { width: anonymized?.width, height: anonymized?.height },
+    original: original === undefined ? null : { width: original.width, height: original.height },
+    anonymized:
+      anonymized === undefined ? null : { width: anonymized.width, height: anonymized.height },
     scale: 1,
   };
 }
@@ -277,7 +312,7 @@ async function showView(page: Page, kind: "Original" | "Anonimizado"): Promise<v
   await page.getByRole("tab", { name: kind }).click();
   await expect(page.getByRole("tab", { name: kind })).toHaveAttribute("aria-selected", "true");
 }
-async function mapHighlight(page: Page, word: string, expectedWidth: number) {
+async function mapHighlight(page: Page, word: string) {
   await page.getByRole("searchbox", { name: "Buscar en el documento" }).fill(word);
   const highlight = page
     .locator('[class*="border-warning-strong"][class*="bg-warning/30"]')
@@ -286,7 +321,7 @@ async function mapHighlight(page: Page, word: string, expectedWidth: number) {
     .poll(
       async () => {
         const box = await highlight.boundingBox();
-        return box !== null && Math.abs(box.width - expectedWidth) < 3;
+        return box !== null;
       },
       { timeout: 15_000 },
     )
@@ -296,19 +331,22 @@ async function mapHighlight(page: Page, word: string, expectedWidth: number) {
   await page.getByRole("button", { name: "Cerrar resultados" }).click();
   return result;
 }
-async function measurePath(page: Page, line: LineGeometry, kind: ClosureCase) {
+async function measurePath(
+  page: Page,
+  line: LineGeometry,
+  kind: ClosureCase,
+  editedSource: string,
+) {
   const originalKey = await shotKey(page, "original");
-  await showView(page, "Anonimizado");
-  const anonymizedKey = await shotKey(page, "anonimizado");
+  const anonymizedKey = await shotKey(page, "anonimizado", editedSource);
   const renderPair = await assertScaleOnePair(page, originalKey, anonymizedKey);
-  await expect
-    .poll(
-      async () =>
-        (await compareShiftedRegion(page, originalKey, anonymizedKey, wordsRegion(line, 2, 2), 0))
-          .mismatches,
-      { timeout: 30_000 },
-    )
-    .toBeGreaterThan(0);
+  const replacementRegion = await compareShiftedRegion(
+    page,
+    originalKey,
+    anonymizedKey,
+    wordsRegion(line, 2, 2),
+    0,
+  );
   const shift = await findExactShift(
     page,
     originalKey,
@@ -323,27 +361,15 @@ async function measurePath(page: Page, line: LineGeometry, kind: ClosureCase) {
     wordsRegion(line, 3, 3),
     shift.exactShifts[0] ?? 0,
   );
-  expect(shift.exactShifts, JSON.stringify(shift)).toHaveLength(1);
-  expect(first.mismatches, JSON.stringify(first)).toBe(0);
-  const pixels = shift.exactShifts[0];
-  if (pixels === undefined) throw new Error("Closure path inconclusive");
-  if (kind === "line-repaint") expect(pixels).toBeGreaterThan(0);
-  else expect(pixels).toBe(0);
-  let map: { originalX: number; anonymizedX: number; shiftPx: number } | null = null;
-  if (kind === "line-repaint") {
-    const word = line.words[4];
-    if (word === undefined) throw new Error("Closure neighbor missing");
-    const canvas = await page.getByRole("img", { name: "Página 1, anonimizado" }).boundingBox();
-    if (canvas === null) throw new Error("Closure page missing");
-    const cssPerPx = canvas.width / 595;
-    const anon = await mapHighlight(page, word.text, (word.right - word.left) * cssPerPx);
-    await showView(page, "Original");
-    const original = await mapHighlight(page, word.text, (word.right - word.left) * cssPerPx);
-    expect(anon.x - original.x).toBeGreaterThan(0);
-    expect(Math.abs(anon.x - original.x - pixels * cssPerPx)).toBeLessThan(0.3);
-    map = { originalX: original.x, anonymizedX: anon.x, shiftPx: (anon.x - original.x) / cssPerPx };
-  }
-  return { pixels, shift, first, map, renderPair };
+  return {
+    pixels: shift.exactShifts[0] ?? null,
+    shift,
+    first,
+    replacementRegion,
+    renderPair,
+    originalKey,
+    anonymizedKey,
+  };
 }
 async function advances(page: Page, group: ObservedGroup) {
   const bbox = group.members[0]?.bbox;
@@ -465,6 +491,7 @@ export async function runClosureExportCase(
   });
   await installPageImageCapture(page);
   await openApp(page, "networkidle");
+  await startRenderTap(page);
   const fixture = await lineDocumentFile(`closure-${kind}.pdf`, [config.line], { size: 12 });
   const line = fixture.lines[0];
   if (line === undefined) throw new Error("Closure fixture missing line");
@@ -536,10 +563,33 @@ export async function runClosureExportCase(
     .click();
   const edit = page.getByRole("dialog", { name: "Editar reemplazo" });
   await edit.getByRole("textbox", { name: "Texto de reemplazo" }).fill(config.replacement);
+  const sequenceMark = await page.evaluate(
+    () => globalThis.__anonlyClosureProbe?.sequence.length ?? 0,
+  );
+  const requestMark = await renderRequestCount(page);
+  const drawMark = await drawLogLength(page);
+  const editStartedAt = await pageNow(page);
   await edit.getByRole("button", { name: "Guardar", exact: true }).click();
-  await expect
-    .poll(async () => (await observedGroup(page)).replacementValue, { timeout: 15_000 })
-    .toBe(config.replacement);
+  try {
+    await expect
+      .poll(async () => (await observedGroup(page)).replacementValue, { timeout: 15_000 })
+      .toBe(config.replacement);
+  } catch (error: unknown) {
+    const diagnostic = await page.evaluate(
+      (from) => ({
+        group: globalThis.__anonlyClosureProbe?.group,
+        sequence: globalThis.__anonlyClosureProbe?.sequence.slice(from),
+      }),
+      sequenceMark,
+    );
+    await testInfo.attach("closure-edit-evidence.json", {
+      body: Buffer.from(
+        JSON.stringify({ kind, line, editStartedAt, requestMark, drawMark, diagnostic }, null, 2),
+      ),
+      contentType: "application/json",
+    });
+    throw error;
+  }
   const group = await observedGroup(page);
   const importProbe = await page.evaluate(() => ({
     parsed: globalThis.__anonlyClosureProbe?.parsed,
@@ -547,7 +597,76 @@ export async function runClosureExportCase(
     sequence: globalThis.__anonlyClosureProbe?.sequence,
   }));
   const measured = await advances(page, group);
-  const path = await measurePath(page, line, kind);
+  await showView(page, "Anonimizado");
+  const readEditedEvidence = async () => {
+    const updates = await page.evaluate(
+      (from) =>
+        (globalThis.__anonlyClosureProbe?.sequence.slice(from) ?? [])
+          .filter(
+            (event) =>
+              event.event === "IDENTIFIER_GROUP_UPDATED" && event.replacementValue !== undefined,
+          )
+          .map((event) => ({
+            at: event.at,
+            replacementValue: event.replacementValue ?? "",
+            interactionRevision: event.interactionRevision ?? null,
+          })),
+      sequenceMark,
+    );
+    const requests = await renderRequestsSince(page, requestMark);
+    const arrivals = await previewArrivalsSince(page, editStartedAt);
+    const draws = await drawsSince(page, drawMark, "Página 1, anonimizado");
+    return {
+      updates,
+      requests,
+      arrivals,
+      draws,
+      match: findEditedPreviewEvidence(updates, requests, arrivals, draws, config.replacement),
+    };
+  };
+  const precheckEvidence = await readEditedEvidence();
+  await testInfo.attach("closure-render-precheck.json", {
+    body: Buffer.from(
+      JSON.stringify(
+        { kind, line, group, importProbe, measured, editStartedAt, ...precheckEvidence },
+        null,
+        2,
+      ),
+    ),
+    contentType: "application/json",
+  });
+  try {
+    await expect
+      .poll(async () => (await readEditedEvidence()).match !== null, { timeout: 30_000 })
+      .toBe(true);
+  } catch (error: unknown) {
+    const partial = await readEditedEvidence();
+    await testInfo.attach("closure-render-evidence.json", {
+      body: Buffer.from(
+        JSON.stringify(
+          { kind, line, group, importProbe, measured, editStartedAt, ...partial },
+          null,
+          2,
+        ),
+      ),
+      contentType: "application/json",
+    });
+    throw error;
+  }
+  const renderEvidence = await readEditedEvidence();
+  const linkedRender = renderEvidence.match;
+  if (linkedRender === null) throw new Error("Closure edited preview evidence disappeared");
+  await testInfo.attach("closure-render-evidence.json", {
+    body: Buffer.from(
+      JSON.stringify(
+        { kind, line, group, importProbe, measured, editStartedAt, ...renderEvidence },
+        null,
+        2,
+      ),
+    ),
+    contentType: "application/json",
+  });
+  const path = await measurePath(page, line, kind, linkedRender.draw.src);
   await testInfo.attach("closure-layout.json", {
     body: Buffer.from(
       JSON.stringify(
@@ -566,9 +685,52 @@ export async function runClosureExportCase(
     ),
     contentType: "application/json",
   });
+  expect(path.renderPair.original).toEqual({ width: 595, height: 842 });
+  expect(path.renderPair.anonymized).toEqual({ width: 595, height: 842 });
+  expect(path.replacementRegion.mismatches).toBeGreaterThan(0);
+  expect(path.shift.exactShifts).toHaveLength(1);
+  expect(path.first.mismatches).toBe(0);
+  if (path.pixels === null) throw new Error("Closure path inconclusive");
+  if (kind === "line-repaint") expect(path.pixels).toBeGreaterThan(0);
+  else expect(path.pixels).toBe(0);
   if (kind === "line-repaint")
     expect(measured.measuredAdvancePt).toBeGreaterThan(measured.availablePt);
   else expect(measured.measuredAdvancePt).toBeLessThanOrEqual(measured.availablePt);
+  let map: {
+    originalX: number;
+    anonymizedX: number;
+    shiftPx: number;
+    expectedWidth: number;
+    originalWidth: number;
+    anonymizedWidth: number;
+  } | null = null;
+  if (kind === "line-repaint") {
+    const word = line.words[4];
+    if (word === undefined) throw new Error("Closure neighbor missing");
+    const canvas = await page.getByRole("img", { name: "Página 1, anonimizado" }).boundingBox();
+    if (canvas === null) throw new Error("Closure page missing");
+    const cssPerPx = canvas.width / 595;
+    const expectedWidth = (word.right - word.left) * cssPerPx;
+    const anon = await mapHighlight(page, word.text);
+    await showView(page, "Original");
+    const original = await mapHighlight(page, word.text);
+    map = {
+      originalX: original.x,
+      anonymizedX: anon.x,
+      shiftPx: (anon.x - original.x) / cssPerPx,
+      expectedWidth,
+      originalWidth: original.width,
+      anonymizedWidth: anon.width,
+    };
+    await testInfo.attach("closure-map-evidence.json", {
+      body: Buffer.from(JSON.stringify(map, null, 2)),
+      contentType: "application/json",
+    });
+    expect(Math.abs(map.anonymizedWidth - map.expectedWidth)).toBeLessThan(3);
+    expect(Math.abs(map.originalWidth - map.expectedWidth)).toBeLessThan(3);
+    expect(map.anonymizedX - map.originalX).toBeGreaterThan(0);
+    expect(Math.abs(map.anonymizedX - map.originalX - path.pixels * cssPerPx)).toBeLessThan(0.3);
+  }
   await page.getByRole("button", { name: "Exportar", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Exportar documento anonimizado" });
   await dialog.getByRole("button", { name: "Exportar", exact: true }).click();
