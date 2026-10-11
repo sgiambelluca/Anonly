@@ -78,8 +78,9 @@ El PR #63 se integró el 2026-10-11 tras M2 y los checks verdes del PR.
 El CI posterior en develop falló en dos casos de Export verification.
 La corrección del arnés y su validación se siguen en
 [el registro del incidente](Export_Verification_CI_2026-10-11.md).
-No se declara cerrado ese incidente con la evidencia previa del PR;
-M2 conserva su validez mientras la corrección solo toque pruebas.
+La corrección pasó 23/23 en Windows y CI/macOS, con revisión Sol APPROVED;
+su integración se condiciona a los checks del HEAD final del PR #64.
+M2 conserva su validez: la corrección solo toca pruebas y documentación.
 
 ## Retiro de «Validar muestra» (2026-10-11)
 
