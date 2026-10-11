@@ -15,6 +15,8 @@ interface BrowserState {
   ready: boolean;
   failure: unknown;
   nerFinished: boolean;
+  /** Los miembros de cada grupo, según el último evento del agrupador: lo que sobrevive y se pinta. */
+  groups: Map<string, ReadonlyArray<string>>;
 }
 
 declare global {
@@ -31,6 +33,7 @@ export async function installAddressHeightObserver(page: Page): Promise<void> {
       ready: false,
       failure: null,
       nerFinished: false,
+      groups: new Map(),
     };
     globalThis.__addressHeight = state;
     const collect = (payload: unknown): void => {
@@ -65,6 +68,23 @@ export async function installAddressHeightObserver(page: Page): Promise<void> {
     core.bus.on("ner", "ENTITY_FOUND", collect);
     core.bus.on("ner", "NER_FINISHED", () => {
       state.nerFinished = true;
+    });
+    const rememberGroup = (payload: unknown): void => {
+      if (typeof payload !== "object" || payload === null || !("group" in payload)) return;
+      const group = payload.group as { readonly id?: unknown; readonly members?: unknown };
+      if (typeof group.id !== "string" || !Array.isArray(group.members)) return;
+      state.groups.set(
+        group.id,
+        (group.members as ReadonlyArray<{ readonly occurrenceId?: unknown }>).flatMap((member) =>
+          typeof member.occurrenceId === "string" ? [member.occurrenceId] : [],
+        ),
+      );
+    };
+    core.bus.on("grouping", "ENTITY_GROUP_CREATED", rememberGroup);
+    core.bus.on("grouping", "ENTITY_GROUP_UPDATED", rememberGroup);
+    core.bus.on("grouping", "ENTITY_GROUP_REMOVED", (payload) => {
+      if (typeof payload === "object" && payload !== null && "groupId" in payload)
+        state.groups.delete(String(payload.groupId));
     });
     core.bus.on("pipeline", "PIPELINE_READY", () => {
       state.ready = true;
@@ -152,6 +172,7 @@ export async function readAddressHeightRun(page: Page): Promise<RunObservation> 
       sourceKind: documents.length === 1 && document !== undefined ? document.sourceKind : null,
       pages: documents.length === 1 ? pages : [],
       occurrences: [...state.occurrences.values()],
+      finalOccurrenceIds: [...state.groups.values()].flat(),
       config,
     };
   });

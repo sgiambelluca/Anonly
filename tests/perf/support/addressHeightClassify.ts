@@ -77,7 +77,8 @@ export interface SentenceRecord {
 
 const WORD_SEPARATOR = " ";
 
-function wordSpanToChars(
+/** Las posiciones en caracteres de un tramo de palabras sobre `Page.text` (palabras unidas por un espacio). */
+export function wordSpanToChars(
   pageWords: ReadonlyArray<string>,
   span: { readonly startIndex: number; readonly endIndexExclusive: number },
 ): { readonly start: number; readonly end: number } | null {

@@ -37,6 +37,11 @@ export interface RunObservation {
   readonly sourceKind: string | null;
   readonly pages: ReadonlyArray<ObservedPage>;
   readonly occurrences: ReadonlyArray<ObservedOccurrence>;
+  /**
+   * Los ids de las ocurrencias que quedan en algún grupo después del agrupado: las que se pintan (M-D3). Ausente
+   * en las observaciones anteriores; M-D1 no lo usa.
+   */
+  readonly finalOccurrenceIds?: ReadonlyArray<string>;
   readonly config: ObservedConfig;
 }
 
@@ -60,19 +65,21 @@ export interface AddressHeightRunRecord {
   readonly sentences: ReadonlyArray<SentenceRecord>;
 }
 
-export function buildRunRecord(input: {
-  readonly repetition: number;
-  readonly sentences: ReadonlyArray<AddressHeightSentence>;
-  readonly observation: RunObservation;
-}): AddressHeightRunRecord {
-  const { repetition, sentences, observation } = input;
+/**
+ * Las razones por las que una corrida es inválida y no dependen de las páginas una por una: el análisis, el
+ * documento y la configuración. Lo comparten M-D1 y M-D2.
+ */
+export function observationInvalidReasons(
+  observation: RunObservation,
+  expectedPages: number,
+): string[] {
   const reasons: string[] = [];
   if (!observation.ready) reasons.push("pipeline-no-llego-a-ready");
   if (observation.pipelineFailure !== null && observation.pipelineFailure !== undefined)
     reasons.push("pipeline-fallo");
   if (!observation.nerFinished) reasons.push("ner-no-termino");
-  if (observation.pages.length !== sentences.length)
-    reasons.push(`paginas: esperadas ${sentences.length}, leidas ${observation.pages.length}`);
+  if (observation.pages.length !== expectedPages)
+    reasons.push(`paginas: esperadas ${expectedPages}, leidas ${observation.pages.length}`);
   if (observation.sourceKind !== "text")
     reasons.push(`sourceKind distinto de text: ${String(observation.sourceKind)}`);
   if (observation.pages.some((page) => page.requiresOCR)) reasons.push("hay paginas que piden OCR");
@@ -83,6 +90,17 @@ export function buildRunRecord(input: {
       `performancePreset: ${String(observation.config.performancePreset)} (se esperaba medium)`,
     );
   if (observation.config.engineOverridesPresent) reasons.push("hay overrides de motor instalados");
+
+  return reasons;
+}
+
+export function buildRunRecord(input: {
+  readonly repetition: number;
+  readonly sentences: ReadonlyArray<AddressHeightSentence>;
+  readonly observation: RunObservation;
+}): AddressHeightRunRecord {
+  const { repetition, sentences, observation } = input;
+  const reasons = observationInvalidReasons(observation, sentences.length);
 
   const textMismatches: PageTextMismatch[] = [];
   const records = sentences.map((sentence, index): SentenceRecord => {
