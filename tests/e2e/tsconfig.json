@@ -4,7 +4,10 @@
     "declaration": false,
     "declarationMap": false,
     "noEmit": true,
-    "baseUrl": "."
+    "baseUrl": ".",
+    "paths": {
+      "@anonly/shared": ["../../packages/anonymization-core/shared/src/index.ts"]
+    }
   },
   "include": ["**/*.ts"],
   "exclude": ["node_modules/**"]
