@@ -8,8 +8,9 @@ El [CI del PR #63](https://github.com/sgiambelluca/Anonly/actions/runs/381564979
 pasó antes del merge. El [CI posterior en develop](https://github.com/sgiambelluca/Anonly/actions/runs/38157610082),
 commit `59bd9b2a3bb33632a5883c7ed2b6cb4584d801c7`, falló en macOS:
 21/23 casos del gate pasaron. Sol revisó logs y artifacts sintéticos y
-emitió **REJECTED** para el arnés el 2026-10-11. Corrección implementada y
-revisión local **APPROVED**; CI/macOS sobre el HEAD publicable pendiente.
+emitió **REJECTED** para el arnés el 2026-10-11. Corrección implementada,
+revisión local **APPROVED** y gate de exportación **23/23 en CI/macOS**
+sobre el commit de la corrección.
 
 - `ADR-148 mixed E2E redact JPEG 150 DPI`: `openApp` falló en la recarga con
   `net::ERR_ABORTED`, antes de importar el documento. Los estados de carga
@@ -81,6 +82,22 @@ contratos, formato y diff-check. Las cinco regresiones nuevas del arnés
 pasaron. No repitió la suite pesada ya acreditada por el reporte 23/23.
 Su aprobación autoriza commit, push y PR; el merge queda condicionado al
 CI/macOS verde sobre el HEAD final. No cambió el producto ni los contratos.
+
+## Validación en macOS y condición de integración
+
+El [job de export del PR #64](https://github.com/sgiambelluca/Anonly/actions/runs/38160208379/job/114531431885)
+pasó sobre `367faac21e49227a55582f9515b9733aeaa763bc`: **23/23** en 4,1 minutos,
+cero casos omitidos y assertion final de ejecución efectiva verde. El log
+se conserva en `.measure/export-ci-20261011/ci-pr64-export.log`.
+El caso mixto y las dos filas de cierre completaron el mismo gate canónico
+sin cambios de fixture ni retries. Este resultado acredita macOS para el
+producto y el arnés corregidos; los commits posteriores que solo registran
+evidencia no cambian ese contenido ejecutable.
+
+Antes del merge se verifican todos los checks requeridos sobre el HEAD
+publicable final. El estado de esa validación y de la integración se consulta
+en el [PR #64](https://github.com/sgiambelluca/Anonly/pull/64). Después del merge
+se verifica también la corrida de CI correspondiente en develop.
 
 ## Publicación
 
