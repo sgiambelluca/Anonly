@@ -74,6 +74,13 @@ la versión, según §11.4 de
 `07_Performance_Strategy.md`. No se sustituyen por la medición histórica
 de develop ni por P2N/R4, y no se declaran cumplidas al abrir el PR.
 
+El PR #63 se integró el 2026-10-11 tras M2 y los checks verdes del PR.
+El CI posterior en develop falló en dos casos de Export verification.
+La corrección del arnés y su validación se siguen en
+[el registro del incidente](Export_Verification_CI_2026-10-11.md).
+No se declara cerrado ese incidente con la evidencia previa del PR;
+M2 conserva su validez mientras la corrección solo toque pruebas.
+
 ## Retiro de «Validar muestra» (2026-10-11)
 
 El mantenedor decidió no desarrollar esta función y quitarla del roadmap.
