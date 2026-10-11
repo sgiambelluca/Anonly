@@ -6,6 +6,7 @@ import type { Page, TestInfo } from "@playwright/test";
 import { PDFDocument, rgb } from "pdf-lib";
 
 import { captureDownload, expect, openApp, test } from "./support/electronApp.js";
+import { runClosureExportCase } from "./support/exportVerificationClosure.js";
 import {
   assertFixtureRules,
   addPdfRotation,
@@ -852,6 +853,20 @@ for (const angle of [90, 180, 270] as const) {
     }
   });
 }
+
+test("ADR-148 E2E renglón repintado, placeholder largo, PDF final", async ({
+  page,
+  electronApp,
+}, testInfo) => {
+  await runClosureExportCase(page, electronApp, testInfo, "line-repaint");
+});
+
+test("ADR-148 E2E scan con tinta tenue, placeholder cabe, PDF final", async ({
+  page,
+  electronApp,
+}, testInfo) => {
+  await runClosureExportCase(page, electronApp, testInfo, "faint-ink");
+});
 
 test("ADR-148 infrastructure controls PDF final, JPEG/PNG 288 DPI: sensitivity, geometry shift, blank/black loss, missing page, inconclusive OCR", async ({
   page,

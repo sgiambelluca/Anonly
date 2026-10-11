@@ -59,7 +59,7 @@ if (process.argv.length !== 2) {
     }
   }
 
-  process.stdout.write("\n> Assert 21 tests ejecutados, 0 salteados\n");
+  process.stdout.write("\n> Assert 23 tests ejecutados, 0 salteados\n");
   const assertion = spawnSync(
     process.execPath,
     [
@@ -67,7 +67,7 @@ if (process.argv.length !== 2) {
       "--report",
       jsonReport,
       "--min",
-      "21",
+      "23",
       "--format",
       "playwright",
     ],
