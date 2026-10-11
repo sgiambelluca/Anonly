@@ -6,6 +6,7 @@ import {
   EngineNotInitializedError,
   EntityType,
   EventChannel,
+  normalizeEntityValue,
   type EngineContext,
   type EntityFound,
   type Occurrence,
@@ -19,6 +20,7 @@ import { RegexEngine } from "../regex.engine.js";
 import {
   createEngineContext,
   makeDocument,
+  makePage,
   makePageFromWords,
   makeSinglePageDocument,
   makeSourcedPage,
@@ -453,5 +455,40 @@ describe("RegexEngine — contract tests", () => {
     expect(summarize(fromOcr)).toEqual(summarize(fromPdf));
     // `palabra. nombre@dominio` no se extiende al tramo previo.
     expect(fromOcr.some((o) => o.value.includes(". "))).toBe(false);
+  });
+
+  // Caso 36 (§13, ADR-217): el contrato de salida del patrón de dirección con
+  // palabra clave. No hay contrato nuevo: es una `Occurrence` de `Address` como
+  // la de cualquier patrón, con la normalización que ya usa `ner-engine`.
+  it("keyword address emits Address with regex source, full confidence and the shared normalization", async () => {
+    await engine.init(ctx);
+    const sentences = [
+      "El imputado vive en (Av. Corrientes 1980), de esta ciudad",
+      "El actor, con domicilio en Maipú 1434, torre 2",
+      "CON DOMICILIO EN AVENIDA DEL MAR 450",
+    ];
+
+    for (const sentence of sentences) {
+      const occurrences = await processPage(engine, ctx, makePage(0, sentence.split(" ")));
+      expect(occurrences, sentence).toHaveLength(1);
+      const occurrence = occurrences[0];
+      expect(occurrence?.entityType).toBe(EntityType.Address);
+      expect(occurrence?.source).toBe(DetectionSource.Regex);
+      expect(occurrence?.confidence).toBe(1.0);
+      expect(occurrence?.maskFormat).toBe("XXXXXX XXX");
+      expect(occurrence?.value).toBeDefined();
+      expect(occurrence?.normalizedValue).toBe(normalizeEntityValue(occurrence?.value ?? ""));
+      expect(occurrence?.pageIndex).toBe(0);
+      expect(occurrence?.wordSpan).toBeDefined();
+    }
+
+    // La identidad es la del tramo, sin la puntuación de borde ni la caja.
+    const occurrences = await processPage(
+      engine,
+      ctx,
+      makePage(0, "vive en Av. Corrientes 1980, hoy".split(" ")),
+    );
+    expect(occurrences[0]?.value).toBe("Av. Corrientes 1980");
+    expect(occurrences[0]?.normalizedValue).toBe("av. corrientes 1980");
   });
 });
