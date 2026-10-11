@@ -1,8 +1,8 @@
-<!-- CONTEXT: scope=adr | dependencias=07_Performance_Strategy.md,00_Project_Vision.md,roadmap/MVP.md,roadmap/Version_1.0.md,roadmap/Future_Ideas.md,roadmap/memoria/H-10_Bitacora_De_Memoria.md,roadmap/mediciones/transversal/Banco_Windows_Comparativa_Medicion.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-154-La-Memoria-No-Se-Compra-Bajando-El-Paralelismo.md,adr/ADR-190-Una-Pagina-Con-Tinta-No-Sale-Vacia-En-Silencio.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=adr | dependencias=07_Performance_Strategy.md,00_Project_Vision.md,roadmap/MVP.md,roadmap/Version_1.0.md,roadmap/Future_Ideas.md,roadmap/memoria/H-10_Bitacora_De_Memoria.md,roadmap/mediciones/transversal/Banco_Windows_Comparativa_Medicion.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-154-La-Memoria-No-Se-Compra-Bajando-El-Paralelismo.md,adr/ADR-190-Una-Pagina-Con-Tinta-No-Sale-Vacia-En-Silencio.md,roadmap/hardening/Confianza_Cierre_2026-10-08.md | audiencia=humanos+IA | fase=11 -->
 
 # ADR-192 — El pico total de memoria tiene un techo medido por perfil
 
-- **Estado**: Aceptado. **Medido el 2026-10-01: P1 y P2 cumplen** (ver «Medición del 2026-10-01»), con un margen en P2 menor que el ruido.
+- **Estado**: Aceptado. **Medido el 2026-10-01 y repetido el 2026-10-08: P1 y P2 cumplen las dos veces** (ver «Medición del 2026-10-01» y «Medición del 2026-10-08»), con un margen en P2 menor que el ruido.
 - **Fecha**: 2026-09-30.
 - **Decidido por**: el humano, a propuesta del planificador. Equipo mínimo:
   «8 GB de momento, con plan de poder optimizar a futuro aún más para
@@ -159,6 +159,27 @@ Dos salvedades que quedan abiertas:
   3,0 GB. Lo que sí muestra es que un escaneo a 300 dpi consume del orden de
   700 MiB más que P2. Un perfil de medición a 300 dpi, con su techo, se
   define junto con los perfiles de rendimiento (§5).
+
+## Medición del 2026-10-08
+
+Repetición pedida por la primera salvedad de arriba
+(`roadmap/hardening/Confianza_Cierre_2026-10-08.md`, M-M2). El mismo banco y
+el mismo instrumento, sobre el producto de `develop` del 2026-10-08, con el
+nivel `medium` fijado (ADR-194 §8). Nueve corridas, todas `ok`.
+
+| Perfil | M2 frío (MB) | M2 caliente (MB) | Máximo | Techo | Veredicto |
+|---|---|---|---:|---:|---|
+| P1 | 1588,3 / 1619,0 / 1610,7 | 1293,2 / 1312,1 / 1288,9 | 1619,0 MB | 2,0 GB | **cumple** |
+| P2 | 2151,4 / 2004,6 / 2191,9 | 2813,1 / 2810,3 / 2806,0 | 2813,1 MB | 3,0 GB | **cumple** |
+| P2-dense (informativo) | 2263,1 / 2286,2 / 2231,6 | 2709,8 / 2739,7 / 2711,7 | 2739,7 MB | sin techo | — |
+
+- Las dos tandas cumplen. Sumadas, las seis corridas calientes de P2 van de
+  2660,9 a 2894,2 MB.
+- **El margen de P2 sigue siendo menor que el ruido de M2**: 187 MB en esta
+  tanda, 106 MB en la anterior, contra unos 345 MB. Repetir la medición no
+  cambia eso; lo cambia bajar el consumo (§6) o una decisión del humano
+  sobre el techo.
+- La segunda salvedad, que P2 no es el peor caso, sigue como estaba.
 
 ## Consecuencias
 
