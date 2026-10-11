@@ -8,6 +8,7 @@
  */
 import {
   EngineEvents,
+  EntityType,
   type Document,
   type EngineContext,
   type EntityFound,
@@ -142,6 +143,20 @@ export async function processPage(
   return busEmitSpy.mock.calls
     .filter(([, event]) => event === EngineEvents.ENTITY_FOUND)
     .map(([, , payload]) => (payload as EntityFound).occurrence);
+}
+
+/**
+ * Corre `process` sobre una oración (un token por palabra separada por un
+ * espacio, como `Page.text`) y devuelve el `value` de cada `Address` emitida,
+ * en el orden en que se emitieron. Para el caso 36 (ADR-217).
+ */
+export async function addressValuesOf(
+  engine: RegexEngine,
+  ctx: EngineContext,
+  sentence: string,
+): Promise<ReadonlyArray<string>> {
+  const occurrences = await processPage(engine, ctx, makePage(0, sentence.split(" ")));
+  return occurrences.filter((o) => o.entityType === EntityType.Address).map((o) => o.value);
 }
 
 /** Página sin texto (requiresOCR aún pendiente de fusión OCR). */

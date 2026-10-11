@@ -14,6 +14,7 @@ import { DEFAULT_PATTERNS_AR } from "../patterns/default-ar.js";
 import { RegexEngine } from "../regex.engine.js";
 
 import {
+  addressValuesOf,
   createEngineContext,
   makeDocument,
   makeEmptyPage,
@@ -97,10 +98,11 @@ describe("RegexEngine — unit tests", () => {
   });
 
   describe("DEFAULT_PATTERNS_AR — contrato de datos", () => {
-    it("contiene exactamente los 14 patrones default de Regex_Engine.md (ADR-096)", () => {
+    it("contiene exactamente los 15 patrones default de Regex_Engine.md (ADR-096, ADR-217)", () => {
       const ids = DEFAULT_PATTERNS_AR.map((p) => p.id).sort();
       expect(ids).toEqual(
         [
+          "address-keyword-ar",
           "caratula-ar",
           "credit-card",
           "cuit-ar",
@@ -136,6 +138,8 @@ describe("RegexEngine — unit tests", () => {
       expect(byId.get("plate-vieja-ar")).toBe("XXX XXX");
       expect(byId.get("plate-mercosur-ar")).toBe("XX XXX XX");
       expect(byId.get("plate-mercosur-moto-ar")).toBe("X XXX XXX");
+      // ADR-012: la fila Address; ADR-217 §4.
+      expect(byId.get("address-keyword-ar")).toBe("XXXXXX XXX");
     });
   });
 
@@ -1795,6 +1799,71 @@ describe("RegexEngine — unit tests", () => {
       expect(withEmail.slice(spans[0]?.startIndex, spans[0]?.endIndexExclusive)).toMatch(
         /estudioQexample\.org$/,
       );
+    });
+  });
+
+  /*
+   * Caso 36 (§13, ADR-217): dirección con palabra clave. Las oraciones llevan
+   * contexto antes y después en minúsculas, para fijar dónde empieza y dónde
+   * termina el `value` y no solo que algo se detectó.
+   */
+  describe("Caso 36: dirección con palabra clave (ADR-217)", () => {
+    type AddressCase = readonly [sentence: string, expectedValue: string];
+
+    // Palabra de vía: forma parte del valor. Las abreviaturas, con y sin punto.
+    const streetTypeCases: ReadonlyArray<AddressCase> = [
+      ["El imputado vive en Av. Corrientes 1980 desde hace años", "Av. Corrientes 1980"],
+      ["Reside en avenida Pueyrredón 1999 junto a su familia", "avenida Pueyrredón 1999"],
+      ["Reside en la calle Tucumán 1650 junto a su familia", "calle Tucumán 1650"],
+      ["Notifíquese en Avda. Rivadavia 4520 de esta ciudad", "Avda. Rivadavia 4520"],
+      ["El hecho ocurrió en pasaje Rauch 742 de noche", "pasaje Rauch 742"],
+      ["El hecho ocurrió en Pje. Güemes 315 de noche", "Pje. Güemes 315"],
+      ["Se constituyó en boulevard Oroño 1260 para notificar", "boulevard Oroño 1260"],
+      ["Se constituyó en Bv. Gálvez 2150 para notificar", "Bv. Gálvez 2150"],
+      ["Se constituyó en diagonal Norte 615 para notificar", "diagonal Norte 615"],
+      ["El imputado vive en Av Corrientes 1980 desde hace años", "Av Corrientes 1980"],
+      ["Notifíquese en Avda Rivadavia 4520 de esta ciudad", "Avda Rivadavia 4520"],
+      ["El hecho ocurrió en Pje Güemes 315 de noche", "Pje Güemes 315"],
+      ["Se constituyó en Bv Gálvez 2150 para notificar", "Bv Gálvez 2150"],
+    ];
+
+    // Palabra de domicilio: no forma parte del valor, que arranca en la calle.
+    const domicileCases: ReadonlyArray<AddressCase> = [
+      ["El actor, con domicilio en Maipú 1434 de esta ciudad", "Maipú 1434"],
+      ["La demandada, domiciliada en Sarmiento 742 de Rosario", "Sarmiento 742"],
+      ["El demandado, domiciliado en Belgrano 1950 de Rosario", "Belgrano 1950"],
+      ["El actor, con domicilio real en Lavalle 385 de esta ciudad", "Lavalle 385"],
+      ["El inmueble sito en Mitre 1985 de esta ciudad", "Mitre 1985"],
+      ["La finca sita en Alsina 455 de esta ciudad", "Alsina 455"],
+      ["Fijó domicilio legal en Viamonte 867 a estos efectos", "Viamonte 867"],
+    ];
+
+    it("keyword address is detected after a street-type word", async () => {
+      for (const [sentence, expectedValue] of streetTypeCases) {
+        expect(await addressValuesOf(engine, ctx, sentence), sentence).toEqual([expectedValue]);
+      }
+    });
+
+    it("keyword address after a domicile phrase starts at the street name", async () => {
+      for (const [sentence, expectedValue] of domicileCases) {
+        expect(await addressValuesOf(engine, ctx, sentence), sentence).toEqual([expectedValue]);
+      }
+    });
+
+    it("keyword address is detected in all-caps text with and without accents", async () => {
+      const withoutAccents = (text: string): string => text.normalize("NFD").replace(/\p{M}/gu, "");
+
+      for (const [sentence, expectedValue] of [...streetTypeCases, ...domicileCases]) {
+        const withAccents = sentence.toUpperCase();
+        expect(await addressValuesOf(engine, ctx, withAccents), withAccents).toEqual([
+          expectedValue.toUpperCase(),
+        ]);
+
+        const plain = withoutAccents(withAccents);
+        expect(await addressValuesOf(engine, ctx, plain), plain).toEqual([
+          withoutAccents(expectedValue.toUpperCase()),
+        ]);
+      }
     });
   });
 });
