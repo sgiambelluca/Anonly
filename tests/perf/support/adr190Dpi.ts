@@ -76,6 +76,12 @@ export interface Job {
   terminal: string | null;
   result: unknown;
   error: unknown;
+  /**
+   * Solo en un `ocr-orient` cuyo resultado el arnés reemplazó por un veredicto forzado
+   * (`forceOrientationVerdict`): lo que el worker devolvió de verdad. `result` guarda lo que recibió el
+   * host.
+   */
+  naturalResult?: unknown;
 }
 export interface Capture {
   jobs: Job[];
