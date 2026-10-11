@@ -2,7 +2,7 @@
 
 # ADR-192 — El pico total de memoria tiene un techo medido por perfil
 
-- **Estado**: Aceptado. **Medido el 2026-10-01 y repetido el 2026-10-08: P1 y P2 cumplen las dos veces** (ver «Medición del 2026-10-01» y «Medición del 2026-10-08»), con un margen en P2 menor que el ruido.
+- **Estado**: Aceptado. **Medido el 2026-10-01, repetido el 2026-10-08 y validado sobre el producto final de Confianza el 2026-10-11: P1 y P2 cumplen las tres veces**, con un margen en P2 menor que el ruido. Las tres tandas se registran abajo.
 - **Fecha**: 2026-09-30.
 - **Decidido por**: el humano, a propuesta del planificador. Equipo mínimo:
   «8 GB de momento, con plan de poder optimizar a futuro aún más para
@@ -180,6 +180,21 @@ nivel `medium` fijado (ADR-194 §8). Nueve corridas, todas `ok`.
   cambia eso; lo cambia bajar el consumo (§6) o una decisión del humano
   sobre el techo.
 - La segunda salvedad, que P2 no es el peor caso, sigue como estaba.
+
+## Medición final de Confianza (2026-10-11)
+
+Producto del PR #63, commit `f1fdabb7f1e08c55aeeff24383b772e38f54c1ca`,
+Windows nativo, build fresco y árbol limpio. Nueve pares fríos/calientes
+completos, sin fallos ni suspensión: P1 máximo **1606,3 MB** (techo 2 GB),
+P2 máximo **2820,1 MB** (techo 3 GB). **Ambos cumplen.** P2-dense máximo
+2712,8 MB, informativo. El margen P2 de 179,9 MB sigue por debajo del ruido
+histórico; no se afirma una mejora de memoria.
+
+Las repeticiones, picos posteriores a Ready, presión desconocida por
+importación, identidad mediante el wrapper y series preservadas están en
+[Memoria_Final_Confianza_2026-10-11.md](../roadmap/mediciones/transversal/Memoria_Final_Confianza_2026-10-11.md).
+Esta medición cubre M2 del producto indicado; cambios posteriores de producto
+requieren evaluar nuevamente el gate antes del release.
 
 ## Consecuencias
 

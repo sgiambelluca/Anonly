@@ -64,8 +64,13 @@ OCR, instrumentos por grupo, E2E y changesets en trece commits. Los estados
 de «revisión pendiente» del registro previo describen el momento anterior
 a esta aprobación; esta sección registra el estado actual.
 
-M2 final y la repetición de mediciones provisionales sobre el commit siguen
-siendo obligaciones antes de publicar la versión, según §11.4 de
+M2 final pasó sobre el producto del PR #63 el 2026-10-11: P1 máximo
+1606,3 MB y P2 máximo 2820,1 MB, nueve pares válidos sin suspensión.
+El [registro](../mediciones/transversal/Memoria_Final_Confianza_2026-10-11.md)
+preserva corridas, identidad y límites. El mantenedor autorizó el merge si
+la medición y los checks del PR cumplen. La repetición de otras mediciones
+provisionales sobre el commit sigue siendo una obligación antes de publicar
+la versión, según §11.4 de
 `07_Performance_Strategy.md`. No se sustituyen por la medición histórica
 de develop ni por P2N/R4, y no se declaran cumplidas al abrir el PR.
 
