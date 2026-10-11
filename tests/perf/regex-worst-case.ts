@@ -21,6 +21,15 @@ import {
 import { scanEmailDefault } from "../../packages/anonymization-core/regex-engine/src/email-scanner.js";
 
 import {
+  KEYWORD_LABELS,
+  expectedKeywordAddressDetections,
+  isKeywordLabel,
+  keywordLinearityVerdict,
+  makeKeywordAdversarialText,
+  type KeywordLabel,
+  type KeywordLinearityVerdict,
+} from "./support/regexWorstCaseKeyword.js";
+import {
   Q_LABELS,
   expectedQEmailDetections,
   isQLabel,
@@ -34,7 +43,15 @@ import {
 const KIB = 1024;
 const SIZES_KIB = [2, 10, 20, 40, 80, 160] as const;
 const CHILD_TIMEOUT_MS = 65_000;
-type Label = "adversarial" | "adversarial-late-at" | "normal" | QLabel;
+type Label = "adversarial" | "adversarial-late-at" | "normal" | QLabel | KeywordLabel;
+
+/**
+ * `ANONLY_REGEX_WORST_LABELS=keyword` corre solo los textos del patrón de dirección con palabra clave
+ * (ADR-217); `email` corre solo los del email. Sin la variable corren todos.
+ */
+const LABEL_FILTER = process.env.ANONLY_REGEX_WORST_LABELS ?? "";
+if (LABEL_FILTER !== "" && LABEL_FILTER !== "keyword" && LABEL_FILTER !== "email")
+  throw new Error(`ANONLY_REGEX_WORST_LABELS inválida: ${LABEL_FILTER}`);
 
 interface DetectionSummary {
   readonly count: number;
@@ -53,6 +70,9 @@ interface ChildResult {
   readonly detections: DetectionSummary;
   readonly expectedEmailDetections: number;
   readonly observedEmailDetections: number;
+  /** Direcciones que da el patrón con palabra clave (`source: "regex"`) sobre un texto de su familia. */
+  readonly expectedAddressDetections: number;
+  readonly observedAddressDetections: number;
   readonly emailScannerMs?: number;
   readonly perPatternMs?: Readonly<Record<string, number>>;
 }
@@ -81,6 +101,8 @@ interface CampaignReport {
   readonly qualityMismatchCount: number;
   /** Caso `Q email search stays linear on adversarial text` (ADR-211): curva y pasos de duplicación. */
   readonly qLinearity: ReadonlyArray<LinearityVerdict>;
+  /** Caso `keyword address search stays linear on adversarial text` (ADR-217): curva y pasos de duplicación. */
+  readonly keywordLinearity: ReadonlyArray<KeywordLinearityVerdict>;
 }
 
 const NULL_LOGGER: ILogger = {
@@ -146,6 +168,7 @@ function buildConfig(): EngineContext["config"] {
 
 function makeText(chars: number, label: Label): string {
   if (isQLabel(label)) return makeQAdversarialText(chars, label);
+  if (isKeywordLabel(label)) return makeKeywordAdversarialText(chars, label);
   if (label === "adversarial") return "1-".repeat(Math.ceil(chars / 2)).slice(0, chars);
   if (label === "adversarial-late-at")
     return `${"1-".repeat(Math.ceil(chars / 2)).slice(0, chars)}@x.c`;
@@ -201,8 +224,10 @@ async function executeScenario(
   const detections: DetectionSummary[] = [];
   const bus = createEventBus({ logger: NULL_LOGGER });
   let emailDetections = 0;
+  let addressDetections = 0;
   bus.on(EventChannel.Regex, EngineEvents.ENTITY_FOUND, ({ occurrence }) => {
     if (occurrence.entityType === EntityType.Email) emailDetections += 1;
+    if (occurrence.entityType === EntityType.Address) addressDetections += 1;
     const digest = createHash("sha256")
       .update(
         JSON.stringify([
@@ -302,6 +327,8 @@ async function executeScenario(
         ? [...text.matchAll(/control\d+@example\.test/gu)].length
         : 0,
     observedEmailDetections: emailDetections,
+    expectedAddressDetections: isKeywordLabel(label) ? expectedKeywordAddressDetections() : 0,
+    observedAddressDetections: addressDetections,
   };
   if (!profilePatterns) return base;
   const emailScanStarted = performance.now();
@@ -399,17 +426,34 @@ async function runCampaign(): Promise<void> {
     const order = orders[round];
     if (order === undefined) continue;
     for (const sizeKiB of order) {
-      const labels: ReadonlyArray<Label> =
+      const emailLabels: ReadonlyArray<Label> =
         round === 1
           ? ["normal", "adversarial", "adversarial-late-at", ...Q_LABELS]
           : ["adversarial", "adversarial-late-at", "normal", ...Q_LABELS];
+      const labels: ReadonlyArray<Label> =
+        LABEL_FILTER === "keyword"
+          ? [...KEYWORD_LABELS]
+          : LABEL_FILTER === "email"
+            ? emailLabels
+            : [...emailLabels, ...KEYWORD_LABELS];
       for (const label of labels) {
         const child = await launchChild(sizeKiB, label, false);
         const record = await parseChild(child, round + 1, sizeKiB, label, "plain");
         rounds.push(record);
         if (child.censored) continue;
       }
-      if (!profilesDone.has(sizeKiB)) {
+      if (!profilesDone.has(sizeKiB) && LABEL_FILTER !== "email") {
+        // Un perfil por patrón para cada texto del patrón con palabra clave: dice si el tiempo es suyo.
+        for (const keywordLabel of KEYWORD_LABELS) {
+          const keywordChild = await launchChild(sizeKiB, keywordLabel, true);
+          rounds.push(
+            await parseChild(keywordChild, round + 1, sizeKiB, keywordLabel, "pattern-profile"),
+          );
+        }
+        // Con el filtro «keyword» no corre el bloque del email, que es el que marca el tamaño como perfilado.
+        if (LABEL_FILTER === "keyword") profilesDone.add(sizeKiB);
+      }
+      if (!profilesDone.has(sizeKiB) && LABEL_FILTER !== "keyword") {
         const child = await launchChild(sizeKiB, "adversarial", true);
         rounds.push(await parseChild(child, round + 1, sizeKiB, "adversarial", "pattern-profile"));
         const lateAtChild = await launchChild(sizeKiB, "adversarial-late-at", true);
@@ -439,6 +483,7 @@ async function runCampaign(): Promise<void> {
     rounds,
     qualityMismatchCount: qualityMismatchCount(rounds),
     qLinearity: qLinearity(rounds),
+    keywordLinearity: keywordLinearity(rounds),
   };
   await mkdir(resolve(outputDir, ".."), { recursive: true });
   await mkdir(outputDir);
@@ -451,6 +496,7 @@ async function runCampaign(): Promise<void> {
   );
   process.stdout.write(`Inconsistencias de referencia: ${report.qualityMismatchCount}\n`);
   for (const verdict of report.qLinearity) {
+    if (verdict.curve.length === 0) continue;
     const curve = verdict.curve
       .map((point) => `${point.sizeKiB} KiB: ${point.ms.toFixed(2)} ms`)
       .join("; ");
@@ -464,15 +510,53 @@ async function runCampaign(): Promise<void> {
       `Q ${verdict.label}: ${curve}\n  duplicar: ${ratios}\n  superlineal: ${String(verdict.superLinear)} (pasos interpretables: ${verdict.interpretableSteps})\n`,
     );
   }
+  for (const verdict of report.keywordLinearity) {
+    if (verdict.curve.length === 0) continue;
+    const curve = verdict.curve
+      .map((point) => `${point.sizeKiB} KiB: ${point.ms.toFixed(2)} ms`)
+      .join("; ");
+    const ratios = verdict.steps
+      .map(
+        (step) =>
+          `${step.fromKiB}>${step.toKiB}: x${step.ratio === null ? "n/d" : step.ratio.toFixed(2)}${step.belowNoiseFloor ? " (ruido)" : ""}`,
+      )
+      .join("; ");
+    process.stdout.write(
+      `Dirección ${verdict.label}: ${curve}\n  duplicar: ${ratios}\n  superlineal: ${String(verdict.superLinear)} (pasos interpretables: ${verdict.interpretableSteps})\n`,
+    );
+  }
   // El caso de ADR-211 falla si algún paso de duplicación cuadruplica el trabajo sobre el ruido, o si las
   // detecciones no son las esperadas. No hay gate temporal absoluto (criterio de ADR-181).
-  if (report.qLinearity.some((verdict) => verdict.superLinear) || report.qualityMismatchCount > 0)
+  // El de ADR-217, igual, con la dirección del final como detección esperada.
+  if (
+    report.qLinearity.some((verdict) => verdict.superLinear) ||
+    report.keywordLinearity.some((verdict) => verdict.superLinear) ||
+    report.qualityMismatchCount > 0
+  )
     process.exitCode = 1;
 }
 
 function qLinearity(records: ReadonlyArray<RunRecord>): ReadonlyArray<LinearityVerdict> {
   return Q_LABELS.map((label) =>
     linearityVerdict(
+      label,
+      records.flatMap((record) =>
+        record.pass === "plain" &&
+        record.label === label &&
+        record.status === "completed" &&
+        record.result !== undefined
+          ? [{ sizeKiB: record.sizeKiB, ms: record.result.processMs }]
+          : [],
+      ),
+    ),
+  );
+}
+
+function keywordLinearity(
+  records: ReadonlyArray<RunRecord>,
+): ReadonlyArray<KeywordLinearityVerdict> {
+  return KEYWORD_LABELS.map((label) =>
+    keywordLinearityVerdict(
       label,
       records.flatMap((record) =>
         record.pass === "plain" &&
@@ -495,6 +579,12 @@ function qualityMismatchCount(records: ReadonlyArray<RunRecord>): number {
     if (
       (result.label === "normal" || isQLabel(result.label)) &&
       result.expectedEmailDetections !== result.observedEmailDetections
+    ) {
+      mismatches += 1;
+    }
+    if (
+      isKeywordLabel(result.label) &&
+      result.expectedAddressDetections !== result.observedAddressDetections
     ) {
       mismatches += 1;
     }
@@ -556,7 +646,7 @@ async function childMain(args: ReadonlyArray<string>): Promise<void> {
   const label: Label | undefined =
     requested === "adversarial" || requested === "adversarial-late-at" || requested === "normal"
       ? requested
-      : isQLabel(requested)
+      : isQLabel(requested) || isKeywordLabel(requested)
         ? requested
         : undefined;
   if (

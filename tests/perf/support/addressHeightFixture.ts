@@ -39,19 +39,22 @@ export function pageLines(sentence: AddressHeightSentence): ReadonlyArray<Readon
   return pageParagraphs(sentence).map((paragraph) => wrapText(paragraph, WRAP_CHARS));
 }
 
-/** Un PDF con una página por oración, en el orden de `sentences`. Determinista. */
-export async function buildAddressHeightPdf(
-  sentences: ReadonlyArray<AddressHeightSentence>,
+/**
+ * Un PDF con una página por entrada de `pages`, cada una con sus párrafos ya partidos en renglones y un
+ * renglón en blanco entre párrafos. Determinista. Lo comparten M-D1 y M-D2.
+ */
+export async function buildLinesPdf(
+  pages: ReadonlyArray<ReadonlyArray<ReadonlyArray<string>>>,
 ): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
   const fixedDate = new Date("2026-01-01T00:00:00.000Z");
   doc.setCreationDate(fixedDate);
   doc.setModificationDate(fixedDate);
   const font = await doc.embedFont(StandardFonts.Helvetica);
-  for (const sentence of sentences) {
+  for (const paragraphs of pages) {
     const page = doc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
     let y = MARGIN_Y;
-    for (const paragraph of pageLines(sentence)) {
+    for (const paragraph of paragraphs) {
       for (const line of paragraph) {
         page.drawText(line, { x: MARGIN_X, y, size: FONT_SIZE, font, color: rgb(0, 0, 0) });
         y -= LINE_HEIGHT;
@@ -61,4 +64,11 @@ export async function buildAddressHeightPdf(
     }
   }
   return doc.save();
+}
+
+/** Un PDF con una página por oración, en el orden de `sentences`. Determinista. */
+export async function buildAddressHeightPdf(
+  sentences: ReadonlyArray<AddressHeightSentence>,
+): Promise<Uint8Array> {
+  return buildLinesPdf(sentences.map((sentence) => pageLines(sentence)));
 }
