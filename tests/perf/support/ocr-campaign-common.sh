@@ -114,8 +114,24 @@ campaign_preflight() {
   fi
   # Lo que está en stage y lo que no está trackeado también cuenta (`git diff` no lo ve).
   if [[ -n "$(git status --porcelain -- packages apps)" ]]; then
-    fail "hay cambios (sin commitear, en stage o sin trackear) en packages/ o apps/; la campaña mide el producto sin cambios."
+    if [[ "${ANONLY_CAMPAIGN_ALLOW_UNCOMMITTED_PRODUCT:-0}" == "1" ]]; then
+      # Salida explícita y opt-in: la corrida mide un producto que todavía no está commiteado. Queda
+      # dicho (salvedad y estado del árbol) y la corrida es PROVISIONAL: se repite sobre el commit.
+      git status --short -- packages apps >"$RUN_DIR/product-uncommitted-status.txt"
+      add_caveat "product-tree-uncommitted" "el producto medido (packages/ o apps/) tiene cambios sin commitear: la corrida es provisional y se repite sobre el commit antes de darla por definitiva; la identidad del árbol está en product-tree.identity.sha256"
+    else
+      fail "hay cambios (sin commitear, en stage o sin trackear) en packages/ o apps/; la campaña mide el producto sin cambios."
+    fi
   fi
+}
+
+# Identidad del árbol de producto sin commitear: el diff contra HEAD (lo trackeado, en stage o no) más el hash de
+# cada archivo sin trackear bajo packages/ y apps/, que `git diff` no ve. Solo se usa con el producto sin commitear.
+product_tree_identity() {
+  {
+    git diff HEAD --binary -- packages/ apps/
+    git ls-files --others --exclude-standard -- packages/ apps/ | LC_ALL=C "$(msys_tool sort)" | while IFS= read -r file; do printf '%s %s\n' "$(sha "$file")" "$file"; done
+  } | sha
 }
 
 # Identidad del árbol medido: commit, estado, hash de lo que cambió bajo tests/ (el arnés mismo) y el host.
@@ -125,6 +141,10 @@ campaign_snapshot() {
   git diff HEAD --binary -- packages/ apps/ | sha >"$RUN_DIR/product-tree.diff.sha256"
   git diff HEAD --binary -- tests/ | sha >"$RUN_DIR/tests-tree.diff.sha256"
   git ls-files --others --exclude-standard -- tests/ | LC_ALL=C "$(msys_tool sort)" | while IFS= read -r file; do printf '%s %s\n' "$(sha "$file")" "$file"; done >"$RUN_DIR/tests-untracked.sha256"
+  if [[ -s "$RUN_DIR/product-uncommitted-status.txt" ]]; then
+    git ls-files --others --exclude-standard -- packages/ apps/ | LC_ALL=C "$(msys_tool sort)" | while IFS= read -r file; do printf '%s %s\n' "$(sha "$file")" "$file"; done >"$RUN_DIR/product-untracked.sha256"
+    product_tree_identity >"$RUN_DIR/product-tree.identity.sha256"
+  fi
   node -e 'const os=require("node:os"); process.stdout.write(JSON.stringify({platform:process.platform,arch:process.arch,cpuCount:os.cpus().length,cpuModel:os.cpus()[0]?.model,totalMemBytes:os.totalmem(),node:process.version},null,2)+"\n")' >"$RUN_DIR/host.json"
 }
 
@@ -149,6 +169,9 @@ campaign_build() {
   sha pnpm-lock.yaml >"$RUN_DIR/pnpm-lock.sha256"
   git diff HEAD --binary -- packages/ apps/ | sha >"$RUN_DIR/product-tree.after-build.diff.sha256"
   [[ "$(cat "$RUN_DIR/product-tree.diff.sha256")" == "$(cat "$RUN_DIR/product-tree.after-build.diff.sha256")" ]] || fail "el build modificó el árbol de fuentes de producto medido."
+  if [[ -s "$RUN_DIR/product-uncommitted-status.txt" ]]; then
+    [[ "$(product_tree_identity)" == "$(cat "$RUN_DIR/product-tree.identity.sha256")" ]] || fail "el build modificó el árbol de producto sin commitear (incluidos los archivos sin trackear)."
+  fi
 }
 
 # Antes y después de cada unidad de medición: un evento de suspensión/reanudación la invalida.

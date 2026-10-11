@@ -289,7 +289,7 @@ describe("validación de argumentos de los runners (antes de construir o medir)"
 });
 
 describe("campaign_preflight: producto limpio (O-7)", () => {
-  function preflight(setup: string) {
+  function preflight(setup: string, env: Record<string, string> = {}, after = "true") {
     const repo = join(dir, "repo");
     writeFileSync(join(dir, "pgrep"), "#!/usr/bin/env bash\nexit 1\n");
     chmodSync(join(dir, "pgrep"), 0o755);
@@ -302,7 +302,9 @@ describe("campaign_preflight: producto limpio (O-7)", () => {
         setup,
         'PLATFORM=darwin; ROOT_DIR="$PWD"; sleep_wake_digest() { printf a; }',
         "(campaign_preflight); echo rc=$?",
+        after,
       ].join("; "),
+      env,
     );
   }
 
@@ -316,5 +318,61 @@ describe("campaign_preflight: producto limpio (O-7)", () => {
   ])("control de fallo: %s en packages/ o apps/ aborta", (_label, setup) => {
     const result = preflight(setup);
     expect(result.stdout).toContain("rc=1");
+  });
+
+  describe("ANONLY_CAMPAIGN_ALLOW_UNCOMMITTED_PRODUCT (corrida provisional)", () => {
+    const ALLOW = { ANONLY_CAMPAIGN_ALLOW_UNCOMMITTED_PRODUCT: "1" };
+
+    it("con la variable en 1 no aborta, deja la salvedad y el estado del árbol", () => {
+      const result = preflight("echo x > packages/nuevo.txt", ALLOW);
+      expect(result.stdout).toContain("rc=0");
+      expect(read("caveats.json")).toMatchObject({ items: [{ id: "product-tree-uncommitted" }] });
+      expect(readFileSync(join(dir, "run", "product-uncommitted-status.txt"), "utf8")).toContain(
+        "packages/nuevo.txt",
+      );
+    });
+
+    it.each(["0", "", "true", "yes"])(
+      "control de fallo: con la variable en «%s» sigue abortando y no deja salvedad",
+      (value) => {
+        const result = preflight("echo b > packages/a.txt", {
+          ANONLY_CAMPAIGN_ALLOW_UNCOMMITTED_PRODUCT: value,
+        });
+        expect(result.stdout).toContain("rc=1");
+        expect(existsSync(join(dir, "run", "caveats.json"))).toBe(false);
+      },
+    );
+
+    it("con la variable y el producto limpio no registra nada", () => {
+      const result = preflight("true", ALLOW);
+      expect(result.stdout).toContain("rc=0");
+      expect(existsSync(join(dir, "run", "caveats.json"))).toBe(false);
+      expect(existsSync(join(dir, "run", "product-uncommitted-status.txt"))).toBe(false);
+    });
+
+    it("la identidad del árbol cubre los archivos sin trackear y cambia si cambian", () => {
+      const identity = (content: string) => {
+        const result = preflight(
+          "echo x > packages/nuevo.txt",
+          ALLOW,
+          `echo '${content}' > packages/nuevo.txt; PLATFORM=darwin; (campaign_snapshot >/dev/null 2>&1); cat "$RUN_DIR/product-tree.identity.sha256"; cat "$RUN_DIR/product-untracked.sha256"`,
+        );
+        return result.stdout;
+      };
+      const first = identity("uno");
+      const second = identity("dos");
+      expect(first).toMatch(/[0-9a-f]{64}[\s\S]*packages\/nuevo\.txt/);
+      expect(first).not.toBe(second);
+    });
+
+    it("sin la variable no se escribe ningún archivo de identidad del producto sin commitear", () => {
+      const result = preflight(
+        "true",
+        {},
+        'PLATFORM=darwin; (campaign_snapshot >/dev/null 2>&1); ls "$RUN_DIR"',
+      );
+      expect(result.stdout).not.toContain("product-tree.identity.sha256");
+      expect(result.stdout).not.toContain("product-untracked.sha256");
+    });
   });
 });
