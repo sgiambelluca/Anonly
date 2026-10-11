@@ -27,6 +27,7 @@ vi.mock("tesseract.js", () => ({
 import { OcrEngine } from "../ocr.engine.js";
 
 import {
+  createEncodedPageImage,
   createEngineContext,
   createImageProducer,
   createTrackingOcrPool,
@@ -35,6 +36,7 @@ import {
   mockEmptyRecognizeData,
   mockRecognizeData,
   mockTesseractWorker,
+  setStubDecodedPixel,
 } from "./fixtures/test-helpers.js";
 
 describe("OcrEngine — contract tests", () => {
@@ -299,6 +301,68 @@ describe("OcrEngine — contract tests", () => {
     const emitOrder = busEmitSpy.mock.invocationCallOrder[pageFinishedCallIndex]!;
 
     expect(cacheOrder).toBeLessThan(emitOrder);
+  });
+
+  it("RC deposits its recovered words before emitting one page-finished event", async () => {
+    setStubDecodedPixel([255, 255, 255, 255]);
+    const box = { x0: 0, y0: 0, x1: 40, y1: 10 };
+    const recognize = vi
+      .fn()
+      .mockResolvedValueOnce({ jobId: "empty", data: mockRecognizeData([], 0) })
+      .mockResolvedValueOnce({ jobId: "empty-90", data: mockRecognizeData([], 0) })
+      .mockResolvedValueOnce({ jobId: "empty-180", data: mockRecognizeData([], 0) })
+      .mockResolvedValueOnce({
+        jobId: "recovered-270",
+        data: mockRecognizeData([{ text: "DNI", confidence: 90, bbox: box }], 90),
+      });
+    vi.mocked(createWorker).mockResolvedValue(
+      mockTesseractWorker(mockEmptyRecognizeData(), { recognize }),
+    );
+    const pool = createTrackingOcrPool();
+    const pooledEngine = new OcrEngine(pool, {
+      dispatch: (): Promise<unknown> =>
+        Promise.resolve({ orientation: 0, inkRatio: 0.001, osdHadVerdict: false }),
+      releaseIdleWorkers: (): boolean => false,
+    });
+    await pooledEngine.init(ctx);
+    const cacheSetSpy = vi.spyOn(ctx.cache, "set");
+    const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+
+    await pooledEngine.processPage(
+      {
+        ...createValidOcrPageInput("doc-190-rc-cache-event", 0),
+        image: createEncodedPageImage(100, 40),
+      },
+      ctx,
+    );
+
+    const pageEvents = busEmitSpy.mock.calls.filter(
+      ([channel, event]) =>
+        channel === EventChannel.Ocr && event === EngineEvents.OCR_PAGE_FINISHED,
+    );
+    const cacheCallIndex = cacheSetSpy.mock.calls.findIndex(
+      ([key]) => key === "ocr-words:doc-190-rc-cache-event:0",
+    );
+    const eventCallIndex = busEmitSpy.mock.calls.findIndex(
+      ([channel, event]) =>
+        channel === EventChannel.Ocr && event === EngineEvents.OCR_PAGE_FINISHED,
+    );
+    expect(pageEvents).toHaveLength(1);
+    expect(cacheSetSpy).toHaveBeenCalledWith(
+      "ocr-words:doc-190-rc-cache-event:0",
+      expect.arrayContaining([expect.objectContaining({ text: "DNI" })]),
+      expect.any(Number),
+    );
+    expect(cacheCallIndex).toBeGreaterThanOrEqual(0);
+    expect(eventCallIndex).toBeGreaterThanOrEqual(0);
+    expect(cacheSetSpy.mock.invocationCallOrder[cacheCallIndex]).toBeLessThan(
+      busEmitSpy.mock.invocationCallOrder[eventCallIndex] ?? Infinity,
+    );
+    expect(recognize).toHaveBeenCalledTimes(4);
+    expect(
+      pool.calls.map(({ payload }) => (payload as { readonly orientation: number }).orientation),
+    ).toEqual([0, 90, 180, 270]);
+    await pooledEngine.dispose();
   });
 
   it("events identical with and without pool (fallback ADR-035)", async () => {

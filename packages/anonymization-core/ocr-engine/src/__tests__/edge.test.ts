@@ -1556,5 +1556,207 @@ describe("OcrEngine — edge case tests", () => {
       ]);
       expect(regionWeak.finished).not.toHaveProperty("unreadableInk");
     });
+
+    it("an empty low-ink page without an OSD verdict recovers text at the last angle", async () => {
+      const box = { x0: 0, y0: 0, x1: 40, y1: 10 };
+      const recognize = vi
+        .fn()
+        .mockResolvedValueOnce({ jobId: "empty-0", data: mockRecognizeData([], 0) })
+        .mockResolvedValueOnce({
+          jobId: "false-90",
+          data: mockRecognizeData([{ text: "Basura", confidence: 75, bbox: box }], 60),
+        })
+        .mockResolvedValueOnce({ jobId: "empty-180", data: mockRecognizeData([], 0) })
+        .mockResolvedValueOnce({
+          jobId: "dni-270",
+          data: mockRecognizeData(
+            [
+              { text: "Juan", confidence: 96, bbox: box },
+              { text: "Perez", confidence: 95, bbox: box },
+              { text: "DNI", confidence: 94, bbox: box },
+              { text: "34567891", confidence: 92, bbox: box },
+            ],
+            91,
+          ),
+        });
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(mockEmptyRecognizeData(), { recognize }),
+      );
+      const pool = createTrackingOcrPool();
+      const pooledEngine = new OcrEngine(pool, fakeOrientationPool(0, 0.001, false));
+      await pooledEngine.init(ctx);
+
+      const output = await pooledEngine.processPage(inputConRaster("doc-190-rc-last"), ctx);
+
+      expect(pool.calls.map(({ payload }) => (payload as OcrPagePayload).orientation)).toEqual([
+        0, 90, 180, 270,
+      ]);
+      expect(output.words.map(({ text }) => text)).toEqual(["Juan", "Perez", "DNI", "34567891"]);
+      expect(output.words.every(({ bbox }) => bbox.width > 0 && bbox.height > 0)).toBe(true);
+      expect(recognize).toHaveBeenCalledTimes(4);
+      await pooledEngine.dispose();
+    });
+
+    it("an empty low-ink noise page without an OSD verdict tries all angles without upscale or unreadableInk", async () => {
+      const recognize = vi
+        .fn()
+        .mockResolvedValue({ jobId: "noise", data: mockRecognizeData([], 0) });
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(mockEmptyRecognizeData(), { recognize }),
+      );
+      const pool = createTrackingOcrPool();
+      const pooledEngine = new OcrEngine(pool, fakeOrientationPool(0, 0.001, false));
+      await pooledEngine.init(ctx);
+      const emitted = vi.spyOn(ctx.bus, "emit");
+
+      const input = inputConRaster("doc-190-rc-noise", { dpi: 150 });
+      await pooledEngine.processPage(input, ctx);
+
+      expect(
+        pool.calls.map(({ payload }) => {
+          const item = payload as OcrPagePayload;
+          return [item.orientation, item.dpi, item.upscale];
+        }),
+      ).toEqual([
+        [0, 150, undefined],
+        [90, 150, undefined],
+        [180, 150, undefined],
+        [270, 150, undefined],
+      ]);
+      expect(
+        pool.calls.every(({ payload }) => (payload as OcrPagePayload).image === input.image),
+      ).toBe(true);
+      const finished = emitted.mock.calls.filter(
+        ([channel, event]) =>
+          channel === EventChannel.Ocr && event === EngineEvents.OCR_PAGE_FINISHED,
+      );
+      expect(finished).toHaveLength(1);
+      expect(finished[0]?.[2]).not.toHaveProperty("unreadableInk");
+      expect(recognize).toHaveBeenCalledTimes(4);
+      await pooledEngine.dispose();
+    });
+
+    it("a zero-ink empty page without an OSD verdict pays one recognition", async () => {
+      const recognize = vi.fn(() =>
+        Promise.resolve({ jobId: "blank", data: mockRecognizeData([], 0) }),
+      );
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(mockEmptyRecognizeData(), { recognize }),
+      );
+      const pool = createTrackingOcrPool();
+      const pooledEngine = new OcrEngine(pool, fakeOrientationPool(0, 0, false));
+      await pooledEngine.init(ctx);
+
+      await pooledEngine.processPage(inputConRaster("doc-190-rc-zero"), ctx);
+
+      expect(pool.calls).toHaveLength(1);
+      expect(recognize).toHaveBeenCalledTimes(1);
+      await pooledEngine.dispose();
+    });
+
+    it("RC preserves retries for valid verdicts regions and nonempty weak readings", async () => {
+      const empty = mockRecognizeData([], 0);
+      const weak = mockRecognizeData([
+        { text: "x", confidence: 40, bbox: { x0: 0, y0: 0, x1: 5, y1: 5 } },
+      ]);
+      const cases = [
+        { name: "valid-verdict", target: "page" as const, verdict: true, ink: 0.001, data: empty },
+        { name: "region", target: "region" as const, verdict: false, ink: 0.001, data: empty },
+        { name: "nonempty-weak", target: "page" as const, verdict: false, ink: 0.001, data: weak },
+        { name: "threshold", target: "page" as const, verdict: false, ink: 0.002, data: empty },
+      ];
+
+      for (const scenario of cases) {
+        const recognize = vi.fn(() =>
+          Promise.resolve({ jobId: scenario.name, data: scenario.data }),
+        );
+        vi.mocked(createWorker).mockResolvedValue(
+          mockTesseractWorker(mockEmptyRecognizeData(), { recognize }),
+        );
+        const pool = createTrackingOcrPool();
+        const pooledEngine = new OcrEngine(
+          pool,
+          fakeOrientationPool(0, scenario.ink, scenario.verdict),
+        );
+        await pooledEngine.init(ctx);
+        try {
+          if (scenario.target === "page") {
+            await pooledEngine.processPage(inputConRaster(`doc-190-rc-${scenario.name}`), ctx);
+          } else {
+            await pooledEngine.processSession(
+              [
+                createValidOcrPageRequest(`doc-190-rc-${scenario.name}`, 0, {
+                  region: { x: 0, y: 0, width: 50, height: 40 },
+                }),
+              ],
+              createImageProducer(),
+              ctx,
+            );
+          }
+          expect(pool.calls, scenario.name).toHaveLength(scenario.ink >= 0.002 ? 4 : 1);
+          expect(
+            pool.calls.map(({ payload }) => (payload as OcrPagePayload).upscale),
+          ).not.toContain(2);
+        } finally {
+          await pooledEngine.dispose();
+        }
+      }
+    });
+
+    it("RC cancellation aborts before the next recovery dispatch", async () => {
+      const controller = new AbortController();
+      const abortedCtx = createEngineContext({ abortSignal: controller.signal });
+      const recognize = vi.fn(() => {
+        controller.abort();
+        return Promise.resolve({ jobId: "abort-after-empty", data: mockRecognizeData([], 0) });
+      });
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(mockEmptyRecognizeData(), { recognize }),
+      );
+      const pool = createTrackingOcrPool();
+      const pooledEngine = new OcrEngine(pool, fakeOrientationPool(0, 0.001, false));
+      await pooledEngine.init(abortedCtx);
+      const emitted = vi.spyOn(abortedCtx.bus, "emit");
+
+      await expect(
+        pooledEngine.processPage(inputConRaster("doc-190-rc-cancel"), abortedCtx),
+      ).rejects.toBeInstanceOf(CancelledError);
+      expect(pool.calls).toHaveLength(1);
+      expect(recognize).toHaveBeenCalledTimes(1);
+      expect(
+        emitted.mock.calls.filter(
+          ([channel, event]) =>
+            channel === EventChannel.Ocr && event === EngineEvents.OCR_PAGE_FINISHED,
+        ),
+      ).toHaveLength(0);
+      await pooledEngine.dispose();
+    });
+
+    it("RC retry failures keep the best recovered reading", async () => {
+      const box = { x0: 0, y0: 0, x1: 40, y1: 10 };
+      const recognize = vi
+        .fn()
+        .mockResolvedValueOnce({ jobId: "empty-0", data: mockRecognizeData([], 0) })
+        .mockResolvedValueOnce({
+          jobId: "recovered-90",
+          data: mockRecognizeData([{ text: "DNI", confidence: 90, bbox: box }], 90),
+        })
+        .mockRejectedValueOnce(new Error("retry failed"))
+        .mockResolvedValueOnce({ jobId: "empty-270", data: mockRecognizeData([], 0) });
+      vi.mocked(createWorker).mockResolvedValue(
+        mockTesseractWorker(mockEmptyRecognizeData(), { recognize }),
+      );
+      const pool = createTrackingOcrPool();
+      const pooledEngine = new OcrEngine(pool, fakeOrientationPool(0, 0.001, false));
+      await pooledEngine.init(ctx);
+
+      const output = await pooledEngine.processPage(inputConRaster("doc-190-rc-failed-retry"), ctx);
+
+      expect(pool.calls.map(({ payload }) => (payload as OcrPagePayload).orientation)).toEqual([
+        0, 90, 180, 270,
+      ]);
+      expect(output.words.map(({ text }) => text)).toEqual(["DNI"]);
+      await pooledEngine.dispose();
+    });
   });
 });
