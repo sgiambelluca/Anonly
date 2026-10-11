@@ -266,11 +266,12 @@ Cuando se retome, el candidato natural es reusar el mismo Levenshtein normalizad
 
 Buscar texto en el PDF anonimizado (sobre la imagen, con OCR en vivo) para validar que un dato específico fue reemplazado.
 
-### 5.3 Modo "validar muestra"
+### 5.3 Propuesta retirada
 
-> **Ubicado en la 1.0.x el 2026-10-02** (`Roadmap_1.x.md` §3).
-
-Tras exportar, cargar el PDF resultante de vuelta y verificar que ningún valor original aparece (auto-validación post-export).
+«Validar muestra» fue retirada del roadmap y de las ideas futuras por decisión
+del mantenedor el 2026-10-11. Se prioriza la revisión manual del documento y
+la configuración de sus entidades. No queda pendiente de desarrollo ni de
+decisión; esta sección conserva únicamente el registro de su retiro.
 
 ### 5.4 Internacionalización de placeholders
 

@@ -1,8 +1,8 @@
-<!-- CONTEXT: scope=adr | dependencias=core/OCR_Engine.md,core/Export_Engine.md,core/Contracts.md,architecture/04_Event_System.md,ui/Components.md,ui/React_Client.md,adr/ADR-090-La-Orientacion-De-Un-Escaneo-Se-Detecta.md,adr/ADR-119-La-Orientacion-Se-Detecta-Con-El-Motor-Que-La-Sabe-Leer.md,adr/ADR-121-El-Sello-Rotado-Vive-En-El-Margen.md,adr/ADR-154-La-Memoria-No-Se-Compra-Bajando-El-Paralelismo.md,adr/ADR-160-El-Worker-De-OCR-No-Decodifica-La-Pagina.md,adr/ADR-161-Una-Franja-Sin-Tinta-No-Se-Reconoce.md,adr/ADR-162-Solo-Una-Franja-Visualmente-Blanca-Se-Saltea.md,adr/ADR-163-El-DPI-De-OCR-No-Supera-Al-Raster-Fuente.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,adr/ADR-176-Un-Choque-Pendiente-Bloquea-El-Export.md,roadmap/hardening/Revision_Por_Bloques_Hardening.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=adr | dependencias=core/OCR_Engine.md,core/Export_Engine.md,core/Contracts.md,architecture/04_Event_System.md,ui/Components.md,ui/React_Client.md,adr/ADR-090-La-Orientacion-De-Un-Escaneo-Se-Detecta.md,adr/ADR-119-La-Orientacion-Se-Detecta-Con-El-Motor-Que-La-Sabe-Leer.md,adr/ADR-121-El-Sello-Rotado-Vive-En-El-Margen.md,adr/ADR-154-La-Memoria-No-Se-Compra-Bajando-El-Paralelismo.md,adr/ADR-160-El-Worker-De-OCR-No-Decodifica-La-Pagina.md,adr/ADR-161-Una-Franja-Sin-Tinta-No-Se-Reconoce.md,adr/ADR-162-Solo-Una-Franja-Visualmente-Blanca-Se-Saltea.md,adr/ADR-163-El-DPI-De-OCR-No-Supera-Al-Raster-Fuente.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,adr/ADR-176-Un-Choque-Pendiente-Bloquea-El-Export.md,roadmap/hardening/Revision_Por_Bloques_Hardening.md | audiencia=humanos+IA | fase=12 -->
 
 # ADR-190 — Una página con tinta no sale vacía en silencio
 
-- **Estado**: Aceptado e implementado, incluida la enmienda de recuperación OSD del 2026-09-28. Campaña de §7 ejecutada; cap nativo de ADR-163 conservado y costo residual aceptados por decisión humana. Riesgo residual de basura confiable con veredicto OSD aceptado por el humano el 2026-09-29 (Consecuencias).
+- **Estado**: Aceptado e implementado hasta la enmienda de recuperación OSD del 2026-09-28. Enmienda RC aceptada por el humano el 2026-10-10, código, E2E, calidad, costo y caracterización M-O1 700/700 confirmados; revisión integral pendiente. Campaña de §7 ejecutada; cap nativo de ADR-163 conservado y costo residual aceptados por decisión humana. Riesgo residual de basura confiable con veredicto OSD: aceptado para esta actualización el 2026-10-10; SV/CP pendiente de desarrollo hasta disponer de más documentos/escaneos (Consecuencias).
 - **Fecha**: 2026-09-27.
 - **Decidido por**: el humano, a propuesta del planificador.
 - **Origen**: revisión de las rondas A y B (`Revision_Por_Bloques_Hardening.md`).
@@ -160,6 +160,46 @@ lectura fiable:**
 > simulación fuera de línea: el cambio debe pasar E2E de 180°/90°/270°,
 > calidad, controles negativos y gates de tiempo/memoria antes del revisor.
 
+> **Enmienda RC del 2026-10-10 (aceptada, código y pruebas focalizadas implementados;
+> validación integral pendiente).**
+> M-O1 halló cuatro fallos naturales de N1: un renglón A4 de 12 pt, girado
+> 90/270 a 150/300 dpi de origen, sin veredicto OSD, primera lectura vacía
+> y tinta entre 0,0012 y 0,0018. Quedaban debajo del umbral anterior.
+> El humano aceptó incorporar RC y decidir SV + CP después, tras conocer
+> el [costo aislado](../roadmap/mediciones/ocr/Costo_RC_Aislado_2026-10-10.md).
+>
+> Para páginas enteras sin veredicto, a las dos condiciones de la rama
+> anterior se agrega **primera lectura con cero palabras e `inkRatio > 0`**.
+> El predicado efectivo es `!isRegion && !osdHadVerdict &&
+> (primeraLecturaFiable || inkRatio >= 0.002 || (words.length === 0 && inkRatio > 0))`.
+> Se prueban exactamente los tres ángulos faltantes 90/180/270 sobre el mismo
+> ráster y DPI, una vez cada uno, aun si un intento intermedio parece fiable.
+> Se conserva el comparador de confianza de página que ya tiene esta rama,
+> su primera lectura cuando ninguna es fiable y el desempate vigente.
+> No hay upscale ni ejecución posterior de la cadena general en esa página.
+>
+> La ampliación efectiva añade trabajo cuando `0 < inkRatio < 0.002`:
+> con 0,002 o más el control ya hacía estos intentos. Tinta cero y lectura
+> vacía siguen con un solo reconocimiento; una lectura no vacía pero débil
+> debajo del umbral no activa RC. Las regiones y páginas con veredicto
+> conservan sus reglas. Timeout, fallos posteriores y cancelación mantienen
+> las reglas del caso 47 del spec.
+>
+> **El aviso conserva el umbral de 0,002.** Una hoja con ruido debajo de ese
+> umbral puede hacer cuatro lecturas y terminar vacía sin `unreadableInk`.
+> Se acepta ese trabajo para poder recuperar el renglón escaso, sin cambiar
+> contratos, opciones del usuario, trabajadores, DPI, detector ni tinta.
+> SV no se habilita y CP no se extiende a los pasos de la cadena general.
+>
+> Costo experimental aceptado, provisional: en R1, una página ampliada de
+> veinte, Ready +0,394/1,022 s y diferencia M2 dentro del ruido; en P2N,
+> diez hojas de ruido de sesenta, Ready +19,884/19,112 s y M2
+> +455,9/+404,8 MB (frío/caliente). No estima frecuencia poblacional,
+> no acredita el techo normativo P2 y no mide SV. Antes de cerrar RC se
+> confirma recuperación, no regresión y costo con la implementación real;
+> se repite sobre el commit como exige el plan conjunto. No se commitea
+> antes de cerrar el lote y de la aprobación del revisor.
+
 Detalles:
 
 - Cada paso es un despacho normal al pool, con la cancelación, los timeouts y
@@ -193,8 +233,10 @@ Una página **tiene tinta** si `inkRatio ≥ INK_PRESENT_RATIO = 0.002`, es deci
 el 0,2 % de los píxeles. El valor se valida en la medición del §7 contra
 páginas en blanco, con ruido de escáner y con muy poco contenido.
 
-Las páginas blancas o de puro ruido quedan afuera. Así no se dispara ni la
-cadena del §2 ni el aviso del §4.
+Las páginas con tinta cero y lectura vacía quedan afuera. Las de ruido
+debajo de 0,002 no disparan la cadena general ni el aviso del §4, pero
+desde la enmienda RC pueden recorrer la rama sin veredicto si su primera
+lectura es vacía y `inkRatio > 0`. El aviso no usa el predicado de RC.
 
 ### 4. Lo que no se pudo leer se avisa, y se confirma al exportar
 
@@ -311,8 +353,10 @@ actual de §1 y el ráster nativo. El actual y el nativo dieron los mismos
 todos los casos de dos renglones y en ningún tamaño cruzaron el umbral
 de tinta. La mitad histórica empeoró 22 PDFs a DPI bajo. Aumentar la copia
 OSD a nativo no resuelve este defecto y cuesta más `detect`; el informe
-recomienda mantener §1. La enmienda pendiente debe ocuparse de la cadena
-de reconocimiento y de la fiabilidad, no del tamaño OSD.
+recomienda mantener §1. Su recomendación histórica dirige la mejora a la
+cadena de reconocimiento y la fiabilidad. La recuperación sin veredicto
+se incorporó después; SV/CP ante un veredicto equivocado queda pendiente
+de desarrollo por decisión del 2026-10-10 (Consecuencias).
 
 ## Pruebas exigidas
 
@@ -342,6 +386,27 @@ Los nombres son exactos y entran en §14 de cada spec.
 - `orientation detection failure preserves measured inkRatio`.
 - `rejects orientation results whose inkRatio is outside [0,1]`.
 
+Enmienda RC, nombres exactos de `OCR_Engine.md` §14:
+
+- `an empty low-ink page without an OSD verdict recovers text at the last angle`.
+- `an empty low-ink noise page without an OSD verdict tries all angles without upscale or unreadableInk`.
+- `a zero-ink empty page without an OSD verdict pays one recognition`.
+- `RC preserves retries for valid verdicts regions and nonempty weak readings`.
+- `RC cancellation aborts before the next recovery dispatch`.
+- `RC retry failures keep the best recovered reading`.
+- `RC deposits its recovered words before emitting one page-finished event`.
+
+E2E adicional: el N1 exacto de M-O1 a 150/300 dpi de origen y giros 90/270,
+sin engrosarlo ni cambiar su geometría, debe leer el DNI, detectar la entidad
+y taparla en el PDF exportado. Los crudos de transporte deben confirmar
+ausencia natural de veredicto, primera lectura vacía, tinta positiva por
+debajo de 0,002 y cuatro ángulos a escala 1. No se fuerza el worker para
+acreditar esta recuperación. Se conservan los E2E anteriores de ADR-190 y
+la calidad normativa. M-O1 completo después se compara con el anterior:
+solo se esperan las cuatro recuperaciones naturales, sin regresiones fuera
+del predicado. El costo se confirma sobre los builds del código adoptado
+antes de congelar la campaña completa M-V1.
+
 `export-engine`:
 
 - `covered pages are exported fully black with the same size and no page render`.
@@ -368,6 +433,15 @@ E2E de regresión:
 
 ## Consecuencias
 
+- **Decisión actual del humano (2026-10-10):** cerrar esta actualización con
+  RC, documentar el riesgo residual de orientación y dejar SV/CP como su
+  único punto abierto de 1.0.x, en estado **pendiente de desarrollo**,
+  hasta disponer de más PDF escaneados para mayores pruebas.
+  No se adopta el umbral 0,8 ni se extiende CP a la cadena general.
+  Reemplaza la propuesta condicional del 2026-10-09; el comparador de la
+  rama sin veredicto se conserva. La aceptación histórica siguiente se
+  mantiene como antecedente. Ver
+  [evidencia y retoma](../roadmap/ocr/Orientacion_SV_CP_Retoma_2026-10-10.md).
 - La cadena del §2 recupera lecturas débiles y el §4 avisa cuando una página
   con tinta sigue sin una lectura fiable. No garantiza que toda lectura
   confiable sea correcta.

@@ -34,9 +34,13 @@ documentos de trabajo. Los arneses que producen estos números están en
 | OCR | [`ADR190_OSD_Escala_2026-09-28.md`](./ocr/ADR190_OSD_Escala_2026-09-28.md) | ADR-190: tamaño de la imagen del OSD |
 | OCR | [`ADR190_OSD_Recuperacion_2026-09-28.md`](./ocr/ADR190_OSD_Recuperacion_2026-09-28.md) | ADR-190: recuperación con OSD sin veredicto |
 | OCR | [`DPI_Descendente_Fase1_Windows_2026-10-01.md`](./ocr/DPI_Descendente_Fase1_Windows_2026-10-01.md) | DPI descendente (300/250/200/150): ningún brazo pasa; se pierden emails al bajar |
-| OCR | [`Regiones_Pequenas_2026-10-05.md`](./ocr/Regiones_Pequenas_2026-10-05.md) | Admisión, calidad y 12 series de costo; caracterización limitada y arnés aprobados por Sol 6.1, política nueva pendiente |
+| OCR | [`Regiones_Pequenas_2026-10-05.md`](./ocr/Regiones_Pequenas_2026-10-05.md) | Admisión, calidad y 12 series de costo; caracterización limitada y arnés aprobados por Sol 6.1; investigación posterior sin adopción del umbral de 25 pt |
 | OCR | [`Regiones_Pequenas_25pt_2026-10-05.md`](./ocr/Regiones_Pequenas_25pt_2026-10-05.md) | ADR-202: evidencia/arnés aprobados; mixed recuperado, H2 refutada; candidato no adoptado, costo no medido |
+| OCR | [`Veredicto_De_Orientacion_Equivocado_2026-10-09.md`](./ocr/Veredicto_De_Orientacion_Equivocado_2026-10-09.md) | M-O1/M-O2: orientación equivocada forzada, recuperación de renglón escaso, ruido, márgenes y páginas reales |
+| OCR | [`Costo_De_Verificar_Cuatro_Angulos_2026-10-09.md`](./ocr/Costo_De_Verificar_Cuatro_Angulos_2026-10-09.md) | M-O3: 30/30 válidas, provisionales; peor caso de cuatro ángulos, 3,4–4,4 veces el tiempo; decisión posterior: RC incorporado y SV/CP pendiente de desarrollo |
+| OCR | [`Costo_RC_Aislado_2026-10-10.md`](./ocr/Costo_RC_Aislado_2026-10-10.md) | RC experimental y adoptado: campañas separadas 12/12 válidas, provisionales; costo implementado confirmado, cerca de un segundo adicional en R1 y diecinueve con diez hojas de ruido; frecuencia real desconocida |
 | NER | [`Altura_De_Direcciones_2026-10-07.md`](./ner/Altura_De_Direcciones_2026-10-07.md) | ADR-212: la altura de las direcciones, regla por contexto contra «tapar siempre» (M-D1) |
+| NER | [`Direcciones_Con_Palabra_Clave_2026-10-08.md`](./ner/Direcciones_Con_Palabra_Clave_2026-10-08.md) | ADR-217: línea de base M-D2 y después M-D3 provisional; de 41 a 4 páginas con núcleo a la vista |
 | NER | [`Hilos_NER_Medicion.md`](./ner/Hilos_NER_Medicion.md) | Hilos de ONNX, macOS y Windows nativo |
 | NER | [`Empaquetado_NER_Medicion.md`](./ner/Empaquetado_NER_Medicion.md) | Empaquetado del modelo |
 | NER | [`Perfilado_NER_Interno_Medicion.md`](./ner/Perfilado_NER_Interno_Medicion.md) | Perfilado interno A1/B/A2 |
@@ -51,3 +55,4 @@ documentos de trabajo. Los arneses que producen estos números están en
 | Transversal | [`PDFs_Pesados_Y_Exportacion_Medicion.md`](./transversal/PDFs_Pesados_Y_Exportacion_Medicion.md) | PDFs pesados hasta el archivo exportado |
 | Transversal | [`Perfilado_Tiempo_Fuera_OCR_Medicion_M0_M1.md`](./transversal/Perfilado_Tiempo_Fuera_OCR_Medicion_M0_M1.md) | Tiempo fuera del OCR, M-0 a M-3 |
 | Transversal | [`Banco_Windows_Comparativa_Medicion.md`](./transversal/Banco_Windows_Comparativa_Medicion.md) | El hardening contra la 0.9.2, y Windows contra el M1 |
+| Transversal | [`Validar_Muestra_Costo_Lectura_2026-10-10.md`](./transversal/Validar_Muestra_Costo_Lectura_2026-10-10.md) | M-V1 con RC: 36/36 registrados y auditados; 30 flujos exitosos y seis lecturas parciales de R4; aproximación por reimportación; antecedente histórico, función retirada del roadmap el 2026-10-11 |
