@@ -53,6 +53,24 @@ export interface ReleaseNotesEntry {
 /** Más nueva primero. */
 export const RELEASE_NOTES: ReadonlyArray<ReleaseNotesEntry> = [
   {
+    version: "1.0.2",
+    date: "2026-10-12",
+    notes: [
+      {
+        kind: "new",
+        text: "Ahora podés consultar las novedades de cada versión y ver qué texto queda visible antes de eliminar una entidad.",
+      },
+      {
+        kind: "fix",
+        text: "Mejora la detección de direcciones y emails; el mismo documento puede dar otro resultado.",
+      },
+      {
+        kind: "fix",
+        text: "Las etiquetas largas conservan la letra del renglón y la búsqueda sigue el texto visible en el PDF anonimizado.",
+      },
+    ],
+  },
+  {
     version: "1.0.1",
     date: "2026-10-02",
     notes: [
