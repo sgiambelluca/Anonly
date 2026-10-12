@@ -82,6 +82,13 @@ La corrección pasó 23/23 en Windows y CI/macOS, con revisión Sol APPROVED;
 su integración se condiciona a los checks del HEAD final del PR #64.
 M2 conserva su validez: la corrección solo toca pruebas y documentación.
 
+**Versión asignada el 2026-10-12: 1.0.2.** El mantenedor solicitó el PR
+de promoción de develop hacia main. La preparación de versión, novedades
+y los requisitos restantes antes del tag se registran en
+[Preparación de 1.0.2](Release_1.0.2_Preparacion_2026-10-12.md).
+Esta decisión reemplaza la falta de número del registro histórico;
+no declara cumplidas las repeticiones provisionales ni publica la versión.
+
 ## Retiro de «Validar muestra» (2026-10-11)
 
 El mantenedor decidió no desarrollar esta función y quitarla del roadmap.
