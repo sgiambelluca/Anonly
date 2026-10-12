@@ -18,6 +18,11 @@ como `a2573a5`. El fallo posterior del E2E de menús se investiga en
 El registro de implementación, revisión y
 publicación está al final, incluido el cierre de foco del toast saliente.
 
+**Revisión del planificador, 2026-10-07:** la interacción anonimizada quedó
+validada contra la tinta real en la aplicación de escritorio. La medición
+encontró un defecto anterior a esta campaña en el repintado de línea. Ver
+[Revision_ADR204_2026-10-07.md](Revision_ADR204_2026-10-07.md).
+
 ## Especificación cerrada para implementación
 
 Estas reglas complementan las secciones indicadas de `ui/Components.md` y

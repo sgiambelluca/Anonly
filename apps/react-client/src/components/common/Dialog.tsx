@@ -31,6 +31,13 @@ export interface DialogProps {
   readonly title: string;
   /** Contenido a la derecha del título, en el mismo renglón (p. ej. "5/9"). */
   readonly titleAside?: ReactNode;
+  /**
+   * Ícono a la izquierda del título y de la descripción (ADR-215 §3,
+   * `Components.md` §8.2). Es decorativo (`aria-hidden`): lo que el diálogo
+   * dice ya está en el título. Quien lo pasa dibuja su propia caja (fondo y
+   * color). Sin esta prop el encabezado queda como siempre.
+   */
+  readonly icon?: ReactNode;
   readonly description?: string;
   readonly children?: ReactNode;
   /** Acciones fijas al pie: no scrollean con el cuerpo. */
@@ -54,6 +61,7 @@ export function Dialog({
   onClose,
   title,
   titleAside,
+  icon,
   description,
   children,
   footer,
@@ -66,6 +74,23 @@ export function Dialog({
   useEffect(() => {
     if (!open) setSelectOpen(false);
   }, [open]);
+
+  const titleNode = (
+    <RadixDialog.Title className="text-sm font-semibold text-text-primary">
+      {title}
+    </RadixDialog.Title>
+  );
+  const closeButton = (
+    <RadixDialog.Close asChild>
+      <button
+        type="button"
+        aria-label="Cerrar"
+        className="shrink-0 rounded-md p-1 text-text-secondary hover:bg-bg-tertiary"
+      >
+        <XIcon className="h-4 w-4" aria-hidden />
+      </button>
+    </RadixDialog.Close>
+  );
 
   return (
     <DialogSelectOpenContext.Provider value={handleSelectOpenChange}>
@@ -83,30 +108,42 @@ export function Dialog({
             style={selectOpen ? { pointerEvents: "auto" } : undefined}
             className={`fixed left-1/2 top-1/2 z-50 flex max-h-[85vh] w-[calc(100%-2rem)] ${SIZE_CLASS[size]} -translate-x-1/2 -translate-y-1/2 flex-col rounded-lg bg-bg-primary p-5 shadow-md focus:outline-none`}
           >
-            <div className="mb-3 flex shrink-0 items-start justify-between gap-4">
-              <div className="flex min-w-0 items-baseline gap-2">
-                <RadixDialog.Title className="text-sm font-semibold text-text-primary">
-                  {title}
-                </RadixDialog.Title>
-                {titleAside}
+            {icon !== undefined ? (
+              // ADR-215 §3: con ícono, el título y la descripción van en una
+              // columna a su derecha; el botón de cierre sigue al final.
+              <div className="mb-3 flex shrink-0 items-start gap-3">
+                <span aria-hidden className="shrink-0">
+                  {icon}
+                </span>
+                <div className="flex min-w-0 flex-1 flex-col">
+                  <div className="flex min-w-0 items-baseline gap-2">
+                    {titleNode}
+                    {titleAside}
+                  </div>
+                  {description ? (
+                    <RadixDialog.Description className="text-sm text-text-secondary">
+                      {description}
+                    </RadixDialog.Description>
+                  ) : null}
+                </div>
+                {hideCloseButton ? null : closeButton}
               </div>
-              {hideCloseButton ? null : (
-                <RadixDialog.Close asChild>
-                  <button
-                    type="button"
-                    aria-label="Cerrar"
-                    className="rounded-md p-1 text-text-secondary hover:bg-bg-tertiary"
-                  >
-                    <XIcon className="h-4 w-4" aria-hidden />
-                  </button>
-                </RadixDialog.Close>
-              )}
-            </div>
-            {description ? (
-              <RadixDialog.Description className="mb-3 shrink-0 text-sm text-text-secondary">
-                {description}
-              </RadixDialog.Description>
-            ) : null}
+            ) : (
+              <>
+                <div className="mb-3 flex shrink-0 items-start justify-between gap-4">
+                  <div className="flex min-w-0 items-baseline gap-2">
+                    {titleNode}
+                    {titleAside}
+                  </div>
+                  {hideCloseButton ? null : closeButton}
+                </div>
+                {description ? (
+                  <RadixDialog.Description className="mb-3 shrink-0 text-sm text-text-secondary">
+                    {description}
+                  </RadixDialog.Description>
+                ) : null}
+              </>
+            )}
             {/*
             `-mx-5 px-5`: el padding horizontal se reaplica adentro del área
             que scrollea para que la barra quede pegada al borde del diálogo y

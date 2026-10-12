@@ -8,7 +8,7 @@ Este archivo es un índice. Los cambios de cada versión no se escriben a mano a
 
 ## Dónde leer qué cambió
 
-- **Para un usuario**: las notas de cada versión en [GitHub Releases](https://github.com/sgiambelluca/Anonly/releases).
+- **Para un usuario**: el menú «Novedades» de la pantalla de inicio, que trae un resumen de cada versión dentro de la aplicación (ADR-216), y las notas completas en [GitHub Releases](https://github.com/sgiambelluca/Anonly/releases).
 - **Por paquete**:
 
 | Paquete                      | Qué es                                            | Changelog                                                                                                |

@@ -8,7 +8,7 @@ async function deleteFirstEntity(page: Page): Promise<void> {
   await page.getByRole("button", { name: "Más acciones" }).first().click();
   const menu = page.getByRole("group", { name: "Acciones del grupo" });
   await menu.getByRole("button", { name: "Eliminar entidad" }).click();
-  const confirmation = page.getByRole("dialog", { name: "Eliminar entidad" });
+  const confirmation = page.getByRole("dialog", { name: "¿Eliminar esta entidad?" });
   await confirmation.getByRole("button", { name: "Eliminar" }).click();
   await expect(confirmation).toHaveCount(0);
 }

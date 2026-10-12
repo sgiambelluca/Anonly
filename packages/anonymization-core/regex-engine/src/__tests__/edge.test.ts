@@ -13,6 +13,7 @@ import { RegexEngine } from "../regex.engine.js";
 import { RegexInvalidPatternError } from "../regex.errors.js";
 
 import {
+  addressValuesOf,
   createEngineContext,
   makeDocument,
   makeEmptyPage,
@@ -20,6 +21,8 @@ import {
   makePage,
   makePageFromWords,
   makeSinglePageDocument,
+  makeSourcedPage,
+  processPage,
 } from "./fixtures/test-helpers.js";
 
 describe("RegexEngine — edge case tests", () => {
@@ -596,6 +599,293 @@ describe("RegexEngine — edge case tests", () => {
         .map(([, , payload]) => (payload as EntityFound).occurrence)
         .filter((o) => watchedTypes.has(o.entityType));
       expect(watchedOccurrences, tokens.join(" ")).toHaveLength(0);
+    });
+  });
+  // Caso 35 (ADR-211): el email leído con `Q` en texto de OCR.
+  describe("Caso 35: email leído con Q (ADR-211)", () => {
+    const emailValues = async (tokens: ReadonlyArray<string>): Promise<string[]> => {
+      const occurrences = await processPage(engine, ctx, makeSourcedPage(0, tokens));
+      return occurrences.filter((o) => o.entityType === EntityType.Email).map((o) => o.value);
+    };
+
+    it("email read with Q requires the strict lowercase shape", async () => {
+      // Marcas y nombres con mayúsculas, y una `Q` sin letra o dígito a cada
+      // lado: ninguna coincide.
+      const noMatch: ReadonlyArray<ReadonlyArray<string>> = [
+        ["ProQuest.com"],
+        ["BanQ.com.ar"],
+        ["JUAN.PEREZQGMAIL.COM"],
+        ["JuanQgmail.com"],
+        ["juanQGmail.com"],
+        ["juanQgmail.COM"],
+        ["-Qexample.org"],
+        ["juanQ.example.org"],
+        ["Qexample.org"],
+        ["juan", "Qexample.org"],
+        ["juanQ", "example.org"],
+        ["juanQexample"],
+        ["juanQexample.c"],
+        ["juanQexample.com1"],
+        ["juanQexample.com_"],
+      ];
+      for (const tokens of noMatch) {
+        expect(await emailValues(tokens), tokens.join(" ")).toEqual([]);
+      }
+
+      expect(await emailValues(["juanQgmail.com"])).toEqual(["juanQgmail.com"]);
+      // Dígitos, y los signos del nombre y del dominio, sí.
+      expect(await emailValues(["j.u-a_n+9Qgm-ail9.co.uk"])).toEqual(["j.u-a_n+9Qgm-ail9.co.uk"]);
+    });
+
+    it("email read with Q includes up to two dot-space name segments", async () => {
+      expect(await emailValues(["contacto.", "estudioQexample.org"])).toEqual([
+        "contacto. estudioQexample.org",
+      ]);
+      expect(await emailValues(["info.", "contacto.", "estudioQexample.org"])).toEqual([
+        "info. contacto. estudioQexample.org",
+      ]);
+      // Un tercer tramo queda afuera: entran los dos más cercanos a la `Q`.
+      expect(await emailValues(["uno.", "dos.", "tres.", "estudioQexample.org"])).toEqual([
+        "dos. tres. estudioQexample.org",
+      ]);
+      // Dos espacios, o un espacio sin punto, no extienden.
+      expect(await emailValues(["contacto.", "", "estudioQexample.org"])).toEqual([
+        "estudioQexample.org",
+      ]);
+      expect(await emailValues(["contacto", "estudioQexample.org"])).toEqual([
+        "estudioQexample.org",
+      ]);
+      // Un punto sin espacio no necesita tramo: ya es parte del nombre.
+      expect(await emailValues(["contacto.estudioQexample.org"])).toEqual([
+        "contacto.estudioQexample.org",
+      ]);
+    });
+
+    it("email read with Q yields to an overlapping regular email", async () => {
+      // La forma con `Q` coincide con la parte inicial de un email con `@`:
+      // gana el de la `@`, completo y sin el tramo previo.
+      const occurrences = await processPage(
+        engine,
+        ctx,
+        makeSourcedPage(0, ["contacto.", "estudioQexample.org@example.net"]),
+      );
+      expect(occurrences.map((o) => o.value)).toEqual(["estudioQexample.org@example.net"]);
+      expect(occurrences[0]?.normalizedValue).toBe("estudioqexample.org@example.net");
+
+      // Aun cuando el match con `Q` (con sus dos tramos previos) sea más
+      // largo que el email con `@` que pisa su final: el de la `@` gana, y no
+      // por tamaño. Sin el descarte explícito ganaría el más largo.
+      const longerRead = await processPage(
+        engine,
+        ctx,
+        makeSourcedPage(0, ["info.", "contacto.", "aQb.co@x.io"]),
+      );
+      expect(longerRead.map((o) => o.value)).toEqual(["aQb.co@x.io"]);
+
+      // Sin superposición, conviven y salen en orden de lectura.
+      const both = await processPage(
+        engine,
+        ctx,
+        makeSourcedPage(0, ["juanQexample.com", "ana@example.com"]),
+      );
+      expect(both.map((o) => [o.value, o.normalizedValue])).toEqual([
+        ["juanQexample.com", "juan@example.com"],
+        ["ana@example.com", "ana@example.com"],
+      ]);
+    });
+
+    it("custom pattern named email does not get the Q search", async () => {
+      engine.addPattern({
+        id: "email",
+        entityType: EntityType.Custom,
+        pattern: /\bjuanQexample\.com\b/g,
+        normalizer: (value: string) => value.toLowerCase(),
+        maskFormat: "CUSTOM-XXXX",
+      });
+
+      // Sobre palabras de PDF la forma con `Q` no se busca: lo único que
+      // emite es el patrón custom, con su propio normalizador (sin restituir
+      // la `@`) y su propio tipo.
+      const onPdf = await processPage(
+        engine,
+        ctx,
+        makeSourcedPage(0, [{ text: "juanQexample.com", source: "pdf" }]),
+      );
+      expect(
+        onPdf.map(({ value, normalizedValue, entityType, maskFormat }) => ({
+          value,
+          normalizedValue,
+          entityType,
+          maskFormat,
+        })),
+      ).toEqual([
+        {
+          value: "juanQexample.com",
+          normalizedValue: "juanqexample.com",
+          entityType: EntityType.Custom,
+          maskFormat: "CUSTOM-XXXX",
+        },
+      ]);
+
+      // Sobre OCR, el que restituye la `@` es el email default y con su tipo y
+      // su máscara: el custom no se vuelve un email ni gana la búsqueda.
+      const onOcr = await processPage(engine, ctx, makeSourcedPage(0, ["juanQexample.com"]));
+      expect(onOcr).toHaveLength(1);
+      expect(onOcr[0]?.entityType).toBe(EntityType.Email);
+      expect(onOcr[0]?.maskFormat).toBe("xxxx@xxxx.xx");
+      expect(onOcr[0]?.normalizedValue).toBe("juan@example.com");
+    });
+  });
+
+  /*
+   * Caso 36 (§13, ADR-217): dirección con palabra clave. Los límites del
+   * patrón: qué nombres toma, dónde frena, qué no es una altura, qué no
+   * emite, y el costo de tapar de más que el mantenedor aceptó.
+   */
+  describe("Caso 36: dirección con palabra clave — límites (ADR-217)", () => {
+    it("keyword address takes multi-word, date-like and numbered street names", async () => {
+      const cases: ReadonlyArray<readonly [string, string]> = [
+        [
+          "Vive en Av. Presidente Roque Sáenz Peña 1234 desde ayer",
+          "Av. Presidente Roque Sáenz Peña 1234",
+        ],
+        [
+          // Seis palabras: el tope.
+          "Vive en la calle Fray Justo Santa María de Oro 2745 desde ayer",
+          "calle Fray Justo Santa María de Oro 2745",
+        ],
+        ["Vive en la avenida del Mar 450 desde ayer", "avenida del Mar 450"],
+        ["Vive en la calle 25 de Mayo 350 desde ayer", "calle 25 de Mayo 350"],
+        ["Vive en la calle 1° de Mayo 480 desde ayer", "calle 1° de Mayo 480"],
+        ["Fijó domicilio en 12 de Octubre 1575 a estos efectos", "12 de Octubre 1575"],
+        ["Vive en la calle 50 N° 889 desde ayer", "calle 50 N° 889"],
+        ["Vive en la calle 7 número 1240 desde ayer", "calle 7 número 1240"],
+        ["Vive en Av. O'Higgins 250 desde ayer", "Av. O'Higgins 250"],
+      ];
+      for (const [sentence, expectedValue] of cases) {
+        expect(await addressValuesOf(engine, ctx, sentence), sentence).toEqual([expectedValue]);
+      }
+
+      // Un nombre de siete palabras no coincide: pasa del tope.
+      const sevenWords = "Vive en la calle Doctor Juan Bautista Alberdi Sur Este Norte 100 hoy";
+      expect(await addressValuesOf(engine, ctx, sevenWords)).toEqual([]);
+    });
+
+    it("keyword address stops at the first street number", async () => {
+      expect(
+        await addressValuesOf(engine, ctx, "Con domicilio en Maipú 1434, torre 2, piso 8 de aquí"),
+      ).toEqual(["Maipú 1434"]);
+      expect(
+        await addressValuesOf(engine, ctx, "Vive en calle Lavalle 385, piso 3 de aquí"),
+      ).toEqual(["calle Lavalle 385"]);
+    });
+
+    it("keyword address requires capitalized name words", async () => {
+      const notAddresses = [
+        "La calle estuvo cortada 3 horas por la marcha.",
+        "Los vecinos de la avenida reclamaron 15 veces.",
+        "El pasaje costó 4500 pesos según el recibo.",
+        "Trabaja en la calle desde 1998 como vendedor.",
+        "La diagonal del terreno mide 120 metros.",
+        "Sobre la avenida circulaban 2 camiones.",
+        "su domicilio en 2019 ni después",
+        "El cambio de domicilio en 30 días",
+      ];
+      for (const sentence of notAddresses) {
+        expect(await addressValuesOf(engine, ctx, sentence), sentence).toEqual([]);
+      }
+    });
+
+    // Costo aceptado de ADR-217 («Lo que se tapa de más»), fijado en un test
+    // para que sea conocido: en mayúsculas nada distingue un verbo de un
+    // nombre de calle. Si este test cambia, cambia una decisión del mantenedor.
+    it("keyword address over-covers a common-noun street word in all-caps text", async () => {
+      expect(await addressValuesOf(engine, ctx, "LA CALLE ESTUVO CORTADA 3 HORAS")).toEqual([
+        "CALLE ESTUVO CORTADA 3",
+      ]);
+      expect(
+        await addressValuesOf(engine, ctx, "DOMICILIO PROCESAL EN LA CALLE TUCUMÁN 1650"),
+      ).toEqual(["LA CALLE TUCUMÁN 1650"]);
+      expect(await addressValuesOf(engine, ctx, "SU DOMICILIO EN 2019 NI DESPUÉS")).toEqual([]);
+    });
+
+    it("keyword address needs a street number", async () => {
+      const withoutNumber = [
+        "Av. Corrientes y Maipú",
+        "calle Lavalle esquina Callao",
+        "calle Balcarce sin número",
+        "calle 13 entre 44 y 45",
+        "ruta 205 kilómetro 54",
+      ];
+      for (const sentence of withoutNumber) {
+        expect(await addressValuesOf(engine, ctx, sentence), sentence).toEqual([]);
+      }
+    });
+
+    it("keyword address number follows the NER street number shape", async () => {
+      // Los seis conectores, con y sin espacio entre el conector y el número.
+      const connectors = ["N°", "Nº", "No.", "nro.", "nro", "número", "numero", "al"];
+      for (const connector of connectors) {
+        const spaced = `calle Mitre ${connector} 100`;
+        expect(await addressValuesOf(engine, ctx, spaced), spaced).toEqual([spaced]);
+      }
+      expect(await addressValuesOf(engine, ctx, "calle Mitre N°100")).toEqual([
+        "calle Mitre N°100",
+      ]);
+      // Hasta cinco dígitos.
+      expect(await addressValuesOf(engine, ctx, "calle Mitre 12345 hoy")).toEqual([
+        "calle Mitre 12345",
+      ]);
+
+      // Un número que continúa como fecha, importe o rango no es una altura.
+      const notHeights = [
+        "calle Mitre 1005/2 hoy",
+        "calle Mitre 100/2 hoy",
+        "calle Mitre 100.5 hoy",
+        "calle Mitre 1.234 hoy",
+        "calle Mitre 100,5 hoy",
+        "calle Mitre 100-5 hoy",
+        "calle Mitre 100‐5 hoy",
+        "calle Mitre 100‑5 hoy",
+        "calle Mitre 100–5 hoy",
+        "calle Mitre 100—5 hoy",
+        "calle Mitre 123456 hoy",
+      ];
+      for (const sentence of notHeights) {
+        expect(await addressValuesOf(engine, ctx, sentence), sentence).toEqual([]);
+      }
+
+      // La puntuación sin dígito detrás no continúa el número.
+      expect(await addressValuesOf(engine, ctx, "calle Mitre 100, hoy")).toEqual([
+        "calle Mitre 100",
+      ]);
+      expect(await addressValuesOf(engine, ctx, "calle Mitre 100. Hoy")).toEqual([
+        "calle Mitre 100",
+      ]);
+    });
+
+    it("keyword address does not start inside a word", async () => {
+      // La palabra de vía tiene que empezar palabra y ser seguida por un espacio.
+      expect(await addressValuesOf(engine, ctx, "Bocacalle Mitre 100")).toEqual([]);
+      expect(await addressValuesOf(engine, ctx, "Pasajero Mitre 100")).toEqual([]);
+      // Lo mismo vale para la palabra de domicilio (ADR-217 §1).
+      expect(await addressValuesOf(engine, ctx, "subdomicilio en Mitre 100")).toEqual([]);
+      expect(await addressValuesOf(engine, ctx, "casita en Mitre 100")).toEqual([]);
+    });
+
+    it("a plate inside a keyword address yields to the address", async () => {
+      const inside = await processPage(
+        engine,
+        ctx,
+        makePage(0, "CON DOMICILIO EN AVENIDA DEL MAR 450".split(" ")),
+      );
+      expect(inside.map((o) => [o.entityType, o.value])).toEqual([
+        [EntityType.Address, "AVENIDA DEL MAR 450"],
+      ]);
+
+      // Sin la palabra clave la patente se emite como siempre.
+      const outside = await processPage(engine, ctx, makePage(0, "EL DOMINIO MAR 450".split(" ")));
+      expect(outside.map((o) => [o.entityType, o.value])).toEqual([[EntityType.Plate, "MAR 450"]]);
     });
   });
 });

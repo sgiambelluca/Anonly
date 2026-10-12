@@ -25,6 +25,12 @@ export interface MenuPlacementInput {
   /** El área donde el menú se ve entero: lo que recorta, o la ventana. */
   readonly boundaryTop: number;
   readonly boundaryBottom: number;
+  /**
+   * El lado que se prefiere cuando entra en los dos. Sin esto, abajo (el menú
+   * de modos y el ⋯ de las filas). El panel de novedades del pie prefiere
+   * arriba: su disparador está al final de la pantalla (ADR-216 §2).
+   */
+  readonly preferred?: MenuPlacement;
 }
 
 export interface MenuLayoutInput {
@@ -37,6 +43,8 @@ export interface MenuLayoutInput {
   /** Intersección de ventana y ancestros que recortan contenido vertical. */
   readonly boundaryTop: number;
   readonly boundaryBottom: number;
+  /** Ver `MenuPlacementInput.preferred`. */
+  readonly preferred?: MenuPlacement;
 }
 
 export interface MenuLayout {
@@ -62,15 +70,19 @@ export function clippingBoundary(element: HTMLElement): ClippingBoundary {
 }
 
 /**
- * Abajo si entra. Si no, arriba si ahí entra. Si no entra en ninguno, el lado
- * con más lugar; en el empate, abajo.
+ * El lado preferido —abajo si no se pide otro— si entra. Si no, el otro si ahí
+ * entra. Si no entra en ninguno, el lado con más lugar; en el empate, el
+ * preferido.
  */
 export function resolveMenuPlacement(input: MenuPlacementInput): MenuPlacement {
   const spaceBelow = input.boundaryBottom - input.triggerBottom;
   const spaceAbove = input.triggerTop - input.boundaryTop;
-  if (input.menuHeight <= spaceBelow) return "bottom";
-  if (input.menuHeight <= spaceAbove) return "top";
-  return spaceAbove > spaceBelow ? "top" : "bottom";
+  const preferred = input.preferred ?? "bottom";
+  const other: MenuPlacement = preferred === "bottom" ? "top" : "bottom";
+  const spaceOf = (side: MenuPlacement): number => (side === "bottom" ? spaceBelow : spaceAbove);
+  if (input.menuHeight <= spaceOf(preferred)) return preferred;
+  if (input.menuHeight <= spaceOf(other)) return other;
+  return spaceOf(other) > spaceOf(preferred) ? other : preferred;
 }
 
 /** Conserva la dirección y desplaza el panel lo mínimo dentro del área visible. */
@@ -81,6 +93,7 @@ export function resolveMenuLayout(input: MenuLayoutInput): MenuLayout {
     menuHeight: input.menuHeight + input.gap,
     boundaryTop: input.boundaryTop,
     boundaryBottom: input.boundaryBottom,
+    ...(input.preferred !== undefined ? { preferred: input.preferred } : {}),
   });
   const availableHeight = Math.max(0, input.boundaryBottom - input.boundaryTop);
   const maxHeight = Math.min(Math.max(0, input.menuHeight), availableHeight);
@@ -114,6 +127,20 @@ function intrinsicMenuHeight(menu: HTMLElement): number {
   return Math.max(menu.scrollHeight + borders, menu.getBoundingClientRect().height);
 }
 
+export interface ObserveMenuLayoutOptions {
+  /** El lado que se prefiere cuando entra en los dos (ver `MenuPlacementInput`). */
+  readonly preferred?: MenuPlacement;
+  /**
+   * Alto máximo propio del panel, para el que tiene un tope de diseño (el de
+   * novedades, 452 px). La colocación se calcula con `min(intrínseco, tope)`:
+   * si no, un panel con scroll interno se pondría como si midiera todo su
+   * contenido y quedaría separado del disparador.
+   */
+  readonly maxHeight?: number;
+  /** Separación entre el disparador y el panel. 4 px si no se dice. */
+  readonly gap?: number;
+}
+
 /**
  * Observa el menú y los límites que pueden cambiar por resize, scroll o reflow.
  * `scrollHeight` mantiene la medida intrínseca aunque el panel ya tenga max-height.
@@ -122,22 +149,31 @@ export function observeMenuLayout(
   container: HTMLElement,
   menu: HTMLElement,
   onLayout: (layout: MenuLayout) => void,
+  options: ObserveMenuLayoutOptions = {},
 ): () => void {
+  const cap = options.maxHeight ?? Number.POSITIVE_INFINITY;
+  const gap = options.gap ?? 4;
   const ancestors = clippingAncestors(container);
   const measure = (): void => {
     const trigger = container.getBoundingClientRect();
     const boundary = clippingBoundary(container);
-    const menuHeight = intrinsicMenuHeight(menu);
+    const intrinsicHeight = intrinsicMenuHeight(menu);
+    const menuHeight = Math.min(intrinsicHeight, cap);
     const availableHeight = Math.max(0, boundary.bottom - boundary.top);
-    if (menuHeight <= availableHeight && menu.scrollTop !== 0) menu.scrollTop = 0;
+    // Solo se vuelve arriba de todo si el contenido entero entra: con un tope
+    // propio, que el panel mida menos que su contenido es scroll legítimo.
+    if (intrinsicHeight <= Math.min(availableHeight, cap) && menu.scrollTop !== 0) {
+      menu.scrollTop = 0;
+    }
     onLayout(
       resolveMenuLayout({
         triggerTop: trigger.top,
         triggerBottom: trigger.bottom,
         menuHeight,
-        gap: 4,
+        gap,
         boundaryTop: boundary.top,
         boundaryBottom: boundary.bottom,
+        ...(options.preferred !== undefined ? { preferred: options.preferred } : {}),
       }),
     );
   };

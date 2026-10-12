@@ -66,6 +66,12 @@ export interface WordSelectionOverlayProps {
   /** Bbox de página del resultado activo de la lupa, si hay uno en esta página. */
   readonly activeMatchBboxes?: ReadonlyArray<BoundingBox>;
   readonly kind: "original" | "anonymized";
+  /**
+   * ADR-213 §6: la página está pintando la imagen del otro lado mientras espera
+   * la vigente. La capa no admite selección ni dibuja resaltados: lo que se ve
+   * no es lo que su geometría describe.
+   */
+  readonly inert?: boolean;
   readonly interactionGeometry?: PreviewInteractionGeometry;
   /** La selección vigente si es de esta página, o `null`. */
   readonly selection: PageSelection | null;
@@ -90,6 +96,7 @@ export function WordSelectionOverlay({
   displayHeight,
   activeMatchBboxes,
   kind,
+  inert = false,
   interactionGeometry,
   selection,
   onSelect,
@@ -254,8 +261,10 @@ export function WordSelectionOverlay({
           ),
         };
 
-  const highlightRects = (activeMatchBboxes ?? []).map(toScreen).filter((rect) => rect !== null);
-  const selectionBox = selection !== null ? wordsBoundingBox(selection.words) : null;
+  const highlightRects = inert
+    ? []
+    : (activeMatchBboxes ?? []).map(toScreen).filter((rect) => rect !== null);
+  const selectionBox = selection !== null && !inert ? wordsBoundingBox(selection.words) : null;
   const selectionRect = selectionBox !== null ? toScreen(selectionBox) : null;
 
   const dragRect =
@@ -270,7 +279,7 @@ export function WordSelectionOverlay({
 
   return (
     <div
-      className={`absolute inset-0 select-none ${kind === "original" || interactionGeometry !== undefined ? "cursor-crosshair" : "pointer-events-none"}`}
+      className={`absolute inset-0 select-none ${!inert && (kind === "original" || interactionGeometry !== undefined) ? "cursor-crosshair" : "pointer-events-none"}`}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
@@ -288,7 +297,7 @@ export function WordSelectionOverlay({
           style={dragRect}
         />
       ) : null}
-      {selection !== null && selectionRect !== null ? (
+      {selection !== null && !inert && selectionRect !== null ? (
         <>
           <div
             aria-hidden

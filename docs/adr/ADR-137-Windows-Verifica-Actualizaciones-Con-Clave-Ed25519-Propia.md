@@ -147,6 +147,12 @@ vez: el `publisherName` reservado y la asignación de una función real a
 
 ### 5. Cuando llegue SignPath se exigen las dos verificaciones
 
+> **Nota del 2026-10-07.** SignPath rechazó la postulación
+> (`roadmap/distribucion/SignPath_Postulacion.md` §6). La decisión de esta
+> sección no cambia: vale para cualquier certificado Authenticode que el
+> proyecto llegue a tener. Mientras tanto rige el primer caso de la lista: el
+> valor reservado, y Ed25519 como única verificación.
+
 Antes de reemplazar el callback se conserva la función Authenticode original de
 `electron-updater`. El verificador compuesto siempre ejecuta Ed25519 primero:
 

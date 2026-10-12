@@ -7,6 +7,8 @@ ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT_DIR"
 # Fase 2 de la campaña de DPI descendente: tiene su propio runner, para no tocar el comportamiento de `ultra`.
 if [[ "${ANONLY_OCR_POOL_PHASE:-}" == "ultra-dpi" ]]; then exec "${BASH:-bash}" "$ROOT_DIR/tests/perf/run-ocr-pool-dpi.sh" "$@"; fi
+# Memoria del perfil Bajo (M-M1, ADR-194 §7): también tiene su propio runner, con el perfil por el setting.
+if [[ "${ANONLY_OCR_POOL_PHASE:-}" == "low-memory" ]]; then exec "${BASH:-bash}" "$ROOT_DIR/tests/perf/run-ocr-pool-low.sh" "$@"; fi
 # shellcheck source=support/ocr-pool-platform.sh
 source "$ROOT_DIR/tests/perf/support/ocr-pool-platform.sh"
 PLATFORM="$(detect_platform)"

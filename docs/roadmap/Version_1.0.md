@@ -91,9 +91,23 @@ Van en las notas de la versión. Cada una tiene su lugar en `Roadmap_1.x.md`.
   Riesgo aceptado (ADR-190).
 - **Emails en escaneos de baja resolución.** Leyendo a menos de 300 dpi se
   pierden emails. Un escaneo de unos 200 dpi se lee a esa resolución
-  (ADR-163). Causa sin investigar.
+  (ADR-163); medido el 2026-10-07 sobre sintéticos, a 200 dpi nativos no se
+  perdió ninguno y a 150 se perdieron 2 de 25. Corregido después de la 1.0
+  con ADR-211. La causa es la lectura del OCR: confunde la `@` con una `Q`, o
+  el punto del nombre con un espacio (encontrada el 2026-10-07; sin corregir).
+- **Repintado de línea.** Cuando una etiqueta no entra en el lugar del dato y
+  se corre el resto del renglón, ese resto puede quedar dibujado con otra
+  letra y más chico, y que pase o no depende del zoom. Se ve con tipografías
+  comunes de oficina. No deja datos a la vista (encontrado el 2026-10-07;
+  `interaccion/Revision_ADR204_2026-10-07.md`).
 - **Direcciones.** En la línea de base de calidad, las cuatro direcciones del
-  conjunto de referencia no se detectan.
+  conjunto de referencia no se detectan. Corregido después de la 1.0 con
+  ADR-212: la dirección incluye la altura que la sigue. Sigue siendo un
+  límite que el modelo no marque algunas calles.
+- **Una dirección en mayúsculas que choca con el patrón de patente.** En
+  «AVENIDA DEL MAR 450» se tapaba «MAR 450» como patente y la dirección se
+  descartaba, con «AVENIDA DEL» a la vista (encontrado el 2026-10-07).
+  Corregido después de la 1.0 con ADR-214.
 - **Nombres en formas poco comunes.** El modelo puede no reconocer un nombre
   en mayúsculas o con el apellido primero. La red de contención es el
   agregado manual.
@@ -101,11 +115,13 @@ Van en las notas de la versión. Cada una tiene su lugar en `Roadmap_1.x.md`.
 - **Nada verifica de forma automática el PDF exportado.** El gate que lo lee
   con OCR (ADR-148) está decidido y sin implementar.
 - **Primera instalación en Windows**: sin firma Authenticode, Windows muestra
-  SmartScreen y un editor no verificado. La postulación a SignPath está
-  preparada y sin enviar.
+  SmartScreen y un editor no verificado. La postulación a SignPath se envió
+  el 2026-10-02 y fue rechazada; no hay otra vía gratuita. Riesgo aceptado
+  (`08_Security_Model.md` §2.3).
 - **macOS**: la aplicación no está notarizada. Gatekeeper la bloquea la
   primera vez. Riesgo aceptado (`08_Security_Model.md` §2.3).
-- **Memoria**: 8 GB como mínimo. El techo del perfil Bajo es provisorio.
+- **Memoria**: 8 GB como mínimo. El techo del perfil Bajo era provisorio al
+  publicar la 1.0; se midió el 2026-10-07 y quedó en 2,5 GB (ADR-194 §7).
 - **Accesibilidad**: sin auditar. El árbol de entidades tiene varios puntos
   de tabulación por fila.
 - **Idioma**: la interfaz está solo en español.

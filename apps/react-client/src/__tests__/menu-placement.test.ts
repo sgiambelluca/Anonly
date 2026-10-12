@@ -122,3 +122,71 @@ describe("resolveMenuLayout", () => {
     ).toEqual({ placement: "top", top: -10, maxHeight: 0 });
   });
 });
+
+// ADR-216 §2: el panel de novedades del pie se abre hacia arriba. Sin
+// `preferred` nada cambia (todos los tests de arriba).
+describe("lado preferido", () => {
+  it("prefiriendo arriba, abre arriba aunque abajo también entre", () => {
+    expect(
+      resolveMenuPlacement({ ...base, triggerTop: 300, triggerBottom: 330, preferred: "top" }),
+    ).toBe("top");
+  });
+
+  it("prefiriendo arriba, cae abajo solo si arriba no entra y abajo sí", () => {
+    expect(
+      resolveMenuPlacement({ ...base, triggerTop: 100, triggerBottom: 130, preferred: "top" }),
+    ).toBe("bottom");
+  });
+
+  it("prefiriendo arriba, si no entra en ninguno elige el lado con más lugar", () => {
+    const small = { menuHeight: 400, boundaryTop: 0, boundaryBottom: 500 };
+    expect(
+      resolveMenuPlacement({ ...small, triggerTop: 300, triggerBottom: 330, preferred: "top" }),
+    ).toBe("top");
+    expect(
+      resolveMenuPlacement({ ...small, triggerTop: 100, triggerBottom: 130, preferred: "top" }),
+    ).toBe("bottom");
+  });
+
+  it("prefiriendo arriba, el empate lo gana arriba", () => {
+    const tie = { menuHeight: 400, boundaryTop: 0, boundaryBottom: 430 };
+    expect(
+      resolveMenuPlacement({ ...tie, triggerTop: 200, triggerBottom: 230, preferred: "top" }),
+    ).toBe("top");
+  });
+
+  it("preferir abajo es lo mismo que no decir nada", () => {
+    const input = { ...base, triggerTop: 540, triggerBottom: 570 };
+    expect(resolveMenuPlacement({ ...input, preferred: "bottom" })).toBe(
+      resolveMenuPlacement(input),
+    );
+  });
+
+  it("el layout de un panel preferido arriba queda pegado al disparador, con su separación", () => {
+    expect(
+      resolveMenuLayout({
+        triggerTop: 700,
+        triggerBottom: 736,
+        menuHeight: 452,
+        gap: 8,
+        boundaryTop: 0,
+        boundaryBottom: 800,
+        preferred: "top",
+      }),
+    ).toEqual({ placement: "top", top: -460, maxHeight: 452 });
+  });
+
+  it("con poca altura visible, el panel se acota y scrollea por dentro", () => {
+    expect(
+      resolveMenuLayout({
+        triggerTop: 340,
+        triggerBottom: 376,
+        menuHeight: 452,
+        gap: 8,
+        boundaryTop: 0,
+        boundaryBottom: 400,
+        preferred: "top",
+      }),
+    ).toEqual({ placement: "top", top: -340, maxHeight: 400 });
+  });
+});

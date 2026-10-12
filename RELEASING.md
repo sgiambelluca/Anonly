@@ -44,6 +44,24 @@ pnpm run version   # sube las versiones y escribe los CHANGELOG
 Tiene que ser `pnpm run version`: `pnpm version` a secas es un comando propio
 de pnpm, que imprime versiones y no toca nada.
 
+En la misma rama, **escribí las novedades de la versión** (ADR-216): una
+entrada nueva, arriba de todo, en
+`apps/react-client/src/components/screens/releaseNotes.ts`. Es lo que el
+usuario lee en el menú «Novedades» de la pantalla de inicio, y viaja dentro
+del instalador.
+
+- Dos o tres líneas, escritas para quien usa la aplicación: sin ADR ni
+  nombres internos, una oración por línea, 140 caracteres como máximo.
+- Cada línea lleva su etiqueta: **Nuevo** (antes no se podía), **Mejora** (ya
+  existía y funciona mejor) o **Arreglo** (fallaba).
+- Si cambió la detección, una línea lo dice.
+- La fecha es la del día en que pensás publicar. Si el tag se corre, corregila
+  antes de tagear.
+
+`pnpm test` falla mientras la versión nueva no tenga su entrada. El detalle
+completo y las limitaciones conocidas siguen yendo en las notas del release
+de GitHub.
+
 **4. Probás la versión y promovés `develop` a `main` con un merge commit.**
 Es el único caso donde se usa Create a merge commit (ADR-209). Así los commits
 de `develop` entran a `main` con el mismo SHA, y la próxima promoción solo trae
@@ -111,10 +129,11 @@ SPKI está horneada en `src/windows-update-signature.ts`; si el secret no
 corresponde a ella, falta o no se genera la metadata `anonlyEd25519`, el release
 falla antes de subir artefactos (ADR-137).
 
-La firma propia protege actualizaciones, no la primera instalación. Hasta que
-se integre Authenticode mediante SignPath, Windows puede mostrar SmartScreen y
-un editor no verificado. Cuando llegue el certificado, el verificador exige
-las dos firmas; la Ed25519 no se retira.
+La firma propia protege actualizaciones, no la primera instalación. El
+instalador no lleva Authenticode: SignPath rechazó la postulación y no hay otra
+vía gratuita (`docs/architecture/08_Security_Model.md` §2.3), así que Windows
+muestra SmartScreen y un editor no verificado. Si el proyecto llega a tener un
+certificado, el verificador exige las dos firmas; la Ed25519 no se retira.
 
 **El release se crea como borrador.** El tag lo arma; publicarlo lo decidís
 vos, desde la página del release. Hasta entonces ningún usuario lo recibe.

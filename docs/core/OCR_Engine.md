@@ -1,12 +1,22 @@
-<!-- CONTEXT: scope=ocr-engine | dependencias=adr/ADR-190-Una-Pagina-Con-Tinta-No-Sale-Vacia-En-Silencio.md,adr/ADR-145-El-Deposito-No-Expulsa-Lo-Que-Acaba-De-Guardar.md,core/Contracts.md,architecture/05_Worker_Architecture.md,architecture/06_Pipeline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md,adr/ADR-018-First-Party-Assets.md,adr/ADR-021-Engines-Inline-Hasta-Hito9.md,adr/ADR-041-FuseOcrPage-Funcion-Pura-Sin-Estado-Retenido.md,adr/ADR-045-OcrEngine-Pool-Propia-Kernel-Puro.md,adr/ADR-064-Palabras-De-OCR-En-Puntos.md,adr/ADR-090-La-Orientacion-De-Un-Escaneo-Se-Detecta.md,adr/ADR-119-La-Orientacion-Se-Detecta-Con-El-Motor-Que-La-Sabe-Leer.md,adr/ADR-112-El-Sello-No-Es-Un-Parrafo.md,adr/ADR-121-El-Sello-Rotado-Vive-En-El-Margen.md,adr/ADR-101-El-Despacho-Paralelo-De-OCR-Que-Nunca-Aterrizo.md,adr/ADR-143-Las-Imagenes-De-OCR-Se-Producen-Cuando-Hay-Lugar.md,adr/ADR-158-El-Raster-De-OCR-Viaja-Codificado.md,adr/ADR-160-El-Worker-De-OCR-No-Decodifica-La-Pagina.md,adr/ADR-161-Una-Franja-Sin-Tinta-No-Se-Reconoce.md,adr/ADR-162-Solo-Una-Franja-Visualmente-Blanca-Se-Saltea.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md | audiencia=IA-implementador | fase=11 (§12/§13/§14/§15 en fase 11 por ADR-162: cada franja visualmente blanca evita sus dos pasadas, con una compuerta exacta y fail-open; §12/§13/§15 en fase 11 por ADR-160: el kernel no materializa la pagina completa en el camino comun — los bytes codificados van directo a tesseract.js, el OSD decodifica reducido y las franjas de ADR-121 decodifican solo su franja; §6/§9/§11/§13/§14/§15 en fase 11 por ADR-143: processSession pide cada imagen bajo demanda, con presupuesto de bytes en vivo, en vez de que el caller materialice todo el documento antes de empezar; §10/§13/§14/§15 en fase 11 por ADR-121: las pasadas rotadas sobre las franjas de margen; §13/§14/§15 en fase 11 por ADR-112: el modo de segmentación de página es SPARSE_TEXT; §2/§6/§12/§15 actualizados en fase 10: clase host-side dueña de su pool + kernel de reconocimiento en el worker, ADR-045; §9/§10/§11/§13/§14 en fase 10.8: las palabras salen en puntos de página, no en píxeles del raster, ADR-064) -->
+<!-- CONTEXT: scope=ocr-engine | dependencias=adr/ADR-190-Una-Pagina-Con-Tinta-No-Sale-Vacia-En-Silencio.md,adr/ADR-145-El-Deposito-No-Expulsa-Lo-Que-Acaba-De-Guardar.md,core/Contracts.md,roadmap/ocr/Recuperacion_RC_Validacion_2026-10-10.md,architecture/05_Worker_Architecture.md,architecture/06_Pipeline.md,adr/ADR-014-OCR-PDF-Fusion-Orchestrator.md,adr/ADR-018-First-Party-Assets.md,adr/ADR-021-Engines-Inline-Hasta-Hito9.md,adr/ADR-041-FuseOcrPage-Funcion-Pura-Sin-Estado-Retenido.md,adr/ADR-045-OcrEngine-Pool-Propia-Kernel-Puro.md,adr/ADR-064-Palabras-De-OCR-En-Puntos.md,adr/ADR-090-La-Orientacion-De-Un-Escaneo-Se-Detecta.md,adr/ADR-119-La-Orientacion-Se-Detecta-Con-El-Motor-Que-La-Sabe-Leer.md,adr/ADR-112-El-Sello-No-Es-Un-Parrafo.md,adr/ADR-121-El-Sello-Rotado-Vive-En-El-Margen.md,adr/ADR-101-El-Despacho-Paralelo-De-OCR-Que-Nunca-Aterrizo.md,adr/ADR-143-Las-Imagenes-De-OCR-Se-Producen-Cuando-Hay-Lugar.md,adr/ADR-158-El-Raster-De-OCR-Viaja-Codificado.md,adr/ADR-160-El-Worker-De-OCR-No-Decodifica-La-Pagina.md,adr/ADR-161-Una-Franja-Sin-Tinta-No-Se-Reconoce.md,adr/ADR-162-Solo-Una-Franja-Visualmente-Blanca-Se-Saltea.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md | audiencia=IA-implementador | fase=12 (RC de ADR-190 en §13/§14/§15, casos 49–51 e item 39; §12/§13/§14/§15 en fase 11 por ADR-162: cada franja visualmente blanca evita sus dos pasadas, con una compuerta exacta y fail-open; §12/§13/§15 en fase 11 por ADR-160: el kernel no materializa la pagina completa en el camino comun — los bytes codificados van directo a tesseract.js, el OSD decodifica reducido y las franjas de ADR-121 decodifican solo su franja; §6/§9/§11/§13/§14/§15 en fase 11 por ADR-143: processSession pide cada imagen bajo demanda, con presupuesto de bytes en vivo, en vez de que el caller materialice todo el documento antes de empezar; §10/§13/§14/§15 en fase 11 por ADR-121: las pasadas rotadas sobre las franjas de margen; §13/§14/§15 en fase 11 por ADR-112: el modo de segmentación de página es SPARSE_TEXT; §2/§6/§12/§15 actualizados en fase 10: clase host-side dueña de su pool + kernel de reconocimiento en el worker, ADR-045; §9/§10/§11/§13/§14 en fase 10.8: las palabras salen en puntos de página, no en píxeles del raster, ADR-064) -->
 
 # OCR Engine — Spec de Motor
 
 > Ejecuta OCR sobre las páginas sin texto del PDF. Solo corre si `PdfEngineOutput.textlessPages.length > 0`. Devuelve `Word[]` con `BoundingBox` y `confidence` que el PDF Engine fusiona.
 
 **EngineId**: `ocr`
-**Versión del spec**: 1.17.0
-**Última actualización**: 2026-09-16
+**Versión del spec**: 1.18.0
+**Última actualización**: 2026-10-10
+
+> **Nota (v1.18.0, enmienda RC de ADR-190, aceptada el 2026-10-10;
+> código y pruebas focalizadas implementados; validación integral pendiente):** una página entera sin veredicto OSD, cuya
+> primera lectura trae cero palabras y tiene `inkRatio > 0`, prueba también
+> 90/180/270 sobre el mismo ráster/DPI. Amplía el caso 48 debajo de 0,002;
+> conserva el comparador de esa rama, errores, cancelación y el criterio de
+> `unreadableInk`. Sin upscale, regiones ni cambios en las páginas con
+> veredicto. SV y CP en la cadena general quedan pendientes de otra decisión
+> humana. Casos 49–51, siete pruebas de §14 e item 39 de §15; costo y calidad
+> se confirman con la implementación real antes de cerrar.
 
 > **Nota (v1.17.0, ADR-165, 2026-09-16 — una franja ya explicada no se
 > reconoce)**: las cuatro pasadas de margen de ADR-121 cuestan **~301 ms por
@@ -610,9 +620,30 @@ OcrPageOutput {
 43. **El OSD recibe un tamaño fijo (ADR-190 §1)**: la imagen del OSD se escala a `OSD_TARGET_LONG_SIDE_PX = 1754` px de lado largo, con factor `min(2, 1754 / ladoLargoPx)`. Una página A4 a 150 dpi y la misma a 300 dpi le llegan al OSD con el mismo tamaño. Un recorte de región chico se agranda como mucho al doble. Para una página A4 a 300 dpi el resultado es idéntico al anterior (`OSD_SCALE = 0.5`).
 44. **Ángulo del OSD distinto de 0, y lectura débil (ADR-190 §2)**: si la página tiene tinta (caso 46) y el OSD da un ángulo distinto de 0, **siempre** se reconoce también a 0° y se entrega la mejor de las dos lecturas: más palabras con confianza ≥ 60, y ante empate la de mayor confianza media. Esto corre aunque la primera lectura parezca fiable, porque un ángulo equivocado puede devolver basura con confianza ≥ 60. Se considera fiable una lectura con al menos una palabra de confianza ≥ 60 (`ROTATED_MIN_CONFIDENCE`); el criterio es provisional hasta la medición de ADR-190 §7. Si ninguna de las dos lecturas es fiable y la página tiene tinta, se prueban los ángulos restantes de {0, 90, 180, 270}. Se conserva el conjunto de ángulos intentados, incluido el del OSD, aunque cambie la mejor lectura o falle un intento: cada ángulo se intenta una sola vez antes del upscale. El caso de OSD **sin veredicto** y primera lectura confiable se trata en el caso 48.
 45. **Lectura débil por debajo de 300 dpi (ADR-190 §2 paso 4)**: si después del caso 44 no hay lectura fiable, la página tiene tinta y su `dpi` efectivo es menor que 300, se reconoce una vez más en el mejor ángulo con `upscale = 300 / dpi`. El kernel agranda la imagen decodificada y convierte las coordenadas con `dpi × upscale`: el `bbox` sigue en puntos de página (ADR-064). Las regiones no pasan por este paso.
-46. **Tinta presente y página ilegible (ADR-190 §3, §4)**: el kernel del OSD devuelve `inkRatio` (fracción de píxeles presentes con el predicado de ADR-162) sobre la misma imagen reducida. Con `inkRatio < INK_PRESENT_RATIO = 0.002` la página se considera en blanco o ruido: no hay reintentos de los casos 44–45 ni `unreadableInk`; el caso 48 puede verificar una primera lectura aparentemente confiable aun debajo de ese umbral. Si una **página entera** con tinta termina la cadena sin lectura fiable, `OCR_PAGE_FINISHED` lleva `unreadableInk: true`, se entregan las palabras de la mejor lectura (pueden ser cero) y no se emite `OCR_PAGE_FAILED`. Las regiones nunca llevan `unreadableInk`.
+46. **Tinta presente y página ilegible (ADR-190 §3, §4)**: el kernel del OSD devuelve `inkRatio` (fracción de píxeles presentes con el predicado de ADR-162) sobre la misma imagen reducida. Con `inkRatio < INK_PRESENT_RATIO = 0.002` no hay reintentos de los casos 44–45 ni `unreadableInk`; el caso 48 puede verificar una primera lectura aparentemente confiable aun debajo de ese umbral y, desde RC, una lectura vacía con tinta positiva (caso 49). Si una **página entera** con tinta termina la cadena sin lectura fiable, `OCR_PAGE_FINISHED` lleva `unreadableInk: true`, se entregan las palabras de la mejor lectura (pueden ser cero) y no se emite `OCR_PAGE_FAILED`. Las regiones nunca llevan `unreadableInk`.
 47. **Costo y fallos de la cadena (ADR-190 §2)**: una página con veredicto OSD 0° y primera lectura fiable no hace despachos extra. Una página con tinta que el OSD da como girada hace siempre un reconocimiento más (a 0°). En el peor caso la cadena suma cuatro reconocimientos adicionales; el caso 48 suma como máximo tres. Cada paso es un despacho normal, con timeout, cancelación y reserva de imagen. Un `CancelledError` corta la cadena y se propaga. Cualquier otro error en un paso posterior al primero, incluido un modelo ausente, no hace fallar la página: se entrega la mejor lectura obtenida hasta ahí. El fallo del primer paso conserva su tratamiento actual.
-48. **OSD sin veredicto con primera lectura confiable o tinta presente (enmienda ADR-190 del 2026-09-28)**: `OcrOrientationResult.osdHadVerdict` es `true` solo para un ángulo válido detectado con confianza ≥ 1 y `false` para el fallback 0°; el host valida el booleano. Si es `false`, se trata de una página entera y la primera lectura tiene al menos una palabra con confianza ≥ 0,60 **o** `inkRatio ≥ 0.002`, reconocer también a 90°, 180° y 270° con la misma imagen y DPI. Entre las lecturas que tienen alguna palabra confiable, comparar primero la confianza de página devuelta por el kernel y después la cantidad de palabras confiables; si ninguna es confiable conservar la primera y ante empate exacto conservar la primera. No recalcular la confianza de página con palabras de las pasadas de margen. No hacer upscale en este camino y no ejecutar después la cadena general para la misma página. Una página sin primera palabra confiable y por debajo del umbral de tinta, y los recortes de región, siguen la cadena anterior. La excepción de error/cancelación del caso 47 rige para cada intento. La cadena y el ranking general del caso 44 no cambian cuando `osdHadVerdict` es `true`. Los controles de figuras con tinta deben terminar con `unreadableInk`, sin aceptar el falso `>` del upscale viejo; confirmar esto en el pipeline real.
+48. **OSD sin veredicto con primera lectura confiable, tinta presente o lectura vacía con tinta positiva (enmiendas ADR-190 del 2026-09-28 y RC del 2026-10-10)**: `OcrOrientationResult.osdHadVerdict` es `true` solo para un ángulo válido detectado con confianza ≥ 1 y `false` para el fallback 0°; el host valida el booleano. Si es `false`, se trata de una página entera y la primera lectura tiene al menos una palabra con confianza ≥ 0,60 **o** `inkRatio ≥ 0.002` **o** (`words.length === 0` **y** `inkRatio > 0`), reconocer también a 90°, 180° y 270° con la misma imagen y DPI. Entre las lecturas que tienen alguna palabra confiable, comparar primero la confianza de página devuelta por el kernel y después la cantidad de palabras confiables; si ninguna es confiable conservar la primera y ante empate exacto conservar la primera. No recalcular la confianza de página con palabras de las pasadas de margen. No hacer upscale en este camino y no ejecutar después la cadena general para la misma página. Una lectura vacía con tinta cero, una no vacía sin palabra confiable debajo del umbral y los recortes de región siguen sus reglas anteriores. La excepción de error/cancelación del caso 47 rige para cada intento. La cadena y el ranking general del caso 44 no cambian cuando `osdHadVerdict` es `true`. Los controles de figuras con tinta deben terminar con `unreadableInk`, sin aceptar el falso `>` del upscale viejo; confirmar esto en el pipeline real.
+
+49. **RC recupera una página casi vacía**: página entera, sin veredicto,
+    primera lectura vacía y `0 < inkRatio < 0.002`. Cuatro reconocimientos
+    en total, uno por ángulo 0/90/180/270, misma imagen y DPI, sin upscale.
+    Aun si 90° trae basura aparentemente fiable se intenta 270° y se entrega
+    la lectura ganadora según el ranking vigente del caso 48. Una hoja de
+    ruido que no trae palabras en ningún ángulo también paga los tres
+    despachos nuevos, devuelve la primera lectura vacía y no levanta
+    `unreadableInk` bajo 0,002. La ausencia de lectura no prueba que el
+    contenido carezca de datos sensibles.
+50. **Controles de alcance de RC**: tinta cero y lectura vacía, página con
+    veredicto válido, región sin veredicto y lectura débil pero no vacía con
+    tinta debajo de 0,002 conservan los despachos anteriores. No se amplía
+    el comparador de la cadena general ni se agrega SV, configuración,
+    evento, contrato, DPI o cambio de tinta/resultado del worker.
+51. **Fallos y depósito con RC**: cancelar corta antes del siguiente
+    despacho, sin emitir éxito ficticio; un fallo no cancelado de un intento
+    posterior conserva la mejor lectura obtenida y permite continuar los
+    ángulos faltantes según el caso 47. Tras éxito, cache contiene las palabras
+    recuperadas antes de un único `OCR_PAGE_FINISHED`, sin `OCR_PAGE_FAILED`.
+    La reserva de imagen cubre toda la cadena y se libera al asentarse.
 
 
 ## 14. Casos de prueba
@@ -725,7 +756,7 @@ OcrPageOutput {
 | `a rotated osd verdict always compares against upright even when the first reading looks reliable` | `unit.test.ts` | unit | caso 44, enmienda de ADR-190 §2 |
 | `a weak reading with ink tries the remaining angles` | `unit.test.ts` | unit | caso 44, ADR-190 §2 paso 3 |
 | `a weak reading below 300 dpi retries upscaled` | `unit.test.ts` | unit | caso 45, ADR-190 §2 paso 4: coordenadas con `dpi × upscale` |
-| `a blank or noise-only page does not trigger retries nor unreadableInk` | `edge.test.ts` | edge | caso 46, ADR-190 §3 |
+| `a blank or noise-only page does not trigger retries nor unreadableInk` | `edge.test.ts` | edge | caso 46, ADR-190 §3: control de ruido bajo el umbral con veredicto válido; el ruido vacío sin veredicto entra en RC (caso 49) |
 | `an unreadable page with ink finishes with unreadableInk` | `contract.test.ts` | contract | caso 46, ADR-190 §4-§5 |
 | `a readable page pays no extra dispatch` | `unit.test.ts` | unit | caso 47 |
 | `cancellation stops the retry chain` | `edge.test.ts` | edge | caso 47 |
@@ -744,6 +775,13 @@ OcrPageOutput {
 | `a missing OSD verdict on shapes does not upscale a false punctuation word` | `edge.test.ts` | edge | caso 48: sin lectura confiable tras cuatro ángulos, `unreadableInk` |
 | `a valid OSD verdict and regions keep their existing retry rules` | `edge.test.ts` | edge | caso 48: acotar el costo y preservar contratos |
 | `rejects orientation results without osdHadVerdict` | `edge.test.ts` | edge | caso 48, Contracts §7.2 y ADR-055: validar el sobre del worker |
+| `an empty low-ink page without an OSD verdict recovers text at the last angle` | `edge.test.ts` | edge | caso 49, RC: discriminante contra el predicado anterior; no cortar con basura fiable en 90°, recuperar texto/DNI y cajas en 270° |
+| `an empty low-ink noise page without an OSD verdict tries all angles without upscale or unreadableInk` | `edge.test.ts` | edge | caso 49, RC: cuatro lecturas vacías a mismo DPI/escala; sin aviso inventado |
+| `a zero-ink empty page without an OSD verdict pays one recognition` | `edge.test.ts` | edge | caso 50: blanco exacto excluido; contar despachos, no solo words=[] |
+| `RC preserves retries for valid verdicts regions and nonempty weak readings` | `edge.test.ts` | edge | caso 50: parametrizado sobre las tres exclusiones y frontera inkRatio=0.002 ya cubierta por el camino anterior |
+| `RC cancellation aborts before the next recovery dispatch` | `edge.test.ts` | edge | caso 51: abort después de primera lectura vacía; sin trabajo/evento de éxito posterior |
+| `RC retry failures keep the best recovered reading` | `edge.test.ts` | edge | caso 51: recuperar lectura, fallo posterior y mejor lectura retenida, sin perder la página |
+| `RC deposits its recovered words before emitting one page-finished event` | `contract.test.ts` | contract | caso 51: frontera host, cache→evento y cardinalidad; misma firma pública |
 
 **Fixtures y mocks (ADR-021 §5)**: los tests **unit / contract / edge** (Hito 3) mockean la frontera `tesseract.js` — deterministas, sin wasm ni descargas; el cast de frontera va en un helper único de `__tests__/fixtures/` (Code_Standards §10, precedente `mockGetDocumentResult` del pdf-engine). Los tests **stress / cancel / integration** son Hito 11 y usan `tests/fixtures/scanned-10p.pdf` (rasterizado a `ImageData` por el host), imagen blanca e imagen con texto pequeño.
 
@@ -861,6 +899,22 @@ OcrPageOutput {
 
 - [x] 38. (ADR-190, enmienda del 2026-09-28) Rama de OSD sin veredicto (caso 48): `osdHadVerdict` en `OcrOrientationResult`, disparo por primera lectura fiable o tinta presente, reconocimiento en 90/180/270 sin upscale, ranking por confianza de página y sin rama para regiones. Tests de §14 del caso 48.
 
+- [ ] 39. (ADR-190, enmienda RC aceptada el 2026-10-10) **Solo `ocr-engine`,
+  sin contratos ni otros motores:** extender el predicado del caso 48 con
+  `(reading.words.length === 0 && inkRatio > 0)` y ajustar los comentarios
+  que excluían todo ruido de los reintentos. Conservar comparador, loop
+  completo de ángulos, imagen/DPI, ausencia de upscale, aviso, fallos,
+  cancelación y cache→evento. Implementar las siete filas de §14, controles
+  y discriminante que falla contra el predicado anterior, cobertura ≥85%
+  y gates scoped. Después: E2E del N1 exacto y regresiones ADR-190,
+  caracterización M-O1 completa y calidad normativa sin regresiones,
+  confirmación del costo real con tres repeticiones frías/calientes de R1
+  y P2N según ADR-218. Es evidencia provisional del árbol sin commitear,
+  no aprobación del lote. SV/CP fuera de esta rama sigue sin adoptarse;
+  el humano lo difirió el 2026-10-10 hasta disponer de más documentos/
+  escaneos, aceptando el riesgo residual para esta actualización.
+  [Evidencia y retoma](../roadmap/ocr/Orientacion_SV_CP_Retoma_2026-10-10.md).
+
 ---
 
 ## Referencias
@@ -870,3 +924,4 @@ OcrPageOutput {
 - `architecture/07_Performance_Strategy.md` §2.2 (carga de wasm y modelo)
 - `adr/ADR-001-Framework.md` (tesseract.js)
 - `adr/ADR-003-Workers.md` (pools)
+- `roadmap/ocr/Recuperacion_RC_Validacion_2026-10-10.md` (item 39: E2E N1, regresiones, caracterización y costo adoptado)

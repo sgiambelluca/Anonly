@@ -27,9 +27,11 @@ import {
   _electron as electron,
   test as base,
   type ElectronApplication,
+  type Frame,
   type Page,
 } from "@playwright/test";
 
+import { reloadReadyApp, type AppNavigationActivity } from "./appNavigation.js";
 import { installSettingsOverride, isMeasurementSuite } from "./settingsOverride.js";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -144,7 +146,40 @@ export async function openApp(
    * pestaña vacía y la carga la dispara el test con `goto`. Acá la dispara la
    * aplicación, y el test llega después.
    */
-  await page.waitForLoadState("load");
+  await reloadReadyApp(
+    {
+      currentUrl: () => page.url(),
+      waitForUrl: async (url, waitForState) => {
+        await page.waitForURL(url, { waitUntil: waitForState });
+      },
+      waitForReady: async () => {
+        await page.waitForFunction(() => {
+          const core = (window as typeof window & { __anonlyCore?: unknown }).__anonlyCore;
+          return core !== undefined;
+        });
+      },
+      reload: async (waitForState) => {
+        await page.reload({ waitUntil: waitForState });
+      },
+      subscribe: (listener: (activity: AppNavigationActivity) => void) => {
+        const navigated = (frame: Frame): void => {
+          if (frame === page.mainFrame()) listener({ event: "navigated", url: frame.url() });
+        };
+        const domcontentloaded = (): void =>
+          listener({ event: "domcontentloaded", url: page.url() });
+        const load = (): void => listener({ event: "load", url: page.url() });
+        page.on("framenavigated", navigated);
+        page.on("domcontentloaded", domcontentloaded);
+        page.on("load", load);
+        return () => {
+          page.off("framenavigated", navigated);
+          page.off("domcontentloaded", domcontentloaded);
+          page.off("load", load);
+        };
+      },
+    },
+    criterion,
+  );
   /*
    * `reload` y no solo `waitForLoadState`: seis specs registran un
    * `addInitScript` —`support/settingsOverride.ts`— que tiene que correr
@@ -153,7 +188,6 @@ export async function openApp(
    * Recargar restituye exactamente la semántica que tenía `page.goto("/")`
    * contra el navegador: carga limpia, con los init scripts puestos.
    */
-  await page.reload({ waitUntil: criterion });
 }
 
 /**

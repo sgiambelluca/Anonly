@@ -8,18 +8,22 @@ import {
 } from "@anonly/shared";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
+import { normalizeEmailReadWithQ, scanEmailReadWithQ } from "../email-q-scanner.js";
 import { scanEmailDefault } from "../email-scanner.js";
 import { DEFAULT_PATTERNS_AR } from "../patterns/default-ar.js";
 import { RegexEngine } from "../regex.engine.js";
 
 import {
+  addressValuesOf,
   createEngineContext,
   makeDocument,
   makeEmptyPage,
   makePage,
   makePageFromWords,
   makeSinglePageDocument,
+  makeSourcedPage,
   makeWord,
+  processPage,
 } from "./fixtures/test-helpers.js";
 
 async function firstOccurrence(
@@ -94,10 +98,11 @@ describe("RegexEngine — unit tests", () => {
   });
 
   describe("DEFAULT_PATTERNS_AR — contrato de datos", () => {
-    it("contiene exactamente los 14 patrones default de Regex_Engine.md (ADR-096)", () => {
+    it("contiene exactamente los 15 patrones default de Regex_Engine.md (ADR-096, ADR-217)", () => {
       const ids = DEFAULT_PATTERNS_AR.map((p) => p.id).sort();
       expect(ids).toEqual(
         [
+          "address-keyword-ar",
           "caratula-ar",
           "credit-card",
           "cuit-ar",
@@ -133,6 +138,8 @@ describe("RegexEngine — unit tests", () => {
       expect(byId.get("plate-vieja-ar")).toBe("XXX XXX");
       expect(byId.get("plate-mercosur-ar")).toBe("XX XXX XX");
       expect(byId.get("plate-mercosur-moto-ar")).toBe("X XXX XXX");
+      // ADR-012: la fila Address; ADR-217 §4.
+      expect(byId.get("address-keyword-ar")).toBe("XXXXXX XXX");
     });
   });
 
@@ -1561,6 +1568,302 @@ describe("RegexEngine — unit tests", () => {
 
       expect(matches).toHaveLength(1);
       expect(matches[0]?.text).toBe("O'Brien");
+    });
+  });
+  // Caso 35 (ADR-211): el email que el OCR leyó con la `@` convertida en `Q`.
+  describe("Email leído con Q (ADR-211, caso 35)", () => {
+    it("email read with Q is detected in OCR words only", async () => {
+      const ocr = await processPage(engine, ctx, makeSourcedPage(0, ["juanQexample.com"]));
+      expect(ocr).toHaveLength(1);
+      expect(ocr[0]).toMatchObject({
+        value: "juanQexample.com",
+        entityType: EntityType.Email,
+        source: "regex",
+        confidence: 1,
+        maskFormat: "xxxx@xxxx.xx",
+        wordSpan: { startIndex: 0, endIndexExclusive: 1 },
+      });
+
+      const pdf = await processPage(
+        engine,
+        ctx,
+        makeSourcedPage(0, [{ text: "juanQexample.com", source: "pdf" }]),
+      );
+      expect(pdf).toHaveLength(0);
+
+      // Un span de dos palabras exige las dos de OCR: con una de PDF, en
+      // cualquiera de los dos lugares, no hay ocurrencia.
+      const pdfThenOcr = await processPage(
+        engine,
+        ctx,
+        makeSourcedPage(0, [
+          { text: "contacto.", source: "pdf" },
+          { text: "estudioQexample.org", source: "ocr" },
+        ]),
+      );
+      expect(pdfThenOcr).toHaveLength(0);
+      const ocrThenPdf = await processPage(
+        engine,
+        ctx,
+        makeSourcedPage(0, [
+          { text: "contacto.", source: "ocr" },
+          { text: "estudioQexample.org", source: "pdf" },
+        ]),
+      );
+      expect(ocrThenPdf).toHaveLength(0);
+
+      const bothOcr = await processPage(
+        engine,
+        ctx,
+        makeSourcedPage(0, ["contacto.", "estudioQexample.org"]),
+      );
+      expect(bothOcr).toHaveLength(1);
+      expect(bothOcr[0]?.wordSpan).toEqual({ startIndex: 0, endIndexExclusive: 2 });
+    });
+
+    it("email read with Q normalizes to the real address and keeps the read value", async () => {
+      const read = await processPage(
+        engine,
+        ctx,
+        makeSourcedPage(0, ["Escribir", "a", "contacto.", "estudioQexample.org", "gracias"]),
+      );
+      expect(read).toHaveLength(1);
+      // `value`: el texto como se leyó, con la `Q` y con el espacio.
+      expect(read[0]?.value).toBe("contacto. estudioQexample.org");
+      // `normalizedValue`: la `@` restituida, sin el espacio y en minúsculas.
+      expect(read[0]?.normalizedValue).toBe("contacto.estudio@example.org");
+
+      // El mismo email leído bien cae en la misma clave de agrupado.
+      const wellRead = await processPage(
+        engine,
+        ctx,
+        makeSourcedPage(0, ["Escribir", "a", "Contacto.Estudio@Example.ORG"]),
+      );
+      expect(wellRead).toHaveLength(1);
+      expect(wellRead[0]?.value).toBe("Contacto.Estudio@Example.ORG");
+      expect(wellRead[0]?.normalizedValue).toBe(read[0]?.normalizedValue);
+
+      expect(normalizeEmailReadWithQ("info. contacto. estudioQexample.org")).toBe(
+        "info.contacto.estudio@example.org",
+      );
+    });
+
+    // Auxiliar de la implementación: el escáner lineal contra la expresión de
+    // referencia del caso 35, que acá es solo un oráculo de tamaños acotados.
+    it("Q email scanner matches reference spans and values", () => {
+      const reference =
+        /\b(?:[a-z0-9._%+-]*[a-z0-9]\. ){0,2}[a-z0-9._%+-]*[a-z0-9]Q[a-z0-9][a-z0-9.-]*\.[a-z]{2,}\b/g;
+      const expectedFor = (text: string) => {
+        reference.lastIndex = 0;
+        const expected: Array<{
+          readonly startIndex: number;
+          readonly endIndexExclusive: number;
+          readonly value: string;
+        }> = [];
+        let match: RegExpExecArray | null;
+        while ((match = reference.exec(text)) !== null) {
+          expected.push({
+            startIndex: match.index,
+            endIndexExclusive: match.index + match[0].length,
+            value: match[0],
+          });
+        }
+        return expected;
+      };
+
+      let seed = 0x2d1;
+      const next = (modulo: number): number => {
+        seed = (seed * 48271) % 0x7fffffff;
+        return seed % modulo;
+      };
+
+      const characters = "abz09._%+-QQQ@ \n,A é";
+      const tokens = [
+        "a",
+        "bc",
+        "x9",
+        ".",
+        "-",
+        "Q",
+        "Q",
+        "Q",
+        " ",
+        ". ",
+        "  ",
+        "example",
+        ".org",
+        ".com",
+        "@",
+        "A",
+        "_",
+        "9",
+      ];
+      const generated: string[] = [];
+      for (let sample = 0; sample < 300; sample++) {
+        let text = "";
+        for (let index = next(90); index > 0; index--) {
+          text += characters[next(characters.length)] ?? "x";
+        }
+        generated.push(text);
+      }
+      for (let sample = 0; sample < 600; sample++) {
+        let text = "";
+        for (let index = 3 + next(14); index > 0; index--) {
+          text += tokens[next(tokens.length)] ?? "x";
+        }
+        generated.push(text);
+      }
+
+      // Muestras estructuradas: de 0 a 3 tramos «nombre. », un nombre, la `Q`,
+      // un dominio y un resto, todo con piezas que a veces se corrompen. Sin
+      // ellas casi ninguna muestra al azar llega a ser una coincidencia.
+      const nameParts = ["a", "bc", "x9", "a.b", "m-n", "q_r", "Ab", "9", "z.", ".z"];
+      const domainParts = ["example.org", "x.co", "a.b.cd", "d.e", "ex-ample.com", "a.b", "e.c1"];
+      const separators = [" ", "  ", ", ", " y ", "\n", ""];
+      const pick = (list: ReadonlyArray<string>): string => list[next(list.length)] ?? "";
+      for (let sample = 0; sample < 600; sample++) {
+        let text = "";
+        for (let item = 1 + next(3); item > 0; item--) {
+          for (let segment = next(4); segment > 0; segment--) {
+            text += `${pick(nameParts)}${next(8) === 0 ? "" : ". "}`;
+          }
+          text += `${pick(nameParts)}${next(10) === 0 ? "q" : "Q"}${pick(domainParts)}`;
+          text += next(3) === 0 ? pick(["@x.org", "1", "_", "-", ".", "Q"]) : "";
+          text += pick(separators);
+        }
+        generated.push(text);
+      }
+
+      const corpus = [
+        "juanQgmail.com",
+        "contacto. estudioQexample.org",
+        "uno. dos. tres. estudioQexample.org",
+        "a. b. c. dQexample.org",
+        "aQb.comQc.org",
+        "aQb.com. cQd.org",
+        "aQb.com.ar y cQd.net",
+        "ProQuest.com BanQ.com.ar JUAN.PEREZQGMAIL.COM",
+        "-Qexample.org juanQ.example.org Qexample.org",
+        "a.b.cQd.e.fg",
+        "x. yQa.bc,z. wQd.ef",
+        "juanQexample.org@example.net",
+        "Pro.xQa.com",
+        "name.Qa.com",
+        "name. Qa.com",
+        "contacto.  estudioQexample.org",
+        "contacto.\nestudioQexample.org",
+        "juanQexample.com1 juanQexample.com_ juanQexample.com-",
+        "éjuanQexample.com juanQexample.comé",
+        ...generated,
+      ];
+
+      let totalMatches = 0;
+      let matchesWithSegments = 0;
+      for (const text of corpus) {
+        const expected = expectedFor(text);
+        const actual = scanEmailReadWithQ(text).map((span) => ({
+          ...span,
+          value: text.slice(span.startIndex, span.endIndexExclusive),
+        }));
+        expect(actual, JSON.stringify(text)).toEqual(expected);
+        totalMatches += expected.length;
+        matchesWithSegments += expected.filter((match) => match.value.includes(". ")).length;
+      }
+      // El corpus no es vacuo: encuentra coincidencias, y con tramos previos.
+      expect(totalMatches).toBeGreaterThan(300);
+      expect(matchesWithSegments).toBeGreaterThan(100);
+    });
+
+    // El costo lineal se mide en `tests/perf/regex-worst-case.ts` (caso 35, en
+    // otro commit). Acá, sin umbral temporal, se corre texto adverso de 200 KiB
+    // con muchísimas `Q` y tramos largos: con un escáner cuadrático esto tarda
+    // minutos y revienta el timeout de la suite.
+    it("Q email scanner finishes on long adversarial text", () => {
+      const size = 200_000;
+      const adversarial = [
+        `${"a".repeat(size)}Q`,
+        `${"aQ".repeat(size / 2)}`,
+        `${"a.".repeat(size / 2)}Qexample.org`,
+        `${"a. ".repeat(size / 3)}bQexample.org`,
+        `${"a-".repeat(size / 2)}Qa.b`,
+        `${"aQb.".repeat(size / 4)}`,
+        `${"x. yQz.".repeat(size / 7)}`,
+      ];
+      for (const text of adversarial) {
+        expect(scanEmailReadWithQ(text).length).toBeGreaterThanOrEqual(0);
+      }
+      // Control: el texto adverso con un email legible al final lo encuentra.
+      const withEmail = `${"a. ".repeat(size / 3)}contacto. estudioQexample.org`;
+      const spans = scanEmailReadWithQ(withEmail);
+      expect(spans).toHaveLength(1);
+      expect(withEmail.slice(spans[0]?.startIndex, spans[0]?.endIndexExclusive)).toMatch(
+        /estudioQexample\.org$/,
+      );
+    });
+  });
+
+  /*
+   * Caso 36 (§13, ADR-217): dirección con palabra clave. Las oraciones llevan
+   * contexto antes y después en minúsculas, para fijar dónde empieza y dónde
+   * termina el `value` y no solo que algo se detectó.
+   */
+  describe("Caso 36: dirección con palabra clave (ADR-217)", () => {
+    type AddressCase = readonly [sentence: string, expectedValue: string];
+
+    // Palabra de vía: forma parte del valor. Las abreviaturas, con y sin punto.
+    const streetTypeCases: ReadonlyArray<AddressCase> = [
+      ["El imputado vive en Av. Corrientes 1980 desde hace años", "Av. Corrientes 1980"],
+      ["Reside en avenida Pueyrredón 1999 junto a su familia", "avenida Pueyrredón 1999"],
+      ["Reside en la calle Tucumán 1650 junto a su familia", "calle Tucumán 1650"],
+      ["Notifíquese en Avda. Rivadavia 4520 de esta ciudad", "Avda. Rivadavia 4520"],
+      ["El hecho ocurrió en pasaje Rauch 742 de noche", "pasaje Rauch 742"],
+      ["El hecho ocurrió en Pje. Güemes 315 de noche", "Pje. Güemes 315"],
+      ["Se constituyó en boulevard Oroño 1260 para notificar", "boulevard Oroño 1260"],
+      ["Se constituyó en Bv. Gálvez 2150 para notificar", "Bv. Gálvez 2150"],
+      ["Se constituyó en diagonal Norte 615 para notificar", "diagonal Norte 615"],
+      ["El imputado vive en Av Corrientes 1980 desde hace años", "Av Corrientes 1980"],
+      ["Notifíquese en Avda Rivadavia 4520 de esta ciudad", "Avda Rivadavia 4520"],
+      ["El hecho ocurrió en Pje Güemes 315 de noche", "Pje Güemes 315"],
+      ["Se constituyó en Bv Gálvez 2150 para notificar", "Bv Gálvez 2150"],
+    ];
+
+    // Palabra de domicilio: no forma parte del valor, que arranca en la calle.
+    const domicileCases: ReadonlyArray<AddressCase> = [
+      ["El actor, con domicilio en Maipú 1434 de esta ciudad", "Maipú 1434"],
+      ["La demandada, domiciliada en Sarmiento 742 de Rosario", "Sarmiento 742"],
+      ["El demandado, domiciliado en Belgrano 1950 de Rosario", "Belgrano 1950"],
+      ["El actor, con domicilio real en Lavalle 385 de esta ciudad", "Lavalle 385"],
+      ["El inmueble sito en Mitre 1985 de esta ciudad", "Mitre 1985"],
+      ["La finca sita en Alsina 455 de esta ciudad", "Alsina 455"],
+      ["Fijó domicilio legal en Viamonte 867 a estos efectos", "Viamonte 867"],
+    ];
+
+    it("keyword address is detected after a street-type word", async () => {
+      for (const [sentence, expectedValue] of streetTypeCases) {
+        expect(await addressValuesOf(engine, ctx, sentence), sentence).toEqual([expectedValue]);
+      }
+    });
+
+    it("keyword address after a domicile phrase starts at the street name", async () => {
+      for (const [sentence, expectedValue] of domicileCases) {
+        expect(await addressValuesOf(engine, ctx, sentence), sentence).toEqual([expectedValue]);
+      }
+    });
+
+    it("keyword address is detected in all-caps text with and without accents", async () => {
+      const withoutAccents = (text: string): string => text.normalize("NFD").replace(/\p{M}/gu, "");
+
+      for (const [sentence, expectedValue] of [...streetTypeCases, ...domicileCases]) {
+        const withAccents = sentence.toUpperCase();
+        expect(await addressValuesOf(engine, ctx, withAccents), withAccents).toEqual([
+          expectedValue.toUpperCase(),
+        ]);
+
+        const plain = withoutAccents(withAccents);
+        expect(await addressValuesOf(engine, ctx, plain), plain).toEqual([
+          withoutAccents(expectedValue.toUpperCase()),
+        ]);
+      }
     });
   });
 });

@@ -12,7 +12,8 @@
  * - **`HowItWorks`**: la animación de tres fases con sus tres pasos.
  * - **Tres tarjetas** con lo que la herramienta **garantiza** (no repiten los
  *   pasos, que dicen qué hace el usuario).
- * - **Pie**: versión y licencia, "Acerca de…" (`AboutDialog`, ADR-168 §3) y
+ * - **Pie**: el botón de versión que abre "Novedades" (`ReleaseNotesMenu`,
+ *   ADR-216), la licencia, "Acerca de…" (`AboutDialog`, ADR-168 §3) y
  *   "Reportar un problema".
  *
  * **Estado "Abriendo"**: cubre la ventana entre el drop y `DOCUMENT_IMPORTED`
@@ -50,6 +51,7 @@ import {
   peekImportFailure,
   type DropZoneError,
 } from "./importFailure.js";
+import { ReleaseNotesMenu } from "./ReleaseNotesMenu.js";
 
 export function LoadScreen() {
   const [openingFileName, setOpeningFileName] = useState<string | null>(null);
@@ -147,10 +149,17 @@ export function LoadScreen() {
           />
         </dl>
 
-        <footer className="anonly-rise anonly-rise-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-bg-primary py-1.5 pl-4 pr-1.5">
-          <p className="text-sm text-text-secondary">
-            Anonly {__ANONLY_VERSION__} · Software libre, licencia {PRODUCT_LICENSE}
-          </p>
+        <footer className="anonly-rise anonly-rise-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-bg-primary p-1.5">
+          {/*
+            ADR-216 §1: la versión es un botón que abre "Novedades"; la licencia
+            sigue siendo texto, a su derecha.
+          */}
+          <div className="flex flex-wrap items-center gap-3">
+            <ReleaseNotesMenu installedVersion={__ANONLY_VERSION__} />
+            <p className="text-sm text-text-secondary">
+              Software libre, licencia {PRODUCT_LICENSE}
+            </p>
+          </div>
           <nav aria-label="Pie de página" className="flex flex-wrap items-center gap-2">
             <button
               type="button"

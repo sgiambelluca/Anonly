@@ -53,6 +53,7 @@ import {
   type WordSpan,
 } from "@anonly/shared";
 
+import { extendAddressSpan } from "./address-extension.js";
 import {
   NerModelLoadFailedError,
   NerModelMissingError,
@@ -254,6 +255,61 @@ function mapSpanToWords(
 /** `Contracts.md` §5: `rotation` ausente ≡ `0`. */
 function rotationOf(word: Word | undefined): number {
   return word?.bbox.rotation ?? 0;
+}
+
+/*
+ * ADR-212 / caso 34 («No cruza a otro ángulo», aplicación del caso 19): la
+ * extensión de una dirección no puede sumar una `Word` con otra `rotation` que
+ * la de la última palabra del span. Los runs rotados van al final de
+ * `Page.text` (ADR-067 §4) y un folio suele ser un número; sin esta guarda, una
+ * dirección al final del texto horizontal absorbería el folio del margen.
+ *
+ * Vive acá y no en `address-extension.ts` porque necesita las `Word`. Qué
+ * palabras cubre un rango de offsets lo decide el mismo criterio que
+ * `mapSpanToWords`: `Page.text` es `words.map(w => w.text).join(" ")` y una
+ * palabra está en el rango si se solapa con él. La última palabra del span es
+ * la que contiene su último carácter; el tramo agregado es
+ * `[oldEnd, newEnd)`, conector y dígitos incluidos.
+ */
+function addedTextCrossesRotation(
+  words: ReadonlyArray<Word>,
+  oldEnd: number,
+  newEnd: number,
+): boolean {
+  let offset = 0;
+  let spanRotation: number | undefined;
+  for (const word of words) {
+    const wordStart = offset;
+    const wordEnd = wordStart + word.text.length;
+    offset = wordEnd + 1; // +1 por el separador " " de Page.text.
+
+    if (wordStart <= oldEnd - 1 && oldEnd - 1 < wordEnd) spanRotation = rotationOf(word);
+    if (wordEnd > oldEnd && wordStart < newEnd) {
+      // Si el span termina a mitad de palabra, esa palabra es la última del
+      // span y no un agregado: su ángulo es el de referencia, no una cruza.
+      spanRotation ??= rotationOf(word);
+      if (rotationOf(word) !== spanRotation) return true;
+    }
+    if (wordStart >= newEnd) break;
+  }
+  return false;
+}
+
+/**
+ * Caso 34: `extendAddressSpan` (pura, sobre el texto) más la guarda de ángulo
+ * (sobre las `Word`). Si la guarda frena la extensión el span sale exactamente
+ * como lo devolvió el modelo.
+ */
+function extendAddressSpanWithinAngle(
+  span: NerKernelSpan,
+  pageText: string,
+  words: ReadonlyArray<Word>,
+): NerKernelSpan {
+  const extended = extendAddressSpan(span, pageText);
+  if (extended === span) return span;
+  return addedTextCrossesRotation(words, span.endIndexExclusive, extended.endIndexExclusive)
+    ? span
+    : extended;
 }
 
 /*
@@ -664,7 +720,13 @@ export class NerEngine implements IEngine {
       }
 
       try {
-        const spans = await this.runInferenceInBatches(input, batchSize, timeoutMs, ctx);
+        const modelSpans = await this.runInferenceInBatches(input, batchSize, timeoutMs, ctx);
+        // ADR-212 / caso 34: paso posterior al modelo, sobre el texto completo
+        // de la página y antes de mapear a palabras. Solo toca spans de Address
+        // y no cruza a una palabra de otro ángulo.
+        const spans = modelSpans.map((span) =>
+          extendAddressSpanWithinAngle(span, input.text, words),
+        );
         const occurrences = spans.map((span) =>
           this.buildOccurrence(span, words, pageIndex, input.text),
         );

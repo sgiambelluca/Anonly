@@ -201,9 +201,9 @@ nativo, con el arnés del pool (`tests/perf/run-ocr-pool.sh`, fase `ultra`:
 pico de RSS del árbol durante el OCR, tres corridas frías, el **máximo**
 contra el techo). GB decimales.
 
-| Nivel | Máximo medido (2026-10-01) | Techo |
+| Nivel | Máximo medido (2026-10-01; `low` el 2026-10-07) | Techo |
 |---|---:|---:|
-| `low` | sin medir | **3,5 GB (provisorio)** |
+| `low` | 2,05 GB | **2,5 GB** |
 | `medium` | 3,16 GB | **3,5 GB** |
 | `high` | 4,11 GB | **4,5 GB** |
 | `ultra` | 4,41 GB | **5,0 GB** |
@@ -211,9 +211,14 @@ contra el techo). GB decimales.
 - El techo es el máximo medido más el ruido de M2 (unos 0,35 GB, ADR-146
   §7), redondeado al medio GB. En `medium` y `high` el margen es el ruido y
   nada más.
-- **`low` es provisorio**: no hay corrida de un reconocedor sobre `P2H`. Se
-  mide en la próxima tanda de Windows antes del release, y el techo se
-  confirma o se corrige con ese número.
+- **`low` se midió el 2026-10-07** (`roadmap/hardening/Confianza_1.0.x_Plan.md`,
+  M-M1): 2,045, 2,018 y 2,040 GB en tres corridas frías, con el perfil elegido
+  por el setting y los cuatro pools en 1. **El mantenedor fijó el techo en
+  2,5 GB el 2026-10-07**, con la regla de arriba (máximo más ruido, redondeado
+  al medio GB). Reemplaza al provisorio de 3,5 GB, que se había puesto sin
+  medir. Hubo además una corrida de humo previa, la primera después del build
+  y la que generó el corpus, que dio 2,42 GB: no forma parte de la tanda y
+  queda por debajo del techo.
 - Estos techos **no reemplazan** los de ADR-192 §2 (2,0 GB en P1 y 3,0 GB
   en P2, medidos con `memory.spec.ts`). Son otro escenario y otro
   instrumento, y un número de uno no se compara contra el techo del otro.

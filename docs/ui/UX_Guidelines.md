@@ -64,8 +64,10 @@ Pantalla completa. Sin panel de entidades ni de reglas montados. **Organizada en
   Revisá lo detectado · Exportá la copia*).
 - **Tres tarjetas** (todo local / detección automática / no se puede deshacer). Dicen **qué
   garantiza** la herramienta; no repiten los pasos de "Cómo funciona", que dicen qué hace el usuario.
-- **Pie de página**: versión y licencia, "Acerca de…" (créditos y código fuente, ADR-168 §3) y
-  "Reportar un problema".
+- **Pie de página**: el botón de versión, que abre **"Novedades"** (ADR-216), la licencia,
+  "Acerca de…" (créditos y código fuente, ADR-168 §3) y "Reportar un problema". "Novedades" es un
+  panel flotante con lo que trae cada versión publicada, etiquetado como Nuevo, Mejora o Arreglo.
+  El texto viaja con la aplicación: abrirlo no usa la red (`Components.md` §2.9b).
 
 > La versión anterior mostraba esta pantalla como "Hero" **dentro** del panel derecho, con el
 > árbol de entidades vacío a la izquierda ocupando un tercio del ancho. Además su dropzone no
@@ -207,6 +209,8 @@ ensanchar se vuelve sola al panel de trabajo, con el documento y las ediciones i
 
   Botones de 22 px con el fondo de su color al ~12 %; "espacio justo" mide **26×22** para que la
   flecha se lea. Cada uno abre su `Tooltip` (título + frase) y, al hacer clic, su acción.
+  El de espacio justo abre un diálogo que muestra cómo quedó el reemplazo y cómo quedaría con cada
+  salida, y aplica la que el usuario elige (ADR-215 §1, `Components.md` §3.3b).
 - **Grupo con conflicto**: el aviso de conflicto de la tabla. Click abre el conflicto.
 - **Grupo con el valor de reemplazo editado a mano** (ADR-078): punto azul al lado del nombre cuando `EntityGroup.replacementValueUserSet === true`, con `title` "Valor de reemplazo editado manualmente". El menú contextual del grupo ofrece **"Restaurar valor calculado"** solo en ese estado. Existe porque un `replacementValue` escrito a mano es **indistinguible** de uno calculado —`[P1]` es `[P1]`—, y desde ADR-076 sobrevive a todo recálculo automático: sin el punto, el usuario no puede revisar ni deshacer lo que editó antes de exportar. Es además el remedio que ADR-058 §4 y ADR-062 le ofrecen ante un reemplazo degradado, así que se usa de rutina.
 - **Grupo con el `replacementMode` distinto del default de las reglas**: **no implementado**, y no lo estará sin un dato nuevo. Calcularlo exige `resolveMode(group, rules)`, que es la resolución de reglas de Grouping: la UI tendría que reimplementarla, que es fuera de su rol (`React_Client.md` U-3). Nota: esta señal era el paréntesis del estado "Grupo editado manualmente" en la redacción anterior, que **conflacionaba** dos cosas distintas — la de arriba (el valor lo escribió el usuario) y esta (el modo difiere del default). ADR-078 §Contexto 1 las separa. Esta es además la menos urgente de las dos: el modo ya se ve, en el `Select` de la propia fila.

@@ -5537,4 +5537,201 @@ describe("GroupingEngine — edge cases", () => {
       }
     });
   });
+
+  // Caso 77 (§13, ADR-214): la que pierde un conflicto no se descarta si cubre
+  // más texto que la ganadora.
+  describe("a losing occurrence that covers more text (ADR-214)", () => {
+    /** «MAR 450», la patente que toma el patrón dentro de la dirección. */
+    const patente = makeBBox(160, 200, 60, 12);
+    /** «AVENIDA DEL MAR 450»: contiene a la patente y sobresale a la izquierda. */
+    const direccion = makeBBox(100, 200, 120, 12);
+
+    function emitir(documentId: string, occurrence: ReturnType<typeof makeOccurrence>): void {
+      ctx.bus.emit(
+        occurrence.source === DetectionSource.NER ? EventChannel.Ner : EventChannel.Regex,
+        EngineEvents.ENTITY_FOUND,
+        { documentId, occurrence },
+      );
+    }
+
+    function plate(
+      overrides?: Partial<ReturnType<typeof makeOccurrence>>,
+    ): ReturnType<typeof makeOccurrence> {
+      return makeOccurrence({
+        entityType: EntityType.Plate,
+        source: DetectionSource.Regex,
+        confidence: 1.0,
+        value: "MAR 450",
+        normalizedValue: "mar 450",
+        bbox: patente,
+        ...overrides,
+      });
+    }
+
+    function address(
+      overrides?: Partial<ReturnType<typeof makeOccurrence>>,
+    ): ReturnType<typeof makeOccurrence> {
+      return makeOccurrence({
+        entityType: EntityType.Address,
+        source: DetectionSource.NER,
+        confidence: 0.95,
+        value: "AVENIDA DEL MAR 450",
+        normalizedValue: "avenida del mar 450",
+        bbox: direccion,
+        ...overrides,
+      });
+    }
+
+    function conflictsOf(spy: MockInstance<EngineContext["bus"]["emit"]>): ConflictDetected[] {
+      return spy.mock.calls
+        .filter(
+          ([channel, event]) =>
+            channel === EventChannel.Grouping && event === EngineEvents.CONFLICT_DETECTED,
+        )
+        .map(([, , payload]) => payload as ConflictDetected);
+    }
+
+    function shape(documentId: string): ReadonlyArray<string> {
+      return engine
+        .getSnapshot(documentId)
+        .groups.map((g) => `${g.type}:${g.canonicalValue}:${g.members.length}`)
+        .sort();
+    }
+
+    it("a losing occurrence that covers text beyond the winner is still grouped", () => {
+      // disagree: la patente (Regex) le gana a la dirección (NER) que llega después.
+      const spy = vi.spyOn(ctx.bus, "emit");
+      emitir("doc-1", plate());
+      emitir("doc-1", address());
+
+      const groups = engine.getSnapshot("doc-1").groups;
+      expect(groups).toHaveLength(2);
+      const winnerGroup = groups.find((g) => g.type === EntityType.Plate);
+      expect(winnerGroup?.members).toHaveLength(1);
+      expect(groups.find((g) => g.type === EntityType.Address)?.canonicalValue).toBe(
+        "AVENIDA DEL MAR 450",
+      );
+
+      const conflicts = conflictsOf(spy);
+      expect(conflicts).toHaveLength(1);
+      const conflict = conflicts[0]?.conflict;
+      expect(conflict?.reason).toBe(ConflictReason.Disagree);
+      expect(conflict?.groupId).toBe(winnerGroup?.id);
+      expect(conflict?.resolved).toBe(true);
+      expect(conflict?.resolvedType).toBe(EntityType.Plate);
+      expect(conflict?.heldManual).toBeUndefined();
+
+      // overlap: misma fuente, la que llega pierde por confidence.
+      engine.startSession("doc-overlap");
+      const overlapSpy = vi.spyOn(ctx.bus, "emit");
+      overlapSpy.mockClear();
+      emitir("doc-overlap", plate({ source: DetectionSource.Regex, confidence: 1.0 }));
+      emitir("doc-overlap", address({ source: DetectionSource.Regex, confidence: 0.8 }));
+
+      expect(engine.getSnapshot("doc-overlap").groups).toHaveLength(2);
+      const overlap = conflictsOf(overlapSpy)[0]?.conflict;
+      expect(overlap?.reason).toBe(ConflictReason.Overlap);
+      expect(overlap?.resolvedType).toBe(EntityType.Plate);
+    });
+
+    it("a losing occurrence contained in the winner is still discarded", () => {
+      // Misma caja que la ganadora.
+      const spy = vi.spyOn(ctx.bus, "emit");
+      emitir("doc-1", plate());
+      emitir("doc-1", address({ bbox: patente, value: "MAR 450", normalizedValue: "mar 450x" }));
+      expect(engine.getSnapshot("doc-1").groups).toHaveLength(1);
+      expect(engine.getSnapshot("doc-1").groups[0]?.type).toBe(EntityType.Plate);
+      expect(conflictsOf(spy)).toHaveLength(1);
+
+      // Caja estrictamente adentro.
+      engine.startSession("doc-inside");
+      spy.mockClear();
+      emitir("doc-inside", plate());
+      emitir(
+        "doc-inside",
+        address({
+          bbox: makeBBox(170, 201, 30, 10),
+          value: "450",
+          normalizedValue: "450",
+        }),
+      );
+      expect(engine.getSnapshot("doc-inside").groups).toHaveLength(1);
+      expect(engine.getSnapshot("doc-inside").groups[0]?.type).toBe(EntityType.Plate);
+      expect(conflictsOf(spy)).toHaveLength(1);
+    });
+
+    it("a losing occurrence with one line fragment outside the winner is still grouped", () => {
+      const winnerBox = makeBBox(100, 200, 100, 12);
+      // Un renglón adentro de la ganadora y otro afuera.
+      emitir("doc-1", plate({ bbox: winnerBox }));
+      emitir(
+        "doc-1",
+        address({
+          bbox: makeBBox(100, 200, 100, 42),
+          fragments: [makeBBox(120, 200, 60, 12), makeBBox(100, 230, 60, 12)],
+        }),
+      );
+      expect(engine.getSnapshot("doc-1").groups).toHaveLength(2);
+
+      // Con los dos fragmentos adentro (la ganadora abarca los dos renglones), se descarta.
+      engine.startSession("doc-both");
+      emitir("doc-both", plate({ bbox: makeBBox(100, 200, 100, 42) }));
+      emitir(
+        "doc-both",
+        address({
+          bbox: makeBBox(100, 200, 100, 42),
+          fragments: [makeBBox(120, 200, 60, 12), makeBBox(100, 230, 60, 12)],
+          value: "AVENIDA DEL\nMAR 450",
+          normalizedValue: "avenida del mar 450 b",
+        }),
+      );
+      const groups = engine.getSnapshot("doc-both").groups;
+      expect(groups).toHaveLength(1);
+      expect(groups[0]?.type).toBe(EntityType.Plate);
+    });
+
+    it("a losing manual occurrence is still held whether contained or not", () => {
+      for (const [docId, bbox] of [
+        ["doc-1", direccion],
+        ["doc-held-contained", patente],
+      ] as const) {
+        engine.startSession(docId);
+        const spy = vi.spyOn(ctx.bus, "emit");
+        spy.mockClear();
+        emitir(docId, plate());
+        emitir(
+          docId,
+          address({
+            source: DetectionSource.Manual,
+            confidence: 1.0,
+            bbox,
+            normalizedValue: `avenida del mar 450 ${docId}`,
+          }),
+        );
+
+        const groups = engine.getSnapshot(docId).groups;
+        expect(groups).toHaveLength(1);
+        expect(groups[0]?.type).toBe(EntityType.Plate);
+        const conflicts = conflictsOf(spy);
+        expect(conflicts).toHaveLength(1);
+        expect(conflicts[0]?.conflict.heldManual).toBe(true);
+        expect(conflicts[0]?.conflict.resolved).toBe(false);
+        spy.mockRestore();
+      }
+    });
+
+    it("the pair leaves the same groups whichever occurrence arrives first", () => {
+      emitir("doc-1", plate());
+      emitir("doc-1", address());
+      engine.startSession("doc-reverse");
+      emitir("doc-reverse", address());
+      emitir("doc-reverse", plate());
+
+      expect(shape("doc-reverse")).toEqual(shape("doc-1"));
+      expect(shape("doc-1")).toEqual([
+        `${EntityType.Address}:AVENIDA DEL MAR 450:1`,
+        `${EntityType.Plate}:MAR 450:1`,
+      ]);
+    });
+  });
 });

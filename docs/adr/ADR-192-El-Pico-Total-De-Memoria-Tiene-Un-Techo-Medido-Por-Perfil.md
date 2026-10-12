@@ -1,8 +1,8 @@
-<!-- CONTEXT: scope=adr | dependencias=07_Performance_Strategy.md,00_Project_Vision.md,roadmap/MVP.md,roadmap/Version_1.0.md,roadmap/Future_Ideas.md,roadmap/memoria/H-10_Bitacora_De_Memoria.md,roadmap/mediciones/transversal/Banco_Windows_Comparativa_Medicion.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-154-La-Memoria-No-Se-Compra-Bajando-El-Paralelismo.md,adr/ADR-190-Una-Pagina-Con-Tinta-No-Sale-Vacia-En-Silencio.md | audiencia=humanos+IA | fase=11 -->
+<!-- CONTEXT: scope=adr | dependencias=07_Performance_Strategy.md,00_Project_Vision.md,roadmap/MVP.md,roadmap/Version_1.0.md,roadmap/Future_Ideas.md,roadmap/memoria/H-10_Bitacora_De_Memoria.md,roadmap/mediciones/transversal/Banco_Windows_Comparativa_Medicion.md,adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-154-La-Memoria-No-Se-Compra-Bajando-El-Paralelismo.md,adr/ADR-190-Una-Pagina-Con-Tinta-No-Sale-Vacia-En-Silencio.md,roadmap/hardening/Confianza_Cierre_2026-10-08.md | audiencia=humanos+IA | fase=11 -->
 
 # ADR-192 — El pico total de memoria tiene un techo medido por perfil
 
-- **Estado**: Aceptado. **Medido el 2026-10-01: P1 y P2 cumplen** (ver «Medición del 2026-10-01»), con un margen en P2 menor que el ruido.
+- **Estado**: Aceptado. **Medido el 2026-10-01, repetido el 2026-10-08 y validado sobre el producto final de Confianza el 2026-10-11: P1 y P2 cumplen las tres veces**, con un margen en P2 menor que el ruido. Las tres tandas se registran abajo.
 - **Fecha**: 2026-09-30.
 - **Decidido por**: el humano, a propuesta del planificador. Equipo mínimo:
   «8 GB de momento, con plan de poder optimizar a futuro aún más para
@@ -120,8 +120,9 @@ explícitos»).
 
 > **Hecho en ADR-194 §7 (2026-10-01).** Los perfiles son cinco (se sumó
 > Ultra). Sus techos se fijaron sobre un escenario nuevo, un escaneo de 300
-> dpi, medido con el arnés del pool: 3,5 GB provisorio en Bajo, 3,5 GB en
-> Intermedio, 4,5 GB en Alto y 5,0 GB en Ultra. Los techos de §2 no cambian,
+> dpi, medido con el arnés del pool: 3,5 GB provisorio en Bajo (**2,5 GB
+> desde el 2026-10-07**, ya medido), 3,5 GB en Intermedio, 4,5 GB en Alto y
+> 5,0 GB en Ultra. Los techos de §2 no cambian,
 > y son los del nivel Intermedio: `memory.spec.ts` lo fija de forma explícita,
 > porque Automático ya no da la misma configuración en todos los equipos.
 
@@ -158,6 +159,42 @@ Dos salvedades que quedan abiertas:
   3,0 GB. Lo que sí muestra es que un escaneo a 300 dpi consume del orden de
   700 MiB más que P2. Un perfil de medición a 300 dpi, con su techo, se
   define junto con los perfiles de rendimiento (§5).
+
+## Medición del 2026-10-08
+
+Repetición pedida por la primera salvedad de arriba
+(`roadmap/hardening/Confianza_Cierre_2026-10-08.md`, M-M2). El mismo banco y
+el mismo instrumento, sobre el producto de `develop` del 2026-10-08, con el
+nivel `medium` fijado (ADR-194 §8). Nueve corridas, todas `ok`.
+
+| Perfil | M2 frío (MB) | M2 caliente (MB) | Máximo | Techo | Veredicto |
+|---|---|---|---:|---:|---|
+| P1 | 1588,3 / 1619,0 / 1610,7 | 1293,2 / 1312,1 / 1288,9 | 1619,0 MB | 2,0 GB | **cumple** |
+| P2 | 2151,4 / 2004,6 / 2191,9 | 2813,1 / 2810,3 / 2806,0 | 2813,1 MB | 3,0 GB | **cumple** |
+| P2-dense (informativo) | 2263,1 / 2286,2 / 2231,6 | 2709,8 / 2739,7 / 2711,7 | 2739,7 MB | sin techo | — |
+
+- Las dos tandas cumplen. Sumadas, las seis corridas calientes de P2 van de
+  2660,9 a 2894,2 MB.
+- **El margen de P2 sigue siendo menor que el ruido de M2**: 187 MB en esta
+  tanda, 106 MB en la anterior, contra unos 345 MB. Repetir la medición no
+  cambia eso; lo cambia bajar el consumo (§6) o una decisión del humano
+  sobre el techo.
+- La segunda salvedad, que P2 no es el peor caso, sigue como estaba.
+
+## Medición final de Confianza (2026-10-11)
+
+Producto del PR #63, commit `f1fdabb7f1e08c55aeeff24383b772e38f54c1ca`,
+Windows nativo, build fresco y árbol limpio. Nueve pares fríos/calientes
+completos, sin fallos ni suspensión: P1 máximo **1606,3 MB** (techo 2 GB),
+P2 máximo **2820,1 MB** (techo 3 GB). **Ambos cumplen.** P2-dense máximo
+2712,8 MB, informativo. El margen P2 de 179,9 MB sigue por debajo del ruido
+histórico; no se afirma una mejora de memoria.
+
+Las repeticiones, picos posteriores a Ready, presión desconocida por
+importación, identidad mediante el wrapper y series preservadas están en
+[Memoria_Final_Confianza_2026-10-11.md](../roadmap/mediciones/transversal/Memoria_Final_Confianza_2026-10-11.md).
+Esta medición cubre M2 del producto indicado; cambios posteriores de producto
+requieren evaluar nuevamente el gate antes del release.
 
 ## Consecuencias
 

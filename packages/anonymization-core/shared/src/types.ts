@@ -546,8 +546,9 @@ export interface RenderPagePayload {
   readonly interactionRevision?: number;
   // ADR-058 §5: palabras que comparten línea con algún reemplazo de esta página,
   // seleccionadas host-side por una función pura del Orchestrator desde Page.words
-  // (precedente de reparto: fuseOcrPage, ADR-041). El kernel las usa para calibrar
-  // la tipografía y reposicionar la línea al repintarla.
+  // (precedente de reparto: fuseOcrPage, ADR-041). El kernel las usa para decidir
+  // el repintado de línea y saber qué tramo del renglón correr (ADR-210: mueve
+  // los píxeles de esas palabras; ya no calibra una tipografía).
   // Se adjuntan SOLO cuando algún token podría no entrar (estimado con
   // estimateTokenWidth, ADR-057 §5, con margen conservador). Ausente es el caso
   // normal y nunca es un error: sin ellas el kernel cae al shrink-to-fit de

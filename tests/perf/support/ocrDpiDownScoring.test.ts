@@ -5,6 +5,7 @@ import {
   canonicalValue,
   compareEntities,
   distributionOf,
+  entityKey,
   pairBoxCoverage,
   scoreTokens,
   type ObservedEntity,
@@ -178,5 +179,42 @@ describe("scoreTokens", () => {
   it("sin referencia no hay recall (null), no cero", () => {
     expect(scoreTokens("", "algo").recall).toBeNull();
     expect(scoreTokens("algo", "").precision).toBeNull();
+  });
+});
+
+describe("entityKey y el valor normalizado del email (ADR-211)", () => {
+  const truthEmail = entity("EMAIL", "ricardo.ibarra@example.org", 0, null);
+
+  it("un email leído con Q se empareja por su valor normalizado, no por lo que leyó el OCR", () => {
+    const read: ObservedEntity = {
+      ...entity("EMAIL", "ricardo.ibarraQexample.org", 0, null),
+      normalizedValue: "ricardo.ibarra@example.org",
+    };
+    expect(entityKey(read)).toBe(entityKey(truthEmail));
+    const result = compareEntities([truthEmail], [read]);
+    expect(result.totals).toMatchObject({ expected: 1, matched: 1, missed: 0, added: 0 });
+  });
+
+  it("sin valor normalizado (corridas anteriores) se compara el valor, y la Q no empareja", () => {
+    const read = entity("EMAIL", "ricardo.ibarraQexample.org", 0, null);
+    expect(entityKey(read)).not.toBe(entityKey(truthEmail));
+    expect(compareEntities([truthEmail], [read]).totals).toMatchObject({ missed: 1, added: 1 });
+  });
+
+  it("un email con @ da la misma clave con o sin valor normalizado", () => {
+    const plain = entity("EMAIL", "Ricardo.Ibarra@example.org", 0, null);
+    const normalized: ObservedEntity = {
+      ...plain,
+      normalizedValue: "ricardo.ibarra@example.org",
+    };
+    expect(entityKey(plain)).toBe(entityKey(normalized));
+  });
+
+  it("en los demás tipos el valor normalizado no se usa: una fecha normalizada a otro formato no cambia la clave", () => {
+    const date: ObservedEntity = {
+      ...entity("DATE", "04/03/2026", 0, null),
+      normalizedValue: "2026-03-04",
+    };
+    expect(entityKey(date)).toBe(entityKey(entity("DATE", "04/03/2026", 0, null)));
   });
 });

@@ -672,6 +672,52 @@ ANONLY_OCR_POOL_PHASE=ultra ANONLY_OCR_POOL_ULTRA_HIDPI=1 caffeinate -dimsu ./te
 ANONLY_OCR_POOL_PHASE=ultra ANONLY_OCR_POOL_ULTRA_HIDPI=1 ANONLY_REAL_DOC_R2='C:\ruta\neutra\R2.pdf' ./tests/perf/run-ocr-pool.sh
 ```
 
+#### Memoria del perfil Bajo (`low-memory`, M-M1)
+
+`ANONLY_OCR_POOL_PHASE=low-memory ./tests/perf/run-ocr-pool.sh` delega en
+`run-ocr-pool-low.sh` (o se lo invoca directo); `ultra` y las demás fases no cambian.
+Mide el pico de RSS del árbol de procesos durante el OCR del perfil `low` sobre `P2H`, contra el
+techo de ADR-194 §7: **2,5 GB**, fijado el 2026-10-07 con esa medición (M-M1, máximo de 2,045 GB).
+Mismo escenario que los otros niveles: Windows nativo, fase `pool-rss` del spec (RSS natural cada 150 ms, sin CDP ni
+barrera), tres instancias frías en serie, y se compara el **máximo**.
+
+El brazo `low` **no es el brazo `1`**. El `1` solo fuerza `workerPool.ocrPoolSize` por override
+sobre la base `medium` de las suites de medición (ADR-194 §8). `low` instala el setting
+`performancePreset: "low"` (el mismo camino que un usuario) y **ningún** override suelto, de
+modo que el cliente deriva `LEVEL_OVERRIDE.low` (`settingsToEngineConfig.ts`): los pools de
+PDF, OCR, NER y render en 1 y `ocr.maxLiveImageBytes` sin enviar (queda el default de 128 MiB).
+
+**Antes de medir**, el spec lee la configuración efectiva (`ctx.config` del motor OCR y lo
+persistido en `localStorage`) y falla si no coincide: `performancePreset` distinto de `low`,
+cualquier valor en `anonly:engine-overrides`, algún pool distinto de 1 o `maxLiveImageBytes`
+distinto de 134217728. La corrida queda inválida (`validity.json`, `playwright-failure`) y no
+escribe artefacto; la comprobación no se relaja. Lo observado se guarda en el artefacto como
+`effectiveProfile`, y el resumen lo vuelve a comprobar.
+
+```bash
+# Humo: una sola corrida fría, para validar el circuito (carpeta aparte)
+ANONLY_OCR_POOL_PHASE=low-memory ANONLY_OCR_POOL_LOW_SMOKE=1 ./tests/perf/run-ocr-pool.sh
+# Tanda: tres corridas frías de memoria sobre P2H
+ANONLY_OCR_POOL_PHASE=low-memory ./tests/perf/run-ocr-pool.sh
+```
+
+Mismas guardas de validez que `ultra` en Windows (preámbulo común
+`support/ocr-campaign-common.sh`): sin otro Playwright ni Vitest activos, producto sin cambios
+en `packages/` y `apps/` (incluido lo que está en stage o sin trackear), prevención y detección
+de suspensión (un evento durante la corrida la invalida), un build único y artefactos que no
+se sobrescriben (la guarda del producto tiene una salida explícita, ver «Guardas comunes: producto sin commitear»). Salida en `.measure/ocr-pool/<fecha>-low/` (o `ANONLY_OCR_POOL_OUTPUT_DIR`,
+que tiene que ser nueva): `ocr-pool-pool-rss-low-P2H-r<n>.json`, `ocr-pool-low-run.json`,
+`validity.json`, `caveats.json`, `sleep-detection.json`, `host.json`, `commit.txt`, presión del
+sistema y `summary.json` (`support/ocrPoolLowSummary.ts` vía `support/summarizeOcrPoolLowCli.ts`).
+
+El resumen da, por corrida, el pico de RSS en bytes y en GB decimales, el desglose por tipo de
+proceso en la muestra del pico, la ocupación de reconocedores, el pico de trabajos por tipo de
+worker y los despachos de NER y render que caen dentro de la ventana OCR; y, de la tanda, el
+máximo, el mínimo, la mediana y el margen contra el techo de 2,5 GB (`ceiling`). Que el máximo
+supere el techo **no** hace fallar el instrumento: se informa (`supera=true`) y la decisión es
+del humano (ADR-194 §7: el techo no se sube en silencio). Sale con 1 si falta o es inválida
+alguna corrida. `P2H` es sintético: la salida no lleva rutas ni contenido de documentos.
+
 ## Campaña opt-in Regex y Grouping: peores casos
 
 `regex-worst-case.ts` mide el patrón de email en textos sintéticos de 2–160 KiB,
@@ -684,6 +730,42 @@ variables de entorno. El informe es `docs/roadmap/mediciones/regex/Patron_Email_
 caffeinate -dimsu pnpm exec tsx --tsconfig tests/tsconfig.json tests/perf/regex-worst-case.ts
 ANONLY_REAL_DOC_R1=/ruta/neutral/R1.pdf ANONLY_REAL_DOC_R2=/ruta/neutral/R2.pdf \
   caffeinate -dimsu ./tests/perf/run-regex-real-docs.sh
+```
+
+**Caso `Q email search stays linear on adversarial text` (ADR-211, `Regex_Engine.md` §14).** La
+misma campaña suma tres textos adversos para la segunda búsqueda del email default, la de la `@`
+leída como `Q`, que solo corre sobre palabras con `source: "ocr"` (por eso estas corridas arman el
+documento con palabras de OCR; las demás siguen siendo de PDF): `adversarial-q` (muchas `Q`, tramos de
+nombre largos en minúsculas con dos «punto, espacio» y una cola de dominio que no termina en dos
+letras: ningún email), `adversarial-q-late-domain` (lo mismo y, al final, un único email con `Q` y dos
+tramos de nombre) y `adversarial-q-long-local` (una sola corrida de minúsculas del largo pedido
+seguida de `Qexample.org`). Usa el camino público (`RegexEngine` y `DEFAULT_PATTERNS_AR`), sin
+importar internos del motor. El criterio es el de ADR-181: la curva de 2 a 160 KiB, mediana de las tres
+rondas, y **duplicar el largo no puede cuadruplicar el trabajo** (`support/regexWorstCaseQ.ts`:
+cociente `>= 4` entre tamaños exactamente dobles, con un piso de ruido de 2 ms por debajo del cual el
+cociente no se interpreta; no hay gate temporal absoluto). Además las detecciones tienen que ser las
+esperadas (0, 1 y 1). El script sale con 1 si un paso es superlineal o si una detección no coincide, e
+imprime la curva y los cocientes de cada texto; el reporte numérico lleva `qLinearity`.
+
+**Caso `keyword address search stays linear on adversarial text` (ADR-217, `Regex_Engine.md` §14,
+caso 36).** La misma campaña suma seis textos adversos para el patrón `address-keyword-ar`
+(`support/regexWorstCaseKeyword.ts`), todos sin un solo dígito en el cuerpo y con una única dirección
+real al final (`calle Tucumán 1650`, en mayúsculas en la etiqueta `caps`), que el patrón tiene que
+encontrar: `adversarial-keyword-street` (palabras de vía seguidas de seis palabras con mayúscula),
+`-connectors` (palabras de vía seguidas de cadenas de «de la de los del las y e»), `-domicile` (frases
+de domicilio seguidas de ocho palabras con mayúscula), `-caps` (todo en mayúsculas, con palabras de vía y
+de domicilio mezcladas), `-long-word` (palabras de vía y palabras de 2000 letras) y
+`-single-long-word` (una sola palabra de vía y una única palabra del largo pedido). Mismo criterio que
+el caso de `Q` y que ADR-181: curva de 2 a 160 KiB, mediana de las tres rondas, y duplicar el largo no
+puede cuadruplicar el trabajo (cociente `>= 4` sobre el piso de ruido de 2 ms; sin gate temporal
+absoluto). Las detecciones de tipo `Address` tienen que ser exactamente una. Además, un perfil por
+patrón (`perPatternMs`) dice cuánto del tiempo es de `address-keyword-ar`. El script sale con 1 si un
+paso es superlineal o si una detección no coincide; el reporte numérico lleva `keywordLinearity`.
+`ANONLY_REGEX_WORST_LABELS=keyword` corre solo estos textos (y `email`, solo los del email); sin la
+variable corren todos.
+
+```bash
+ANONLY_REGEX_WORST_LABELS=keyword pnpm exec tsx --tsconfig tests/tsconfig.json tests/perf/regex-worst-case.ts
 ```
 
 `run-grouping-worst-case.sh` ejecuta tres rondas intercaladas de 250–2000
@@ -1430,3 +1512,744 @@ para el i5-12400: de 1 a 1,5 horas por corpus.
     escriben valores): si el proceso muere a mitad de un corpus real, sus celdas siguientes
     quedan sin comparación y el corpus `indeterminado`. Los sintéticos rehidratan la
     referencia desde el JSON de la celda.
+
+## Emails en escaneos de DPI nativo bajo (`ocr-emails-native`, M-E1)
+
+`docs/roadmap/hardening/Confianza_1.0.x_Plan.md`, Frente 2. La campaña de DPI descendente tomaba
+escaneos de 300 dpi nativos y **forzaba** `ocr.dpi` a 250, 200 o 150, y perdía emails porque el OCR
+leía la `@` como `Q`. Esta campaña es al revés: los mismos textos sintéticos (`SR`, `S12`, `S10` y
+`S8`) se **rasterizan** a 300 (control), 200 y 150 dpi nativos y se leen con la configuración por
+defecto, **sin forzar `ocr.dpi`**. El Core lee a `min(ocr.dpi, tope nativo de la página)` (ADR-163),
+así que un escaneo de 200 dpi se lee a 200. La pregunta: ¿un escaneo cuya resolución nativa ya es
+baja pierde emails, con qué frecuencia y con qué lecturas?
+
+```bash
+# Humo: S10 a 300 y 150 dpi, una repetición
+ANONLY_OCR_EMAILS_NATIVE_SMOKE=1 ./tests/perf/run-ocr-emails-native.sh
+# Campaña: SR S12 S10 S8 x 300, 200 y 150 dpi nativos x 2 repeticiones (24 celdas, unos 14 min)
+./tests/perf/run-ocr-emails-native.sh
+```
+
+Es un runner propio (`run-ocr-emails-native.sh`, `ocr-emails-native.spec.ts`) sobre el preámbulo
+común `support/ocr-campaign-common.sh`: no toca ninguna campaña ni fase existente. Mismas guardas de
+validez (producto sin cambios en `packages/` y `apps/`, otro Playwright o Vitest activos, detección y
+prevención de suspensión, artefactos que no se sobrescriben), una instancia fría de Electron por celda,
+en serie, un reconocedor y NER activado (igual que la campaña anterior, para que los números se
+comparen). Solo sintéticos: no usa `ANONLY_REAL_DOC_*`.
+
+| Variable                          | Qué hace                                                              |
+| --------------------------------- | --------------------------------------------------------------------- |
+| `ANONLY_OCR_EMAILS_NATIVE_SMOKE`  | `1`: humo (`S10`, 300 y 150 dpi, una repetición)                       |
+| `ANONLY_OCR_EMAILS_NATIVE_SET`    | `sd`: M-E2, los textos con degradación de fotocopia `SD1 SD2 SD3 SD4 SD5` (sin valor, M-E1) |
+| `ANONLY_OCR_EMAILS_NATIVE_CORPUS` | Corpus sintéticos, también `SD1` a `SD5` (por defecto los de `SET`: `SR S12 S10 S8`) |
+| `ANONLY_OCR_EMAILS_NATIVE_DPIS`   | DPI nativos (por defecto `300 200 150`)                                |
+
+**M-E2: textos con degradación de fotocopia.** La misma campaña sobre `SD1` a `SD5` (`S10` con la
+receta `photocopy-v2`: desenfoque gaussiano, pérdida de contraste y ruido con semilla fija; las cinco
+variantes difieren solo en la semilla). Se corre con `ANONLY_OCR_EMAILS_NATIVE_SET=sd
+./tests/perf/run-ocr-emails-native.sh` (30 celdas, unos 10 min; el humo, `ANONLY_OCR_EMAILS_NATIVE_SMOKE=1`
+con `SET=sd`, usa `SD1`). Sin `SET` el runner hace lo de M-E1. **Cómo se aplica la degradación a un
+DPI nativo distinto de 300:** la receta es la misma, con los mismos parámetros, y se aplica al
+raster de ese DPI (`scannedPdf.ts`, sobre el canvas ya renderizado a `dpi / 72`). Esos parámetros
+están en **píxeles**, no en milímetros (desenfoque σ = 1 px, ruido σ = 6 niveles por píxel, ambos
+sin escalar): a 200 y 150 dpi el mismo píxel es físicamente más grande (0,127 y 0,169 mm contra 0,085
+mm a 300) y el glifo tiene menos píxeles, así que **la degradación relativa al texto crece al bajar
+el DPI** y las celdas de 200 y 150 no son la «misma fotocopia» que la de 300. Tampoco el ruido: la
+semilla es la misma pero el campo de píxeles es otro. Está fijado en
+`ocrDpiDownFixtures.test.ts` y no se adaptó; si se quiere una receta en unidades físicas es otra
+medición.
+
+**El DPI nativo forma parte de la clave del fixture** (`fixtureCacheKey(truth, nativeDpi)` y la escala
+en el hash de `scannedFixtureHash`): `ocr-dpi-down-<corpus>-fs<pt>-<dpi>dpi-<hash>.pdf` en
+`.measure/fixtures/`. A 300 la clave es la de siempre, así que los fixtures de la campaña anterior se
+reutilizan sin cambios.
+
+**Validez de la celda** (una celda inválida se escribe, se lista y no entra a ningún total; no se
+«arregla»): la cadena de ADR-190 observada (`ready`, OSD leído, NER terminado), pool, tope de imágenes
+vivas y NER como se fijaron, **`ocr.dpi` efectivo del Core igual a 300** (si el default cambia, la
+premisa cambió), el tope nativo de cada página dentro de ±1 dpi del DPI nativo pedido y el DPI de
+**cada** despacho `ocr-page` también dentro de ±1 dpi del nativo. El tope sale de píxeles sobre puntos
+y redondea: un escaneo de «150 dpi» da tope 151 y se despacha a 151; el de 300 da 301 y se despacha a
+300 (`min(300, 301)`).
+
+**Qué registra cada celda** (`ocr-emails-native-cell-<corpus>-n<dpi>-r<n>.json`):
+
+- Emails esperados, detectados, perdidos y agregados contra la verdad del sintético, y lo perdido y
+  agregado de los demás tipos de entidad (con valores: son inventados).
+- Para cada email perdido, cómo lo leyó el OCR, clasificado por
+  `support/ocrEmailsNativeReading.ts::classifyLostEmail` (pura, con tests) sobre el texto de **su**
+  página: `at-as-q` (la `@` leída como `Q`, el resto intacto), `dot-as-space` (cada punto del nombre,
+  antes de la `@`, leído como espacio o como punto seguido de espacio), `at-as-q-and-dot-as-space`
+  (las dos cosas), `intact-in-text` (la dirección está escrita tal cual y no se detectó: la causa no
+  sería el OCR), `other-reading` (cualquier otra, con el fragmento del texto más parecido, por
+  distancia de edición acotada al 40 %) y `not-found` (nada parecido). Se compara sin distinguir
+  mayúsculas; los puntos del dominio no cuentan como «punto del nombre». Se guarda el fragmento leído.
+- **Cota de falsos positivos de una regla tolerante**: las cadenas del texto leído con la forma
+  `^[A-Za-z0-9][A-Za-z0-9._%+-]*Q(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}$` (una cadena entre espacios, sin
+  puntuación en los bordes, con `Q` mayúscula; con varias `Q` vale la última con un dominio a la
+  derecha). Se reconstruyen cambiando la `Q` por `@` y se clasifican contra los emails de la verdad de
+  la página: `recoverable` (es exactamente uno), `partial-of-truth` (es el final de uno: un espacio
+  partió el nombre) y `unrelated` (no es ninguno: la cota de falsos positivos).
+- DPI efectivo de cada despacho, tope de cada página, cadena de ADR-190 (OSD, pasos de recuperación,
+  upscale, tinta ilegible), puntaje de tokens y el texto leído con su hash (sintético: permite
+  reclasificar sin volver a medir).
+
+**Qué produce** (`.measure/ocr-emails-native/<fecha>/`, ignorada por git): las celdas,
+`ocr-emails-native-run.json`, `validity.json` y `caveats.json` si corresponden,
+`sleep-detection.json`, presión del sistema, `summary.json` y `summary-table.txt`
+(`support/ocrEmailsNativeSummary.ts` vía `support/summarizeOcrEmailsNativeCli.ts`). El resumen da una
+fila por corpus, DPI nativo y repetición, los totales por DPI, la lista de emails perdidos con su
+lectura y fragmento, y si las dos repeticiones coinciden (mismos emails perdidos con la misma lectura,
+mismos perdidos y agregados de los demás tipos, mismos candidatos y mismos DPI efectivos;
+`observedTextIdentical` es más fuerte: el texto leído es idéntico). Sale con 1 si falta o es inválida
+alguna celda. Que haya emails perdidos o que las repeticiones difieran no es un error del
+instrumento: se informa, y es la línea de base contra la que se compara cualquier cambio de detección.
+
+### Comparar antes y después de un cambio de detección (M-E3)
+
+`support/compareEmailsBeforeAfterCli.ts` compara, celda por celda, una campaña de línea de base
+con la misma campaña corrida con el cambio (usado para ADR-211, el email que tolera la `@` leída
+como `Q`). Sirve a las tres: la fase 1 de DPI descendente (`dpi-down`) y las de emails nativos
+(`native`, M-E1 y M-E2). Lógica pura en `support/emailsBeforeAfter.ts`, con test.
+
+```bash
+pnpm exec tsx --tsconfig tests/tsconfig.json tests/perf/support/compareEmailsBeforeAfterCli.ts \
+  <dpi-down|native> <carpeta-de-la-linea-de-base> <carpeta-con-el-cambio> [nombre]
+```
+
+Escribe `comparison.json` y `comparison.txt` en la carpeta «con el cambio» y los imprime. Por celda
+compara emails esperados, detectados, perdidos y agregados; qué emails se recuperaron (con cómo los leyó
+el OCR antes, el `value` detectado después, su valor normalizado y si coincide letra por letra con el
+email de la verdad) y cuáles siguen perdidos; los emails agregados que no están en la verdad, separando
+los que ya estaban en la línea de base de los nuevos; cualquier otra entidad que cambie contra la
+verdad (en la fase de DPI descendente y en las celdas con `detected`, también el conjunto de entidades
+detectadas); y si el texto leído por el OCR es idéntico (si no, la comparación de esa celda no es
+limpia). Las celdas de corpus reales (`R2`, `R3`) no se leen. Sale con 0 solo si no hay agregados
+nuevos, ni perdidos nuevos, ni otras entidades que cambien, ni celdas inválidas, ni texto leído distinto;
+si no, con 1: se informa, no se corrige.
+
+**Cambio en el puntaje compartido.** Con ADR-211, el `value` de un email leído con `Q` es lo que leyó
+el OCR (`ricardo.ibarraQexample.org`) y el email restituido va en `normalizedValue`. Para que el arnés
+empareje esa ocurrencia con la verdad, `entityKey` (`ocrDpiDownScoring.ts`) usa `normalizedValue`
+**solo en los emails** y cuando existe; para un email con `@` da la misma clave que antes (la
+normalización es pasar a minúsculas) y en los demás tipos no se usa (una fecha se normaliza a otro
+formato). Las celdas de las corridas nuevas guardan `normalizedValue` en `detected`, y las de emails
+nativos suman `detected` completo. Los registros anteriores no lo tienen y se siguen leyendo igual.
+
+## Altura de las direcciones (`address-height`, M-D1)
+
+`docs/roadmap/hardening/Confianza_1.0.x_Plan.md` (M-D1) y ADR-212. El modelo de nombres marca la calle y
+deja el número afuera («con domicilio en Maipú 1434» da `Maipú`); `ner-engine` extiende la ocurrencia
+`Address` hasta el número que la sigue, **siempre**: no mira el contexto ni si el número parece un año. Este
+arnés mide, para esa regla, cuántas alturas quedan a la vista y cuántos años y otros números quedan tapados
+de más, y lista las oraciones cuyo resultado difiere del que la regla espera. Se vuelve a correr si la regla
+o el modelo cambian. La medición original, con la regla por contexto que se descartó, está en
+`docs/roadmap/mediciones/ner/Altura_De_Direcciones_2026-10-07.md`; el arnés ya no calcula «tapar siempre»,
+porque esa alternativa es hoy la regla.
+
+```bash
+# Humo: una repetición
+ANONLY_ADDRESS_HEIGHT_SMOKE=1 ./tests/perf/run-address-height.sh
+# Medición: dos repeticiones completas (con el build, unos 2 min)
+./tests/perf/run-address-height.sh
+```
+
+Es un runner propio (`run-address-height.sh`, `address-height.spec.ts`) sobre el preámbulo común
+`support/ocr-campaign-common.sh`: mismas guardas (producto sin cambios en `packages/` y `apps/`, otro
+Playwright o Vitest activos, detección y prevención de suspensión, salida que no se pisa). Una instancia
+fría de Electron por repetición, en serie, con el modelo real y la configuración por defecto: la suite de
+medición solo fija el perfil (ADR-194 §8) y el arnés verifica que no haya overrides de motor. Solo
+sintéticos: no usa `ANONLY_REAL_DOC_*`.
+
+**El documento.** `support/addressHeightFixture.ts` genera un PDF digital (capa de texto, sin OCR) con
+una página por oración de `support/addressHeightSentences.ts` (76 oraciones, categorías A a H, con su
+`place` y su `number`). Cada página lleva tres párrafos: un relleno fijo, la oración y otro relleno fijo.
+El relleno es el mismo en todas, no lleva dígitos ni palabras de dirección y está para que el modelo tenga
+algo de contexto. **Las oraciones son datos y no se cambian ni se acomodan** para que el resultado salga de
+una u otra manera; si una no se puede generar tal cual es un hallazgo. Las categorías B a F se siguen
+definiendo por la presencia o ausencia de una palabra de dirección en la oración, aunque la regla vigente
+ya no la mira: se conservan para que las mediciones sean comparables.
+
+| Categoría | Qué es | Qué se espera de la regla vigente |
+| --- | --- | --- |
+| A | altura que no parece año (A1 a A4 con palabra de dirección, A5 a A10 sin) | dentro de la dirección |
+| B | altura con forma de año y palabra de dirección antes | dentro |
+| C | altura con forma de año y palabra de dirección después | dentro |
+| D | altura con forma de año, sin palabra de dirección | dentro |
+| E | lugar y año, sin palabra de dirección | dentro (año tapado de más) |
+| F | lugar y año con una palabra de dirección cerca por otro motivo | dentro (año tapado de más) |
+| G | variantes de la altura: «N°», «Nº», «nro.», «número», «No.», «al», cinco dígitos | dentro |
+| H | lugar y un número que no es altura ni año | dentro (tapado de más), salvo H4 y H5 (fecha, importe), que la forma del número deja sin tocar |
+
+Lo que no se espera nunca es una altura a la vista (A a D, G) cuando el modelo marcó la calle: si queda
+fuera, el resumen la lista como distinta de lo esperado.
+
+| Variable | Qué hace |
+| --- | --- |
+| `ANONLY_ADDRESS_HEIGHT_SMOKE` | `1`: humo, una repetición |
+| `ANONLY_ADDRESS_HEIGHT_OUTPUT_DIR` | carpeta de salida (por defecto `.measure/address-height/<UTC>/`; no se pisa una existente) |
+
+**Qué registra cada oración** (`support/addressHeightClassify.ts`, función pura con test): el texto de la
+página tal como lo extrajo la app; todas las ocurrencias de la página, de cualquier tipo, con `entityType`,
+`value`, `source`, `confidence`, índices de palabra y posición en el texto; y
+
+- `placeMarked`: hay una ocurrencia `Address` cuyo valor contiene el lugar o se superpone con él;
+- `addressValues`: los valores de las ocurrencias `Address` de la página;
+- `numberInAddress` / `numberCoveredByOther`: los dígitos (la aparición que sigue al lugar) quedan dentro de
+  una dirección o de una ocurrencia de otro tipo (se dice cuál);
+- `adjacent`: la dirección que contiene el lugar termina justo antes del número (entre el fin del valor y
+  los dígitos hay solo espacio y, si lo hay, el conector);
+- `yearLike`: el número de la oración tiene forma de año (cuatro dígitos entre 1900 y 2099). Es solo una
+  descripción de la oración; la regla no la usa.
+
+`numberInAddress` no distingue si el número lo sumó la regla o lo incluyó el propio modelo (con «Av.» a
+veces lo incluye): es el estado final que ve el usuario, que es lo que importa para la fuga.
+
+**Validez de la corrida** (una corrida inválida se escribe, se lista y no entra a ningún total; no se
+«arregla»): el pipeline llegó a `Ready` sin fallar, NER terminó, hay una página por oración, el documento
+es de texto y ninguna página pide OCR, `ner.enabled` efectivo es `true`, el perfil de los settings es el que
+fija la suite de medición (`medium`), no hay overrides de motor y **el texto que extrajo la app de cada
+página es exactamente el escrito** (tildes, «°» y «º» incluidos).
+
+**Qué produce** (`.measure/address-height/<UTC>/`, ignorada por git): `address-height-run-r<n>.json` (un
+registro completo por repetición, con el commit medido), `address-height-run.json`, `validity.json` y
+`caveats.json` si corresponden, `sleep-detection.json`, presión del sistema, `summary.json` y
+`summary-table.txt` (`support/addressHeightSummary.ts` vía `support/summarizeAddressHeightCli.ts`). El
+resumen da, por categoría y en total, los lugares marcados y no marcados (estos últimos se cuentan aparte:
+son un límite del modelo, no de la regla), los números dentro de la dirección y a la vista, las alturas
+que quedan a la vista (A, B, C, D, G) y los años y otros números tapados de más (E, F, H); la lista de
+oraciones cuyo resultado no es el esperado de ADR-212 (la tabla de arriba), con su `id`, sus
+`addressValues` y el motivo; y si las dos repeticiones coinciden oración por oración. Sale con 1 si falta o
+es inválida alguna corrida. Que el resultado no sea el esperado, o que las repeticiones difieran, no es un
+error del instrumento: se informa. Es una medición, no un gate.
+
+## Direcciones con palabra clave (`address-keyword`, M-D2)
+
+`docs/roadmap/hardening/Confianza_Cierre_2026-10-08.md` (Frente 2, M-D2 y «Anexo — corpus de M-D2»). Es la
+línea de base del caso en que una dirección viene con una palabra clave antes («Av.», «calle», «domicilio
+en»…): qué deja a la vista la aplicación de hoy, en tres escrituras. Mide la aplicación tal como está y no
+cambia producto; es el punto de partida contra el que se compara un patrón anclado en la palabra clave.
+
+```bash
+# Humo: una repetición
+ANONLY_ADDRESS_KEYWORD_SMOKE=1 ./tests/perf/run-address-keyword.sh
+# Medición: dos repeticiones completas (con el build, unos 2 min)
+./tests/perf/run-address-keyword.sh
+```
+
+Es un runner propio (`run-address-keyword.sh`, `address-keyword.spec.ts`), hermano de `address-height` y
+sobre el mismo preámbulo común `support/ocr-campaign-common.sh`: mismas guardas, una instancia fría de
+Electron por repetición, en serie, con el modelo real y la configuración por defecto, y el mismo observador
+del bus del Core (`support/addressHeightBrowser.ts`). Solo sintéticos: no usa `ANONLY_REAL_DOC_*`.
+
+**El documento.** `support/addressKeywordFixture.ts` genera un PDF digital (capa de texto, sin OCR) de 165
+páginas: las 55 oraciones de `support/addressKeywordSentences.ts` (categorías K1 a K8, con sus partes `vía`,
+`nombre`, `altura` y `resto`) en tres escrituras. Cada página lleva los mismos tres párrafos de M-D1: el
+relleno de antes, la oración y el relleno de después. **La escritura se aplica a la página entera**, rellenos
+incluidos, y a las partes: `n` es como se escribe normalmente, `M` va toda en mayúsculas con sus tildes y `S`
+toda en mayúsculas sin tildes ni diéresis, con la «Ñ» conservada (los signos «°» y «º» no son tildes y quedan).
+El orden del documento es primero todas las `n`, después las `M` y al final las `S`. **Las oraciones son
+datos y no se cambian ni se acomodan**; si una no se puede generar tal cual (un glifo que la fuente no
+tiene) es un hallazgo. Ninguna oración se parte en renglones ni se sale de la página, tampoco en mayúsculas
+(la más ancha mide 497 pt desde el margen de 50 pt, en una página de 595 pt); un test lo comprueba.
+
+| Categoría | Qué es |
+| --- | --- |
+| K1 | palabra de vía y altura |
+| K2 | palabra de domicilio, sin palabra de vía |
+| K3 | nombre de varias palabras |
+| K4 | nombre con número o fecha |
+| K5 | calle numerada |
+| K6 | sin altura |
+| K7 | con piso o departamento después |
+| K8 | trampas: la palabra clave sin una dirección (no tienen partes) |
+
+| Variable | Qué hace |
+| --- | --- |
+| `ANONLY_ADDRESS_KEYWORD_SMOKE` | `1`: humo, una repetición |
+| `ANONLY_ADDRESS_KEYWORD_OUTPUT_DIR` | carpeta de salida (por defecto `.measure/address-keyword/<UTC>/`; no se pisa una existente) |
+
+**Qué registra cada página** (`support/addressKeywordClassify.ts`, función pura con test): el texto de la
+página tal como lo extrajo la app; todas las ocurrencias que tocan la oración, con valor, tipo y detector
+(`source`); y, para cada parte presente, si quedó cubierta **entera, en parte o nada** (a) por ocurrencias de
+tipo dirección, (b) por ocurrencias de otro tipo, con la lista de esos tipos, y (c) por la unión de todas, de
+cualquier tipo. La cobertura mira los caracteres que no son espacio. Una ocurrencia se ubica por sus índices
+de palabra cuando el tramo coincide con su valor, y si no por su valor dentro de la página; las que no se
+pueden ubicar se cuentan aparte, y las que se ubicaron por un valor que se repite en la oración (un «.»,
+por ejemplo) se marcan como ambiguas, porque la posición es la de la primera aparición. En K8 se registra todo lo que la aplicación tape dentro de la oración.
+
+**Validez.** Una corrida es inválida (se escribe, se lista y no entra a ningún total; no se «arregla») si el
+pipeline no llegó a `Ready`, si NER no terminó, si no hay una página por entrada, si el documento no es de
+texto o alguna página pide OCR, si `ner.enabled` efectivo no es `true`, si el perfil de los settings no es
+`medium` o si hay overrides de motor (el mismo criterio de M-D1, `observationInvalidReasons`). **Una página
+es inválida si el texto que extrajo la app no es exactamente el escrito**: se cuenta aparte, no entra a los
+totales y no se «normaliza» para que coincida; la corrida sigue valiendo para las demás.
+
+**Qué produce** (`.measure/address-keyword/<UTC>/`, ignorada por git): `address-keyword-run-r<n>.json` (un
+registro completo por repetición, con el commit medido), `address-keyword-run.json`, `validity.json` y
+`caveats.json` si corresponden, `sleep-detection.json`, presión del sistema, `summary.json`,
+`summary-table.txt` y `pages-table-r<n>.txt` (una línea por página; `support/addressKeywordSummary.ts` vía
+`support/summarizeAddressKeywordCli.ts`). El resumen da, por categoría y escritura, las páginas, y cuántas
+tienen el núcleo (el nombre y, si la hay, la altura) cubierto entero, en parte o nada, por una ocurrencia de
+tipo dirección y por cualquier tipo; lo mismo para el nombre solo; el recuento por parte (vía, nombre,
+altura, resto) sobre K1 a K7 y por escritura; lo que se tapó en cada trampa de K8; las páginas inválidas; y
+si las dos repeticiones coinciden página por página. Sale con 1 si falta o es inválida alguna corrida. Que
+el resultado no guste, que haya páginas inválidas o que las repeticiones difieran no es un error del
+instrumento: se informa. Es una medición, no un gate.
+
+## Veredicto de orientación equivocado (`osd-verdict`, M-O1)
+
+`docs/roadmap/hardening/Confianza_Cierre_2026-10-08.md` (Frente 3, M-O1) y el riesgo residual de ADR-190
+(Consecuencias): si el OSD **afirma** un ángulo equivocado sobre una página con muy poco texto y la lectura
+en ese ángulo es basura con alguna palabra de confianza ≥ 60, la cadena la da por fiable, no prueba otros
+ángulos, no marca `unreadableInk` y la página se exporta sin tapar y sin aviso. El caso sin veredicto ya
+está medido y cubierto (`ADR190_OSD_Recuperacion_2026-09-28.md`); este no. Mide el producto tal como está y
+no cambia producto.
+
+```bash
+# Humo: dos PDF, a 300 dpi (10 observaciones)
+ANONLY_OSD_VERDICT_ONLY='^(N7|two-lines)-300-90$' ./tests/perf/run-osd-verdict.sh
+# Campaña completa, en tandas reanudables: se repite la misma llamada hasta que el resumen diga «completa»
+export ANONLY_OSD_VERDICT_OUTPUT_DIR=.measure/osd-verdict/<fecha>
+./tests/perf/run-osd-verdict.sh
+```
+
+Es un runner propio (`run-osd-verdict.sh`, `osd-verdict.spec.ts`) sobre el preámbulo común
+`support/ocr-campaign-common.sh`, con el worker y los modelos reales, una instancia fría de Electron por
+observación, en serie, y el OCR a 300 dpi con tope por página como en la campaña de ADR-190. NER va
+desactivado (como en esa campaña: lo que se mide es OSD, OCR y Regex). Solo sintéticos: no usa
+`ANONLY_REAL_DOC_*`. Exige `packages/` y `apps/` sin cambios sin commitear.
+
+**Tandas.** Son 700 observaciones de unos 5 s. El spec registra solo las que todavía no tienen su archivo en
+la carpeta de salida, hasta `ANONLY_OSD_VERDICT_LIMIT` por llamada (80 por defecto). Cada llamada reconstruye
+el build y exige que el commit, el árbol de producto, el arnés y el digest del dist sean los de la primera;
+si algo difiere, aborta sin medir. Una observación que falla deja `<archivo>-failure-<n>.json` (con el
+registro incoherente, si lo hubo) y se reintenta una vez.
+
+| Variable | Qué hace |
+| --- | --- |
+| `ANONLY_OSD_VERDICT_OUTPUT_DIR` | carpeta de salida; si existe, se reanuda (por defecto una nueva en `.measure/osd-verdict/<UTC>/`) |
+| `ANONLY_OSD_VERDICT_LIMIT` | tope de observaciones por llamada (`0`: sin tope) |
+| `ANONLY_OSD_VERDICT_ONLY` | expresión regular sobre la clave del PDF (`N7-300-90`, `two-lines-150-180`…) |
+
+**El corpus** (`support/osdVerdictCorpus.ts`): 140 PDF escaneados sintéticos, sin capa de texto.
+
+- Los 76 de la campaña de recuperación de ADR-190, sin cambios (64 con texto: `full`, `header`,
+  `two-lines` y `signature` a 150, 200, 250 y 300 dpi en los cuatro giros; y 12 controles: `blank`, `noise`
+  y `shapes`). Salen de `adr190Fixtures.ts` y de su caché; el spec compara sus 76 hashes con los del
+  manifiesto de esa campaña y falla si alguno difiere.
+- 64 de página escasa (`support/osdVerdictFixtures.ts`): las geometrías N1 a N8 de la tabla del plan, en
+  los cuatro giros y a 150 y 300 dpi, con el texto «Juan Perez DNI 34.567.891» repartido como dice cada
+  una. Misma técnica que el corpus viejo: una página con texto de pdf-lib (Helvetica, fechas fijas) se
+  rasteriza en un Chromium aparte con el giro físico pedido. Lo que la tabla no fija se eligió y está en
+  `GEOMETRIES`: margen de 54 pt, interlineado de 1,5 veces el cuerpo, y la alineación. N7 usa las
+  posiciones exactas del E2E `adr190-two-lines-osd-recovery.spec.ts`. **N4 lleva «DNI 34.567.891» y no el
+  nombre** (la tabla dice «una palabra y el número»): son 2 tokens esperados, no 4.
+
+**Cinco observaciones por PDF.**
+
+- `production`: la cadena sin forzar nada.
+- `forced-<0|90|180|270>`: el resultado de la detección de orientación se reemplaza, en el transporte del
+  arnés (`installTransportObserver`, opción `forceOrientationVerdict`) y antes de que lo lea el host, por
+  `{ orientation: ángulo, osdHadVerdict: true }` con el `inkRatio` que midió el worker. **No es lo que hace
+  `forceOcrPageOrientation`** (campaña de recuperación): esa opción cambia el payload del primer
+  reconocimiento y deja el `osdHadVerdict` real, o sea `false` cuando el OSD no dio veredicto, y el producto
+  sigue por la rama de «sin veredicto». Acá el host recibe un veredicto válido y sigue por la rama de «con
+  veredicto». El listener de captura se registra antes que el del pool, así que el host recibe el mismo
+  objeto ya cambiado; el registro guarda lo que devolvió el worker (`natural`) y lo que recibió el host
+  (`delivered`), y la coherencia entre ambos se comprueba (`observationIssues`).
+
+El primer reconocimiento de cada observación forzada es la **primera lectura** del PDF en ese ángulo: el
+mismo ráster (se guarda el SHA-256 de cada payload), el mismo DPI. No hay una corrida aparte para eso.
+
+**Qué produce** (`.measure/osd-verdict/<UTC>/`, ignorada por git): `<clave>-production.json` y
+`<clave>-forced-<ángulo>.json` (una por observación: OSD crudo, veredicto natural y recibido, `inkRatio`, cada
+reconocimiento con su ángulo, ráster, tiempo, palabras y confianza, la lectura final, `unreadableInk`, DNI como
+entidad y si están los tokens esperados), `manifest.json` (build, hash de los 140 PDF, tandas),
+`summary.json`, `summary-tables.txt` y `leaks-table.txt` (`support/osdVerdictCampaign.ts`,
+`osdVerdictAnalysis.ts` y `osdVerdictTables.ts`, vía `support/summarizeOsdVerdictCli.ts`, que también se
+puede correr suelto: `pnpm exec tsx tests/perf/support/summarizeOsdVerdictCli.ts <carpeta>`).
+
+**El resumen** son funciones puras con test, sobre las observaciones y sin volver a correr:
+
+1. **Veredictos naturales equivocados** (afirmó un ángulo y no es el correcto), por geometría o densidad,
+   dpi y giro. Y, aparte, qué entrega la producción sin forzar nada (recupera los datos, avisa o filtra),
+   por veredicto natural, conjunto, etiqueta, dpi y giro.
+2. **Veredicto forzado a un ángulo equivocado**: en cuántas observaciones el producto recupera los datos
+   esperados (los tokens y el DNI como entidad), en cuántas avisa (`unreadableInk`) y en cuántas filtra en
+   silencio, por conjunto, etiqueta, dpi, giro y distancia al ángulo correcto. El mismo conteo con el
+   ángulo correcto afirmado es el control: lo que no recupera ahí es un defecto de la cadena, no del OSD.
+   `leaks-table.txt` lista cada observación que no recuperó los datos, en tres bloques (ángulo equivocado,
+   control y producción).
+3. **Señales sobre la primera lectura** (menos de N palabras confiables, confianza de página baja, `inkRatio`
+   bajo, unión e intersección): cuántas primeras lecturas en ángulo equivocado dispara (y cuántas de las que
+   la cadena de hoy da por fiables, y cuántas fugas) y cuántas en ángulo correcto dispara de más, separando
+   el control denso (`full`) de las páginas escasas.
+   **3 bis**: si comparar las cuatro primeras lecturas elige el ángulo real, por confianza de página y por
+   palabras confiables; un empate en el primer puesto no cuenta como acierto.
+4. **Tiempo** de tres lecturas más por cada página que una señal dispara, con los tiempos de lectura medidos.
+   Cada primera lectura se midió en su propia instancia fría, así que incluye el arranque: el resumen da el
+   costo con esos tiempos (cota alta) y otro con tiempos en caliente (la mediana, por PDF y ángulo, de los
+   reconocimientos que no fueron el primero de su observación, como los vería el producto al encadenarlos;
+   solo cuenta las lecturas con muestra de los otros tres ángulos y dice cuántas quedaron sin ella). La
+   memoria no se mide.
+
+Sale con 1 si falta, sobra o se repite alguna observación, si hay una incoherencia del instrumento o si dos
+observaciones de un mismo PDF no se hicieron sobre el mismo ráster. Que el resultado no sea el que se quería
+no es un error del instrumento: se informa. Es una medición, no un gate.
+
+**El «después» (M-D3, ADR-217).** El mismo arnés, sin tocar las oraciones ni la clasificación de la línea de
+base, compara cada corrida con el criterio de ADR-217 (`support/addressKeywordExpectation.ts`, puro y con
+test; el bloque «Contra el criterio de ADR-217» del resumen y `expectation` en `summary.json`):
+
+- **A la vista:** páginas de K1 a K7 con el núcleo (el nombre y, si la hay, la altura) no cubierto entero
+  por ningún tipo; se esperan 4 de 138 (K5-5 en las tres escrituras y K5-3 en escritura normal). También se
+  informa el recuento contando solo ocurrencias de tipo dirección.
+- **Trampas (K8)** tapadas por cualquier ocurrencia: se esperan 0 de 9 en escritura normal y 12 de 18 en
+  mayúsculas (K8-1, K8-2, K8-3, K8-7, K8-8 y K8-9, en `M` y en `S`).
+- **Quién cerró** el núcleo de cada página cerrada: solo el patrón (`source` `regex`), solo el modelo, los
+  dos por separado, o hizo falta la unión.
+- **Dos direcciones pintadas sobre el mismo tramo** (el límite de ADR-117): páginas con dos ocurrencias de tipo
+  dirección que se superponen, con su relación (contenida o cruzada).
+- La lista de las páginas que **no coinciden con lo esperado**, en los dos sentidos: una que debía cerrarse y
+  no cerró o debía taparse y no se tapó, y una que debía quedar a la vista o sin tapar y se cerró o se tapó.
+
+Es una comparación, no un gate: si un número no da, la corrida no se «arregla», se informa, y el script
+sigue saliendo según la validez de las corridas. Con `ANONLY_ADDRESS_KEYWORD_BASELINE_DIR=<carpeta de otra
+corrida>` (o como segundo argumento de `summarizeAddressKeywordCli.ts`) el resumen suma una comparación
+página por página de la primera repetición contra la primera de esa corrida (por ejemplo, la línea de base de
+M-D2): páginas con el núcleo más o menos cubierto, y trampas que antes no se tapaban y ahora sí, o al revés.
+Sobre los datos de la línea de base de M-D2 el criterio da «no se cumple» (41 páginas a la vista y 2 trampas
+tapadas): el arnés se puede volver a correr sobre esos mismos datos.
+
+## Ruido, margen y páginas reales (`osd-verdict` con `ANONLY_OSD_VERDICT_SET=m2`, M-O2)
+
+`docs/roadmap/hardening/Confianza_Cierre_2026-10-08.md` (Frente 3, «M-O2 — lo que falta medir antes de enmendar
+ADR-190»). Es el mismo arnés que M-O1, con tres conjuntos nuevos y tres reglas candidatas que se evalúan **fuera de
+línea** sobre las lecturas medidas. No cambia producto.
+
+```bash
+# Humo: unos pocos PDF (los documentos reales, si están, se miden también)
+ANONLY_OSD_VERDICT_SET=m2 ANONLY_OSD_VERDICT_ONLY='^(RU5-150-0|M1-150-0|M3-300-90|R2-p01)$' \
+  ANONLY_CAMPAIGN_ALLOW_UNCOMMITTED_PRODUCT=1 ./tests/perf/run-osd-verdict.sh
+# Campaña: 645 observaciones, en tandas reanudables (repetir la misma llamada hasta «completa»)
+source <archivo-fuera-del-repo-con-ANONLY_REAL_DOC_R1-a-R4>
+export ANONLY_OSD_VERDICT_SET=m2 ANONLY_OSD_VERDICT_OUTPUT_DIR=.measure/osd-verdict/campana-m-o2
+./tests/perf/run-osd-verdict.sh
+# El resumen, sin volver a correr nada (lee también la campaña de M-O1, que no se toca)
+pnpm exec tsx tests/perf/support/summarizeOsdVerdictM2Cli.ts .measure/osd-verdict/campana-m-o2
+```
+
+Cinco observaciones por página, igual que en M-O1: `production` y un veredicto forzado a cada ángulo
+(`forceOrientationVerdict`). El spec es `osd-verdict-m2.spec.ts`; la observación contra la aplicación está en
+`support/osdVerdictObserve.ts`, que usan los dos specs.
+
+**Los conjuntos** (`support/osdVerdictCorpusM2.ts`, `osdVerdictFixturesM2.ts`):
+
+| Conjunto | PDF | Qué es |
+| --- | --- | --- |
+| ruido (`RU1` a `RU6`) | 24 | hoja A4 sin texto, a 150 y 300 dpi, derecha y girada 90°: motas dispersas (200 de 0,4 pt, las del control de ADR-190); una línea de sombra en el borde izquierdo; dos perforaciones; una línea de doblez; motas más densas (315 de 0,5 pt, calibradas para una tinta cerca de 0,0019 a 150 dpi); y motas con una sombra de borde. Semillas fijas. |
+| margen (`M1` a `M3`) | 24 | un sello vertical «Maria Gomez DNI 28.123.456» a 90° en el margen derecho (la técnica de `qa-stamp.pdf`, dentro de la franja del 20 % de ADR-121), solo (`M1`), con la página completa de ADR-190 (`M2`) o con dos renglones de cuerpo (`M3`). Cuatro giros, 150 y 300 dpi. |
+| reales (`R1-p01` a `R4-p51`) | hasta 81 | cada página de los documentos de `ANONLY_REAL_DOC_R1` (escaneo, 20 páginas, resolución nativa) y `R2` a `R4` (digitales, 5, 5 y 51 páginas, rasterizadas a 150 dpi sin giro). |
+
+**Privacidad de los reales.** Las rutas entran solo por las variables de entorno y no se loguean. Cada página se
+arma **en memoria**: el PDF de una página y el ráster derivado no se escriben bajo el repo, ni en `.measure/`, ni en
+la caché de fixtures. El registro de una observación real (`osdVerdictM2Run.ts`) **no lleva ningún campo de texto**:
+ni palabras, ni valores de entidades, ni nombres de archivo ni rutas; solo cantidades, confianza de cada palabra,
+tinta, ángulos, tiempos, dimensiones, hashes, el identificador neutro y la cantidad de entidades por tipo. Un test
+lo comprueba (`osdVerdictM2Run.test.ts`). Un error al leer un documento real no informa la ruta, y el archivo de falla
+de una página real guarda solo el nombre del error. Si una variable no está definida (o su archivo no se lee), ese
+documento no se mide: el manifiesto lo dice (`realDocs`, `realDocsMissing`) y el resumen también.
+
+**Las reglas** (`support/osdVerdictSim.ts`, **simulación sobre lecturas medidas, no el producto**: la lectura de una
+página en un ángulo es su primera lectura medida en ese ángulo, y la simulación decide qué ángulos habría leído la
+cadena y cuál habría elegido; el reintento agrandado del paso 4 no se simula y queda marcado):
+
+- **RC**: sin veredicto, si la primera lectura no trae ninguna palabra y la tinta es mayor que cero, se prueban 90°,
+  180° y 270° aunque la tinta quede debajo de `INK_PRESENT_RATIO`; el aviso de ilegible conserva el umbral.
+- **CP**: el comparador del paso 2 y del 3 pasa a ser el de la rama sin veredicto (confianza de página primero).
+- **SV**: con veredicto, tinta mayor que cero y una lectura elegida con confianza de página menor que T, se prueban
+  los ángulos que falten y se elige con CP. T = 0,5, 0,6, 0,7, 0,8 y 0,85.
+
+`validateSimulation` compara la simulación de la cadena de hoy con lo que midió el producto (mismos ángulos, misma
+lectura final) y el resumen lo informa.
+
+**El resumen** (`support/osdVerdictM2Analysis.ts`, `osdVerdictM2Campaign.ts`, `osdVerdictM2Tables.ts`; salida:
+`summary.json` y `summary-tables.txt`): la Parte A (tinta y lecturas de las 24 hojas de ruido; lecturas con alguna
+palabra confiable; entidades; qué páginas de M-O1 y de ruido manda RC a los cuatro ángulos y qué entrega; tiempo de
+tres lecturas más, en frío y en caliente), el análisis de CP (hoy contra CP en producción, con el veredicto correcto
+forzado y con uno equivocado forzado, con las listas de lo que cambia en cada sentido y cuántas de las fugas de M-O1
+cierra CP solo), la Parte C (cuerpo y sello por separado), SV por conjunto y umbral (costo sobre páginas bien
+orientadas, lecturas equivocadas que se le escapan y fugas con hoy, con CP y con SV + CP) y la Parte B (solo
+agregados de las páginas reales: distribución de la confianza de la lectura de referencia y de las equivocadas,
+coincidencia de la referencia con el veredicto natural, tinta y qué entrega el producto de hoy con un veredicto
+equivocado forzado). El ángulo de referencia de una página real es el que elige CP entre sus cuatro primeras lecturas.
+
+Sale con 1 si falta, sobra o se repite alguna observación, o si hay una incoherencia del instrumento. Que el resultado
+no sea el que se quería no es un error del instrumento: se informa. Es una medición, no un gate. Con el producto sin
+commitear se usa `ANONLY_CAMPAIGN_ALLOW_UNCOMMITTED_PRODUCT=1` (ver «Guardas comunes: producto sin commitear»): la
+corrida es provisional.
+
+## El peor caso de tiempo y memoria (`osd-verdict` con `ANONLY_OSD_VERDICT_SET=m3`, M-O3)
+
+`docs/roadmap/hardening/Confianza_Cierre_2026-10-08.md` (Frente 3, «M-O3 — el peor caso, con documentos reales»).
+Si todas las páginas de un escaneo se leen en los cuatro ángulos, ¿cuánto suben el tiempo y el pico de memoria, y
+cambia lo que se entrega? No cambia producto.
+
+```bash
+# Humo: un documento chico, un brazo, una repetición
+ANONLY_OSD_VERDICT_SET=m3 ANONLY_OSD_VERDICT_ONLY='^P2-B-r1$' ANONLY_CAMPAIGN_ALLOW_UNCOMMITTED_PRODUCT=1 \
+  ./tests/perf/run-osd-verdict.sh
+# Campaña: 30 corridas, en tandas reanudables (repetir la misma llamada hasta «completa»; LIMIT cuenta corridas)
+source <archivo-fuera-del-repo-con-ANONLY_REAL_DOC_R1-y-R4>
+export ANONLY_OSD_VERDICT_SET=m3 ANONLY_OSD_VERDICT_OUTPUT_DIR=.measure/osd-verdict/campana-m-o3
+ANONLY_OSD_VERDICT_LIMIT=2 ./tests/perf/run-osd-verdict.sh
+pnpm exec tsx tests/perf/support/summarizeOsdVerdictM3Cli.ts .measure/osd-verdict/campana-m-o3
+```
+
+**El instrumento es el de `memory.spec.ts`** (`measureProfile`, `support/memoryProfile.ts`): una instancia de
+Electron por corrida, importación en frío, `closeDocument` e importación en caliente del mismo archivo; pico M2 de
+ADR-146 (suma de working sets, dentro de la ventana de fases) en frío y en caliente; nivel `medium` de la suite de
+medición (ADR-194 §8), NER activo y la misma cadencia de muestreo; más el tiempo de importación hasta `Ready`.
+`memory.spec.ts` no se toca. El spec es `osd-verdict-m3.spec.ts`.
+
+| Documento | Qué es | Brazos |
+| --- | --- | --- |
+| R1 | el escaneo real de `ANONLY_REAL_DOC_R1`, entero (20 páginas), a su resolución | A, B, C |
+| R4 | el digital real de `ANONLY_REAL_DOC_R4`, rasterizado a 300 dpi y unido en un solo PDF escaneado (51 páginas) | A, B |
+| P2 | el fixture normativo de `memory.spec.ts` (50 páginas escaneadas), sin cambios | A0, A, B |
+| P2N | P2 con 10 hojas de ruido de M-O2 (RU1, RU3, RU4 y RU5 a 300 dpi) intercaladas, una cada cinco páginas | A, C |
+
+**Brazos.** `A`: el producto tal cual, con el observador de transporte instalado y sin forzar nada (así A y B difieren
+solo en el forzado). `A0`: lo mismo sin observador (solo P2): la diferencia A − A0 es el efecto del observador sobre el
+número. `B`: el resultado de la detección de orientación de **todas** las páginas (`ocr-orient`) se reemplaza, en el
+transporte y antes de que lo lea el host, por «sin veredicto» (`osdHadVerdict: false`, orientación 0, el ángulo de
+fallback del producto) con la tinta medida (`forceNoVerdict` de `adr190Browser.ts`, al revés de
+`forceOrientationVerdict` de M-O1). `C`: además, si la tinta medida es menor que `INK_PRESENT_RATIO` (0,002) se informa
+ese umbral. Se guarda lo natural y lo entregado de cada página y se comprueba la coherencia con el brazo
+(`m3RunIssues`). El observador no retiene texto: de un reconocimiento guarda cantidades, la confianza y un hash de las
+palabras (`lightweightResults`).
+
+**Qué registra cada corrida** (`<doc>-<brazo>-r<n>.json`, en frío y en caliente): pico M2, tiempo hasta `Ready`,
+despachos de `ocr-page` (que se cuentan por el bus de workers y por el observador, y tienen que coincidir) y, por página:
+resultado de orientación natural y entregado, la lista de reconocimientos con su ángulo, tiempo, palabras, palabras
+confiables, confianza y hash, y lo entregado: cantidad de palabras, **SHA-256 del texto**, palabras confiables,
+confianza de página, entidades por tipo (sin valores) y `unreadableInk`. La lectura entregada se empareja con el
+reconocimiento que la produjo para saber el ángulo entregado.
+
+**Privacidad de los reales.** Igual que en M-O2: las rutas entran solo por las variables de entorno y no se loguean; R1
+se importa tal cual y R4 se rasteriza en un Chromium aparte, los dos **en memoria** (nada derivado de esos documentos se
+escribe a disco, ni bajo el repo ni en `.measure/`); el registro de una corrida no lleva ningún campo de texto (un test lo
+comprueba) y el archivo de falla de una corrida real guarda solo el nombre del error. Los temporales de Electron
+(`anonly-e2e-*`) los borra el fixture aunque la corrida falle.
+
+**El resumen** (`osdVerdictM3Analysis.ts`, `osdVerdictM3Campaign.ts`): (1) por documento y brazo, el pico M2 mediano y
+el rango de las tres repeticiones en frío y en caliente, las diferencias B − A, C − A y A − A0 contra el ruido de M2
+entre corridas iguales (~345 MB: «se distingue» solo si la diferencia de medianas lo supera **y** los rangos no se pisan;
+«dentro del ruido» si es menor; «ambiguo» entre los dos) y P2 contra el techo de 3,0 GB (ADR-192 §2); (2) el tiempo
+hasta `Ready`, el factor contra A y los segundos por página; (3) cuántas páginas hicieron las cuatro lecturas en cada
+brazo y por qué las que no; (4) de A a B y de A a C, cuántas páginas cambian el hash del texto, las palabras, el ángulo
+entregado, las entidades o el aviso, con el sentido del cambio, y el **piso**: cuántas cambian entre dos repeticiones
+del mismo brazo A. Una importación que termina en `PIPELINE_FAILED` (o un OOM) no es un fallo del instrumento: es un
+resultado y se informa.
+
+## Leer la copia exportada (`validate-sample-v1`, M-V1)
+
+Instrumento de costo conservado como antecedente histórico, sin cambiar producto.
+«Validar muestra» fue retirada del roadmap el 2026-10-11, por decisión del
+mantenedor. Los comandos siguientes permiten reproducir el estudio; no son
+tareas pendientes del cierre ni una implementación de la función.
+Diseño: `docs/roadmap/hardening/Validar_Muestra_Diseno_2026-10-09.md`.
+
+```bash
+# Smoke aislado: dos recorridos completos. No equivale a campaña completa.
+ANONLY_VALIDATE_SAMPLE_ONLY='^(digital10-low-r1|scan10-low-r1)$' \
+  ANONLY_VALIDATE_SAMPLE_OUTPUT_DIR=.measure/validate-sample/smoke \
+  ANONLY_CAMPAIGN_ALLOW_UNCOMMITTED_PRODUCT=1 ./tests/perf/run-validate-sample.sh
+# Después de adaptar la preparación de conflictos: repetir los dos sintéticos
+# y R1-low-r1 en una carpeta nueva, con ANONLY_REAL_DOC_R1 cargada en privado.
+# No reutilizar el checkpoint del intento bloqueado ni sus costos.
+ANONLY_VALIDATE_SAMPLE_ONLY='^(digital10-low-r1|scan10-low-r1|R1-low-r1)$' \
+  ANONLY_VALIDATE_SAMPLE_OUTPUT_DIR=.measure/validate-sample/smoke-conflictos \
+  ANONLY_CAMPAIGN_ALLOW_UNCOMMITTED_PRODUCT=1 ./tests/perf/run-validate-sample.sh
+# Campaña de 36, serial; las rutas reales se cargan sin imprimirlas.
+source <archivo-privado-fuera-del-repo-con-ANONLY_REAL_DOC_R1-y-R4>
+export ANONLY_VALIDATE_SAMPLE_OUTPUT_DIR=.measure/validate-sample/campana-m-v1
+ANONLY_CAMPAIGN_ALLOW_UNCOMMITTED_PRODUCT=1 ./tests/perf/run-validate-sample.sh
+# Resumen sin importar ni exportar otra vez.
+pnpm exec tsx tests/perf/support/summarizeValidateSampleCli.ts .measure/validate-sample/campana-m-v1
+```
+
+Seis documentos: R1 (escaneo real, 20 páginas), R4 (digital real, 51 páginas),
+`digital10`, `digital50`, `scan10` y `scan50`. Cada uno con `low` y `medium`,
+tres repeticiones frías: universo fijo de 36. No disponer de un real deja
+incompleta la campaña, sin achicar el universo esperado. Los reales son el
+resultado principal; los sintéticos se agregan aparte. `ANONLY_VALIDATE_SAMPLE_LIMIT`
+permite limitar una tanda; `ANONLY_VALIDATE_SAMPLE_ONLY` filtra IDs mediante regex.
+Reutilizar carpeta solo con la misma identidad de producto, tests, builds y fixtures.
+
+El primer intento real llegó a Ready con tres conflictos y quedó bloqueado
+correctamente por ADR-176. La adaptación del instrumento confirma por UI los
+defaults ya seleccionados, sin cambiar tipos, grafías ni modos, después de
+medir la importación y antes de exportar. No acredita revisión semántica ni
+simula tiempo humano: cantidad, duración e invariantes se informan aparte.
+Si aparecen conflictos manuales retenidos o defaults inconsistentes, se
+conserva el bloqueo como resultado separado; no se elimina una entidad ni
+se elige otra opción. Un recorrido acotado exige disminución de pendientes
+y Exportar habilitado. Solo resolución y sus metadatos pueden cambiar en los
+datos comparados (`resolvedType` debe coincidir con el tipo vigente; se
+permite `updatedAt` del grupo);
+los valores usados para comprobarlo quedan en memoria y no se registran.
+Esta adaptación requiere identidad y carpeta nuevas. El smoke de tres
+recorridos verifica la preparación real y deja la campaña global incompleta;
+las 36 se habilitan después de auditarlo. La reparación del formatter puede
+analizar el intento anterior offline para informar faltantes/falla sin
+reimportar, copiar costos ni declararlo válido.
+Un crudo histórico que no registró preparación se proyecta con ese campo
+en `null`, sin fabricar evidencia; los éxitos antiguos sin preparación no
+cuentan como corridas válidas del instrumento nuevo.
+
+Cada recorrido abre Electron frío con perfil temporal propio e importa el original,
+lo exporta por la UI real (JPEG, 150 dpi, calidad 0,92, placeholders sin leyenda),
+lee el blob en memoria y cierra por completo ese Electron. Después abre otro
+Electron frío e importa el Buffer exportado. Sin datos detectados o con páginas
+ilegibles, se registran las confirmaciones y coberturas negras por defecto.
+No hay descarga ni PDF derivado persistido. Los fixtures escaneados sintéticos
+se generan a 216 dpi fuera de la ventana medida; solo sus fechas variables se
+fijan en memoria, antes de medir e importar. Los bytes reales no se modifican.
+
+La CSP del shell impide leer esa URL mediante `fetch`; el acceso directo al
+UUID público mediante CDP tampoco resolvió el Blob en el probe sintético.
+El arnés observa `URL.createObjectURL` solo después de Ready y antes del export,
+llama al original sin cambiar argumentos ni URL y retiene únicamente referencias
+a Blob PDF. Lee el que corresponde al href exacto mediante `arrayBuffer`, en
+memoria, fuera de las ventanas de importación; después restaura la función y
+libera referencias en `finally`. No se modifica CSP ni producto. Un probe binario
+y pruebas de transparencia/limpieza deben pasar antes del smoke.
+
+Ambas importaciones usan el instrumento de M2: RSS cada 150 ms, heap CDP,
+fases, presión del sistema y pico posterior a Ready separado. Se informan el
+tiempo total hasta Ready y el tiempo OCR por separado. La reimportación incluye
+NER y agrupación: aproxima el costo de leer la copia, no mide un verificador
+todavía inexistente. M2 incluye Electron; el Buffer retenido por Node se excluye
+y su tamaño se informa aparte. **No es una cota del flujo futuro con el original
+abierto**: ese flujo requerirá su propia medición.
+
+`measureColdImport` permite exportar antes de cerrar el original.
+`allowFailedRunReport` es opt-in de arnés: una importación que termina en
+`PIPELINE_FAILED` conserva su observación sin exigir el botón de un documento
+Ready. No se inventan tiempos ni picos exitosos. Las fallas de producto son
+resultados, separados de las medianas de recorridos completos; las fallas de
+infraestructura dejan la campaña incompleta. El límite de 50 MiB del payload
+en memoria de Playwright también es infraestructura: no habilita guardar un
+derivado real para eludirlo.
+
+**Privacidad e integridad.** Antes de escribir y al releer, se proyectan únicamente
+campos permitidos: IDs neutros, hashes, cantidades, opciones y métricas. No se
+conservan palabras OCR, valores de entidades, URL, nombres/rutas reales ni mensajes
+arbitrarios de errores. Los IDs de sesiones CDP se hashean. Trace, screenshot y
+video están desactivados; la copia no se usa para generar snapshots de error.
+Solo se guarda el agregado de cada recorrido: perder su Buffer obliga a repetir
+el recorrido frío completo.
+
+Cada tanda exige sello terminal válido y detección de suspensión positivamente
+confirmada tanto al inicio como al cierre. Una tanda interrumpida, suspendida,
+sin sello o sin detección confirmada conserva observaciones pero excluye costos
+y completitud; al retomar repite esas celdas y archiva los intentos con IDs
+neutros. La prevención best effort es una salvedad independiente. Snapshots
+iniciales faltantes, cambio de identidad o archivos de corrida inesperados impiden
+declarar completa la campaña, aun con 36 resultados. Una falla del resumen
+reemplaza cualquier estado anterior de completa por incompleta.
+
+## RC aislado: costo de recuperar páginas casi vacías (ADR-218)
+
+RC aceptado el 2026-10-10; SV/CP pendiente. El protocolo está en
+[`Costo_RC_Aislado_Protocolo_2026-10-10.md`](../../docs/roadmap/ocr/Costo_RC_Aislado_Protocolo_2026-10-10.md).
+El arnés conserva las fuentes de `apps/` y `packages/` y prepara dos builds
+con la misma configuración. En `ANONLY_RC_SOURCE_MODE=experimental` (default),
+A conserva la fuente y RC amplía un único predicado. En `adopted`, RC conserva
+la implementación de producto byte por byte y A elimina solo esa cláusula
+durante el build. El modo es explícito, cerrado y parte de la identidad;
+no se detecta por semejanza. El plugin exige una sola coincidencia exacta.
+Se registran las identidades de fuente, transformación, renderer de cada brazo,
+shell, producto, tests, assets y fixtures. Los artefactos quedan congelados;
+el switch de brazo ocurre antes de abrir Electron y fuera de las ventanas medidas.
+Al cerrar se restauran y comprueban los dist previos.
+
+```bash
+# Primero: cuatro N1 naturales más controles A/RC de blanco y ruido.
+ANONLY_CAMPAIGN_ALLOW_UNCOMMITTED_PRODUCT=1 \
+ANONLY_RC_MODE=smoke \
+ANONLY_RC_OUTPUT_DIR=.measure/rc-isolated/smoke-rc \
+./tests/perf/run-rc-isolated.sh
+
+# Después del smoke válido: R1 y P2N, A/RC intercalados, tres repeticiones.
+# R1 entra solo por ANONLY_REAL_DOC_R1, ya definida en el entorno privado.
+ANONLY_CAMPAIGN_ALLOW_UNCOMMITTED_PRODUCT=1 \
+ANONLY_RC_MODE=cost \
+ANONLY_RC_M3_REFERENCE_DIR=.measure/osd-verdict/campana-m-o3 \
+ANONLY_RC_OUTPUT_DIR=.measure/rc-isolated/campana-rc \
+./tests/perf/run-rc-isolated.sh
+```
+
+Para confirmar la implementación, usar carpetas nuevas y agregar
+`ANONLY_RC_SOURCE_MODE=adopted` en ambos comandos. Antes de medir, verificar
+que el renderer RC coincide con el build normal recién producido bajo la
+misma configuración y `VITE_E2E=1`; conservar ese hash en la identidad.
+No reusar resultados experimentales en la campaña adoptada. Primero sus
+ocho smoke, después las doce corridas de costo; la matriz M-V1 completa se
+congela después con producto e instrumento actualizados.
+
+El universo de costo es fijo: doce corridas frías/calientes, nivel `medium`,
+NER activo. R1 usa sus 20 páginas originales; P2N conserva exactamente la receta
+de M-O3, 50 páginas normativas más diez de ruido. P2N es diagnóstico y no tiene
+el techo normativo de P2. Se separan condición candidata y expansión efectiva:
+el trabajo nuevo corresponde a primera lectura vacía, sin veredicto y tinta
+entre cero y 0,002. La cantidad y duración de reconocimientos adicionales se
+observan en el transporte. Orientación y tinta deben permanecer naturales.
+
+M2 conserva RSS cada 150 ms, fases, presión por importación y pico posterior
+a Ready separado. Las métricas y observaciones pasan por proyección permitida
+antes de escribir y al releer; no se conservan texto, imágenes, valores, rutas
+ni derivados de documentos reales. La retoma exige identidad y sello de tanda
+válidos, con detección de suspensión confirmada al inicio/cierre. Celdas inválidas
+se archivan con nombres neutros y se repiten; un archivo existente no prueba
+por sí solo completitud. Fallos de producto se informan separados de costos
+exitosos; fallos del instrumento dejan la campaña incompleta.
+
+El experimento corre en serie, sin M-V1 ni otra suite pesada. Con el árbol
+sin commitear, sus resultados son provisionales y se repiten sobre el commit.
+El arnés no decide política de producto, no publica esos builds y no cambia
+presupuestos. La adopción RC está en ADR-190; SV/CP sigue abierta.
+
+## Guardas comunes: producto sin commitear (`ANONLY_CAMPAIGN_ALLOW_UNCOMMITTED_PRODUCT`)
+
+El preámbulo común `support/ocr-campaign-common.sh` aborta si `git status --porcelain -- packages apps`
+no está vacío: una campaña mide el producto de un commit. Hay una salida explícita y opt-in para medir
+un producto que todavía no está commiteado (por ejemplo, un lote que espera la revisión antes de
+commitearse):
+
+```bash
+ANONLY_CAMPAIGN_ALLOW_UNCOMMITTED_PRODUCT=1 ./tests/perf/run-address-keyword.sh
+```
+
+Solo el valor `1` la activa; con cualquier otro valor, o sin la variable, el comportamiento es el de
+siempre (aborta). Con la variable y el árbol sucio, la corrida **no aborta** y deja en su carpeta:
+
+- una salvedad `product-tree-uncommitted` en `caveats.json` (que los resúmenes ya copian);
+- `product-uncommitted-status.txt`: `git status --short -- packages apps`;
+- `product-untracked.sha256`: el SHA-256 de cada archivo sin trackear bajo `packages/` y `apps/` (que
+  `git diff` no ve);
+- `product-tree.identity.sha256`: el SHA-256 del diff contra `HEAD` más ese listado. Es la identidad del
+  árbol de producto medido; el build la vuelve a calcular y aborta si cambió. `product-tree.diff.sha256`
+  sigue siendo solo el del diff de lo trackeado.
+
+**Una corrida con esa salvedad es provisional.** Los números valen para ese árbol exacto (su identidad
+está en la carpeta) y se repiten sobre el commit antes de darlos por definitivos. Con el producto limpio
+la variable no hace nada: no registra salvedad ni escribe esos archivos.
+
+`run-osd-verdict.sh` compara entre tandas, contra la identidad de la primera (guardada en `first/` de su carpeta),
+`commit.txt`, `product-tree.diff.sha256`, `product-tree.identity.sha256` (cuando existe), `tests-tree.diff.sha256`,
+`tests-untracked.sha256` y el digest del dist. Con archivos nuevos sin trackear bajo `packages/` o `apps/`, dos tandas
+con distinto contenido de esos archivos ya no se ven iguales: la identidad difiere y la tanda aborta sin medir. Que una
+tanda tenga ese archivo y la otra no (el árbol pasó de sucio a limpio o al revés) también es una diferencia.

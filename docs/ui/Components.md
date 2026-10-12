@@ -202,7 +202,8 @@ apps/react-client/src/components/
 - **Acción**: `actions.importDocument(file)`, por drop o por el botón.
 - **Organización en cajas** (ADR-168 §1): barra superior (logo, nombre, `SettingsButton`), caja
   principal con la `DropZone`, caja `HowItWorks` (animación de tres fases + tres pasos), tres
-  tarjetas de rasgos y un pie con versión, licencia, "Acerca de…" y "Reportar un problema".
+  tarjetas de rasgos y un pie con el botón de versión (§2.9b, ADR-216), la licencia, "Acerca de…" y
+  "Reportar un problema".
 - **`DropZone`** (ADR-168 §2): cuatro estados —reposo, arrastrando encima, abriendo, error— en el
   mismo recuadro de tamaño fijo. El de error se usa para el archivo que no es PDF y para el fallo de
   importación que vuelve desde `ScanScreen` (§2.10); muestra el nombre del archivo y el mensaje de
@@ -222,6 +223,37 @@ apps/react-client/src/components/
   (`sourceUrl`, `licenseUrl`) más `https://github.com/sgiambelluca/Anonly` (código fuente) y
   `https://github.com/sgiambelluca/Anonly/issues/new` ("Reportar un problema", en el pie y en
   `AboutDialog`). Son las **únicas**; cualquier otra necesita ADR.
+
+### 2.9b `ReleaseNotesMenu` (ADR-216)
+
+- **Disparador**: el botón de versión del pie de `LoadScreen`, con el aspecto de los otros dos
+  botones del pie: **"Anonly {versión}"**, *"Novedades"* en texto secundario y una flecha. A su
+  derecha queda, como texto, *"Software libre, licencia MIT"*.
+- **Panel**: flotante, anclado al botón, se abre **hacia arriba** y no desplaza nada (UX-10). Mide
+  400 px de ancho y hasta 452 px de alto, con scroll interno. Si no entra en el área visible, se
+  acota y se desplaza con la regla de `GroupContextMenu` (§3.5, ADR-207).
+- **Render**: encabezado *"Novedades"* con botón de cierre, y las versiones de la más nueva a la más
+  vieja, separadas por una línea. Cada versión muestra el número, la fecha en formato largo
+  (*"2 de octubre de 2026"*), **"Instalada"** en la que coincide con `__ANONLY_VERSION__`,
+  un resumen de una línea si lo tiene, y sus novedades. Solo figuran las versiones estables. Cada
+  novedad lleva una etiqueta de **ancho fijo**: **Nuevo**, **Mejora** o **Arreglo**.
+- **Sin enlaces** y sin red: no agrega ninguna URL a la lista de §2.9.
+- **Datos**: `components/screens/releaseNotes.ts`, un dato `readonly` tipado que se compila con la
+  interfaz. Tipos de novedad: `new`, `improvement` y `fix`. Reglas de redacción y contenido inicial:
+  ADR-216 §3 y §4.
+- **Test** (ADR-216 §5): la primera entrada tiene la versión de `apps/react-client/package.json`,
+  que coincide con la de `apps/desktop-shell/package.json`; las versiones no se repiten y van de mayor a menor; las fechas son válidas y no crecen; cada
+  entrada tiene resumen o al menos una novedad; ningún texto está vacío, supera los 140 caracteres
+  ni contiene `ADR-`.
+- **Cierre**: `Escape`, clic afuera, el botón de cierre o el mismo botón de versión. El foco vuelve
+  al botón de versión, salvo con el clic afuera, que lo deja donde se hizo clic.
+- **Accesibilidad**: disclosure hecho a mano, como §3.5. El botón lleva `aria-expanded` y, mientras
+  el panel está abierto, `aria-controls`; el panel es una región con nombre. No usa `role="menu"` ni
+  `aria-haspopup`. Las etiquetas se distinguen por su texto y no solo por el color.
+- **Tamaño y contraste** (`UX_Guidelines.md` §9): ningún texto baja de 14 px, tampoco las etiquetas
+  ni "Instalada". Las tres etiquetas llevan el color del texto principal sobre su fondo atenuado. La
+  palabra *"Novedades"* del botón va en texto secundario solo sobre `bg-primary`: en hover y con el
+  panel abierto pasa al color del texto principal.
 
 ### 2.10 `ScanScreen` (ADR-087 §1/§6, momento ②a)
 
@@ -307,7 +339,7 @@ apps/react-client/src/components/
     `?` ámbar (`NeedsReviewBadge`), conflicto con una Y que se abre en dos, en rojo (`ConflictBadge`),
     espacio justo `]↔[` naranja de 26×22 (`DegradedBadge`)—, en la columna de avisos.
   - editado manualmente (punto azul).
-  - **reemplazo degradado** (ADR-058 §7, canal por ADR-062): alguna ocurrencia del grupo recibió `AnnotationKind.Degraded` — el texto de reemplazo quedó más angosto que `DEGRADED_FONT_RATIO` de su ancho natural (ADR-086 §1) y esos píxeles quedaron comprometidos. Es una marca **accionable**, no informativa: existe porque la palanca para arreglarlo ya existía y era invisible. Al abrirla, ofrece las tres salidas —editar el `replacementValue` a mano, cambiar el modo a `redact` (que no tiene problema de espacio) o deshabilitar el grupo—. **No** aparece cada vez que el repintado de línea no se activó: solo bajo el umbral, para que la señal signifique algo.
+  - **reemplazo degradado** (ADR-058 §7, canal por ADR-062): alguna ocurrencia del grupo recibió `AnnotationKind.Degraded` — el texto de reemplazo quedó más angosto que `DEGRADED_FONT_RATIO` de su ancho natural (ADR-086 §1) y esos píxeles quedaron comprometidos. Es una marca **accionable**, no informativa: existe porque la palanca para arreglarlo ya existía y era invisible. Al abrirla, ofrece las tres salidas —editar el `replacementValue` a mano, cambiar el modo a `redact` (que no tiene problema de espacio) o deshabilitar el grupo—, en el diálogo de §3.3b. **No** aparece cada vez que el repintado de línea no se activó: solo bajo el umbral, para que la señal signifique algo.
 
     **De dónde sale el dato (ADR-062)**: de `PREVIEW_UPDATED.degraded`, no de `EntityGroup` —que no tiene ni va a tener un campo para esto (ADR-062 §5: es un veredicto de Render, no un atributo del grupo)— y **nunca** de una estimación cliente-side con `estimateTokenWidth`, que sería una tercera fuente de verdad capaz de discrepar del preview y del export (ADR-062 §"Alternativas"). Tres reglas duras del consumo, cada una con su test:
 
@@ -321,6 +353,51 @@ apps/react-client/src/components/
   - Checkbox → `actions.updateGroup(group.id, { enabled: value })`.
   - Click en el aviso de conflicto → `ConflictDialog`.
 - **ARIA**: `role="treeitem"`, `aria-checked`, `aria-label` con tipo + count + estado.
+
+### 3.3b Diálogo de espacio justo (`DegradedBadge`, ADR-215 §1)
+
+- **Trigger**: clic en el aviso `]↔[` de la fila. El botón, su `Tooltip` y su `aria-label` no cambian.
+- **`Dialog`** de tamaño `lg`. Título *"El reemplazo puede no leerse"*; descripción *"No entraba en
+  el lugar del original y hubo que achicarlo."*.
+- **Render**, de arriba hacia abajo:
+  1. `EntityLine` con el símbolo de espacio justo a la derecha.
+  2. *"Así queda en el documento"*, con las páginas afectadas a la derecha en un renglón
+     (*"Página 3"*, *"Páginas 3 y 7"*, *"Páginas 3, 7 y 12"*; con más de tres, las tres primeras y
+     el resto contado: *"Páginas 3, 7, 12 y 5 más"*). Debajo, una caja con la frase de la aparición de
+     `tightestMember(group.members)` en dos renglones: **"Hoy"** (el reemplazo vigente dentro del
+     ancho del original, achicado) y el resultado de la opción elegida, con su rótulo. Al pie de la
+     caja, **un renglón reservado** para la aclaración.
+  3. *"¿Qué querés hacer?"*: grupo de opciones de radio con el patrón de `ConflictDialog` (§6.2).
+     Cada opción lleva ícono, título y una línea de descripción. Preselecciona la primera. La caja
+     del grupo usa `bg-secondary` y no `bg-tertiary`: la descripción va en texto secundario, y sobre
+     `bg-tertiary` ese par no llega a 4.5:1 (`UX_Guidelines.md` §9).
+
+  | Opción | Descripción | Rótulo del segundo renglón | Qué dibuja | Botón |
+  |---|---|---|---|---|
+  | Usar un texto más corto | Se abre el editor, con sugerencias que sí entran. | Con un texto más corto (ejemplo) | la primera sugerencia de `replacementSuggestions` | Abrir el editor |
+  | Tapar con negro | Un bloque negro sobre el texto. Siempre entra. | Con el bloque negro | el bloque, del ancho del original | Aplicar |
+  | Dejarlo a la vista | No se oculta: el dato se va a poder leer. | Sin ocultar | el texto original, resaltado | Aplicar |
+
+- **Aclaración**: *"El dato sigue oculto: es un problema de lectura, no de privacidad."*. Con
+  "Dejarlo a la vista" elegida: *"El dato va a quedar legible en el documento exportado."*, en
+  `--color-warning-strong`.
+- **Pie**: "Cerrar" y el botón primario, con **ancho mínimo fijo**.
+- **Casos**: "Tapar con negro" no se ofrece si el grupo ya está en `redact`. Sin sugerencias, el
+  rótulo es *"Con un texto más corto"* y el lugar del dato se dibuja vacío. Sin una aparición
+  utilizable, la caja dice *"No hay una aparición para mostrar."* y conserva su alto.
+- **Diseño estable** (UX-10): elegir una opción cambia el segundo renglón, la aclaración y el texto
+  del botón. Ningún bloque cambia de tamaño ni de lugar.
+- **Acciones**:
+  - "Usar un texto más corto" → cierra y abre `EditReplacementDialog` (§3.4e).
+  - "Tapar con negro" → `applyGroupMode(group, ReplacementMode.Redact)`. Confirma como el cambio de
+    modo de la fila (§3.11): toast con "Deshacer" **solo si** `replacementValueUserSet`, con el mismo
+    texto (*"Se descartó el texto que habías escrito para X."*).
+  - "Dejarlo a la vista" → deshabilita el grupo y muestra **el mismo toast con "Deshacer"** que la
+    casilla de la fila (`UX_Guidelines.md` §3.3b).
+- **Texto sin jerga**: sigue la regla de `degradedMessage.ts`.
+- **Vista previa compartida**: `ContextPreview` vive en un archivo propio y lo usan este diálogo,
+  `EditReplacementDialog` (§3.4e) y `RemoveEntityDialog` (§3.5b). Dibuja, dentro del ancho del
+  original, un texto (achicado si no entra), el bloque negro o el original resaltado.
 
 ### 3.4 `ReplacementModeSelect`
 
@@ -480,8 +557,8 @@ Marca los grupos que **el detector sugirió sin estar seguro**: nacen con `enabl
   - "Editar reemplazo…" → `EditReplacementDialog` (§3.4e). No aparece en modo `redact`.
   - "Fusionar con…" → `MergeDialog`.
   - "Dividir…" → `SplitDialog`.
-  - **"Eliminar entidad"** (ADR-171) → `ConfirmDialog` que nombra la entidad y aclara que su dato
-    queda **a la vista** en el documento → `actions.removeGroup(groupId)` (`GROUP_REMOVE_REQUESTED`).
+  - **"Eliminar entidad"** (ADR-171) → `RemoveEntityDialog` (§3.5b, ADR-215 §2), que nombra la
+    entidad y muestra que su dato queda **a la vista** en el documento → `actions.removeGroup(groupId)` (`GROUP_REMOVE_REQUESTED`).
     Toast *"Eliminaste «X» · Ya no está en la lista ni se va a ocultar"* con "Deshacer". Si en el mismo
     pedido se resolvió un conflicto `heldManual` de ese grupo (ADR-175 §1), el toast pasa a *"Eliminaste
     «X» · Lo que marcaste («Z») ahora se oculta"*. Si la eliminación deja **un choque nuevo** (ADR-178 §2: algo marcado a mano que el contenedor eliminado tapaba ahora pisa otra entidad, `Grouping_Engine.md` §13 caso 69), el toast no cambia y no se abre ningún diálogo: el choque se muestra con el aviso persistente y el ⚠ de la fila (§6.3, ADR-175 §5), y Exportar queda bloqueado (§2.5). No hace falta código nuevo, porque la UI ya reacciona a `CONFLICT_DETECTED` con `heldManual`.
@@ -498,6 +575,33 @@ Marca los grupos que **el detector sugirió sin estar seguro**: nacen con `enabl
 > **No usa `role="menu"`/`role="menuitem"` ni `aria-haspopup`**, y es deliberado (2026-08-20). Ese rol es un contrato con el lector de pantalla: promete navegación por flechas, Home/End y foco gestionado con un solo tab stop, y nada de eso está implementado. Anunciarlo igual deja al usuario de teclado apretando flechas contra un panel que no responde — peor que no anunciar nada, porque sin el rol son botones en un grupo etiquetado y se comportan como el lector espera. `aria-haspopup="true"` sale por lo mismo: en WAI-ARIA 1.1+ es **sinónimo de `menu`**, así que reintroducía la promesa por la puerta de atrás. Si algún día entra Radix, trae el rol **y** el manejo de foco juntos, que es la única forma correcta de tener el primero.
 >
 > **Los roles de este menú son API de test.** Tres escenarios E2E localizan sus items por rol (`scenario-9`, `scenario-10`), y `pnpm test` **no** corre la suite E2E — así que cambiar un rol acá pasa los cuatro gates del subset pre-PR y rompe en CI. Pasó al retirar `role="menuitem"`. Quien toque estos roles corre `pnpm test:e2e` en el mismo cambio (requiere `pnpm assets:mirror` previo, ver `tests/e2e/README.md`).
+
+### 3.5b `RemoveEntityDialog` (ADR-215 §2)
+
+- **Trigger**: "Eliminar entidad" de `GroupContextMenu` (§3.5). Reemplaza al `ConfirmDialog`
+  genérico solo para esta acción.
+- **`Dialog`** de tamaño `md`, con `icon` (§8.2): una papelera sobre fondo de error atenuado. Título
+  *"¿Eliminar esta entidad?"*; descripción *"Deja de ocultarse en todo el documento."*.
+- **Render**, de arriba hacia abajo:
+  1. `EntityLine`.
+  2. Una caja con la frase de la primera aparición del grupo, en dos renglones (`ContextPreview`,
+     §3.3b): **"Hoy"**, con lo que muestra el documento anonimizado —el reemplazo vigente, el bloque
+     en modo `redact`, o el texto original si el grupo ya está deshabilitado—, y **"Si la
+     eliminás"**, con el texto original resaltado en el color de error. Sin una aparición
+     utilizable, la caja dice *"No hay una aparición para mostrar."* y la primera consecuencia no
+     menciona la cantidad.
+  3. Tres consecuencias, en este orden. La primera va en el color del texto principal y con el ícono
+     en `--color-error`; las otras dos, en texto secundario.
+     - *"**Su texto queda a la vista** en el documento exportado, en las N apariciones."* Con una
+       sola: *"…en su única aparición."*
+     - *"Sale de la lista de entidades."*
+     - *"Si un nuevo análisis la vuelve a encontrar, sigue eliminada."*
+- **Pie**: a la izquierda, *"Podés deshacerlo con Ctrl+Z"*, con la misma pista de los toasts de
+  edición (§8.6). A la derecha, "Cancelar" y **"Eliminar"** (variante `danger`, con ícono de
+  papelera).
+- **Foco**: al abrirse, no cae en "Eliminar".
+- **Acción**: al confirmar, lo mismo que antes (ADR-171 §5): `RULE_DELETED` de la regla de grupo si
+  existe y `GROUP_REMOVE_REQUESTED`, en un mismo punto de deshacer. Los toasts de §3.5 no cambian.
 
 ### 3.8 `ChangeTypeDialog` (ADR-082 §6)
 
@@ -670,7 +774,7 @@ existen. Lo que se retira es la superficie de UI, no el modelo.
 
 - **Props**: **ninguno** (ADR-087 §2). El `kind` sale de `viewer.store.mode` — hay un solo `PdfViewer` y lo que muestra lo decide el `ViewerModeToggle` (§5.1).
 - **Stores**: `viewer`, `entities` (para highlights en `original`), `document`, `pipeline`.
-- **Comportamiento**: usa `PageVirtualizer` para renderizar solo visibles. Escucha `PREVIEW_UPDATED` via `viewer.previewByPage[kind]` (sigue siendo **por `kind`**, `React_Client.md` §3.5: las dos vistas tienen imágenes distintas de la misma página, y conmutar el toggle pinta la cacheada sin esperar un render nuevo) y pasa el `blobUrl` al `PageCanvas` correspondiente.
+- **Comportamiento**: usa `PageVirtualizer` para renderizar solo visibles. Escucha `PREVIEW_UPDATED` via `viewer.previewByPage[kind]` (sigue siendo **por `kind`**, `React_Client.md` §3.5: las dos vistas tienen imágenes distintas de la misma página, y conmutar el toggle pinta la cacheada sin esperar un render nuevo) y pasa el `blobUrl` al `PageCanvas` correspondiente. **Desde ADR-213, «la cacheada» es la que está a la escala del zoom**: al pasar a Original, si su imagen quedó a otra escala, la página sigue mostrando la anonimizada hasta que llega la nítida, con un tope de medio segundo, y mientras tanto su capa de selección queda inerte. Al pasar a Anonimizado nunca se muestra la imagen original: se pinta la anonimizada que haya, o el estado de carga. Para que eso sea raro, cada zoom actualiza las dos vistas. Reglas exactas en `React_Client.md` §7.
 - **La barra con el buscador solo se monta en `original`**: el rótulo del lado lo dice el toggle, así que repetir "Documento original" al lado de un toggle que ya dice "Original" sería decir lo mismo dos veces en la misma línea.
 - **Eventos** (reconciliados por ADR-036 §5, reescrito por ADR-037, `kind` agregado por ADR-056 §1/§2):
   - Cambio de `visibleRange` → `actions.requestRender(pageIndices, kind)` — **con el `kind` de este panel**: el motor renderiza solo ese lado. Antes se emitía sin `kind` y Render producía original y anonimizado, lo que con scroll independiente (ADR-054) hacía que scrollear este panel refrescara el otro.
@@ -847,6 +951,8 @@ hay nada que sincronizar: se retira junto con `SideBySideViewer` y `scrollSyncCo
 
 - Wrapper sobre Radix `Dialog` con focus trap, escape para cerrar, backdrop.
 - Props: `open`, `onClose`, `title`, `children`.
+- **`icon`** (opcional, ADR-215 §3): se dibuja a la izquierda del título y de la descripción. Sin la
+  prop, el encabezado queda igual. Lo usa `RemoveEntityDialog` (§3.5b).
 - **Select anidado** (pedido del humano, 2026-10-05): con un Select abierto,
   hacer click en el cuerpo de este mismo diálogo cierra únicamente el Select,
   conservando el formulario. Escape cierra primero el Select y un segundo
@@ -860,7 +966,7 @@ hay nada que sincronizar: se retira junto con `SideBySideViewer` y `scrollSyncCo
 
 ### 8.2b `ConfirmDialog` (ADR-036 §7)
 
-- Confirmación genérica sobre `Dialog`; referenciado por `CancelButton` (§2.4) y `GroupContextMenu` (§3.5). (También lo usaba `RuleItem`, retirado por ADR-087 §3.)
+- Confirmación genérica sobre `Dialog`; referenciado por `CancelButton` (§2.4). (También lo usaba `RuleItem`, retirado por ADR-087 §3, y `GroupContextMenu` para "Eliminar entidad", que desde ADR-215 tiene su diálogo: §3.5b.)
 - Props: `open`, `title`, `message`, `confirmLabel`, `cancelLabel`, `variant?: "danger"`, `onConfirm`, `onCancel`.
 - Usos MVP: cancelar pipeline (`UX_Guidelines.md` §7.3), deshabilitar grupo, borrar regla, reanalizar por cambio de settings (§2.6).
 

@@ -178,22 +178,61 @@ describe("applyEdits", () => {
     toasts.unsubscribe();
   });
 
-  it("applyGroupMode cambia el modo de reemplazo sin toast", () => {
-    applyEdits.applyGroupMode(group(), ReplacementMode.Mask);
+  it("applyGroupMode cambia el modo de reemplazo sin toast si el texto no estaba escrito a mano", () => {
+    const toasts = captureLastToast();
+    applyEdits.applyGroupMode(group(), ReplacementMode.Redact);
     expect(emit).toHaveBeenCalledWith(EventChannel.UI, EngineEvents.GROUP_UPDATE_REQUESTED, {
       documentId: "doc-1",
       groupId: "g1",
-      patch: { replacementMode: ReplacementMode.Mask },
+      patch: { replacementMode: ReplacementMode.Redact },
     });
+    expect(toasts.get()).toBeNull();
+    // Igual entra a la pila de deshacer.
+    expect(useHistoryStore.getState().past).toHaveLength(1);
+    toasts.unsubscribe();
   });
 
-  it("applyLeaveVisible deshabilita el grupo", () => {
+  it("applyGroupMode avisa con Deshacer si descarta un texto escrito a mano", () => {
+    const toasts = captureLastToast();
+    applyEdits.applyGroupMode(
+      group({ replacementValueUserSet: true, replacementValue: "[X]" }),
+      ReplacementMode.Redact,
+    );
+    expect(emit).toHaveBeenCalledWith(EventChannel.UI, EngineEvents.GROUP_UPDATE_REQUESTED, {
+      documentId: "doc-1",
+      groupId: "g1",
+      patch: { replacementMode: ReplacementMode.Redact },
+    });
+    // El mismo texto que la fila (`ReplacementModeSelect`).
+    expect(toasts.get()?.title).toBe("Se descartó el texto que habías escrito para Juan Pérez.");
+    expect(toasts.get()?.actions?.map((action) => action.label)).toEqual(["Deshacer"]);
+    expect(toasts.get()?.actions?.[0]?.shortcut).toBe("Ctrl+Z");
+    expect(useHistoryStore.getState().past).toHaveLength(1);
+    toasts.unsubscribe();
+  });
+
+  it("applyLeaveVisible deshabilita el grupo y confirma con el toast de la casilla", () => {
+    const toasts = captureLastToast();
     applyEdits.applyLeaveVisible(group());
     expect(emit).toHaveBeenCalledWith(EventChannel.UI, EngineEvents.GROUP_UPDATE_REQUESTED, {
       documentId: "doc-1",
       groupId: "g1",
       patch: { enabled: false },
     });
+    // ADR-215 §1: el mismo toast, con "Deshacer", que destildar la casilla de la fila.
+    expect(toasts.get()?.title).toBe("«Juan Pérez» no se anonimiza");
+    expect(toasts.get()?.actions?.map((action) => action.label)).toEqual(["Deshacer"]);
+    expect(toasts.get()?.actions?.[0]?.shortcut).toBe("Ctrl+Z");
+    expect(useHistoryStore.getState().past).toHaveLength(1);
+    toasts.unsubscribe();
+  });
+
+  it("applyLeaveVisible sobre un grupo ya deshabilitado no emite ni avisa", () => {
+    const toasts = captureLastToast();
+    applyEdits.applyLeaveVisible(group({ enabled: false }));
+    expect(emit).not.toHaveBeenCalled();
+    expect(toasts.get()).toBeNull();
+    toasts.unsubscribe();
   });
 
   it("applyTypeChange cambia el tipo y confirma con toast, con o sin preview", () => {

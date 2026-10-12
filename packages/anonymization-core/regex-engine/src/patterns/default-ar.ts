@@ -13,7 +13,12 @@
  * plate-vieja-ar: "XXX XXX").
  */
 
-import { EntityType, GENDER_LEXICON, normalizeForComparison } from "@anonly/shared";
+import {
+  EntityType,
+  GENDER_LEXICON,
+  normalizeEntityValue,
+  normalizeForComparison,
+} from "@anonly/shared";
 
 import type { RegexPattern } from "../regex.types.js";
 
@@ -216,6 +221,74 @@ function firstNameIsInLexicon(normalizedValue: string): boolean {
   const firstToken = normalizedValue.split(" ")[0];
   return firstToken !== undefined && GENDER_LEXICON.has(firstToken);
 }
+
+// ─── Dirección con palabra clave (ADR-217, caso 36) ───
+
+/*
+ * Una palabra en cualquier escritura, armada letra por letra (`calle` →
+ * `[Cc][Aa][Ll][Ll][Ee]`). No se usa el flag `i` a propósito: con `iu`, la
+ * clase `\p{Lu}` pasa a aceptar también minúsculas, y la regla de este patrón
+ * —cada palabra del nombre empieza con mayúscula— depende de que `\p{Lu}`
+ * siga distinguiendo la caja. Las palabras clave valen en las dos cajas; el
+ * nombre, no.
+ */
+function anyCase(word: string): string {
+  return Array.from(word, (ch) => {
+    const upper = ch.toUpperCase();
+    return upper === ch ? ch : `[${ch}${upper}]`;
+  }).join("");
+}
+
+function anyCaseAlternation(words: ReadonlyArray<string>): string {
+  return words.map(anyCase).join("|");
+}
+
+/* El carácter anterior no es letra ni dígito: la palabra clave empieza palabra. */
+const WORD_START = String.raw`(?<![\p{L}\p{N}])`;
+
+/*
+ * Palabra de vía: forma parte del match. Las abreviaturas llevan el punto
+ * final opcional; la palabra siguiente tiene que venir tras uno o dos
+ * espacios (`NAME_PART`), así que `Pasajero` no es `pasaje` + `ro`.
+ */
+const VIA_KEYWORD = `(?:${anyCaseAlternation(["calle", "avenida", "pasaje", "boulevard", "diagonal"])}|(?:${anyCaseAlternation(["avda", "av", "pje", "bv"])})\\.?)`;
+
+/*
+ * Palabra de domicilio: NO forma parte del match, va en un lookbehind. Termina
+ * en «en» y en el espacio que la separa del nombre, para que el match empiece
+ * en la primera palabra de la calle. Como la vía, empieza palabra.
+ */
+const DOMICILE_PHRASE = `${WORD_START}(?:${anyCase("domicilio")}(?:\\s{1,2}(?:${anyCaseAlternation(["real", "legal", "procesal", "especial", "constituido"])}))?|${anyCase("domiciliad")}[OoAa]|${anyCase("sit")}[OoAa])\\s{1,2}${anyCase("en")}\\s{1,2}`;
+
+/*
+ * Una palabra del nombre: empieza con mayúscula (apóstrofo interno y punto
+ * final opcionales), o es un número de 1 a 4 dígitos con `°`/`º` opcional, o es
+ * un conector. Los conectores se listan solo con la inicial en minúscula: con
+ * la inicial en mayúscula (`De`, `DEL`, `Y`) ya los acepta la primera
+ * alternativa, así que el lenguaje es el mismo que «conector en cualquier
+ * escritura» y cada palabra se puede leer de una sola manera.
+ */
+const NAME_WORD = String.raw`(?:\p{Lu}[\p{L}'’]*\.?|\d{1,4}[°º]?|d[Ee][Ll]?|l[Aa][Ss]?|l[Oo][Ss]|y|e)`;
+
+/*
+ * La altura (obligatoria): el «número candidato» de NER_Engine.md caso 34
+ * (ADR-212). De 1 a 5 dígitos, con conector opcional delante, sin continuar
+ * como fecha, importe o rango (dígito, barra, o punto/coma/guion con dígito).
+ */
+const STREET_NUMBER_CONNECTOR = `(?:${anyCase("n")}[°º]|${anyCase("no")}\\.|${anyCase("nro")}\\.?|${anyCase("n")}[úuÚU]${anyCase("mero")}|${anyCase("al")})`;
+const STREET_NUMBER = String.raw`\s{1,2}(?:${STREET_NUMBER_CONNECTOR}\s{0,2})?\d{1,5}(?!\d|\/|[.,\-‐‑–—]\d)`;
+
+/*
+ * Costo acotado (ADR-217 §5): el patrón está anclado en la palabra clave y el
+ * nombre tiene tope de seis palabras, perezoso (la menor cantidad que llegue a
+ * una altura). Cada palabra se puede leer de una sola manera, así que el
+ * retroceso por palabra clave es una cota constante.
+ */
+const ADDRESS_KEYWORD_PATTERN = new RegExp(
+  `${WORD_START}${VIA_KEYWORD}(?:\\s{1,2}${NAME_WORD}){1,6}?${STREET_NUMBER}` +
+    `|(?<=${DOMICILE_PHRASE})${NAME_WORD}(?:\\s{1,2}${NAME_WORD}){0,5}?${STREET_NUMBER}`,
+  "gu",
+);
 
 export const DEFAULT_PATTERNS_AR: ReadonlyArray<RegexPattern> = [
   {
@@ -492,5 +565,34 @@ export const DEFAULT_PATTERNS_AR: ReadonlyArray<RegexPattern> = [
     checksum: firstNameIsInLexicon,
     normalizer: flipCaption,
     maskFormat: "XXXXX XXXXX",
+  },
+  {
+    /*
+     * ADR-217 / caso 36 — una dirección con palabra clave es un patrón. El
+     * modelo de nombres no marca todas las calles, y cuando no la marca quedan
+     * a la vista la calle y la altura. Empieza en una palabra de vía («calle»,
+     * «Av.»), que forma parte del valor, o justo después de una palabra de
+     * domicilio («domicilio en»), que no; toma de una a seis palabras de nombre
+     * y termina en la altura, que es obligatoria. Las piezas están armadas
+     * arriba, en `ADDRESS_KEYWORD_PATTERN`.
+     *
+     * Una sola regla para las tres escrituras (normal, mayúsculas con tildes y
+     * sin tildes): en mayúsculas todas las palabras empiezan con mayúscula, así
+     * que el patrón tapa de más cuando una palabra de vía se usa como palabra
+     * común con un número cerca (`LA CALLE ESTUVO CORTADA 3 HORAS` →
+     * `CALLE ESTUVO CORTADA 3`). Es un costo aceptado por el mantenedor
+     * (ADR-217, «Lo que se tapa de más») y está fijado en un test.
+     *
+     * `normalizeEntityValue` es la misma función que usa `ner-engine` para una
+     * dirección: el mismo tramo detectado por los dos motores tiene la misma
+     * identidad para el agrupador. Va última en la tabla; el match más largo
+     * (caso 10) hace que una patente contenida («MAR 450» en «AVENIDA DEL MAR
+     * 450») no se emita.
+     */
+    id: "address-keyword-ar",
+    entityType: EntityType.Address,
+    pattern: ADDRESS_KEYWORD_PATTERN,
+    normalizer: normalizeEntityValue,
+    maskFormat: "XXXXXX XXX",
   },
 ];

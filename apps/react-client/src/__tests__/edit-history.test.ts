@@ -14,8 +14,7 @@ vi.mock("../core-adapter/index.js", () => ({ getCore: () => ({}) }));
 
 const { discardLastEdit, UNDO_SHORTCUT_HINT, withUndoAction } =
   await import("../components/entities/editHistory.js");
-const { removeConfirmMessage, removedToastText } =
-  await import("../components/entities/undoableEdits.js");
+const { removedToastText } = await import("../components/entities/undoableEdits.js");
 const { useHistoryStore } = await import("../core-adapter/history.js");
 
 /**
@@ -305,12 +304,6 @@ describe("Eliminar entidad (ADR-171 §5)", () => {
       title: "Eliminaste «Banco Nación»",
       description: "Ya no está en la lista ni se va a ocultar",
     });
-  });
-
-  it("la confirmación nombra la entidad y avisa que queda a la vista", () => {
-    const message = removeConfirmMessage("Banco Nación");
-    expect(message).toContain("«Banco Nación»");
-    expect(message).toContain("queda a la vista en el documento exportado");
   });
 });
 

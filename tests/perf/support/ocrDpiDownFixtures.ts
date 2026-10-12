@@ -38,28 +38,38 @@ export async function buildSyntheticSource(id: SyntheticCorpusId): Promise<Synth
   return id === "SR" ? buildSrSource() : buildPageSource(id);
 }
 
-/** Opciones de rasterizado de un corpus: 300 dpi, y giros o degradación si el corpus los lleva. */
-export function rasterizeOptions(truth: CorpusTruth): ScannedFixtureOptions {
+/**
+ * Opciones de rasterizado de un corpus: a `nativeDpi` (300 por defecto, el de la campaña de DPI
+ * descendente), y giros o degradación si el corpus los lleva. La escala entra en el hash del cache.
+ */
+export function rasterizeOptions(
+  truth: CorpusTruth,
+  nativeDpi: number = NATIVE_DPI,
+): ScannedFixtureOptions {
   return {
-    scale: NATIVE_DPI / 72,
+    scale: nativeDpi / 72,
     ...(truth.rotations === null ? {} : { rotations: truth.rotations }),
     ...(truth.degradation === null ? {} : { degradation: truth.degradation }),
   };
 }
 
-export function fixtureCacheKey(truth: CorpusTruth): string {
+/** El DPI nativo forma parte de la clave: a 300 es la de siempre, así no se invalidan los fixtures cacheados. */
+export function fixtureCacheKey(truth: CorpusTruth, nativeDpi: number = NATIVE_DPI): string {
   const degradation =
     truth.degradation === null ? "" : `-${truth.degradation.recipe}-s${truth.degradation.seed}`;
   const rotations = truth.rotations === null ? "" : `-rot${truth.rotations.join("_")}`;
-  return `ocr-dpi-down-${truth.corpus.toLowerCase()}-fs${truth.fontSize}${degradation}${rotations}-${NATIVE_DPI}dpi`;
+  return `ocr-dpi-down-${truth.corpus.toLowerCase()}-fs${truth.fontSize}${degradation}${rotations}-${nativeDpi}dpi`;
 }
 
-export async function prepareSynthetic(id: SyntheticCorpusId): Promise<PreparedCorpus> {
+export async function prepareSynthetic(
+  id: SyntheticCorpusId,
+  nativeDpi: number = NATIVE_DPI,
+): Promise<PreparedCorpus> {
   const source = await buildSyntheticSource(id);
   const raster = await getOrGenerateScannedFixture(
-    fixtureCacheKey(source.truth),
+    fixtureCacheKey(source.truth, nativeDpi),
     source.bytes,
-    rasterizeOptions(source.truth),
+    rasterizeOptions(source.truth, nativeDpi),
   );
   const buffer = Buffer.from(raster.buffer);
   return {

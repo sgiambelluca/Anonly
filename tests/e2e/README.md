@@ -64,9 +64,16 @@ Spec cerrado el 2026-10-05 en
 Primera implementación entregada y **sin aprobar**: 20/21 tests pasan en
 Windows, cero salteados. Hallazgos y correcciones en
 [`ADR148_Revision_2026-10-05.md`](../../docs/roadmap/hardening/ADR148_Revision_2026-10-05.md).
-La segunda revisión de Sol 6.1 sigue en REJECTED: el fixture mixed
-contradice el mínimo de ADR-065 y necesita resolver su política;
+La segunda revisión de Sol 6.1 fue REJECTED: el fixture mixed
+contradecía el mínimo de ADR-065 y necesitaba resolver su política;
 [`informe y decisión humana`](../../docs/roadmap/hardening/ADR148_Revision_Sol61_2026-10-05.md).
+Ese hallazgo quedó resuelto por ADR-203: cierre histórico APPROVED,
+21/21 Windows/macOS y CI verde, con la política vigente de 100 pt
+([cierre](../../docs/roadmap/hardening/ADR148_Cierre_ADR203_2026-10-05.md)).
+La ampliación del 2026-10-10 conserva esas 21 filas y agrega renglón
+repintado con etiqueta larga y tinta tenue: **23/23 localmente, cero fallos,
+salteados o flaky**, revisión del lote pendiente
+([evidencia](../../docs/roadmap/hardening/Export_Gate_Ampliacion_2026-10-10.md)).
 Requiere Electron, motores reales, OCR verificador independiente sobre los
 bytes finales y controles del original. El test de píxeles
 `scanned-rotated-export.spec.ts` aporta un antecedente, pero no cubre ese

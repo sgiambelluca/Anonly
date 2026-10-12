@@ -6,7 +6,7 @@
     "modelId": "ner-model@263e82c06569c8c2ac46238a7ae5107598934234",
     "modelHash": "4e83fc01de454a3aee413e84842bb6ab7c0841aca21880ec6017d7aaf5a2cfcb",
     "effectiveConfig": {
-      "performancePreset": "auto",
+      "performancePreset": "medium",
       "ner": {
         "enabled": true
       },
@@ -14,7 +14,7 @@
         "languages": ["spa", "eng"]
       }
     },
-    "commit": "3aac21fa609fe7cdb4dcdf35eea6e1d78ffc51ea"
+    "commit": "test: la linea de base guarda el encabezado del commit y la branch (branch hardening/confianza-1.0.x)"
   },
   "documents": [
     {
@@ -34,8 +34,8 @@
           "id": "doc-001:0:ADDRESS:maipu 1434#0",
           "entityType": "ADDRESS",
           "pageIndex": 0,
-          "covered": false,
-          "typedCovered": false
+          "covered": true,
+          "typedCovered": true
         },
         {
           "id": "doc-001:0:DNI:46.578.630#0",
@@ -141,8 +141,8 @@
           "id": "doc-003:0:ADDRESS:belgrano 5983#0",
           "entityType": "ADDRESS",
           "pageIndex": 0,
-          "covered": false,
-          "typedCovered": false
+          "covered": true,
+          "typedCovered": true
         },
         {
           "id": "doc-003:1:PLATE:da 004 dd#0",
@@ -319,8 +319,8 @@
           "id": "doc-006:1:ADDRESS:pueyrredon 9741#0",
           "entityType": "ADDRESS",
           "pageIndex": 1,
-          "covered": false,
-          "typedCovered": false
+          "covered": true,
+          "typedCovered": true
         },
         {
           "id": "doc-006:1:DNI:50.905.893#0",
@@ -415,8 +415,8 @@
           "id": "doc-011:0:ADDRESS:pueyrredon 2584#0",
           "entityType": "ADDRESS",
           "pageIndex": 0,
-          "covered": false,
-          "typedCovered": false
+          "covered": true,
+          "typedCovered": true
         },
         {
           "id": "doc-011:0:DATE:09/09/2018#0",

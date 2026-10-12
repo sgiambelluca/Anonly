@@ -73,7 +73,11 @@ export function removedToastText(canonicalValue: string): {
   };
 }
 
-/** El texto del `ConfirmDialog` de "Eliminar entidad" (ADR-171 §5). */
-export function removeConfirmMessage(canonicalValue: string): string {
-  return `«${canonicalValue}» sale de la lista y su texto queda a la vista en el documento exportado. Si un nuevo análisis lo vuelve a encontrar, sigue eliminada.`;
+/**
+ * Toast de un cambio de modo que descarta el texto que el usuario había
+ * escrito a mano (`Components.md` §3.11): lo usan la fila
+ * (`ReplacementModeSelect`) y "Tapar con negro" del aviso de espacio justo.
+ */
+export function discardedTextToastText(canonicalValue: string): string {
+  return `Se descartó el texto que habías escrito para ${canonicalValue}.`;
 }

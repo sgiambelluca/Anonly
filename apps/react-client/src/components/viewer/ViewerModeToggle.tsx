@@ -20,11 +20,12 @@
  * desactivado", que no es lo que pasa acá.
  */
 
-import { PipelineStage } from "@anonly/anonymization-core";
 import { useEffect } from "react";
 
 import { usePipelineStore } from "../../store/pipeline.store.js";
 import { useViewerStore, type ViewerKind } from "../../store/viewer.store.js";
+
+import { isAnonymizedAvailable } from "./anonymizedAvailability.js";
 
 const LABEL: Readonly<Record<ViewerKind, string>> = {
   original: "Original",
@@ -32,14 +33,6 @@ const LABEL: Readonly<Record<ViewerKind, string>> = {
 };
 
 const DISABLED_HINT = "Disponible cuando termine el análisis";
-
-/**
- * `Done` entra junto con `Ready`: tras exportar, el documento sigue abierto y
- * el preview sigue siendo válido (mismo criterio que `exportButtonVisibility`).
- */
-function isAnonymizedAvailable(stage: PipelineStage): boolean {
-  return stage === PipelineStage.Ready || stage === PipelineStage.Done;
-}
 
 export function ViewerModeToggle() {
   const mode = useViewerStore((state) => state.mode);

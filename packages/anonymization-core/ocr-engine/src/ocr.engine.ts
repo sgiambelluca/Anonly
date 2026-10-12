@@ -831,17 +831,21 @@ export class OcrEngine implements IEngine {
     let reading = firstPass.reading;
     const inkRatio = firstPass.inkRatio;
 
-    // ── Pasos 2-4 (ADR-190 §2/§3): solo páginas con tinta (caso 46: una
-    // página en blanco o de puro ruido no dispara ningún reintento). Las
-    // regiones (ADR-065) siguen la misma cadena, PERO sin el paso 4 — un
-    // recorte de región ya viene de un ráster a la resolución configurada. ──
+    // ── Pasos 2-4 (ADR-190 §2/§3): la cadena general requiere tinta en el
+    // umbral vigente; RC también recupera una primera lectura vacía con tinta
+    // positiva y sin veredicto OSD. Blanco exacto y ruido bajo umbral con
+    // lectura no vacía siguen sin activar RC. Las regiones (ADR-065) siguen
+    // la cadena general, pero nunca hacen upscale. ──
     if (
       !isRegion &&
       !firstPass.osdHadVerdict &&
-      (isReliableReading(reading.words) || inkRatio >= INK_PRESENT_RATIO)
+      (isReliableReading(reading.words) ||
+        inkRatio >= INK_PRESENT_RATIO ||
+        (reading.words.length === 0 && inkRatio > 0))
     ) {
-      // ADR-190 §2 enmienda: sin veredicto OSD, una primera lectura confiable
-      // puede ser basura de las franjas. Ensayar los tres giros con el mismo
+      // ADR-190 §2 y RC: sin veredicto OSD, una primera lectura confiable
+      // puede ser basura de las franjas; una lectura vacía con tinta positiva
+      // también merece recuperación. Ensayar los tres giros con el mismo
       // ráster/DPI y priorizar confianza de página para no premiar márgenes.
       for (const angle of [90, 180, 270] as const) {
         const attempt = await this.tryRecognizeAt(angle, basePayload, ctx, timeoutMs);

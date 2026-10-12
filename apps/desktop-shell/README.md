@@ -52,10 +52,11 @@ la app recalcula el hash y valida la firma antes de que `electron-updater`
 acepte el instalador (ADR-137). Una metadata ausente, inválida o perteneciente
 a otro artefacto falla cerrado.
 
-Esto no autentica la primera instalación. Hasta que llegue SignPath, Windows
-sigue mostrando un editor no verificado y SmartScreen puede advertir al
-usuario. Cuando exista Authenticode, el mismo callback exigirá primero
-Ed25519 y después la firma del certificado: son garantías complementarias.
+Esto no autentica la primera instalación. El instalador no lleva Authenticode
+(SignPath rechazó la postulación; `08_Security_Model.md` §2.3), así que Windows
+muestra un editor no verificado y SmartScreen puede advertir al usuario. Si
+alguna vez existe Authenticode, el mismo callback exigirá primero Ed25519 y
+después la firma del certificado: son garantías complementarias.
 
 Las privadas de las dos plataformas son secrets de Actions. No están en el
 repositorio, pero quien controle un workflow con acceso a esos secrets podría

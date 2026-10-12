@@ -181,6 +181,8 @@ export interface RunCollectorOptions {
    * salir de la app hacia el reporte.
    */
   readonly captureOcrWords: boolean;
+  /** M-V1 opt-in: preserve observed metrics if failure precedes the work panel. */
+  readonly allowFailedRunReport?: boolean;
 }
 
 export async function installRunCollector(
@@ -922,7 +924,13 @@ async function runImport(
 
   await page.locator('input[type="file"]').setInputFiles(file);
   await waitForRunSettled(page, runTimeoutMs);
-  await page.getByRole("button", { name: "Cerrar documento" }).waitFor({ state: "visible" });
+  const preserveFailedRun =
+    collectorOptions?.allowFailedRunReport === true && (await readRun(page)).failedAt !== undefined;
+  if (!preserveFailedRun)
+    await page.getByRole("button", { name: "Cerrar documento" }).waitFor({ state: "visible" });
+  const panelVisible =
+    !preserveFailedRun ||
+    (await page.getByRole("button", { name: "Cerrar documento" }).isVisible());
   await page.waitForTimeout(SETTLE_GRACE_MS);
   await sampler.sampleOnce();
   // Heap-por-target al asentar (ADR-159 §2) — igual que el `sampleOnce()` de
@@ -1019,7 +1027,7 @@ async function runImport(
     ocrDurationMs:
       ocrStartedAtMs === null || ocrFinishedAtMs === null ? null : ocrFinishedAtMs - ocrStartedAtMs,
     readyDurationMs: durations.readyDurationMs,
-    panelVisible: true,
+    panelVisible,
     rssPeakDuringOcrBytes: ocrSamples.length === 0 ? null : peakSumBytes(ocrSamples),
     rssPeakGlobalBytes: globalPeakBytes,
     processPeakRssBytes,
@@ -1233,6 +1241,40 @@ function lastSettledWindow(
   return settled ? window : undefined;
 }
 
+/** One cold import with the same samplers and cadence as measureProfile.
+ * Leaves the document open for export; the caller owns the fresh Electron app.
+ */
+export async function measureColdImport(
+  page: Page,
+  electronApp: ElectronApplication,
+  userDataDir: string,
+  file: E2eFilePayload,
+  runTimeoutMs = 180_000,
+  extraCollectors: ReadonlyArray<(page: Page) => Promise<void>> = [],
+): Promise<RunReport> {
+  const sampler = startMemorySampling(electronApp, SAMPLE_INTERVAL_MS);
+  let heapSampler: HeapSampler | undefined;
+  try {
+    heapSampler = await startHeapSampling(userDataDir);
+    const baseline = await sampler.sampleOnce();
+    return await runImport(
+      page,
+      file,
+      sampler,
+      heapSampler,
+      "cold",
+      baseline.sumWorkingSetSizeBytes,
+      runTimeoutMs,
+      extraCollectors,
+      undefined,
+      { captureOcrWords: false, allowFailedRunReport: true },
+    );
+  } finally {
+    sampler.stop();
+    heapSampler?.stop();
+  }
+}
+
 export async function measureProfile(
   page: Page,
   electronApp: ElectronApplication,
@@ -1257,6 +1299,8 @@ export async function measureProfile(
   nativeMemoryIntervalMs?: number,
   /** Opt-in post-close observation window, used to cover the 15/60s idle policies. */
   nativeRestDurationMs = 0,
+  /** Opt-in completed-run handoff before close: preserve observed metrics if a later operation fails. */
+  postRunReport?: (report: RunReport) => void | Promise<void>,
 ): Promise<ProfileReport> {
   const sampler = startMemorySampling(electronApp, sampleIntervalMs);
   let nativeSampler: NativeMemorySampler | undefined;
@@ -1290,6 +1334,7 @@ export async function measureProfile(
       collectorOptions,
     );
 
+    await postRunReport?.(cold);
     await closeDocument(page);
     // Línea de base CALIENTE: los modelos que cargó la corrida fría siguen
     // retenidos (ADR-080 idle-dispose) y ya no hay documento — es la línea
@@ -1314,6 +1359,7 @@ export async function measureProfile(
       collectorOptions,
     );
     const hot: RunReport = { ...hotRun, hotBaselineSettled };
+    await postRunReport?.(hot);
     await closeDocument(page);
     const nativeRestStartedAtMs = nativeSampler === undefined ? undefined : Date.now();
     if (nativeSampler !== undefined) {

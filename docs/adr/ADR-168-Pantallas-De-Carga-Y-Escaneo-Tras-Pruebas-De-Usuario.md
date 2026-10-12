@@ -2,7 +2,7 @@
 
 # ADR-168 — Pantallas de carga y escaneo tras las pruebas de usuario
 
-- **Estado**: Accepted
+- **Estado**: Accepted — **modificado por ADR-216** (§1: la versión del pie pasa a ser un botón que abre "Novedades")
 - **Fecha**: 2026-09-23
 - **Decidido por**: El humano, sobre las pruebas de usuario de la 0.9.2 y el lienzo de diseño
   "Anonly — Nueva pantalla inicial" (páginas *Inicio y carga*).

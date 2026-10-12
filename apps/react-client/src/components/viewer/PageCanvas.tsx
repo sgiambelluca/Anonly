@@ -22,20 +22,33 @@
  * de `pageLayout.ts` (no hay dimensiones de página reales expuestas por el
  * Core al cliente, ver esa nota en `pageLayout.ts`).
  *
+ * **Bajo Anonimizado nunca queda la original a la vista** (enmienda de ADR-213,
+ * `originalImageGuard.ts`): el canvas conserva sus píxeles hasta que el dibujo siguiente
+ * termina de cargar, así que al pasar a Anonimizado se vacía en el mismo commit si lo
+ * último que pintó fue una imagen original.
+ *
  * **Aviso de contenido no leído** (ADR-190 §4, `ui/Components.md` §5.4): ya no
  * se dibuja acá. Va en una franja fija justo arriba de la imagen, fuera de
  * ella (`UnreadablePageStrip`), para no tapar el contenido que pide revisar.
  */
 
 import { ImageOffIcon } from "lucide-react";
-import { memo, useEffect, useRef } from "react";
+import { memo, useEffect, useLayoutEffect, useRef } from "react";
+
+import type { ViewerKind } from "../../store/viewer.store.js";
 
 import { shouldReassignCanvasDimensions } from "./canvasDimensions.js";
+import { mustClearOriginalImage } from "./originalImageGuard.js";
 
 export interface PageCanvasProps {
   readonly pageIndex: number;
   readonly kind: "original" | "anonymized";
   readonly blobUrl?: string;
+  /**
+   * De qué lado es la imagen de `blobUrl`. Es `kind` salvo mientras la página sostiene la
+   * del otro lado (ADR-213 §4, solo hacia Original). Sirve para saber qué quedó pintado.
+   */
+  readonly imageKind?: ViewerKind;
   readonly width: number;
   readonly height: number;
   /**
@@ -49,8 +62,35 @@ export interface PageCanvasProps {
 /** Gris de skeleton (`--color-border` / `bg-tertiary`, `ui/Components.md` §10). */
 const SKELETON_FILL = "#e5e7eb";
 
-function PageCanvasImpl({ pageIndex, kind, blobUrl, width, height, failed }: PageCanvasProps) {
+function PageCanvasImpl({
+  pageIndex,
+  kind,
+  blobUrl,
+  imageKind,
+  width,
+  height,
+  failed,
+}: PageCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  // De qué lado fue la última imagen que el canvas dibujó (`null`: vacío o estado de carga).
+  const paintedKindRef = useRef<ViewerKind | null>(null);
+  const sourceKind = imageKind ?? kind;
+
+  // Antes de que el navegador pinte el cambio de vista: si el canvas todavía muestra una
+  // imagen original y ahora se mira Anonimizado, se vacía (estado de carga). Es un
+  // `useLayoutEffect` a propósito: un efecto común puede correr después del primer cuadro.
+  useLayoutEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || !mustClearOriginalImage({ viewing: kind, painted: paintedKindRef.current })) {
+      return;
+    }
+    const context = canvas.getContext("2d");
+    if (context) {
+      context.fillStyle = SKELETON_FILL;
+      context.fillRect(0, 0, canvas.width, canvas.height);
+    }
+    paintedKindRef.current = null;
+  }, [kind]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -76,6 +116,7 @@ function PageCanvasImpl({ pageIndex, kind, blobUrl, width, height, failed }: Pag
     if (blobUrl === undefined) {
       context.fillStyle = SKELETON_FILL;
       context.fillRect(0, 0, canvas.width, canvas.height);
+      paintedKindRef.current = null;
       return;
     }
 
@@ -89,18 +130,20 @@ function PageCanvasImpl({ pageIndex, kind, blobUrl, width, height, failed }: Pag
       if (!active) return;
       context.clearRect(0, 0, canvas.width, canvas.height);
       context.drawImage(image, 0, 0, canvas.width, canvas.height);
+      paintedKindRef.current = sourceKind;
     };
     image.onerror = () => {
       if (!active) return;
       context.fillStyle = SKELETON_FILL;
       context.fillRect(0, 0, canvas.width, canvas.height);
+      paintedKindRef.current = null;
     };
     image.src = blobUrl;
 
     return () => {
       active = false;
     };
-  }, [blobUrl, width, height]);
+  }, [blobUrl, width, height, sourceKind]);
 
   const label = `Página ${pageIndex + 1}, ${kind === "original" ? "original" : "anonimizado"}`;
 

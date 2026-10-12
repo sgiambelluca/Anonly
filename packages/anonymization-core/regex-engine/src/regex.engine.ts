@@ -23,7 +23,8 @@ import {
   type WordSpan,
 } from "@anonly/shared";
 
-import { scanEmailDefault } from "./email-scanner.js";
+import { normalizeEmailReadWithQ, scanEmailReadWithQ } from "./email-q-scanner.js";
+import { scanEmailDefault, type EmailMatchSpan } from "./email-scanner.js";
 import { DEFAULT_PATTERNS_AR } from "./patterns/default-ar.js";
 import { RegexInvalidPatternError } from "./regex.errors.js";
 import type {
@@ -208,8 +209,13 @@ function passesRunGuard(text: string, match: RawMatch): boolean {
  * un separador de corrida válido (ADR-075 §2), así que el recorte no cambia
  * qué se detecta: solo qué dice el valor.
  */
-function buildRawMatch(pattern: RegexPattern, rawValue: string, startIndex: number): RawMatch {
-  const normalizedValue = pattern.normalizer(rawValue);
+function buildRawMatch(
+  pattern: RegexPattern,
+  rawValue: string,
+  startIndex: number,
+  normalizer: (value: string) => string = pattern.normalizer,
+): RawMatch {
+  const normalizedValue = normalizer(rawValue);
   const checksumPassed = pattern.checksum ? pattern.checksum(normalizedValue) : true;
   return {
     patternId: pattern.id,
@@ -247,11 +253,100 @@ function runPattern(pattern: RegexPattern, text: string): RawMatch[] {
   return results;
 }
 
-function runEmailDefaultPattern(pattern: RegexPattern, text: string): RawMatch[] {
-  return scanEmailDefault(text).map(({ startIndex, endIndexExclusive }) => {
-    const rawValue = text.slice(startIndex, endIndexExclusive);
-    return buildRawMatch(pattern, rawValue, startIndex);
-  });
+/*
+ * Caso 35 (ADR-211): de los spans de la forma con `Q`, se conservan los que
+ * cumplen la condición de OCR —todas las `Word` que el span abarca tienen
+ * `source: "ocr"`— y se descartan los que se superponen con un email con `@`.
+ *
+ * "Las Word que el span abarca" son las que tienen algún carácter dentro del
+ * span, la misma regla con la que `mapSpanToWords` arma el `wordSpan` de la
+ * ocurrencia (el espacio entre dos palabras no es una `Word`). Un span sin
+ * ninguna `Word` no se acepta: sin palabras no hay origen que demostrar.
+ *
+ * Los spans de cada lista vienen en orden y sin superposición, así que los dos
+ * recorridos son de una sola pasada (costo lineal en palabras y spans).
+ */
+function keepOcrOnlySpans(
+  words: ReadonlyArray<Word>,
+  spans: ReadonlyArray<EmailMatchSpan>,
+): EmailMatchSpan[] {
+  const offsets = computeWordOffsets(words);
+  const kept: EmailMatchSpan[] = [];
+  let firstCandidate = 0;
+
+  for (const span of spans) {
+    for (;;) {
+      const offset = offsets[firstCandidate];
+      if (offset === undefined || offset.end > span.startIndex) break;
+      firstCandidate++;
+    }
+
+    let coveredWords = 0;
+    let allOcr = true;
+    for (let index = firstCandidate; index < offsets.length; index++) {
+      const offset = offsets[index];
+      if (offset === undefined || offset.start >= span.endIndexExclusive) break;
+      coveredWords++;
+      if (words[index]?.source !== "ocr") {
+        allOcr = false;
+        break;
+      }
+    }
+    if (allOcr && coveredWords > 0) kept.push(span);
+  }
+  return kept;
+}
+
+function dropOverlappingSpans(
+  candidates: ReadonlyArray<EmailMatchSpan>,
+  winners: ReadonlyArray<EmailMatchSpan>,
+): EmailMatchSpan[] {
+  const kept: EmailMatchSpan[] = [];
+  let firstWinner = 0;
+
+  for (const candidate of candidates) {
+    while (
+      firstWinner < winners.length &&
+      (winners[firstWinner]?.endIndexExclusive ?? Infinity) <= candidate.startIndex
+    ) {
+      firstWinner++;
+    }
+    const winner = winners[firstWinner];
+    if (winner !== undefined && winner.startIndex < candidate.endIndexExclusive) continue;
+    kept.push(candidate);
+  }
+  return kept;
+}
+
+/*
+ * El email default: la búsqueda de ADR-181 (con `@`, sin cambios) y, después
+ * de ella, la forma con `Q` de ADR-211. Las dos se arman como `RawMatch` del
+ * mismo patrón (mismo tipo, mismo `maskFormat`); la segunda cambia solo el
+ * normalizador, que restituye la `@`.
+ */
+function runEmailDefaultPattern(pattern: RegexPattern, page: Page): RawMatch[] {
+  const text = page.text;
+  const regularSpans = scanEmailDefault(text);
+  const regularMatches = regularSpans.map(({ startIndex, endIndexExclusive }) =>
+    buildRawMatch(pattern, text.slice(startIndex, endIndexExclusive), startIndex),
+  );
+
+  const readWithQSpans = scanEmailReadWithQ(text);
+  if (readWithQSpans.length === 0) return regularMatches;
+
+  const acceptedSpans = dropOverlappingSpans(
+    keepOcrOnlySpans(page.words, readWithQSpans),
+    regularSpans,
+  );
+  const readWithQMatches = acceptedSpans.map(({ startIndex, endIndexExclusive }) =>
+    buildRawMatch(
+      pattern,
+      text.slice(startIndex, endIndexExclusive),
+      startIndex,
+      normalizeEmailReadWithQ,
+    ),
+  );
+  return [...regularMatches, ...readWithQMatches];
 }
 
 /*
@@ -760,7 +855,7 @@ export class RegexEngine implements IEngine {
           const patternMatches = isCustom
             ? runCustomPatternWithBudget(pattern, page.text, CUSTOM_PATTERN_BUDGET_MS, ctx.logger)
             : isEmailDefault
-              ? runEmailDefaultPattern(pattern, page.text)
+              ? runEmailDefaultPattern(pattern, page)
               : runPattern(pattern, page.text);
           rawMatches.push(...patternMatches);
         }

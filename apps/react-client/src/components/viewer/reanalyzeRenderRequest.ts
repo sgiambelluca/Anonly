@@ -22,19 +22,32 @@
  */
 
 import { rangeToPageIndices, type VisibleRange } from "./visibleRange.js";
+import { computeZoomRenderScale } from "./zoomRenderScale.js";
 
 export interface ReanalyzeRenderRequest {
   readonly pageIndices: ReadonlyArray<number>;
   readonly kind: "anonymized";
+  /**
+   * La escala del zoom vigente (`computeZoomRenderScale`). Sin ella el motor
+   * dibuja a `previewScale` (zoom 100 %) **y** la recuerda como escala vigente
+   * del lado anonimizado (ADR-189 §1): con zoom distinto de 100 %, la página
+   * quedaba borrosa tras el reanalyze, y las ediciones siguientes también.
+   */
+  readonly scale: number;
 }
 
 /**
  * Compone el pedido de render de un reanalyze: expande el `VisibleRange`
- * vigente a índices de página y fija `kind: "anonymized"` (ADR-056 §3).
+ * vigente a índices de página, fija `kind: "anonymized"` (ADR-056 §3) y pide la
+ * escala del zoom vigente.
  */
-export function computeReanalyzeRenderRequest(visible: VisibleRange): ReanalyzeRenderRequest {
+export function computeReanalyzeRenderRequest(
+  visible: VisibleRange,
+  zoom: number,
+): ReanalyzeRenderRequest {
   return {
     pageIndices: rangeToPageIndices(visible),
     kind: "anonymized",
+    scale: computeZoomRenderScale(zoom),
   };
 }
