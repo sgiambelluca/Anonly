@@ -1,5 +1,13 @@
 # @anonly/test-utils
 
+## 1.0.2
+
+### Patch Changes
+
+- Updated dependencies [1d0b02b]
+  - @anonly/shared@1.0.2
+  - @anonly/event-system@1.0.2
+
 ## 1.0.1
 
 ### Patch Changes
