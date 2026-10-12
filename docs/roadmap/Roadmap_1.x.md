@@ -112,6 +112,12 @@ Plan: [`Avisos_Y_Novedades_2026-10-08.md`](interaccion/Avisos_Y_Novedades_2026-1
 
 Lo primero, porque es lo que permite tocar la detección sin miedo.
 
+**Asignación del 2026-10-12:** el mantenedor solicita promover develop a
+main para preparar **1.0.2**, con Confianza y Avisos/novedades juntos.
+El [plan de preparación](hardening/Release_1.0.2_Preparacion_2026-10-12.md)
+distingue el PR solicitado de los requisitos restantes antes del tag.
+El número reemplaza la falta de asignación del registro histórico siguiente.
+
 **Decisión vigente del mantenedor (2026-10-10):** cerrar el bloque con RC
 y dejar la mejora de orientación SV/CP como **PENDIENTE DE DESARROLLO**,
 para retomarla cuando disponga de más PDF escaneados y pueda hacer mayores
