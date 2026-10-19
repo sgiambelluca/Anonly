@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap-indice | dependencias=roadmap/Version_1.0.md,roadmap/Roadmap_1.x.md,roadmap/Version_2.0.md,roadmap/Future_Ideas.md,roadmap/MVP.md,roadmap/hardening/Export_Verificado_ADR148_Plan.md,roadmap/hardening/ADR148_Revision_2026-10-05.md,roadmap/hardening/ADR148_Revision_Sol61_2026-10-05.md,roadmap/ocr/Regiones_Pequenas_Investigacion_Plan.md,adr/ADR-202-El-Minimo-De-Region-OCR-Se-Prueba-A-25pt-Antes-De-Adoptarlo.md,roadmap/ocr/Regiones_Pequenas_25pt_Experimento_Plan.md,roadmap/interaccion/Mejoras_Interaccion_2026-10-05.md,adr/ADR-204-La-Interaccion-Anonimizada-Usa-La-Geometria-Visible.md,adr/ADR-205-El-Resultado-Exportado-Pertenece-A-Una-Revision.md,adr/ADR-206-Una-Busqueda-Omitida-No-Confirma-La-Version.md,roadmap/hardening/Confianza_Cierre_2026-10-08.md,roadmap/hardening/Validar_Muestra_Diseno_2026-10-09.md,roadmap/mediciones/ocr/Costo_De_Verificar_Cuatro_Angulos_2026-10-09.md | audiencia=humanos+IA | fase=1.0.1 -->
+<!-- CONTEXT: scope=roadmap-indice | dependencias=roadmap/Plan_1.1.md,roadmap/Version_1.0.md,roadmap/Roadmap_1.x.md,roadmap/Version_2.0.md,roadmap/Future_Ideas.md,roadmap/MVP.md,roadmap/hardening/Export_Verificado_ADR148_Plan.md,roadmap/hardening/ADR148_Revision_2026-10-05.md,roadmap/hardening/ADR148_Revision_Sol61_2026-10-05.md,roadmap/ocr/Regiones_Pequenas_Investigacion_Plan.md,adr/ADR-202-El-Minimo-De-Region-OCR-Se-Prueba-A-25pt-Antes-De-Adoptarlo.md,roadmap/ocr/Regiones_Pequenas_25pt_Experimento_Plan.md,roadmap/interaccion/Mejoras_Interaccion_2026-10-05.md,adr/ADR-204-La-Interaccion-Anonimizada-Usa-La-Geometria-Visible.md,adr/ADR-205-El-Resultado-Exportado-Pertenece-A-Una-Revision.md,adr/ADR-206-Una-Busqueda-Omitida-No-Confirma-La-Version.md,roadmap/hardening/Confianza_Cierre_2026-10-08.md,roadmap/hardening/Validar_Muestra_Diseno_2026-10-09.md,roadmap/mediciones/ocr/Costo_De_Verificar_Cuatro_Angulos_2026-10-09.md | audiencia=humanos+IA | fase=1.0.1 -->
 
 # Roadmap — cómo está ordenada esta carpeta
 
@@ -13,6 +13,7 @@ consulta, salvo que su fila diga otra cosa.
 |---|---|
 | [`Version_1.0.md`](./Version_1.0.md) | Qué es la 1.0: qué trae, cómo se midió y qué limitaciones conocidas tiene |
 | [`Roadmap_1.x.md`](./Roadmap_1.x.md) | Qué sigue y en qué orden, versión por versión, y qué hay que decidir al llegar a cada una. **Es el documento que manda para planificar** |
+| [`Plan_1.1.md`](./Plan_1.1.md) | La 1.1: decisiones del mantenedor, ADR-219 a ADR-224 (aceptados), qué falta antes de implementar y los frentes |
 | [`Version_2.0.md`](./Version_2.0.md) | Lo que queda para una versión mayor |
 | [`Future_Ideas.md`](./Future_Ideas.md) | Ideas sin versión asignada |
 | [`MVP.md`](./MVP.md) | Cómo se llegó a la 1.0, hito por hito. Registro histórico: no se sigue actualizando |

@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap-1.x | dependencias=roadmap/Version_1.0.md,roadmap/Version_2.0.md,roadmap/Future_Ideas.md,roadmap/hitos/Post_Hito10.8_Pendientes.md,RELEASING.md,00_Project_Vision.md,architecture/08_Security_Model.md,adr/ADR-009-Export-Strategy.md,adr/ADR-059-Leyenda-Opcional-De-Marcadores.md,adr/ADR-148-Un-Export-Se-Verifica-Leyendo-El-PDF-Exportado.md,adr/ADR-190-Una-Pagina-Con-Tinta-No-Sale-Vacia-En-Silencio.md,roadmap/hardening/Export_Verificado_ADR148_Plan.md,roadmap/hardening/ADR148_Revision_2026-10-05.md,roadmap/hardening/ADR148_Revision_Sol61_2026-10-05.md,roadmap/ocr/Regiones_Pequenas_Investigacion_Plan.md,adr/ADR-202-El-Minimo-De-Region-OCR-Se-Prueba-A-25pt-Antes-De-Adoptarlo.md,roadmap/ocr/Regiones_Pequenas_25pt_Experimento_Plan.md,roadmap/interaccion/Mejoras_Interaccion_2026-10-05.md,adr/ADR-204-La-Interaccion-Anonimizada-Usa-La-Geometria-Visible.md,adr/ADR-205-El-Resultado-Exportado-Pertenece-A-Una-Revision.md,adr/ADR-206-Una-Busqueda-Omitida-No-Confirma-La-Version.md,roadmap/interaccion/Revision_ADR204_2026-10-07.md,roadmap/hardening/Confianza_1.0.x_Plan.md,roadmap/hardening/Confianza_Cierre_2026-10-08.md,adr/ADR-217-Una-Direccion-Con-Palabra-Clave-Es-Un-Patron.md,roadmap/mediciones/ner/Direcciones_Con_Palabra_Clave_2026-10-08.md,adr/ADR-210-El-Repintado-De-Linea-Desplaza-Los-Pixeles-Del-Renglon.md,adr/ADR-211-El-Email-Tolera-La-Arroba-Leida-Como-Q-En-Texto-De-OCR.md,adr/ADR-212-La-Direccion-Incluye-La-Altura-Que-La-Sigue.md,adr/ADR-213-Cambiar-De-Vista-No-Muestra-Una-Imagen-A-Otra-Escala.md,adr/ADR-214-La-Que-Pierde-Un-Conflicto-No-Se-Descarta-Si-Cubre-Mas-Texto.md,roadmap/mediciones/ocr/Emails_DPI_Nativo_2026-10-07.md,roadmap/mediciones/ner/Altura_De_Direcciones_2026-10-07.md,roadmap/distribucion/SignPath_Postulacion.md,architecture/08_Security_Model.md | audiencia=humanos+IA | fase=12 -->
+<!-- CONTEXT: scope=roadmap-1.x | dependencias=roadmap/Plan_1.1.md,adr/ADR-219-Un-Tipo-De-Entidad-Puede-Ser-Del-Usuario.md,adr/ADR-220-Un-Formato-Se-Arma-Con-Piezas-Y-Se-Recorre-En-Tiempo-Lineal.md,adr/ADR-221-Los-Formatos-Base-Salen-De-Un-Catalogo-Por-Pais.md,adr/ADR-222-Dos-Formatos-Que-Se-Pisan-Van-Al-Panel-De-Conflicto.md,adr/ADR-223-Los-Formatos-Se-Configuran-Desde-Inicio-Y-Viajan-En-Un-Archivo.md,adr/ADR-224-Lo-Que-La-1.1-Cambia-En-El-Panel-De-Entidades-Y-El-Visor.md,roadmap/Version_1.0.md,roadmap/Version_2.0.md,roadmap/Future_Ideas.md,roadmap/hitos/Post_Hito10.8_Pendientes.md,RELEASING.md,00_Project_Vision.md,architecture/08_Security_Model.md,adr/ADR-009-Export-Strategy.md,adr/ADR-059-Leyenda-Opcional-De-Marcadores.md,adr/ADR-148-Un-Export-Se-Verifica-Leyendo-El-PDF-Exportado.md,adr/ADR-190-Una-Pagina-Con-Tinta-No-Sale-Vacia-En-Silencio.md,roadmap/hardening/Export_Verificado_ADR148_Plan.md,roadmap/hardening/ADR148_Revision_2026-10-05.md,roadmap/hardening/ADR148_Revision_Sol61_2026-10-05.md,roadmap/ocr/Regiones_Pequenas_Investigacion_Plan.md,adr/ADR-202-El-Minimo-De-Region-OCR-Se-Prueba-A-25pt-Antes-De-Adoptarlo.md,roadmap/ocr/Regiones_Pequenas_25pt_Experimento_Plan.md,roadmap/interaccion/Mejoras_Interaccion_2026-10-05.md,adr/ADR-204-La-Interaccion-Anonimizada-Usa-La-Geometria-Visible.md,adr/ADR-205-El-Resultado-Exportado-Pertenece-A-Una-Revision.md,adr/ADR-206-Una-Busqueda-Omitida-No-Confirma-La-Version.md,roadmap/interaccion/Revision_ADR204_2026-10-07.md,roadmap/hardening/Confianza_1.0.x_Plan.md,roadmap/hardening/Confianza_Cierre_2026-10-08.md,adr/ADR-217-Una-Direccion-Con-Palabra-Clave-Es-Un-Patron.md,roadmap/mediciones/ner/Direcciones_Con_Palabra_Clave_2026-10-08.md,adr/ADR-210-El-Repintado-De-Linea-Desplaza-Los-Pixeles-Del-Renglon.md,adr/ADR-211-El-Email-Tolera-La-Arroba-Leida-Como-Q-En-Texto-De-OCR.md,adr/ADR-212-La-Direccion-Incluye-La-Altura-Que-La-Sigue.md,adr/ADR-213-Cambiar-De-Vista-No-Muestra-Una-Imagen-A-Otra-Escala.md,adr/ADR-214-La-Que-Pierde-Un-Conflicto-No-Se-Descarta-Si-Cubre-Mas-Texto.md,roadmap/mediciones/ocr/Emails_DPI_Nativo_2026-10-07.md,roadmap/mediciones/ner/Altura_De_Direcciones_2026-10-07.md,roadmap/distribucion/SignPath_Postulacion.md,architecture/08_Security_Model.md | audiencia=humanos+IA | fase=12 -->
 
 # Anonly — Roadmap 1.x
 
@@ -354,27 +354,80 @@ cierre. [Riesgo, evidencia y condiciones de retoma](ocr/Orientacion_SV_CP_Retoma
 
 ## 4. 1.1 — Detección a medida del usuario
 
-- **Patrones Regex propios**: interfaz para crear, editar y borrar patrones,
-  con prueba en vivo. El motor ya expone `addPattern` y `removePattern`
-  (`core/Regex_Engine.md` §6).
-- **Tipos de entidad definidos por el usuario**: nombre propio y formato de
-  marcador.
-- **Filtros en el árbol de entidades y búsqueda con regex** en el árbol.
-- **Panel de ayuda de atajos de teclado.**
-- **Tooltips enriquecidos en el visor**: valor original, modo, tipo y
-  cantidad de apariciones.
+**Definición funcional cerrada el 2026-10-19**, en dos sesiones con el
+mantenedor (2026-10-13 y 2026-10-19). ADR-219 a ADR-224 están aceptados
+desde el 2026-10-19, y los contratos y los specs de motor ya están
+escritos. El diseño de la interfaz lo hace el mantenedor más adelante. Todo el
+detalle está en [`Plan_1.1.md`](./Plan_1.1.md).
+
+- **Generador de formatos**, en lugar de patrones regex. El usuario no
+  escribe una regex: arma el formato con piezas (ADR-220). Un formato
+  propio puede ir bajo un tipo propio o bajo un tipo base que depende del
+  país. Los formatos base de pura forma se editan; los que tienen control
+  solo se prenden y apagan. Se abre solo desde la pantalla de inicio.
+- **Catálogos por país**: el mecanismo y Argentina. Un país activo, con
+  sus etiquetas y sus sintéticos (ADR-221). Chile y Uruguay salen en la
+  1.1.1 (§4bis).
+- **Tipos de entidad propios**, con nombre e identidad propios. Sus modos
+  son etiqueta, máscara y censura total, sin sintético. Los creados desde
+  inicio se guardan; los creados con un documento abierto son de ese
+  documento (ADR-219).
+- **«Nuevo tipo» con el documento abierto.** Si una entidad no entra en
+  ninguna categoría, el usuario crea una aparte, le pone nombre y la manda
+  ahí, al agregarla, al cambiarle el tipo o desde el panel de conflicto. Es
+  un tipo auxiliar: se pierde al cerrar el documento y no se guarda para
+  el próximo análisis. Reemplaza a «Custom», que deja de ofrecerse
+  (ADR-219 §5, ADR-224 §6).
+- **Dos formatos que se pisan van al panel de conflicto** cuando uno es
+  propio (ADR-222).
+- **Exportar e importar formatos**, para que un usuario experto arme
+  formatos y otros los usen (ADR-223).
+- **Filtros en el panel de entidades**: por formato, por modo, desactivadas
+  o con conflicto, y agregadas o editadas a mano (ADR-224).
+- **Panel de ayuda de atajos de teclado**, con los atajos que ya existen.
+- **Tooltips enriquecidos en el visor**: valor original, tipo, modo,
+  cantidad de apariciones y formato.
+
+**Decidido el 2026-10-19:** la **búsqueda con regex** en el árbol sale de la
+1.1 y del roadmap. La lupa y el buscador del panel no cambian (ADR-224 §1).
+
+**Lo que quedó resuelto de «Para decidir al llegar»**
+
+- Formatos base por país: un catálogo activo; Argentina en la 1.1, y Chile
+  y Uruguay en la 1.1.1 (ADR-221). El contenido de Chile y Uruguay se
+  investiga y se mide antes de escribirse (ADR-221 §6).
+- Dónde se guardan los formatos y si se exportan: en el equipo, en claro, y
+  se exportan e importan (ADR-223).
+- Cómo expresa un formato el generador y qué se configura de los
+  existentes (ADR-220).
+- Duplicados: un formato idéntico no se crea; uno que comparte textos avisa
+  y deja crear (ADR-220 §3).
+- Un patrón que cuelga el análisis: el generador se recorre en tiempo
+  lineal, y por construcción no puede colgarlo. Si un formato falla, el
+  análisis sigue y avisa (ADR-220 §2 y §6).
+- La guarda de corrida de ADR-075 §2 se aplica a los formatos propios, sin
+  excepción (ADR-220 §2).
+- Modos, agrupación y ciclo de vida de un tipo propio (ADR-219). La
+  pregunta de síntesis de `Future_Ideas.md` §5.5 queda fuera de la 1.1.
+
+## 4bis. 1.1.1 — Chile y Uruguay
+
+**Decidido por el mantenedor el 2026-10-19.** La 1.1 sale con Argentina
+sola, y los catálogos de Chile y Uruguay salen en la 1.1.1. Traen sus
+formatos, los nombres de sus tipos (por ejemplo, RUT) y sus generadores
+sintéticos. Con ellos aparecen el selector de país y «agregar desde otro
+país», que en la 1.1 quedan ocultos (ADR-221 §7).
+
+Por §1 correspondería a una versión menor. Va en un parche por esa
+decisión, como «Novedades» en la 1.0.2 (§2ter).
 
 **Para decidir al llegar**
 
-- Dónde se guardan los patrones del usuario y si se pueden exportar e
-  importar.
-- Un patrón mal escrito puede colgar el análisis. El email por defecto ya
-  necesitó un escáner lineal (ADR-181). Hay que decidir cómo se acota un
-  patrón del usuario.
-- La guarda de corrida de ADR-075 §2 también se aplica a los patrones del
-  usuario (`Future_Ideas.md` §5.8).
-- Qué es el valor sintético de un tipo definido por el usuario
-  (`Future_Ideas.md` §5.5). Hoy es un texto de relleno.
+- Las tablas de cada país: formatos, tipo de cada uno, nombres, controles,
+  máscaras y generadores. El mantenedor las aprueba con su medición antes
+  de escribirlas en los specs (ADR-221 §6).
+- No hay documentos reales de Chile ni de Uruguay: el informe dice qué sale
+  solo de sintéticos.
 
 ## 5. 1.2 — Varios documentos
 
@@ -506,7 +559,8 @@ ante la justicia…».
 
 ## 8. Decisiones del 2026-10-02 sobre los roadmaps anteriores
 
-- Filtros y búsqueda con regex en el árbol: 1.1 (§4).
+- Filtros en el árbol: 1.1 (§4). La búsqueda con regex se retiró el
+  2026-10-19 (ADR-224 §1).
 - Recall y precisión de NER como gate: 1.2 (§5).
 - Export con texto preservado y PDF/A: 1.3 (§6).
 - «Validar muestra»: se ubicó en 1.0.x el 2026-10-02; **retirada del roadmap
