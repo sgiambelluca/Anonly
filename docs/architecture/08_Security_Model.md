@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=seguridad | dependencias=00_Project_Vision.md,01_Technical_Architecture_Document.md,06_Pipeline.md,adr/ADR-130-El-Contenedor-De-Escritorio-Fija-El-Motor.md,adr/ADR-131-El-Actualizador-Es-La-Primera-Salida-De-Red.md,adr/ADR-132-El-Shell-Tiene-Su-Propio-Modelo-De-Seguridad.md,adr/ADR-137-Windows-Verifica-Actualizaciones-Con-Clave-Ed25519-Propia.md,adr/ADR-171-El-Usuario-Puede-Eliminar-Una-Entidad.md,adr/ADR-174-Un-Agregado-Manual-Que-Choca-Se-Resuelve-En-El-Momento.md,roadmap/hardening/Export_Verificado_ADR148_Plan.md,roadmap/hardening/ADR148_Revision_2026-10-05.md | audiencia=IA+humanos | fase=11.6 -->
+<!-- CONTEXT: scope=seguridad | dependencias=adr/ADR-219-Un-Tipo-De-Entidad-Puede-Ser-Del-Usuario.md,adr/ADR-220-Un-Formato-Se-Arma-Con-Piezas-Y-Se-Recorre-En-Tiempo-Lineal.md,adr/ADR-223-Los-Formatos-Se-Configuran-Desde-Inicio-Y-Viajan-En-Un-Archivo.md,00_Project_Vision.md,01_Technical_Architecture_Document.md,06_Pipeline.md,adr/ADR-130-El-Contenedor-De-Escritorio-Fija-El-Motor.md,adr/ADR-131-El-Actualizador-Es-La-Primera-Salida-De-Red.md,adr/ADR-132-El-Shell-Tiene-Su-Propio-Modelo-De-Seguridad.md,adr/ADR-137-Windows-Verifica-Actualizaciones-Con-Clave-Ed25519-Propia.md,adr/ADR-171-El-Usuario-Puede-Eliminar-Una-Entidad.md,adr/ADR-174-Un-Agregado-Manual-Que-Choca-Se-Resuelve-En-El-Momento.md,roadmap/hardening/Export_Verificado_ADR148_Plan.md,roadmap/hardening/ADR148_Revision_2026-10-05.md | audiencia=IA+humanos | fase=11.6 -->
 
 # Anonly — Modelo de Seguridad
 
@@ -342,7 +342,19 @@ Para evitar reidentificación por patrones:
 
 ### 10.2 localStorage / IndexedDB
 
-- `localStorage`: solo settings del usuario (idioma, modo default, performance preset). Nunca documentos ni datos sensibles.
+- `localStorage`: solo settings del usuario (idioma, modo default, performance preset) y, desde la 1.1, la **configuración de detección** (ADR-223 §3, clave `anonly:detection`). Nunca documentos ni datos sensibles.
+
+> **Configuración de detección (ADR-223 §3).** Se guardan en claro, en el equipo, el país activo, qué formatos base están apagados y las copias editadas, los tipos propios guardados, los formatos propios y las referencias a otros países. Son **definiciones**, no datos del documento. Lo que **nunca** se guarda:
+>
+> - un valor detectado, una aparición o cualquier contenido del documento;
+> - el texto de la prueba en vivo del generador (ADR-220 §3), que tampoco se loguea;
+> - un tipo creado con el documento abierto (ADR-219 §5), que muere al cerrarlo.
+>
+> **El riesgo residual es el texto fijo de un formato y las palabras de contexto**, que se guardan tal cual se escribieron. Lo acotan dos cosas: cada variante tiene que tener una pieza de caracteres, así que un formato no puede ser una lista de palabras (ADR-220 §1), y el generador avisa que lo que se escribe en un formato queda guardado. Se decidió no cifrarlo: son estructuras, y el cifrado queda para el glosario de la 1.4, que sí guarda valores originales.
+>
+> **El archivo de formatos** (ADR-223 §5) es el mismo contenido, en claro, elegido por el usuario. Al importar uno, la aplicación lo valida entero con las mismas reglas que una creación (`validateFormatsFile`), y como el generador no admite regex escrita a mano, un archivo de afuera no puede traer un patrón que cuelgue la aplicación (ADR-220 §2).
+>
+> «Borrar datos locales» (§10.1) sigue borrando solo los caches de modelos y WASM. Los formatos son configuración, como los settings.
 - `IndexedDB`: solo modelos y wasm cacheados. Nunca documentos.
 
 > **Memoria de reclasificación (ADR-085)**: cuando el usuario corrige el tipo de una entidad, el motor lo recuerda para que la corrección se propague a las ocurrencias que aparezcan después. Esa memoria incluye el **valor** corregido (`normalizedValue`), o sea contenido del documento — y por eso vive **solo en RAM, en la sesión de Grouping, por documento**, y se borra en `DOCUMENT_CLOSED`. **No** va a `localStorage` ni a `IndexedDB`: una lista de correcciones es un índice destilado de las entidades de la pericia (nombres de personas, organizaciones, direcciones), lo más sensible que se podría persistir. El costo aceptado es que reabrir el documento obliga a re-corregir (ADR-085, Consecuencias).
