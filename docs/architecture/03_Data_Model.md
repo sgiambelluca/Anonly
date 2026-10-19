@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=modelo-de-datos | dependencias=01_Technical_Architecture_Document.md,core/Contracts.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-043-RenderEngine-Reparto-Host-Worker-Kernel.md,adr/ADR-046-NerEngine-Pool-Propia-Kernel-Puro.md,adr/ADR-064-Palabras-De-OCR-En-Puntos.md,adr/ADR-065-OCR-Por-Region.md,adr/ADR-066-Texto-De-Anotaciones-Y-Reemplazo-Rotado.md,adr/ADR-067-Orden-De-Lectura-Por-Runs-Rotados.md,adr/ADR-074-Una-Entidad-Partida-En-Varias-Lineas.md,adr/ADR-109-La-Caja-De-Una-Palabra-Es-Su-Caja-De-Tinta.md,adr/ADR-110-El-Renglon-Es-Un-Grupo-No-Una-Coordenada.md,adr/ADR-141-La-Geometria-Se-Entrega-En-La-Pagina-Que-Se-Ve.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,adr/ADR-170-Las-Vistas-Previas-De-Edicion-Las-Calcula-El-Core.md,adr/ADR-171-El-Usuario-Puede-Eliminar-Una-Entidad.md,adr/ADR-172-Deshacer-Y-Rehacer-Exactos.md,adr/ADR-174-Un-Agregado-Manual-Que-Choca-Se-Resuelve-En-El-Momento.md,adr/ADR-175-Un-Choque-Manual-No-Queda-Colgado.md,adr/ADR-176-Un-Choque-Pendiente-Bloquea-El-Export.md,adr/ADR-204-La-Interaccion-Anonimizada-Usa-La-Geometria-Visible.md,adr/ADR-205-El-Resultado-Exportado-Pertenece-A-Una-Revision.md | audiencia=IA+humanos | fase=1 (fase 11: §6 gana la definición normativa del marco de coordenadas de `BoundingBox` — el de la página presentada, no el crudo de PDF — ADR-141 §1; fase 10.9: §7/§8/§12 `fragments` —la descomposición por línea de una ocurrencia que cruza un salto de renglón, ADR-074 §1—; §18 actualizado en fase 10: OcrPagePayload.imageData→ImageData y payloads de transporte LoadDocument/RasterizePage/ExportSave, ADR-036 §4; UnloadDocumentPayload, ADR-043 §4; NerPagePayload por batch + NerKernelSpan/NerKernelProgress, ADR-046; fase 10.5/10.6: §9 EntityGroup.personGender + PersonGender —ADR-060 §2—, §11 escalera de abreviaturas del placeholder —ADR-057 §1—, §18 RenderPagePayload.lineWords —ADR-058 §5—, ExportSavePayload.legendImage + MarkerLegendEntry/MarkerLegendRow + RenderLegendPayload —ADR-059 §3/§5/§6—, §19 ExportOptions.includeMarkerLegend —ADR-059 §1—; fase 10.8: §4 invariante de orden de lectura por runs rotados —ADR-067— y `ocrCompleted` relajado a `requiresOCR === false` con región —ADR-065 §7—, §4.1 `OcrRegion` nueva —ADR-065 §4—, §5 `Word.bbox.rotation` y aclaración de puntos de página para `source: "ocr"` —ADR-066 §6, ADR-064—, §6 `BoundingBox.rotation` —ADR-066 §6—, §18 `RasterizePagePayload.region` —ADR-065 §5—; fase 10.6: §9 `EntityGroup.personGender` —ADR-060 §2—, reescrita por ADR-069 §4/§6 —quién lo escribe, qué significa la ausencia, y que la elección del humano se recuerda aparte en `personGenderUserSet`, interno—; fase 11: §4 la clave de orden de lectura pasa a la línea de base, §5 `Word.bbox` es la caja de tinta también para `source: "pdf"` y §6 gana el invariante de que `y + height` es la línea de base —ADR-109 §1/§3—; §4 vuelve a cambiar: el orden de lectura deja de tener clave escalar y pasa a agrupar renglones —ADR-110 §1, supersede ADR-109 §3—); §18 `OcrPagePayload` lleva la imagen codificada y clonada en vez de `ImageData` transferida, fase 11 por ADR-158 §2/§5; §18 sincronizado con ADR-164 el 2026-09-30 —`OcrPagePayload.orientation` y `OcrOrientationPayload` en `WorkerJobPayload`— -->
+<!-- CONTEXT: scope=modelo-de-datos | dependencias=01_Technical_Architecture_Document.md,core/Contracts.md,adr/ADR-219-Un-Tipo-De-Entidad-Puede-Ser-Del-Usuario.md,adr/ADR-220-Un-Formato-Se-Arma-Con-Piezas-Y-Se-Recorre-En-Tiempo-Lineal.md,adr/ADR-222-Dos-Formatos-Que-Se-Pisan-Van-Al-Panel-De-Conflicto.md,adr/ADR-224-Lo-Que-La-1.1-Cambia-En-El-Panel-De-Entidades-Y-El-Visor.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-043-RenderEngine-Reparto-Host-Worker-Kernel.md,adr/ADR-046-NerEngine-Pool-Propia-Kernel-Puro.md,adr/ADR-064-Palabras-De-OCR-En-Puntos.md,adr/ADR-065-OCR-Por-Region.md,adr/ADR-066-Texto-De-Anotaciones-Y-Reemplazo-Rotado.md,adr/ADR-067-Orden-De-Lectura-Por-Runs-Rotados.md,adr/ADR-074-Una-Entidad-Partida-En-Varias-Lineas.md,adr/ADR-109-La-Caja-De-Una-Palabra-Es-Su-Caja-De-Tinta.md,adr/ADR-110-El-Renglon-Es-Un-Grupo-No-Una-Coordenada.md,adr/ADR-141-La-Geometria-Se-Entrega-En-La-Pagina-Que-Se-Ve.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,adr/ADR-170-Las-Vistas-Previas-De-Edicion-Las-Calcula-El-Core.md,adr/ADR-171-El-Usuario-Puede-Eliminar-Una-Entidad.md,adr/ADR-172-Deshacer-Y-Rehacer-Exactos.md,adr/ADR-174-Un-Agregado-Manual-Que-Choca-Se-Resuelve-En-El-Momento.md,adr/ADR-175-Un-Choque-Manual-No-Queda-Colgado.md,adr/ADR-176-Un-Choque-Pendiente-Bloquea-El-Export.md,adr/ADR-204-La-Interaccion-Anonimizada-Usa-La-Geometria-Visible.md,adr/ADR-205-El-Resultado-Exportado-Pertenece-A-Una-Revision.md | audiencia=IA+humanos | fase=1 (fase 11: §6 gana la definición normativa del marco de coordenadas de `BoundingBox` — el de la página presentada, no el crudo de PDF — ADR-141 §1; fase 10.9: §7/§8/§12 `fragments` —la descomposición por línea de una ocurrencia que cruza un salto de renglón, ADR-074 §1—; §18 actualizado en fase 10: OcrPagePayload.imageData→ImageData y payloads de transporte LoadDocument/RasterizePage/ExportSave, ADR-036 §4; UnloadDocumentPayload, ADR-043 §4; NerPagePayload por batch + NerKernelSpan/NerKernelProgress, ADR-046; fase 10.5/10.6: §9 EntityGroup.personGender + PersonGender —ADR-060 §2—, §11 escalera de abreviaturas del placeholder —ADR-057 §1—, §18 RenderPagePayload.lineWords —ADR-058 §5—, ExportSavePayload.legendImage + MarkerLegendEntry/MarkerLegendRow + RenderLegendPayload —ADR-059 §3/§5/§6—, §19 ExportOptions.includeMarkerLegend —ADR-059 §1—; fase 10.8: §4 invariante de orden de lectura por runs rotados —ADR-067— y `ocrCompleted` relajado a `requiresOCR === false` con región —ADR-065 §7—, §4.1 `OcrRegion` nueva —ADR-065 §4—, §5 `Word.bbox.rotation` y aclaración de puntos de página para `source: "ocr"` —ADR-066 §6, ADR-064—, §6 `BoundingBox.rotation` —ADR-066 §6—, §18 `RasterizePagePayload.region` —ADR-065 §5—; fase 10.6: §9 `EntityGroup.personGender` —ADR-060 §2—, reescrita por ADR-069 §4/§6 —quién lo escribe, qué significa la ausencia, y que la elección del humano se recuerda aparte en `personGenderUserSet`, interno—; fase 11: §4 la clave de orden de lectura pasa a la línea de base, §5 `Word.bbox` es la caja de tinta también para `source: "pdf"` y §6 gana el invariante de que `y + height` es la línea de base —ADR-109 §1/§3—; §4 vuelve a cambiar: el orden de lectura deja de tener clave escalar y pasa a agrupar renglones —ADR-110 §1, supersede ADR-109 §3—); §18 `OcrPagePayload` lleva la imagen codificada y clonada en vez de `ImageData` transferida, fase 11 por ADR-158 §2/§5; §18 sincronizado con ADR-164 el 2026-09-30 —`OcrPagePayload.orientation` y `OcrOrientationPayload` en `WorkerJobPayload`— -->
 
 # Anonly — Modelo de Datos (TAD bloque 5)
 
@@ -196,9 +196,11 @@ export interface Occurrence {
   readonly pageIndex: number;
   readonly source: DetectionSource;
   readonly confidence: number;
-  readonly entityType: EntityType;
+  readonly entityType: EntityTypeId;         // ADR-219 §1: tipo base o propio
   readonly maskFormat?: string;              // formato de máscara del patrón que matcheó (Regex lo copia de RegexPattern.maskFormat; ausente en NER) — ADR-029
   readonly wordSpan?: WordSpan;              // referencia a palabras del Document, opcional
+  readonly formatId?: string;                // ADR-222 §2: formato o patrón que matcheó; solo source Regex
+  readonly formatOrigin?: "base" | "user";   // ADR-222 §2: "user" = propio, copia editada o referencia de otro país
 }
 
 export interface WordSpan {
@@ -210,7 +212,9 @@ export interface WordSpan {
 **Invariantes**
 - `normalizedValue` es lo que usa Grouping para comparar. Regex siempre lo provee; NER lo calcula con la misma normalización.
 - `confidence ∈ [0,1]`. Regex = `1.0`. NER = score del modelo. OCR-derived = `min(ocrConf, nerConf)`.
-- `entityType` debe estar dentro de los tipos que el `source` puede emitir (ver `core/Regex_Engine.md` y `core/NER_Engine.md`).
+- `entityType` debe estar dentro de los tipos que el `source` puede emitir (ver `core/Regex_Engine.md` y `core/NER_Engine.md`). NER emite solo tipos base; Regex emite un tipo propio solo desde un formato del generador (ADR-220); `Manual` puede traer cualquier tipo, incluido uno del documento (ADR-219 §5).
+- `formatId` y `formatOrigin` (ADR-222 §2) van juntos y solo en `source: Regex`: los dos presentes o los dos ausentes. `formatOrigin: "base"` es un formato del catálogo del país activo; `"user"`, un formato propio, una copia editada (ADR-220 §4) o una referencia a otro país (ADR-221 §5).
+- `maskFormat` de un formato propio bajo un tipo base es `maskByCharacters(value)`; bajo un tipo propio no se emite (ADR-220 §5).
 
 **`bbox` y `fragments`** (ADR-074 §1). Una entidad puede cruzar un salto de línea: `"Diego Ramos Vargas"` con `Diego` al final de un renglón y `Ramos Vargas` al principio del siguiente. La unión de esas palabras es la **envolvente**, un rectángulo que abarca las dos líneas enteras — correcto como región, destructivo como censura (medido: 557,2 × 18,2 pt, casi el ancho útil de la página).
 
@@ -237,12 +241,14 @@ export interface OccurrenceRef {
   readonly bbox: BoundingBox;                // duplicado a propósito: la UI lo necesita sin resolver
   readonly fragments?: ReadonlyArray<BoundingBox>;  // ADR-074 §1; ausente ≡ [bbox]
   readonly source: DetectionSource;
+  readonly formatId?: string;                // ADR-222 §2; se copia de la Occurrence
 }
 ```
 
 **Invariantes**
 - `context` se copia tal cual de la `Occurrence` (ADR-105). **Ausente ≠ vacío**: una ocurrencia puede nacer sin texto alrededor (agregado manual, página de una sola palabra), y el opcional permite distinguirlo. La UI arma `…{before}` **{value}** `{after}…`; el valor **no** se repite adentro del contexto.
 - `value` se copia **tal cual** de la `Occurrence`, sin normalizar (ADR-104 §1): lo que el separador y el fusionador tienen que mostrar es cómo aparece en el documento, que es justamente lo que distingue dos miembros de un grupo fusionado. Requerido y no opcional: toda `Occurrence` tiene `value`.
+- `formatId` se copia tal cual de la `Occurrence` (ADR-222 §2), en `toOccurrenceRef`, con la misma regla que `fragments`: se propaga explícitamente. Es lo que necesita `EntityGroup.formatId` (§9) para recalcularse después de fusionar, dividir o reclasificar.
 - `fragments` se copia tal cual de la `Occurrence` (`toOccurrenceRef`, `grouping-engine`), con la semántica de §7: envolvente en `bbox`, descomposición por línea en `fragments`, ausente ≡ `[bbox]`. Es un salto de la cadena `Word → Occurrence → Replacement` y **se propaga explícitamente**: nada viaja solo por una copia de campos (ADR-066 §6, el precedente donde `rotation` se caía en silencio).
 
 ---
@@ -252,7 +258,7 @@ export interface OccurrenceRef {
 ```ts
 export interface EntityGroup {
   readonly id: string;                              // UUID v4, estable por sesión
-  readonly type: EntityType;
+  readonly type: EntityTypeId;                      // ADR-219 §1: tipo base o propio
   readonly canonicalValue: string;                  // valor "representativo" para mostrar
   readonly members: ReadonlyArray<OccurrenceRef>;
   readonly replacementMode: ReplacementMode;
@@ -273,6 +279,9 @@ export interface EntityGroup {
   // Contracts.md §5). Requerido. Lo calcula Grouping con la misma función que
   // replacementValue; la UI lo muestra en el selector de modo y en "Editar reemplazo".
   readonly replacementPreviews: ReplacementPreviews;
+  // ADR-224 §2: el formato bajo el que el árbol lista el grupo. Ausente = va
+  // directo bajo su tipo (modelo, agregado a mano, o formato de otro tipo).
+  readonly formatId?: string;
   readonly createdAt: number;
   readonly updatedAt: number;
 }
@@ -285,7 +294,7 @@ export type PersonGender = "f" | "m";
 | Atributo | Significado |
 |---|---|
 | `id` | Estable por sesión. Permite que la UI mantenga estado por grupo tras re-procesamientos. |
-| `type` | Uno de `EntityType`. Determina el formato del placeholder y la síntesis. |
+| `type` | Un `EntityTypeId` (ADR-219 §1): uno de `EntityType` o un tipo propio. Determina el formato del placeholder, los modos disponibles y la síntesis. |
 | `canonicalValue` | El valor a mostrar en el árbol de entidades. Típicamente el más frecuente de `aliases` o el más completo. |
 | `members` | Referencias a las ocurrencias agrupadas. La UI muestra `members.length` como contador. |
 | `replacementMode` | `mask \| synthetic \| placeholder \| redact`. |
@@ -296,6 +305,7 @@ export type PersonGender = "f" | "m";
 | `replacementValueUserSet` | `true` si el `replacementValue` lo escribió el usuario. Es lo que hace visible en la UI (`ui/UX_Guidelines.md` §3.3) una edición manual que, de otro modo, es indistinguible de un valor calculado — el caso que **no** aplica a `personGender`, cuyo valor sí delata su procedencia, y por eso `personGenderUserSet` sigue siendo interno (ADR-078 §2). |
 | `personGender` | Solo `type === Person` (ADR-060 §2). `"f"`/`"m"` cambian el label resuelto del `placeholder` (`MUJER`/`HOMBRE` en vez de `PERSONA`); ausente = sin determinar → label neutro y marca en el árbol de entidades. Inferido de un léxico first-party (ADR-069 §6: al asignar/cambiar `canonicalValue` y en `finishSession`) o puesto por el usuario, que gana siempre. **La ausencia tiene dos orígenes que el dato público no distingue** —nunca se infirió, o el usuario eligió `"neutral"` (ADR-069 §4)— y el motor los separa con bookkeeping interno (`personGenderUserSet`, `Grouping_Engine.md` §13 caso 34) para que una re-inferencia no pise la elección. Ese flag **no** es parte de `EntityGroup` ni de ningún evento. |
 | `replacementPreviews` | ADR-170 §1: lo que valdría `replacementValue` en `placeholder`, `mask` y `synthetic` (y los niveles de la escalera de ADR-057), calculado por Grouping con la misma función e ignorando `replacementValueUserSet`. Existe para que la UI muestre valores exactos sin reimplementar la lógica del motor (P-1, U-3). No lo leen Render ni Export. |
+| `formatId` | ADR-224 §2: el `formatId` del primer miembro, en orden documental (ADR-028), que salió de un formato **del tipo actual del grupo**. Ausente si ningún miembro cumple: grupos del modelo, agregados a mano, o reclasificados a un tipo distinto del de su formato. Lo calcula Grouping; la UI no lo deriva (U-3). |
 | `createdAt`, `updatedAt` | Epoch ms. Para UX y merge de ediciones. |
 
 **Invariantes**
@@ -306,6 +316,8 @@ export type PersonGender = "f" | "m";
 - Si `enabled === false`, `replacementValue` no se aplica pero se conserva el último valor para re-activación.
 - **Todas** las `Replacement` derivadas de un mismo grupo comparten `replacementValue` (ADR-012, re-asertado por ADR-057 §4: el nivel de abreviatura se elige por grupo con la ocurrencia más apretada y se aplica a todas — nunca por ocurrencia).
 - `personGender` solo puede estar presente si `type === EntityType.Person` (ADR-060 §2).
+- Si `type` es un tipo propio: `replacementMode !== synthetic` y `replacementPreviews.synthetic === ""` (ADR-219 §3).
+- Si `formatId` está presente, algún miembro tiene ese `formatId` y el formato pertenece a `type` (ADR-224 §2).
 - Si `replacementMode ∈ {placeholder, mask, synthetic}` y `replacementValueUserSet === false`, entonces `replacementPreviews[replacementMode] === replacementValue` (ADR-170 §1).
 - `replacementPreviews.placeholderLadder` contiene a `replacementPreviews.placeholder` y no tiene repetidos.
 
@@ -331,7 +343,14 @@ export enum EntityType {
 }
 ```
 
-Cada tipo tiene:
+**Tipos propios** (ADR-219). Los campos que identifican el tipo de una entidad usan `EntityTypeId = EntityType | UserEntityTypeId` (`core/Contracts.md` §5.2). Un tipo propio (`"user:<uuid>"`) lo define el usuario con un `UserEntityTypeDefinition`: nombre y, si quiere, las versiones cortas de su etiqueta. Hay dos clases, con la misma forma:
+
+- **guardados**: se crean desde la pantalla de inicio y llegan en `EngineConfig.detection.userTypes` (ADR-223 §2);
+- **del documento**: se crean con un documento abierto («Nuevo tipo») por `defineDocumentEntityType`, viven en la sesión de Grouping y se descartan con `DOCUMENT_CLOSED` (ADR-219 §5).
+
+`Custom` se conserva en el enum por compatibilidad, pero la aplicación deja de ofrecerlo (ADR-224 §6).
+
+Cada tipo base tiene:
 - Un label internacionalizable (default español en `ui/Components.md`).
 - Un formato de `mask` (ej. DNI → `XX.XXX.XXX`).
 - Un formato de `placeholder` (`[<TYPE> <NN>]`).
@@ -360,6 +379,8 @@ export enum ReplacementMode {
 | `redact` | `""` (cadena vacía) | bloque negro sólido sobre bbox |
 
 Default: `placeholder`. Justificación en `adr/ADR-012-Replacement-Modes.md`.
+
+**Tipos propios** (ADR-219 §3): tienen `placeholder`, `mask` y `redact`, y **no** tienen `synthetic`. Su `placeholder` es `[<ETIQUETA> <NN>]`, con la etiqueta de `userTypeLabel(name)` y sus versiones cortas. Su `mask` es `maskByCharacters(canonicalValue)`, que conserva espacios y separadores. Un `synthetic` que llega por el modo por defecto, por una regla global o por reclasificar se resuelve como `placeholder`; pedido por patch o por regla de tipo, se rechaza (`GROUPING_INVALID_PATCH`).
 
 **Nivel de abreviatura del `placeholder` (ADR-057)**. El nivel se elige **por grupo**, no por ocurrencia: se toma el primer nivel cuyo token entra —estimado— en **todos** los `members` del grupo, y se aplica a todos. La estimación usa `estimateTokenWidth` (`core/Contracts.md` §6) sobre `bbox.width`/`bbox.height`, magnitudes cuya razón es invariante a la escala, así que el nivel no depende del zoom al que se renderice después. Es una **optimización**: la garantía de que el texto no se derrama vive en el render (ADR-058 §1), no acá. `<NN>` nunca se abrevia. Un `replacementValue` editado a mano por el usuario gana siempre y la escalera no lo toca (ADR-057 §7).
 
@@ -410,7 +431,7 @@ export type RuleScope = "group" | "type" | "global";
 export interface RuleTarget {
   readonly kind: RuleScope;
   readonly groupId?: string;                  // si scope === "group"
-  readonly entityType?: EntityType;           // si scope === "type"
+  readonly entityType?: EntityTypeId;         // si scope === "type" (EntityTypeId por ADR-219 §1)
 }
 ```
 
@@ -428,6 +449,7 @@ Prioridad descendente:
 - Si `scope === "group"`, `target.groupId` es obligatorio y `target.entityType` debe ser `undefined`.
 - Si `scope === "type"`, `target.entityType` es obligatorio y `target.groupId` debe ser `undefined`.
 - Si `scope === "global"`, ambos deben ser `undefined`.
+- Una regla de `scope === "type"` sobre un tipo propio no puede tener `mode: synthetic` (ADR-219 §3). Una regla `global` en `synthetic` resuelve `placeholder` en los grupos de tipo propio.
 
 ---
 
@@ -465,7 +487,7 @@ export interface Conflict {
   readonly reason: ConflictReason;
   readonly candidates: ReadonlyArray<ConflictCandidate>;
   readonly resolved: boolean;
-  readonly resolvedType?: EntityType;   // ADR-083 §3: el tipo con el que quedó clasificado el grupo (antes: resolvedMode)
+  readonly resolvedType?: EntityTypeId; // ADR-083 §3: el tipo con el que quedó clasificado el grupo (antes: resolvedMode); EntityTypeId por ADR-219 §1
   // ADR-174 §1: una ocurrencia manual perdió esta superposición y quedó retenida,
   // esperando que el usuario elija quién gana (ConflictResolveRequested.winner).
   // ADR-175 §1, invariante: heldManual => resolved === false y hay exactamente una
@@ -482,9 +504,10 @@ export enum ConflictReason {
 
 export interface ConflictCandidate {
   readonly source: DetectionSource;
-  readonly entityType: EntityType;
+  readonly entityType: EntityTypeId;        // ADR-219 §1
   readonly confidence: number;
   readonly value: string;
+  readonly formatId?: string;               // ADR-222 §2: el formato del candidato, si salió de uno
 }
 ```
 
@@ -493,6 +516,7 @@ export interface ConflictCandidate {
 - Si `resolved === true`, `resolvedType` es obligatorio (ADR-083 §3).
 - Un conflicto sin resolver bloquea el export hasta ser resuelto, en la UI y en el Core (ADR-176 §1). La redacción anterior decía "o ignorado explícitamente": no existe mecanismo para ignorar un conflicto, y se retira.
 - Todo conflicto sin resolver apunta a un grupo que existe: la fusión y la división lo reapuntan (ADR-176 §2).
+- Dos candidatos de `source: Regex` (ADR-222): nacen resueltos con el ganador del desempate de ADR-222 §3 (propio sobre base, después el más largo, después el que ya estaba). Solo aparecen cuando al menos uno es `formatOrigin: "user"` (ADR-222 §5).
 
 ---
 
@@ -704,9 +728,18 @@ export interface RasterizePagePayload {
 // perfil que RasterizePagePayload (ADR-034 §1).
 export interface RenderLegendPayload {
   readonly rows: ReadonlyArray<MarkerLegendRow>;
+  readonly startRow: number;                  // ADR-219 §6: primera fila de esta página
   readonly pageWidthPt: number;
   readonly pageHeightPt: number;
   readonly imageFormat?: "png" | "jpeg";
+}
+
+// ADR-219 §6: el kernel dibuja una página por job, con las filas que entran
+// enteras desde startRow (siempre al menos una), y dice cuántas dibujó. El host
+// repite hasta dibujarlas todas.
+export interface RenderLegendPageResult {
+  readonly image: EncodedPageImage;
+  readonly rowsDrawn: number;                 // ≥ 1
 }
 
 // Job final del ExportWorker bajo jobType "export-page": aplica la metadata (ya
@@ -724,7 +757,9 @@ export interface ExportSavePayload {
   // ninguna fila tras el filtro de §2 (en ese caso no se agrega página).
   // Viaja en `save` y no en `append-page` porque se aplica una sola vez al final,
   // igual que la metadata (ADR-047 §3), y no tiene pageIndex del que ser idempotente.
-  readonly legendImage?: EncodedPageImage;
+  // ADR-219 §6: una o más páginas de leyenda, en orden. Antes era una sola
+  // (legendImage): con tipos propios las filas no tienen tope.
+  readonly legendImages?: ReadonlyArray<EncodedPageImage>;
   readonly legendPageWidthPt?: number;
   readonly legendPageHeightPt?: number;
 }
@@ -735,7 +770,7 @@ export interface ExportSavePayload {
 // implementador: requiere cambiar este tipo. Mismo mecanismo que
 // `includeOriginalMetadata: false` de ADR-009 (garantía por tipos, no por convención).
 export interface MarkerLegendEntry {
-  readonly type: EntityType;
+  readonly type: EntityTypeId;                // ADR-219 §6: también un tipo propio, con su nombre en la fila
   readonly prefixes: ReadonlyArray<string>;   // p. ej. ["PERSONA", "PERS", "PRS"]
   readonly markerCount: number;
 }
@@ -749,7 +784,7 @@ export interface MarkerLegendEntry {
 // mismo objeto; solo cambia de dónde sale el `value`.
 export interface ManualEntityRequest {
   readonly value: string;
-  readonly entityType: EntityType;
+  readonly entityType: EntityTypeId;          // ADR-219 §1: también un tipo propio o del documento
 }
 
 // ADR-061 §8: resultado del buscador del visor. Es la MISMA búsqueda literal que

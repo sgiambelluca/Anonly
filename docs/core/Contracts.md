@@ -1,8 +1,10 @@
-<!-- CONTEXT: scope=contratos-base | dependencias=03_Data_Model.md,04_Event_System.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-049-Errores-Cruzando-Worker-Discriminacion-Por-Code.md,adr/ADR-056-RenderRequested-Kind-Por-Panel.md,adr/ADR-061-Agregado-Manual-De-Entidades.md,adr/ADR-065-OCR-Por-Region.md,adr/ADR-066-Texto-De-Anotaciones-Y-Reemplazo-Rotado.md,adr/ADR-074-Una-Entidad-Partida-En-Varias-Lineas.md,adr/ADR-062-Veredicto-De-Degradacion-Hasta-La-UI.md,adr/ADR-086-El-Detector-De-Degradacion-Mide-El-Ancho.md,adr/ADR-109-La-Caja-De-Una-Palabra-Es-Su-Caja-De-Tinta.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,adr/ADR-167-El-Modelo-De-NER-Se-Libera-A-Los-15-s-De-Inactividad.md,adr/ADR-170-Las-Vistas-Previas-De-Edicion-Las-Calcula-El-Core.md,adr/ADR-171-El-Usuario-Puede-Eliminar-Una-Entidad.md,adr/ADR-172-Deshacer-Y-Rehacer-Exactos.md,adr/ADR-173-El-Motor-Rechaza-Fusiones-Y-Divisiones-Invalidas.md,adr/ADR-174-Un-Agregado-Manual-Que-Choca-Se-Resuelve-En-El-Momento.md,adr/ADR-175-Un-Choque-Manual-No-Queda-Colgado.md,adr/ADR-176-Un-Choque-Pendiente-Bloquea-El-Export.md,adr/ADR-204-La-Interaccion-Anonimizada-Usa-La-Geometria-Visible.md,adr/ADR-205-El-Resultado-Exportado-Pertenece-A-Una-Revision.md | audiencia=IA-implementador | fase=3 (fase 10.9: §5 nota de `fragments` junto a `BoundingBox` — el campo va en `Occurrence`/`OccurrenceRef`/`Replacement`, no adentro del rectángulo, ADR-074 §1; §3.5 actualizado en fase 10: CoreRuntimeOptions/WorkerLike/WorkerFactory para transporte de workers —ADR-036 §2—, IPipelineOrchestrator.reanalyze/ReanalyzeConfigPatch —ADR-038 §1—; §6 gana MAX_RENDER_SCALE/PREVIEW_CACHE_MAX_BYTES —ADR-037 §2-3—; §8 RenderRequested.scale —ADR-037 §1—; §4 precisa qué garantiza deserialize() al cruzar el boundary, sin cambio de shape —ADR-049 §2—; fase 11: §8 RenderRequested.kind requerido —ADR-056 §1—; fase 10.5/10.6: §5 AnnotationKind.Degraded —ADR-058 §7— y PersonGender —ADR-060 §2—, §6 REPLACEMENT_FONT_HEIGHT_RATIO/AVG_GLYPH_ADVANCE_RATIO/estimateTokenWidth —ADR-057 §5— y DEGRADED_FONT_RATIO —ADR-058 §7—; fase 10.8: §5 gana los primeros tipos públicos que §10 regla 1 obliga a declarar acá antes que en `shared/src/types.ts` — `BoundingBox.rotation` —ADR-066 §6— y `OcrRegion` —ADR-065 §4—; fase 10.6: §5 `PersonGenderChoice` y §8 `GroupUpdateRequested.patch.personGender` —ADR-069 §4—, §5 `SyntheticRequest` y §6 la declaración de `synthesize` —ADR-072 §2, que la trae al contrato: se exportaba desde `shared` sin estar acá, contra §10 regla 1—; fase 10.7: §6 gana `sharesVerticalBand` y `normalizeForComparison` —ADR-061 §2 errata: dos primitivas que ya estaban duplicadas dentro de motores y façade por no tener lugar donde vivir—, y §3.5 gana `ManualEntityResult` con `addManualEntity` devolviéndolo en vez de `void` —ADR-061 §6 errata: sin eso la UI no puede distinguir "no se encontró" de "agregado"—; post-Hito 10.10: §8 `PreviewUpdated.degraded` —ADR-062, el veredicto de legibilidad sale de Render por acá— y §6 `DEGRADED_FONT_RATIO` con **criterio y valor nuevos** —ADR-086: pasa a medir la razón de ANCHOS y baja a 0,5, porque el cociente de tamaños era estructuralmente inalcanzable en cuerpo de texto—; fase 11: §5 la caja de una palabra pasa a ser su caja de tinta —del descenso al ascenso de su fuente, no de la línea de base hacia arriba por un cuerpo— y §6 `REPLACEMENT_FONT_HEIGHT_RATIO` se recalibra de 0,7 a 0,64 para que el token siga dibujándose igual —ADR-109 §1/§4—; fase 11 (plan de campaña, H-01A): §4 gana `EngineErrorCode.PDF_PAGE_ROTATED` —ADR-140: página con `/Rotate` heredado y texto nativo, rechazo tipado en vez de una geometría equivocada con cara de éxito; retirado por ángulo cuando ADR-141 lo verifique de punta a punta—; fase 11 (plan de campaña, H-09D3-b): §7.1 declara por primera vez `OcrPagePayload` —que se exportaba desde `shared` sin estar acá, contra §10 regla 1— y lo cambia: la imagen del job `ocr-page` viaja **codificada** (PNG) en vez de `ImageData` crudo, ADR-158 §2; fase 12.5 (Hito 12.5): §3.5 gana `previewEdit` con `EditPreviewRequest`/`EditPreview`/`EditPreviewGroup` y §5 `ReplacementPreviews`, nuevo campo requerido de `EntityGroup` —ADR-170: la UI muestra valores exactos antes de aplicar sin reimplementar el motor—; fase 12.5: §2/§8 `GROUP_REMOVE_REQUESTED` + `GroupRemoveRequested`, y §3.5 `addManualEntity` levanta la supresión de un valor eliminado —ADR-171: el usuario elimina una entidad y no vuelve tras un re-análisis—; fase 12.5: §3.5 `createEditCheckpoint`/`restoreEditCheckpoint`/`discardEditCheckpoints` y §6 `MAX_EDIT_CHECKPOINTS` —ADR-172: deshacer exacto por puntos de restauración que guarda el Core—) -->
+<!-- CONTEXT: scope=contratos-base | dependencias=03_Data_Model.md,04_Event_System.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-049-Errores-Cruzando-Worker-Discriminacion-Por-Code.md,adr/ADR-056-RenderRequested-Kind-Por-Panel.md,adr/ADR-061-Agregado-Manual-De-Entidades.md,adr/ADR-065-OCR-Por-Region.md,adr/ADR-066-Texto-De-Anotaciones-Y-Reemplazo-Rotado.md,adr/ADR-074-Una-Entidad-Partida-En-Varias-Lineas.md,adr/ADR-062-Veredicto-De-Degradacion-Hasta-La-UI.md,adr/ADR-086-El-Detector-De-Degradacion-Mide-El-Ancho.md,adr/ADR-109-La-Caja-De-Una-Palabra-Es-Su-Caja-De-Tinta.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,adr/ADR-167-El-Modelo-De-NER-Se-Libera-A-Los-15-s-De-Inactividad.md,adr/ADR-170-Las-Vistas-Previas-De-Edicion-Las-Calcula-El-Core.md,adr/ADR-171-El-Usuario-Puede-Eliminar-Una-Entidad.md,adr/ADR-172-Deshacer-Y-Rehacer-Exactos.md,adr/ADR-173-El-Motor-Rechaza-Fusiones-Y-Divisiones-Invalidas.md,adr/ADR-174-Un-Agregado-Manual-Que-Choca-Se-Resuelve-En-El-Momento.md,adr/ADR-175-Un-Choque-Manual-No-Queda-Colgado.md,adr/ADR-176-Un-Choque-Pendiente-Bloquea-El-Export.md,adr/ADR-204-La-Interaccion-Anonimizada-Usa-La-Geometria-Visible.md,adr/ADR-205-El-Resultado-Exportado-Pertenece-A-Una-Revision.md,adr/ADR-219-Un-Tipo-De-Entidad-Puede-Ser-Del-Usuario.md,adr/ADR-220-Un-Formato-Se-Arma-Con-Piezas-Y-Se-Recorre-En-Tiempo-Lineal.md,adr/ADR-221-Los-Formatos-Base-Salen-De-Un-Catalogo-Por-Pais.md,adr/ADR-222-Dos-Formatos-Que-Se-Pisan-Van-Al-Panel-De-Conflicto.md,adr/ADR-223-Los-Formatos-Se-Configuran-Desde-Inicio-Y-Viajan-En-Un-Archivo.md,adr/ADR-224-Lo-Que-La-1.1-Cambia-En-El-Panel-De-Entidades-Y-El-Visor.md | audiencia=IA-implementador | fase=3 (fase 10.9: §5 nota de `fragments` junto a `BoundingBox` — el campo va en `Occurrence`/`OccurrenceRef`/`Replacement`, no adentro del rectángulo, ADR-074 §1; §3.5 actualizado en fase 10: CoreRuntimeOptions/WorkerLike/WorkerFactory para transporte de workers —ADR-036 §2—, IPipelineOrchestrator.reanalyze/ReanalyzeConfigPatch —ADR-038 §1—; §6 gana MAX_RENDER_SCALE/PREVIEW_CACHE_MAX_BYTES —ADR-037 §2-3—; §8 RenderRequested.scale —ADR-037 §1—; §4 precisa qué garantiza deserialize() al cruzar el boundary, sin cambio de shape —ADR-049 §2—; fase 11: §8 RenderRequested.kind requerido —ADR-056 §1—; fase 10.5/10.6: §5 AnnotationKind.Degraded —ADR-058 §7— y PersonGender —ADR-060 §2—, §6 REPLACEMENT_FONT_HEIGHT_RATIO/AVG_GLYPH_ADVANCE_RATIO/estimateTokenWidth —ADR-057 §5— y DEGRADED_FONT_RATIO —ADR-058 §7—; fase 10.8: §5 gana los primeros tipos públicos que §10 regla 1 obliga a declarar acá antes que en `shared/src/types.ts` — `BoundingBox.rotation` —ADR-066 §6— y `OcrRegion` —ADR-065 §4—; fase 10.6: §5 `PersonGenderChoice` y §8 `GroupUpdateRequested.patch.personGender` —ADR-069 §4—, §5 `SyntheticRequest` y §6 la declaración de `synthesize` —ADR-072 §2, que la trae al contrato: se exportaba desde `shared` sin estar acá, contra §10 regla 1—; fase 10.7: §6 gana `sharesVerticalBand` y `normalizeForComparison` —ADR-061 §2 errata: dos primitivas que ya estaban duplicadas dentro de motores y façade por no tener lugar donde vivir—, y §3.5 gana `ManualEntityResult` con `addManualEntity` devolviéndolo en vez de `void` —ADR-061 §6 errata: sin eso la UI no puede distinguir "no se encontró" de "agregado"—; post-Hito 10.10: §8 `PreviewUpdated.degraded` —ADR-062, el veredicto de legibilidad sale de Render por acá— y §6 `DEGRADED_FONT_RATIO` con **criterio y valor nuevos** —ADR-086: pasa a medir la razón de ANCHOS y baja a 0,5, porque el cociente de tamaños era estructuralmente inalcanzable en cuerpo de texto—; fase 11: §5 la caja de una palabra pasa a ser su caja de tinta —del descenso al ascenso de su fuente, no de la línea de base hacia arriba por un cuerpo— y §6 `REPLACEMENT_FONT_HEIGHT_RATIO` se recalibra de 0,7 a 0,64 para que el token siga dibujándose igual —ADR-109 §1/§4—; fase 11 (plan de campaña, H-01A): §4 gana `EngineErrorCode.PDF_PAGE_ROTATED` —ADR-140: página con `/Rotate` heredado y texto nativo, rechazo tipado en vez de una geometría equivocada con cara de éxito; retirado por ángulo cuando ADR-141 lo verifique de punta a punta—; fase 11 (plan de campaña, H-09D3-b): §7.1 declara por primera vez `OcrPagePayload` —que se exportaba desde `shared` sin estar acá, contra §10 regla 1— y lo cambia: la imagen del job `ocr-page` viaja **codificada** (PNG) en vez de `ImageData` crudo, ADR-158 §2; fase 12.5 (Hito 12.5): §3.5 gana `previewEdit` con `EditPreviewRequest`/`EditPreview`/`EditPreviewGroup` y §5 `ReplacementPreviews`, nuevo campo requerido de `EntityGroup` —ADR-170: la UI muestra valores exactos antes de aplicar sin reimplementar el motor—; fase 12.5: §2/§8 `GROUP_REMOVE_REQUESTED` + `GroupRemoveRequested`, y §3.5 `addManualEntity` levanta la supresión de un valor eliminado —ADR-171: el usuario elimina una entidad y no vuelve tras un re-análisis—; fase 12.5: §3.5 `createEditCheckpoint`/`restoreEditCheckpoint`/`discardEditCheckpoints` y §6 `MAX_EDIT_CHECKPOINTS` —ADR-172: deshacer exacto por puntos de restauración que guarda el Core—; fase 1.1: §3.1 `EngineConfig.detection` —ADR-223 §2—, §3.5 tipos del documento y funciones puras de formatos —ADR-219 §5, ADR-220 §3, ADR-223 §6—, §5.2 tipos propios, formatos y catálogos —ADR-219 a ADR-224—, §6 límites `FORMAT_*`/`USER_TYPE_*` —ADR-219 §2, ADR-220 §1— y §8 `RegexFinished.skippedFormats` —ADR-220 §6—) -->
 
 # Anonly — Contratos Base (`@anonly/shared`)
 
 > **T-5 / ADR-164, revisión 2026-09-15**: orientación separada en `ocr-orient` y factory `ocr-orientation`; ver §7.2. La evolución añade un consumidor de preparación con dos LSTM (§6), sin nuevos tipos ni campos públicos. **Aceptado, implementado y validado** (T-5 cerrada el 2026-09-15, ADR-164). ADR-190 (2026-09-27) agrega `OcrOrientationResult.inkRatio` y `OcrPagePayload.upscale` (§7.1/§7.2); su enmienda de 2026-09-28 agrega `OcrOrientationResult.osdHadVerdict` (implementada en la ronda B).
+
+> **1.1 / ADR-219 a ADR-224, aceptados el 2026-10-19**: tipos propios, formatos del generador y catálogos por país. §3.1 gana `EngineConfig.detection`; §3.5 gana `defineDocumentEntityType`/`getDocumentEntityTypes`, las funciones puras de formatos y la declaración de `ManualEntityRequest`; §5.2 declara los tipos nuevos y los campos nuevos sobre tipos existentes; §6 gana los límites `FORMAT_*`/`USER_TYPE_*`; §8 gana `RegexFinished.skippedFormats` y pasa a `EntityTypeId` los payloads de conflicto. **Contrato escrito, implementación pendiente** (frente F0 de `roadmap/Plan_1.1.md`).
 
 > Define **todos** los tipos, interfaces, enums, error codes y contratos compartidos entre motores. Es el único paquete del que un motor puede importar tipos. Un implementador debe leer este archivo **completo** antes de tocar cualquier motor.
 
@@ -151,10 +153,13 @@ export interface EngineConfig {
   readonly grouping: GroupingConfig;
   readonly render: RenderConfig;
   readonly export: ExportConfig;
+  readonly detection: DetectionConfig;   // ADR-223 §2: país, formatos y tipos del usuario (§5.2)
 }
 ```
 
 `EngineConfig` es fija para la vida de un `createCore`, con una única excepción: `IPipelineOrchestrator.reanalyze` (§3.5) puede actualizar `ner.enabled`/`ocr.languages` en runtime vía una config efectiva mantenida por el Orchestrator (ADR-038 §1). Ningún otro campo es mutable en runtime.
+
+`detection` (ADR-223 §1-§2) **no** entra en `ReanalyzeConfigPatch`: se cambia solo sin documento abierto, y el cambio recrea el Core por el camino de ADR-125 §2. La leen `regex-engine` (catálogo, formatos y referencias) y `grouping-engine` (país y tipos propios), cada uno de su `ctx.config`.
 
 ### 3.2 `IEventBus`
 
@@ -248,6 +253,13 @@ export interface ImportDocumentInput {
   readonly password?: string;
 }
 
+// ADR-061 §1. Se declara acá desde la 1.1: vivía solo en `03_Data_Model.md`
+// y en `shared/src/types.ts`, contra §10 regla 1. ADR-219 §1 ensancha el tipo.
+export interface ManualEntityRequest {
+  readonly value: string;
+  readonly entityType: EntityTypeId;
+}
+
 // ADR-061 §6 (errata): lo único que el caller no puede deducir por su cuenta.
 // Objeto y no `number` pelado para poder crecer sin romper firmas.
 export interface ManualEntityResult {
@@ -287,6 +299,17 @@ export interface IPipelineOrchestrator {
   addManualEntity(documentId: string, request: ManualEntityRequest): Promise<ManualEntityResult>;
   /** ADR-061 §8: misma búsqueda literal, salida para el buscador del visor. */
   findText(documentId: string, query: string): ReadonlyArray<TextMatch>;
+  /**
+   * ADR-219 §5: tipo propio que vive solo en este documento ("Nuevo tipo" con el
+   * documento abierto). Sincrónica. Valida con validateUserEntityType contra los
+   * tipos base del país activo, los guardados (EngineConfig.detection.userTypes)
+   * y los del documento; etiqueta repetida, id repetido o documento sin sesión
+   * -> InvalidInputError. La definición vive en la sesión de Grouping, sobrevive
+   * a reanalyze y se descarta con DOCUMENT_CLOSED. No emite eventos.
+   */
+  defineDocumentEntityType(documentId: string, definition: UserEntityTypeDefinition): void;
+  /** ADR-219 §5: los tipos del documento definidos hasta ahora, en orden de creación. */
+  getDocumentEntityTypes(documentId: string): ReadonlyArray<UserEntityTypeDefinition>;
   /** ADR-204: revisión de geometría de una página existente; null si no existe. */
   getPreviewInteractionRevision(documentId: string, pageIndex: number): number | null;
   /**
@@ -323,13 +346,13 @@ export interface IPipelineOrchestrator {
 // Los valores salen del mismo código que el pedido real sobre una copia de la
 // sesión; la UI no los reimplementa (U-3).
 export type EditPreviewRequest =
-  | { readonly kind: "type"; readonly groupId: string; readonly type: EntityType }
+  | { readonly kind: "type"; readonly groupId: string; readonly type: EntityTypeId }   // ADR-219 §1
   | { readonly kind: "merge"; readonly sourceGroupId: string; readonly targetGroupIds: ReadonlyArray<string> }
   | { readonly kind: "split"; readonly groupId: string; readonly occurrenceIds: ReadonlyArray<string> };
 
 export interface EditPreviewGroup {
   readonly groupId: string | null;   // null = el grupo que la operación crearía (parte nueva de un split)
-  readonly type: EntityType;
+  readonly type: EntityTypeId;       // ADR-219 §1
   readonly indexInType: number;
   readonly canonicalValue: string;
   readonly memberCount: number;
@@ -391,6 +414,31 @@ export async function createCore(
   config?: EngineConfigOverrides,
   runtime?: CoreRuntimeOptions
 ): Promise<IAnonymizationCore>;
+
+// ─── Funciones puras de formatos y tipos propios (1.1) ───
+// Las usa la pantalla de inicio, sin documento y sin Core creado (ADR-223 §1).
+// Ninguna emite, loguea ni guarda nada: el texto de muestra de testFormat es
+// texto que escribió el usuario y no sale de la llamada (ADR-220 §3).
+// Tipos de entrada y salida en §5.2.
+
+// Reexportada desde @anonly/shared (ADR-219 §1):
+export function isUserEntityType(type: EntityTypeId): type is UserEntityTypeId;
+
+// Reexportadas desde grouping-engine, dueño de las etiquetas (ADR-219 §2, ADR-057):
+export function userTypeLabel(name: string): string;
+export function validateUserEntityType(
+  definition: UserEntityTypeDefinition,
+  context: UserEntityTypeValidationContext
+): UserEntityTypeValidation;
+
+// Reexportadas desde regex-engine (ADR-220 §3, ADR-221 §2):
+export function getCatalog(country: CountryCode): ReadonlyArray<CatalogFormatInfo>;
+export function validateFormat(definition: FormatDefinition, context: FormatValidationContext): FormatValidation;
+export function testFormat(definition: FormatDefinition, sampleText: string): ReadonlyArray<FormatTestMatch>;
+export function compareFormat(definition: FormatDefinition, others: FormatComparisonInput): FormatComparison;
+
+// Del façade, porque combina las dos anteriores (ADR-223 §6):
+export function validateFormatsFile(text: string, country: CountryCode): FormatsFileValidation;
 ```
 
 ---
@@ -619,8 +667,12 @@ export enum EntityType {
   Date = "DATE",
   License = "LICENSE",
   Plate = "PLATE",
+  // ADR-219 §1: se conserva por compatibilidad. La aplicación deja de
+  // ofrecerlo desde la 1.1 (ADR-224 §6); lo reemplazan los tipos propios.
   Custom = "CUSTOM",
 }
+// ADR-219 §1: los campos que identifican el tipo de una entidad usan
+// EntityTypeId (§5.2), que suma los tipos propios a este enum.
 
 export enum ReplacementMode {
   Mask = "mask",
@@ -682,7 +734,13 @@ export interface SyntheticRequest {
   // nombres de pila; NO entra a la semilla, así que ausente ≡ el mismo valor
   // que sin el campo.
   readonly personGender?: PersonGender;
+  // ADR-221 §4: el país activo elige el generador de los tipos que dependen
+  // del país (DNI, CUIT, Phone, License, Plate). No entra a la semilla: con
+  // "AR", el mismo (type, groupId, seed) da el mismo valor que antes del campo.
+  readonly country: CountryCode;
 }
+// `type` sigue siendo EntityType y no EntityTypeId: un tipo propio no
+// sintetiza (ADR-219 §3), así que nunca llega acá.
 
 export enum ConflictReason {
   Overlap = "overlap",
@@ -779,6 +837,229 @@ Orchestrator (§3.5), independiente del contador de export local (ADR-205).
 Un consumidor directo de Render que no pasa revisión obtiene 0.
 `scale` es la escala efectiva del raster; no escala las cajas del mapa.
 El mapa pertenece al mismo resultado que el blob, no se combina con otro.
+
+### 5.2 Tipos propios, formatos y catálogos por país (1.1)
+
+ADR-219 a ADR-224, aceptados el 2026-10-19. Viven en `shared/src/types.ts`
+y se reexportan desde `shared` y el façade. Todo es dato serializable a
+JSON: lo guarda la aplicación (ADR-223 §3) y viaja en el archivo de
+formatos (ADR-223 §5).
+
+```ts
+// ─── País (ADR-221 §1) ───
+// La 1.1 sale con "AR" sola; "CL" y "UY" entran al tipo en la 1.1.1 junto con
+// sus catálogos (ADR-221 §7). Hasta entonces el tipo es "AR".
+export type CountryCode = "AR";
+
+// ─── Identidad de un tipo (ADR-219 §1) ───
+export type UserEntityTypeId = `user:${string}`;     // "user:" + UUID v4
+export type EntityTypeId = EntityType | UserEntityTypeId;
+
+// ADR-219 §2. La etiqueta no se guarda: la deriva userTypeLabel(name).
+export interface UserEntityTypeDefinition {
+  readonly id: UserEntityTypeId;
+  readonly name: string;                 // como lo escribió el usuario
+  readonly shortLabels?: {
+    readonly level1?: string;            // nivel 1 de ADR-057; ausente = automático
+    readonly level2?: string;            // nivel 2 de ADR-057; ausente = automático
+  };
+}
+
+// ─── Formato (ADR-220 §1) ───
+export type FormatCharClass = "digit" | "letter" | "upper" | "lower" | "alnum";
+export type FormatSeparator = " " | "-" | "." | "/";
+
+export type FormatPiece =
+  | { readonly kind: "chars"; readonly charClass: FormatCharClass; readonly min: number; readonly max: number }
+  | { readonly kind: "text"; readonly value: string }
+  | { readonly kind: "separator"; readonly chars: ReadonlyArray<FormatSeparator>; readonly optional: boolean }
+  | { readonly kind: "optional"; readonly pieces: ReadonlyArray<FormatPiece> };   // sin optional adentro
+
+export interface FormatDefinition {
+  readonly id: string;                                   // "fmt:" + UUID v4
+  readonly name: string;
+  readonly entityType: EntityTypeId;                     // tipo propio o uno de FORMAT_ADMITTING_BASE_TYPES
+  readonly variants: ReadonlyArray<ReadonlyArray<FormatPiece>>;
+  readonly contextBefore?: ReadonlyArray<string>;        // ausente = sin contexto
+  readonly basedOn?: string;                             // ADR-220 §4: id del formato base editado
+  readonly enabled: boolean;
+}
+
+// ADR-220 §5: los únicos tipos base que admiten formatos propios.
+export const FORMAT_ADMITTING_BASE_TYPES: ReadonlySet<EntityType>;
+// = { DNI, CUIT, Phone, License, Plate }
+
+// ─── Catálogo (ADR-221 §2, ADR-220 §4) ───
+export type CatalogFormatKind = "structure" | "control";
+
+export interface CatalogFormatInfo {
+  readonly id: string;                     // "dni-ar", "cuit-ar", …; "cl:…"/"uy:…" desde la 1.1.1
+  readonly country: CountryCode | "universal";
+  readonly name: string;                   // nombre para la interfaz: "Celular"
+  readonly entityType: EntityType;
+  readonly kind: CatalogFormatKind;
+  readonly definition?: FormatDefinition;  // solo "structure": la equivalente que se edita
+}
+
+// ADR-221 §5: un formato de otro catálogo, agregado como propio.
+export interface CatalogFormatRef {
+  readonly id: string;                     // "ref:" + UUID v4
+  readonly country: CountryCode;
+  readonly catalogFormatId: string;
+  readonly enabled: boolean;
+}
+
+// ─── Configuración (ADR-223 §2) ───
+export interface BaseFormatSetting {
+  readonly formatId: string;               // id del catálogo del país activo
+  readonly enabled: boolean;               // un formato base sin entrada está prendido
+}
+
+export interface DetectionConfig {
+  readonly country: CountryCode;
+  readonly baseFormats: ReadonlyArray<BaseFormatSetting>;
+  readonly userTypes: ReadonlyArray<UserEntityTypeDefinition>;
+  readonly userFormats: ReadonlyArray<FormatDefinition>;   // incluye las copias editadas
+  readonly catalogRefs: ReadonlyArray<CatalogFormatRef>;
+}
+
+// ─── Validar un tipo propio (ADR-219 §2) ───
+export type UserEntityTypeIssueCode =
+  | "name_empty" | "name_too_long" | "name_invalid_chars" | "name_without_letter"
+  | "short_label_invalid" | "label_taken" | "id_invalid" | "id_taken";
+
+export interface UserEntityTypeValidationContext {
+  readonly country: CountryCode;
+  // Los tipos propios contra los que se compara la etiqueta. Quien edita un
+  // tipo existente lo excluye de la lista (se compara por id).
+  readonly existing: ReadonlyArray<UserEntityTypeDefinition>;
+}
+
+export interface UserEntityTypeValidation {
+  readonly ok: boolean;                    // ok === (issues.length === 0)
+  readonly issues: ReadonlyArray<{ readonly code: UserEntityTypeIssueCode }>;
+}
+
+// ─── Validar, probar y comparar un formato (ADR-220 §3) ───
+export type FormatIssueCode =
+  | "name_empty" | "name_too_long" | "name_taken"
+  | "no_variants" | "too_many_variants"
+  | "variant_empty" | "variant_without_chars" | "too_many_pieces"
+  | "chars_range_invalid" | "chars_repeat_too_large"
+  | "text_empty" | "text_too_long"
+  | "separator_empty"
+  | "optional_empty" | "optional_nested"
+  | "context_empty" | "context_too_long" | "too_many_context_words"
+  | "too_many_states"
+  | "type_unknown" | "type_not_admitted"
+  | "id_invalid";
+
+export interface FormatIssue {
+  readonly code: FormatIssueCode;
+  readonly variantIndex?: number;          // ausente = el problema es del formato entero
+  readonly pieceIndex?: number;            // índice dentro de la variante, contando las piezas de un optional en orden
+}
+
+export interface FormatValidationContext {
+  readonly userTypes: ReadonlyArray<UserEntityTypeDefinition>;   // guardados; un formato no apunta a un tipo del documento
+  readonly existingFormats: ReadonlyArray<{ readonly id: string; readonly name: string }>;   // excluye el que se edita
+}
+
+export interface FormatValidation {
+  readonly ok: boolean;                    // ok === (issues.length === 0)
+  readonly issues: ReadonlyArray<FormatIssue>;
+}
+
+// Un tramo de sampleText que se detectaría. Índices en code units, end exclusivo.
+export interface FormatTestMatch {
+  readonly start: number;
+  readonly end: number;
+}
+
+export interface FormatComparisonInput {
+  readonly country: CountryCode;                         // los formatos base salen del catálogo de ese país
+  readonly baseFormats: ReadonlyArray<BaseFormatSetting>; // los apagados no se comparan
+  readonly userFormats: ReadonlyArray<FormatDefinition>;  // excluye el que se edita
+  readonly catalogRefs: ReadonlyArray<CatalogFormatRef>;
+}
+
+export interface FormatComparison {
+  readonly identicalTo: string | null;     // id del formato con la misma estructura canónica; bloquea crear
+  // Formatos que comparten algún texto, con el texto más corto que ambos
+  // reconocen (exacto contra formatos del generador; por ejemplos contra los
+  // de control, ADR-220 §3). Avisa y deja crear.
+  readonly overlaps: ReadonlyArray<{ readonly formatId: string; readonly example: string }>;
+}
+
+// ─── Archivo de formatos (ADR-223 §5-§6) ───
+export interface FormatsFileContent {
+  readonly kind: "anonly-formats";
+  readonly version: 1;
+  readonly types: ReadonlyArray<UserEntityTypeDefinition>;
+  readonly formats: ReadonlyArray<FormatDefinition>;
+  readonly catalogRefs: ReadonlyArray<CatalogFormatRef>;
+}
+
+export type FormatsFileIssueCode =
+  | "not_json" | "wrong_kind" | "version_invalid" | "version_newer"
+  | "schema_invalid" | "type_invalid" | "format_invalid" | "format_type_missing";
+
+export type FormatsFileValidation =
+  | { readonly ok: true; readonly content: FormatsFileContent }
+  | { readonly ok: false; readonly issues: ReadonlyArray<{ readonly code: FormatsFileIssueCode; readonly path?: string }> };
+```
+
+**Semántica de las funciones** (declaradas en §3.5):
+
+- **`userTypeLabel(name)`**: NFD, sin marcas combinantes, mayúsculas,
+  espacios colapsados y recortados. «Historia clínica» → `HISTORIA CLINICA`.
+  Es el nivel 0 de la escalera (ADR-057). Los niveles 1 y 2 automáticos son
+  las primeras 4 y 3 letras o dígitos de esa etiqueta, sin espacios
+  (ADR-219 §2).
+- **`validateUserEntityType`**: nombre de 1 a `USER_TYPE_NAME_MAX`
+  caracteres, con al menos una letra, y solo letras, dígitos, espacios y
+  guiones. Cada versión corta escrita a mano, de 1 a
+  `USER_TYPE_SHORT_LABEL_MAX` letras o dígitos. El `id` con forma
+  `user:<uuid>` y sin repetir. La etiqueta no puede ser la de un tipo base en
+  `country` (nivel 0 de la tabla de etiquetas de ese país) ni la de otro
+  tipo de `existing`.
+- **`validateFormat`**: los límites de §6 (`FORMAT_*`), cada variante con al
+  menos una pieza `chars`, `1 ≤ min ≤ max ≤ FORMAT_MAX_REPEAT`, el nombre sin
+  repetir contra `existingFormats` (sin distinguir mayúsculas ni tildes), el
+  tipo propio presente en `userTypes` o el tipo base dentro de
+  `FORMAT_ADMITTING_BASE_TYPES`, y el autómata compilado dentro de
+  `FORMAT_MAX_STATES`.
+- **`testFormat`**: el mismo recorrido que `process` (ADR-220 §2), con
+  bordes, contexto y guarda de corrida, sobre el texto de muestra. No
+  aplica `enabled`. Un formato inválido devuelve `[]`; la interfaz valida
+  antes.
+- **`compareFormat`**: compara contra los formatos base prendidos de
+  `country`, los propios y las referencias.
+- **`getCatalog(country)`**: los formatos base de ese país más los
+  universales, en el orden en que corren.
+- **`validateFormatsFile(text, country)`**: parsea el JSON y valida el archivo
+  **entero** antes de que la aplicación toque nada. Revisa la forma, `kind`
+  y `version` (`version > 1` → `version_newer`), cada tipo con
+  `validateUserEntityType` (contra `country` y los otros tipos del archivo) y cada
+  formato con `validateFormat`, cuyos tipos propios tienen que venir en el
+  mismo archivo (`format_type_missing`). Una sola falla y el resultado es
+  `ok: false`. Los cruces con lo que el usuario ya tiene (mismo nombre,
+  formato idéntico, formatos que comparten textos) los resuelve la
+  aplicación después, con `compareFormat` (ADR-223 §6).
+
+> **Campos nuevos sobre tipos que ya existen** (definidos en `03_Data_Model.md`, declarados acá primero por §10 regla 1):
+>
+> - **`EntityTypeId` en lugar de `EntityType`** (ADR-219 §1): `Occurrence.entityType`, `EntityGroup.type`, `ConflictCandidate.entityType`, `Conflict.resolvedType`, `RuleTarget.entityType`, `MarkerLegendEntry.type`, `ManualEntityRequest.entityType` (§3.5), `EditPreviewRequest`/`EditPreviewGroup` (§3.5) y los payloads `ConflictResolved`/`ConflictResolveRequested` (§8). `RegexPattern.entityType` y `SyntheticRequest.type` siguen siendo `EntityType`.
+> - **`Occurrence.formatId?: string` y `Occurrence.formatOrigin?: "base" | "user"`** (ADR-222 §2): solo en `source: Regex`. `"user"` es un formato propio, una copia editada o una referencia de otro país.
+> - **`OccurrenceRef.formatId?: string`** (ADR-222 §2): se copia de la `Occurrence` con propagación explícita, como `fragments`.
+> - **`ConflictCandidate.formatId?: string`** (ADR-222 §2): para que el panel nombre el formato.
+> - **`EntityGroup.formatId?: string`** (ADR-224 §2): el formato del primer miembro en orden documental que salió de un formato del tipo actual del grupo; ausente si no hay ninguno. Lo calcula Grouping.
+> - **`ReplacementPreviews.synthetic === ""`** en un grupo de tipo propio (ADR-219 §3). El campo sigue siendo requerido.
+> - **La hoja de referencia se pagina** (ADR-219 §6): `RenderLegendPayload.startRow`, `RenderLegendPageResult` y `ExportSavePayload.legendImages` en lugar de `legendImage` (`03_Data_Model.md` §18).
+
+> **`alphanumericKey(value: string): string`** (ADR-219 §4, ADR-220 §5) — función pura de `@anonly/shared`: NFC, sin diacríticos, minúsculas y **sin nada que no sea letra o dígito**. `"0170-0994 11"` → `"0170099411"`. Es el `normalizedValue` de una aparición de un formato bajo un tipo propio, y la clave con la que Grouping compara las apariciones de un tipo propio, vengan de un formato o de un agregado a mano. La usan dos motores que no pueden importarse entre sí (`regex-engine` y `grouping-engine`), mismo argumento que `normalizeEntityValue`. **No reemplaza a `normalizeEntityValue`**, que conserva la puntuación interna y sigue siendo la clave de los tipos base.
+>
+> **`maskByCharacters(value: string): string`** (ADR-219 §3, ADR-220 §5) — función pura de `@anonly/shared`: cada letra o dígito pasa a `X` y el resto queda. `"0170-0994 11"` → `"XXXX-XXXX XX"`. La usan `grouping-engine` (la máscara de un tipo propio, desde `canonicalValue`) y `regex-engine` (el `maskFormat` de una aparición de un formato propio bajo un tipo base).
 
 ## 6. Configuración por motor
 
@@ -898,6 +1179,16 @@ export interface ExportConfig {
 | `AVG_GLYPH_ADVANCE_RATIO` | `0.6` | Avance medio de glifo como fracción del tamaño de fuente, para estimar ancho sin canvas (ADR-057 §5) |
 | `MAX_EDIT_CHECKPOINTS` | `50` | Puntos de restauración de edición por documento; al pasarse se descarta el más viejo (ADR-172 §1) |
 | `DEGRADED_FONT_RATIO` | `0.5` | Umbral del aviso de degradación: se marca cuando **`anchoDisponible / anchoNatural`** cae por debajo, donde `anchoNatural` es lo que el texto mediría a `boxHeight × REPLACEMENT_FONT_HEIGHT_RATIO` (ADR-058 §7, **criterio y valor reemplazados por ADR-086**) |
+| `FORMAT_MAX_VARIANTS` | `8` | Variantes de un `FormatDefinition` (ADR-220 §1) |
+| `FORMAT_MAX_PIECES` | `16` | Piezas por variante, contando las de adentro de un `optional` (ADR-220 §1) |
+| `FORMAT_MAX_REPEAT` | `64` | `max` de una pieza `chars` (ADR-220 §1) |
+| `FORMAT_MAX_TEXT` | `40` | Caracteres de un texto fijo, de una palabra de contexto y del nombre de un formato (ADR-220 §1) |
+| `FORMAT_MAX_CONTEXT` | `5` | Palabras de contexto de un formato (ADR-220 §1) |
+| `FORMAT_MAX_STATES` | `1024` | Estados del autómata compilado de un formato (ADR-220 §2) |
+| `USER_TYPE_NAME_MAX` | `40` | Caracteres del nombre de un tipo propio (ADR-219 §2) |
+| `USER_TYPE_SHORT_LABEL_MAX` | `8` | Letras o dígitos de una versión corta escrita a mano (ADR-219 §2) |
+
+> **`DEFAULT_DETECTION_CONFIG`** (ADR-223 §2) — `{ country: "AR", baseFormats: [], userTypes: [], userFormats: [], catalogRefs: [] }`: Argentina, todos los formatos base prendidos y nada propio. Es exactamente la detección de la 1.0.2, y es lo que recibe un `createCore` sin override de `detection`.
 
 > **Por qué `REPLACEMENT_FONT_HEIGHT_RATIO` bajó de 0,7 a 0,64** (ADR-109 §4). La constante no cambió de significado ni de intención: sigue siendo "qué fracción del alto de la caja mide la fuente del reemplazo". Lo que cambió es **la caja**. Hasta ADR-109, `bbox.height` de una palabra de PDF era el **cuerpo** de la fuente; desde ADR-109 es su **alto de tinta**, `(ascent + |descent|) × cuerpo`, que sobre el corpus relevado —10 documentos, 4266 items— vale **1,101** pesado por items. Entonces `0,70 / 1,101 = 0,636 → 0,64` es la recalibración que deja **todo igual a la vista**: el token se dibuja del mismo tamaño y el detector de degradación mide contra la misma referencia. No es una decisión tipográfica.
 >
@@ -1066,7 +1357,16 @@ export interface OcrPageFailed { readonly documentId: string; readonly pageIndex
 
 // Detectores
 export interface EntityFound { readonly documentId: string; readonly occurrence: Occurrence; }
-export interface RegexFinished { readonly documentId: string; readonly occurrenceCount: number; readonly durationMs: number; }
+export interface RegexFinished {
+  readonly documentId: string;
+  readonly occurrenceCount: number;
+  readonly durationMs: number;
+  // ADR-220 §6: formatos que no se aplicaron en alguna página (un fallo del
+  // recorrido, o una definición inválida al init: figura con todas las
+  // páginas). Ausente ≡ ninguno, misma convención que unreadableInk (ADR-190 §4).
+  // Nunca lleva texto del documento.
+  readonly skippedFormats?: ReadonlyArray<{ readonly formatId: string; readonly pageIndices: ReadonlyArray<number> }>;
+}
 export interface NerStarted { readonly documentId: string; readonly pageCount: number; readonly modelId: string; readonly modelLoading?: boolean; }
 export interface NerModelLoading { readonly modelId: string; readonly progress: number; }
 export interface NerModelReady { readonly modelId: string; }
@@ -1080,7 +1380,7 @@ export interface EntityGroupRemoved { readonly documentId: string; readonly grou
 export interface GroupReplacementChanged { readonly documentId: string; readonly groupId: string; readonly mode: ReplacementMode; readonly value: string; }
 export interface GroupToggled { readonly documentId: string; readonly groupId: string; readonly enabled: boolean; }
 export interface ConflictDetected { readonly documentId: string; readonly conflict: Conflict; }
-export interface ConflictResolved { readonly documentId: string; readonly conflictId: string; readonly entityType: EntityType; } // ADR-083 §3 (antes: mode)
+export interface ConflictResolved { readonly documentId: string; readonly conflictId: string; readonly entityType: EntityTypeId; } // ADR-083 §3 (antes: mode); EntityTypeId por ADR-219 §1
 export interface GroupingFinished { readonly documentId: string; readonly groupCount: number; readonly conflictCount: number; readonly durationMs: number; }
 
 // Render
@@ -1160,7 +1460,7 @@ export interface RuleDeleted { readonly documentId: string; readonly ruleId: str
 export interface ConflictResolveRequested {
   readonly documentId: string;
   readonly conflictId: string;
-  readonly entityType?: EntityType;              // ADR-083 §1: el usuario elige el TIPO; ausente = default (mayor confidence)
+  readonly entityType?: EntityTypeId;            // ADR-083 §1: el usuario elige el TIPO; ausente = default (mayor confidence; entre dos de Regex, ADR-222 §3). EntityTypeId por ADR-219 §1
   // ADR-174 §3: solo en conflictos con `heldManual`. "manual" agrupa la ocurrencia
   // manual retenida; "detected" la descarta. Ausente = "detected". En un conflicto
   // sin heldManual -> GroupingInvalidPatchError (rechazo con warn).
@@ -1267,6 +1567,9 @@ export interface PipelineError {
 | **Snapshot** | Imagen renderizada de una página (original o anonimizada). |
 | **First paint** | Tiempo hasta ver la primera página renderizada. |
 | **Ready** | Estado del pipeline cuando grouping terminó y el usuario puede editar. |
+| **Tipo propio** | Tipo de entidad que crea el usuario (`UserEntityTypeId`). Guardado si se creó desde inicio; del documento si se creó con uno abierto (ADR-219). |
+| **Formato** | La forma de un texto que se reconoce como un tipo. Base (del catálogo) o propio (`FormatDefinition`, del generador) (ADR-220). |
+| **Catálogo** | Los formatos base de un país, más los universales. Hay uno activo (ADR-221). |
 
 ---
 
