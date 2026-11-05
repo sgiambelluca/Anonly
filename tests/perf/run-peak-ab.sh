@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Campaña de reducción de pico (docs/roadmap/memoria/Reduccion_De_Pico_Nube_2026-11.md):
 # A/B intercalado ABBA entre dos brazos de support/peakArmsTransform.ts
-# (base, c1, c2, head, c3, c4). Los fuentes de packages/ y apps/ no se tocan: cada
+# (base, c1, c2, head, c3, c4, c4r). Los fuentes de packages/ y apps/ no se tocan: cada
 # brazo es un renderer construido aparte por support/peakArmsBuildCli.ts y
 # copiado a apps/react-client/dist antes de su corrida. El dist original se
 # restaura al salir, pase lo que pase.
@@ -25,7 +25,7 @@ GREP="${ANONLY_AB_GREP:-P2 —}"
 RUN_DIR="${ANONLY_AB_OUT:-.measure/peak-ab/$(date -u +%Y%m%dT%H%M%SZ)-$CONTROL-$CANDIDATE}"
 DIST="apps/react-client/dist"
 
-valid_arm() { [[ "$1" =~ ^(base|c1|c2|head|c3|c4)$ ]]; }
+valid_arm() { [[ "$1" =~ ^(base|c1|c2|head|c3|c4|c4r)$ ]]; }
 valid_arm "$CONTROL" || { echo "pico: ANONLY_AB_CONTROL inválido" >&2; exit 1; }
 valid_arm "$CANDIDATE" || { echo "pico: ANONLY_AB_CANDIDATE inválido" >&2; exit 1; }
 [[ "$CONTROL" != "$CANDIDATE" ]] || { echo "pico: control y candidato son el mismo brazo" >&2; exit 1; }

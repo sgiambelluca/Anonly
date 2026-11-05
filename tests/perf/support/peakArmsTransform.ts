@@ -23,14 +23,17 @@ import { createHash } from "node:crypto";
  * - `c4`: `head` + `pageProxy.cleanup()` después de cada `render()` en el
  *   kernel de Render (pdf.js solo programa, con 5 s de retardo, la limpieza de
  *   las páginas con imágenes de más de 10e6 bytes).
+ * - `c4r`: `head` + el mismo cleanup, **solo** donde cada página se dibuja una vez
+ *   por etapa: siempre en `kernelRasterizePage` (OCR) y en `kernelRenderPage`
+ *   cuando `mode === "full"` (export). El preview no cambia (ADR-227, opción 2).
  *
  * Cada bloque se busca con una coincidencia exacta: si el fuente cambia, el
  * build se niega en vez de medir otra cosa.
  */
-export type PeakArm = "base" | "c1" | "c2" | "head" | "c3" | "c4";
+export type PeakArm = "base" | "c1" | "c2" | "head" | "c3" | "c4" | "c4r";
 export type PeakSourceFile = "pdf-engine" | "orchestrator" | "render-kernel";
 
-export const PEAK_ARMS: ReadonlyArray<PeakArm> = ["base", "c1", "c2", "head", "c3", "c4"];
+export const PEAK_ARMS: ReadonlyArray<PeakArm> = ["base", "c1", "c2", "head", "c3", "c4", "c4r"];
 
 /** C-1, `pdf-engine/src/pdf.engine.ts` (commit 9ead600). */
 export const C1_BLOCK =
@@ -69,6 +72,33 @@ export const C4_INSERTION =
   "    // experimento C-4 (solo build del arnés): suelta las imágenes de la página.\n" +
   "    pageProxy.cleanup();\n";
 
+/** C-4 restringido: los dos llamados a `renderPageOntoContext`, distinguidos por lo que los precede. */
+const RENDER_CALL =
+  "  try {\n" +
+  "    await renderPageOntoContext(\n" +
+  "      pageProxy,\n" +
+  "      context2d,\n" +
+  "      viewport,\n" +
+  "      documentId,\n" +
+  "      pageIndex,\n" +
+  "      opts.timeoutMs,\n" +
+  "    );\n";
+const CANVAS_LINES =
+  "  const canvas = createCanvas(documentId, pageIndex, viewport.width, viewport.height, opts.onWarn);\n" +
+  "  const context2d = get2dContext(canvas, documentId, pageIndex);\n" +
+  "\n";
+/** `kernelRenderPage` (preview y export). */
+export const C4R_RENDER_ANCHOR =
+  "  const viewport = pageProxy.getViewport({ scale });\n" + CANVAS_LINES + RENDER_CALL;
+export const C4R_RENDER_INSERTION =
+  "    // experimento C-4r (solo build del arnés): solo el export suelta la página.\n" +
+  '    if (mode === "full") pageProxy.cleanup();\n';
+/** `kernelRasterizePage` (OCR). */
+export const C4R_RASTER_ANCHOR = "      : undefined;\n\n" + CANVAS_LINES + RENDER_CALL;
+export const C4R_RASTER_INSERTION =
+  "    // experimento C-4r (solo build del arnés): el OCR suelta la página.\n" +
+  "    pageProxy.cleanup();\n";
+
 const sha256 = (value: string): string => createHash("sha256").update(value).digest("hex");
 
 export function parsePeakArm(value: string | undefined): PeakArm {
@@ -78,7 +108,7 @@ export function parsePeakArm(value: string | undefined): PeakArm {
 
 /** Si el brazo conserva el cambio implementado de ese archivo (C-1 o C-2). `render-kernel` no tiene. */
 export function armKeeps(arm: PeakArm, file: PeakSourceFile): boolean {
-  const withHead = arm === "head" || arm === "c3" || arm === "c4";
+  const withHead = arm === "head" || arm === "c3" || arm === "c4" || arm === "c4r";
   if (file === "pdf-engine") return withHead || arm === "c1";
   if (file === "orchestrator") return withHead || arm === "c2";
   return true;
@@ -86,7 +116,10 @@ export function armKeeps(arm: PeakArm, file: PeakSourceFile): boolean {
 
 /** Si el brazo agrega a ese archivo el candidato todavía no implementado (C-3 o C-4). */
 export function armAdds(arm: PeakArm, file: PeakSourceFile): boolean {
-  return (arm === "c3" && file === "orchestrator") || (arm === "c4" && file === "render-kernel");
+  return (
+    (arm === "c3" && file === "orchestrator") ||
+    ((arm === "c4" || arm === "c4r") && file === "render-kernel")
+  );
 }
 
 function requireOnce(source: string, needle: string, what: string): void {
@@ -114,9 +147,15 @@ export function transformPeakSource(source: string, file: PeakSourceFile, arm: P
   }
   if (file === "render-kernel") {
     requireOnce(out, C4_ANCHOR, "el ancla de C-4");
+    requireOnce(out, C4R_RENDER_ANCHOR, "el ancla de C-4r en kernelRenderPage");
+    requireOnce(out, C4R_RASTER_ANCHOR, "el ancla de C-4r en kernelRasterizePage");
     if (out.includes("pageProxy.cleanup()"))
       throw new Error("arnés de pico: el kernel de Render ya llama a pageProxy.cleanup()");
-    if (armAdds(arm, file)) out = out.replace(C4_ANCHOR, C4_ANCHOR + C4_INSERTION);
+    if (arm === "c4") out = out.replace(C4_ANCHOR, C4_ANCHOR + C4_INSERTION);
+    if (arm === "c4r") {
+      out = out.replace(C4R_RENDER_ANCHOR, C4R_RENDER_ANCHOR + C4R_RENDER_INSERTION);
+      out = out.replace(C4R_RASTER_ANCHOR, C4R_RASTER_ANCHOR + C4R_RASTER_INSERTION);
+    }
   }
   return out;
 }
