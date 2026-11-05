@@ -25,13 +25,15 @@
   - el tiempo no se mueve;
   - el texto de OCR y los grupos son idénticos;
   - en P1 (texto nativo) no hay efecto.
-- **P2 caliente supera a frío por dos razones.**
+- **P2 caliente supera a frío por dos razones** (la primera medida, la
+  segunda inferida).
   - Sin NER, medido: el documento anterior deja unos 90 MB y 4 workers vivos en
     el renderer, y el parseo se apila encima. C-1 casi anula esta parte: con
     C-1, caliente queda a 21 MB de frío.
-  - Con NER, no medible en este banco: el modelo queda cargado (15 s, ADR-167)
+  - Con NER, inferencia no medible en este banco: el modelo queda cargado (15 s, ADR-167)
     mientras corre el OCR del documento siguiente.
-  - Las dos juntas son del orden de los ~630 MB medidos en Windows.
+  - Las dos juntas son del orden de los ~630 MB medidos en Windows, cruzando
+    mediciones de distintos equipos (§3.2).
 - **C-2 (ADR-226): soltar el modelo de NER al empezar el OCR de un documento**,
   si está ocioso. Sin A/B: requiere el modelo de NER.
 - **Lo que este banco no puede decir**: nada con NER prendido, y ningún
@@ -78,6 +80,14 @@ copia el brazo que toca a `apps/react-client/dist` antes de cada corrida, en
 orden ABBA, y restaura el dist original al salir. Una instancia nueva de
 Electron por corrida, seriales. Artefactos crudos en `.measure/c1-parse-cleanup/`,
 fuera del repo.
+
+**La identidad es más débil que la de ADR-218, y alcanza para un A/B
+provisional.** El digest del `dist` de cada brazo se registra al construirlo,
+pero no se vuelve a verificar en cada corrida. `apps/desktop-shell/dist` no se
+congela, y el resumen no cruza el `exit=` del manifest. Las 24 corridas de esta
+campaña terminaron con `exit=0` y escribieron su JSON, y la revisión comprobó
+que el dist del producto quedó restaurado. Si el instrumento se reusa para
+adoptar, hay que endurecerlo (`tests/perf/README.md`).
 
 ## 2. Desglose del pico
 
@@ -135,7 +145,8 @@ brazo A.** Es la causa que ataca C-1 (§4.1).
   el parseo de P2 frío y unos 780 MB durante el OCR. Es una cota, no una
   medición (ADR-159 §7–§8).
 - **Workers vivos** (targets `worker` vistos por CDP en cada muestra de heap):
-  - P2 frío arranca con 0 workers;
+  - P2 frío arranca sin workers según los eventos del pool; la primera muestra
+    de CDP, a ~1,4 s y ya dentro del parseo, ve 1 (el de parseo);
   - P2 caliente arranca con **4**, que quedan vivos del documento anterior por
     el `idleDisposeMs` de 60 s (ADR-080);
   - los dos llegan a 10 durante el OCR y terminan con 4.
@@ -159,7 +170,8 @@ que deja a P2 a 180 MB de su techo. Tiene dos partes.
   157 MB).
 - Coincide con los **4 workers que siguen vivos** después de cerrar el primer
   documento (§2.3), retenidos 60 s por `idleDisposeMs`. El heap de JS de todos
-  los targets crece unos 10 MB (de ~6 a ~16 MB al cerrar el parseo de P2), lejos
+  los targets crece unos 10 MB (de ~7 a ~18 MB al cerrar el parseo de P2, usado más embebedor, el mismo
+  criterio que §2.3), lejos
   de los ~100 MB: lo retenido es memoria que CDP no ve como heap. Lo probable
   es el runtime de esos workers (pdf.js, WASM); no se pudo atribuir por worker.
 - **El parseo de P2 se apila encima**: el pico caliente es 1716 contra 1629
@@ -197,7 +209,10 @@ usa `pageProxy.objs`.
 
 **Por qué no repite el descarte de H-10 §5.2.** Aquel `cleanup()` era en el
 kernel de Render, después de `render()`, donde pdf.js ya limpia solo las
-imágenes grandes (`_maybeCleanupAfterRender`). Después de `getOperatorList()`
+imágenes de más de 10e6 bytes (`_maybeCleanupAfterRender`). Que eso explique
+el resultado nulo de H-10 es una **inferencia**: no se midió el tamaño de las
+imágenes de P2 (los ~620 MB que libera C-1 en 50 páginas dan ~12 MB por
+página, por encima del umbral). Después de `getOperatorList()`
 no hay limpieza automática, y `#pageCache` conserva cada página hasta
 `destroy()` (pdfjs-dist 4.10.38, leído en el código).
 
@@ -277,7 +292,7 @@ separado y juntas.
 |---|---|
 | Bajar `ocrPoolSize`, `renderPoolSize`, hilos de ONNX o reconocedores | ADR-154 §1: la memoria no se compra bajando paralelismo |
 | Bajar el DPI del OCR | cambia la calidad del reconocimiento; ADR-154 §2 lever 6 lo deja al humano con la línea de base de ADR-147 |
-| `pageProxy.cleanup()` en el kernel de Render | descartado con medición (H-10 §5.2, ADR-154 §2). C-1 explica por qué no movía nada: después de `render()` pdf.js ya limpia solo |
+| `pageProxy.cleanup()` en el kernel de Render | descartado con medición (H-10 §5.2, ADR-154 §2). explicación probable, sin medir: después de `render()` pdf.js ya limpia solo las imágenes de más de 10e6 bytes (ADR-225, Contexto §3) |
 | Adelantar la carga de NER durante el OCR | descartado con medición (`Optimizacion_De_Rendimiento.md`, «Descartado con medición») |
 | Soltar NER al terminar la detección | ADR-166, retirado por ADR-167: la recarga se apilaba sobre el documento siguiente. C-2 es otro disparador (§4) |
 | Los workers de Render que siguen vivos del documento anterior | en caliente se ven 3 `render-page` vivos ya durante el parseo (en frío, 0). Sin atribución por worker, porque su heap de JS es de pocos MB y el resto no se observa por CDP. Además, sirven al preview del documento abierto: soltarlos al cerrar choca con el criterio 3 (con pestañas, el documento no se cierra). Queda como observación, no como candidato |
@@ -302,8 +317,9 @@ editó el spec en esta campaña: el cambio va con ADR-225, si se acepta (R-19).
 ## 7. Cómo repetirlo
 
 ```bash
-# Desglose sin NER, P1 y P2 (opt-in)
-ANONLY_MEMORY_NER_OFF=1 pnpm exec playwright test --config=playwright.perf.config.ts tests/perf/memory-ner-off.spec.ts --workers=1 --retries=0
+# Desglose sin NER: P2 salió de «P2-attrib — NER apagado»; P1 de memory-ner-off.spec.ts
+pnpm exec playwright test --config=playwright.perf.config.ts tests/perf/memory-attribution.spec.ts --grep "NER apagado" --workers=1 --retries=0
+ANONLY_MEMORY_NER_OFF=1 pnpm exec playwright test --config=playwright.perf.config.ts tests/perf/memory-ner-off.spec.ts --grep "P1-ner-off" --workers=1 --retries=0
 # A/B de C-1 (ABBA × 3) sobre P2 sin NER
 ANONLY_C1_ROUNDS=3 tests/perf/run-parse-cleanup.sh
 # Lo mismo sobre P1 sin NER

@@ -32,8 +32,7 @@ cargado y no se paga su carga.
   pico es el mayor de los dos, no la suma.
 - **En caliente**, el documento anterior dejó el modelo cargado. Se libera por
   temporizador a los 15 s de inactividad (ADR-167). La línea de base caliente
-  de `memory.spec.ts` asienta en pocos segundos (en la campaña de 2026-11, la
-  importación caliente de P2 arrancó unos 3 s después del `Ready` frío), y
+  de `memory.spec.ts` asienta en pocos segundos (en la campaña de 2026-11, con NER apagado, la importación caliente de P2 arrancó unos 3 s después del `Ready` frío; con NER puede asentar distinto, con un techo de 30 s, ADR-146 §7bis), y
   quien abre un expediente
   detrás de otro tampoco espera 15 s. Entonces **el OCR del documento nuevo
   corre con el modelo de NER residente**: el pico pasa a ser OCR + NER.
@@ -63,16 +62,15 @@ nada, así que no reabre el caso que midió T-8.
    Orchestrator le pide que suelte sus workers. Es la misma baja con guarda de
    ADR-157 §1ter: si hay un job en vuelo no hace nada, y el temporizador de
    ADR-167 sigue como red.
-2. La baja reabre el ciclo del modelo (`modelWarm = false`, ADR-166 §1bis y
-   ADR-167 §4), para que la recarga en la detección emita `NER_MODEL_LOADING` /
+2. La baja reabre el ciclo del modelo (`modelWarm = false`, ADR-166 §1bis; el listener `onWorkersReleased` de ADR-167 §3 ya lo garantiza para cualquier camino de baja), para que la recarga en la detección emita `NER_MODEL_LOADING` /
    `NER_MODEL_READY` y el indicador no mienta (ADR-135).
 3. No cambia `nerIdleDisposeMs`, ni los tamaños de pool, ni la cantidad de
    hilos: no baja paralelismo (ADR-154 §1).
 
 **Contrato**: ADR-167 §1 eliminó `NerEngine.releaseIdleWorkers()` por no tener
 llamador. Esta decisión necesita volver a exponer una baja de NER, así que
-lleva su cambio en `Contracts.md` y en `NER_Engine.md` antes del código (R-2,
-R-19), en un commit propio con este ADR.
+lleva su cambio de spec antes del código: en `NER_Engine.md` §6, y en `Contracts.md` solo si trae tipo, evento o error code nuevo (precedente: la baja de OCR en `OCR_Engine.md`). Va en un commit propio con
+este ADR (R-2, R-19).
 
 ## Costo esperado
 

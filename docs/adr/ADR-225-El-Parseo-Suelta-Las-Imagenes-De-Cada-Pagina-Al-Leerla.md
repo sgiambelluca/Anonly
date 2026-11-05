@@ -3,8 +3,8 @@
 # ADR-225 — El parseo suelta las imágenes de cada página al terminar de leerla
 
 - **Estado**: **Proposed**. A/B intercalado en un contenedor Linux, con NER
-  apagado (§3). Falta la confirmación con NER y en Windows nativo (§6) y la
-  decisión del humano.
+  apagado («A/B medido»). Falta la confirmación con NER y en Windows nativo
+  («Qué falta antes de aceptarlo») y la decisión del humano.
 - **Fecha**: 2026-11-05
 - **Propuesto por**: el planificador, en la campaña de reducción de pico
   ([`Reduccion_De_Pico_Nube_2026-11.md`](../roadmap/memoria/Reduccion_De_Pico_Nube_2026-11.md),
@@ -49,9 +49,12 @@ operadores y argumentos.
 ### 3. Lo que ya se descartó, y por qué esto es otro sitio
 
 ADR-154 §2 y la bitácora H-10 §5.2 descartaron `pageProxy.cleanup()` **en el
-kernel de Render, durante el OCR**: el pico no se movió. El mecanismo de §2
-explica ese resultado: después de `render()` pdf.js ya limpiaba las imágenes
-grandes por su cuenta. Este ADR no repite aquel cambio. Propone el cleanup en
+kernel de Render, durante el OCR**: el pico no se movió. **Una explicación
+probable, sin medir:** después de `render()` pdf.js ya limpia por su cuenta las
+imágenes de más de `MAX_IMAGE_SIZE_TO_CACHE` (10e6 bytes, `pdf.mjs`). Nadie
+midió el tamaño de las imágenes de P2. Los ~620 MB que libera C-1 en 50 páginas
+dan ~12 MB por página, por encima de ese umbral, lo que la hace plausible.
+Este ADR no repite aquel cambio. Propone el cleanup en
 **otra función, de otro motor (PDF Engine), en otra fase (el parseo) y después
 de otra llamada (`getOperatorList()`)**, donde esa limpieza automática no
 existe. El A/B de abajo es lo que lo distingue en números.
@@ -105,8 +108,8 @@ operator list no decodifica nada.
    `pageProxy.rotate` y el viewport siguen disponibles después del cleanup.
 2. No cambia `Page`, ni eventos, ni contratos, ni tamaños de pool, ni el DPI
    del OCR. Es un cambio interno de un solo motor (R-1).
-3. El caso límite 2 de §13 de `core/PDF_Engine.md` se corrige con lo medido
-   en §2.
+3. El caso límite 2 de §13 de `core/PDF_Engine.md` se corrige con lo leído en
+   el código de pdf.js (Contexto §2) y lo medido en «A/B medido».
 
 ## Compatibilidad con varios documentos (1.2)
 
@@ -128,7 +131,7 @@ operator list no decodifica nada.
 - **Tiempo**: ver la tabla. `cleanup()` es una operación local del lado
   principal (vacía dos mapas); no agrega mensajes al worker de pdf.js.
 
-## 6. Qué falta antes de aceptarlo
+## Qué falta antes de aceptarlo
 
 - El mismo A/B con NER prendido, sobre P1, P2 y P2-dense de `memory.spec.ts`.
   En P1 (texto nativo) se espera que no cambie nada.
@@ -147,4 +150,4 @@ operator list no decodifica nada.
 - Con NER prendido, en caliente el modelo puede seguir residente durante el
   parseo del documento siguiente (ADR-226). Si es así, el pico del parseo se
   suma al modelo y este cambio pesaría más en el caso caliente que en el frío.
-  Es una predicción: la mide el A/B de §6.
+  Es una predicción: la mide el A/B con NER de «Qué falta antes de aceptarlo».
