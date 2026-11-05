@@ -7,7 +7,7 @@
  * `apps/react-client/dist` no se toca acá: el runner copia el brazo antes de
  * cada corrida.
  *
- * Uso: `tsx tests/perf/support/peakArmsBuildCli.ts <base|c1|c2|head> <outDir>`.
+ * Uso: `tsx tests/perf/support/peakArmsBuildCli.ts <base|c1|c2|head|c3|c4> <outDir>`.
  */
 import { readFile, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
@@ -26,6 +26,9 @@ import {
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const APP_ROOT = resolve(REPO_ROOT, "apps/react-client");
+/** Principal y worker de Render, observado en el build de c4 (`transformsSeen`). */
+const RENDER_KERNEL_BUNDLES = 2;
+
 /**
  * `bundles`: cuántas veces tiene que pasar el archivo por el plugin. `pdf.engine.ts`
  * entra al bundle principal y al del worker de parseo; si el plugin dejara de
@@ -45,6 +48,11 @@ const SOURCES: ReadonlyArray<{
     file: "orchestrator",
     path: resolve(REPO_ROOT, "packages/anonymization-core/src/orchestrator.ts"),
     bundles: 1,
+  },
+  {
+    file: "render-kernel",
+    path: resolve(REPO_ROOT, "packages/anonymization-core/render-engine/src/worker/kernel.ts"),
+    bundles: RENDER_KERNEL_BUNDLES,
   },
 ];
 
