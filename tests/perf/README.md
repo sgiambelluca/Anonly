@@ -2275,7 +2275,7 @@ ADR-225 y ADR-226). Instrumentos opt-in, ninguno en `pnpm test:perf`:
   | `base` | no | no | no |
   | `c1` | sí | no | no |
   | `c2` | no | sí | no |
-  | `c4r` | no | no | sí |
+  | `c4` | no | no | sí |
   | `head` | sí | sí | sí (el producto) |
 
   `support/peakArmsBuildCli.ts` transforma `pdf.engine.ts`, `orchestrator.ts` y
@@ -2288,9 +2288,12 @@ ADR-225 y ADR-226). Instrumentos opt-in, ninguno en `pnpm test:perf`:
   reportes dejó cada corrida. Variables: `ANONLY_AB_CONTROL` (default `base`),
   `ANONLY_AB_CANDIDATE` (default `head`), `ANONLY_AB_ROUNDS`, `ANONLY_AB_SPEC`
   (default `tests/perf/memory.spec.ts`), `ANONLY_AB_GREP` (default `"P2 —"`),
-  `ANONLY_AB_OUT`. En Linux sin pantalla usa `xvfb-run`. Los brazos `c3` y `c4`
-  con que se midieron esos candidatos antes de implementar C-4 están en la
-  versión del arnés del commit `8e8e2e4`.
+  `ANONLY_AB_OUT`. En Linux sin pantalla usa `xvfb-run`. **Los nombres de los
+  brazos cambiaron de significado** al implementar C-4: en la versión del arnés
+  del commit `8e8e2e4`, `c3`, `c4` y `c4r` **agregaban** candidatos sobre
+  `head` (`c4r` era C-4 restringido a OCR y export, el que se adoptó). Desde
+  entonces `c4` es «solo C-4». Los `transform-<brazo>.json` de cada campaña
+  registran qué se midió.
 - `support/summarizePeakArmsCli.ts <carpeta> [control] [candidato]` escribe un
   `summary-<perfil>.json` por perfil medido (una corrida puede medir P1 y P2):
   medianas por brazo, diferencia pareada por ronda, hash del texto de OCR y
