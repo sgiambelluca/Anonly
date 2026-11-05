@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 
 /**
- * C-1: resumen de la campaña A/B de `run-parse-cleanup.sh`. Función pura sobre
+ * Campaña de reducción de pico: resumen del A/B de `run-peak-ab.sh`, un brazo
+ * de control contra uno candidato (`peakArmsTransform.ts`). Función pura sobre
  * los reportes de `memoryProfile.ts` (un `ProfileReport` por corrida, con su
  * corrida fría y su caliente). No promedia fallos: una corrida que no llegó a
  * `Ready` se cuenta aparte y no entra en las medianas.
@@ -37,7 +38,8 @@ export interface ProfileReportInput {
 export interface LabeledReport {
   /** Ronda ABBA a la que pertenece la corrida (1..n). */
   readonly round: number;
-  readonly arm: "A" | "B";
+  /** Nombre del brazo (`base`, `c1`, `c2`, `head`). */
+  readonly arm: string;
   readonly report: ProfileReportInput;
 }
 
@@ -68,22 +70,22 @@ export interface ArmSummary {
 
 export interface PairedRound {
   readonly round: number;
-  /** Media de B menos media de A dentro de la ronda (MB / ms). */
+  /** Media del candidato menos media del control dentro de la ronda (MB / ms). */
   readonly peakDeltaMb: number;
   readonly readyDeltaMs: number;
 }
 
+export interface TemperatureSummary {
+  readonly control: ArmSummary;
+  readonly candidate: ArmSummary;
+  readonly paired: ReadonlyArray<PairedRound>;
+}
+
 export interface CampaignSummary {
-  readonly cold: {
-    readonly A: ArmSummary;
-    readonly B: ArmSummary;
-    readonly paired: ReadonlyArray<PairedRound>;
-  };
-  readonly hot: {
-    readonly A: ArmSummary;
-    readonly B: ArmSummary;
-    readonly paired: ReadonlyArray<PairedRound>;
-  };
+  readonly controlArm: string;
+  readonly candidateArm: string;
+  readonly cold: TemperatureSummary;
+  readonly hot: TemperatureSummary;
   /** Verdadero si los dos brazos leyeron exactamente el mismo texto de OCR en todas las corridas. */
   readonly ocrTextIdentical: boolean;
   readonly groupCountsIdentical: boolean;
@@ -154,14 +156,16 @@ function summarizeArm(rows: ReadonlyArray<TemperatureRow>): ArmSummary {
 }
 
 function pairRounds(
-  labeled: ReadonlyArray<{ round: number; arm: "A" | "B"; row: TemperatureRow }>,
+  labeled: ReadonlyArray<{ round: number; arm: string; row: TemperatureRow }>,
+  control: string,
+  candidate: string,
 ): PairedRound[] {
   const rounds = [...new Set(labeled.map((entry) => entry.round))].sort((a, b) => a - b);
   const paired: PairedRound[] = [];
   for (const round of rounds) {
     const inRound = labeled.filter((entry) => entry.round === round && entry.row.ok);
-    const a = inRound.filter((entry) => entry.arm === "A").map((entry) => entry.row);
-    const b = inRound.filter((entry) => entry.arm === "B").map((entry) => entry.row);
+    const a = inRound.filter((entry) => entry.arm === control).map((entry) => entry.row);
+    const b = inRound.filter((entry) => entry.arm === candidate).map((entry) => entry.row);
     if (a.length === 0 || b.length === 0) continue;
     paired.push({
       round,
@@ -173,34 +177,35 @@ function pairRounds(
   return paired;
 }
 
-export function summarizeCampaign(reports: ReadonlyArray<LabeledReport>): CampaignSummary {
-  const build = (temperature: "cold" | "hot") => {
+export function summarizeCampaign(
+  reports: ReadonlyArray<LabeledReport>,
+  control: string,
+  candidate: string,
+): CampaignSummary {
+  const build = (temperature: "cold" | "hot"): TemperatureSummary => {
     const labeled = reports.map((entry) => ({
       round: entry.round,
       arm: entry.arm,
       row: toTemperatureRow(entry.report[temperature]),
     }));
     return {
-      A: summarizeArm(labeled.filter((entry) => entry.arm === "A").map((entry) => entry.row)),
-      B: summarizeArm(labeled.filter((entry) => entry.arm === "B").map((entry) => entry.row)),
-      paired: pairRounds(labeled),
+      control: summarizeArm(
+        labeled.filter((entry) => entry.arm === control).map((entry) => entry.row),
+      ),
+      candidate: summarizeArm(
+        labeled.filter((entry) => entry.arm === candidate).map((entry) => entry.row),
+      ),
+      paired: pairRounds(labeled, control, candidate),
     };
   };
   const cold = build("cold");
   const hot = build("hot");
-  const allHashes = new Set([
-    ...cold.A.ocrTextHashes,
-    ...cold.B.ocrTextHashes,
-    ...hot.A.ocrTextHashes,
-    ...hot.B.ocrTextHashes,
-  ]);
-  const allGroups = new Set([
-    ...cold.A.groupCounts,
-    ...cold.B.groupCounts,
-    ...hot.A.groupCounts,
-    ...hot.B.groupCounts,
-  ]);
+  const arms = [cold.control, cold.candidate, hot.control, hot.candidate];
+  const allHashes = new Set(arms.flatMap((arm) => arm.ocrTextHashes));
+  const allGroups = new Set(arms.flatMap((arm) => arm.groupCounts));
   return {
+    controlArm: control,
+    candidateArm: candidate,
     cold,
     hot,
     ocrTextIdentical: allHashes.size === 1,
@@ -209,8 +214,8 @@ export function summarizeCampaign(reports: ReadonlyArray<LabeledReport>): Campai
 }
 
 /** `NN-r<ronda>-<brazo>-memory-...json` → ronda y brazo; `undefined` si el nombre no es de la campaña. */
-export function parseRunFileName(name: string): { round: number; arm: "A" | "B" } | undefined {
-  const match = /^\d{2}-r(\d+)-(A|B)-memory-.+\.json$/.exec(name);
-  if (match === null) return undefined;
-  return { round: Number(match[1]), arm: match[2] as "A" | "B" };
+export function parseRunFileName(name: string): { round: number; arm: string } | undefined {
+  const match = /^\d{2}-r(\d+)-(base|c1|c2|head)-memory-.+\.json$/.exec(name);
+  if (match === null || match[1] === undefined || match[2] === undefined) return undefined;
+  return { round: Number(match[1]), arm: match[2] };
 }
