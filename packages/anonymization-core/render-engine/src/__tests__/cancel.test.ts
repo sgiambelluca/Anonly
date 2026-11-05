@@ -54,6 +54,7 @@ describe("RenderEngine — cancellation", () => {
         if (pageIndex === 0) {
           return {
             getViewport: vi.fn(() => ({ width: 100, height: 100 })),
+            cleanup: vi.fn(),
             render: vi.fn(() => ({ promise: page0RenderPromise })),
           };
         }

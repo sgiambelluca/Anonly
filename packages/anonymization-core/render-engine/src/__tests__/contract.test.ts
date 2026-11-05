@@ -289,6 +289,7 @@ describe("RenderEngine — contract tests", () => {
       pageCount: 1,
       pageFactory: () => ({
         getViewport: getViewportSpy,
+        cleanup: vi.fn(),
         render: vi.fn(() => ({ promise: Promise.resolve() })),
       }),
     });
