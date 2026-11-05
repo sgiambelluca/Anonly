@@ -2253,3 +2253,35 @@ la variable no hace nada: no registra salvedad ni escribe esos archivos.
 `tests-untracked.sha256` y el digest del dist. Con archivos nuevos sin trackear bajo `packages/` o `apps/`, dos tandas
 con distinto contenido de esos archivos ya no se ven iguales: la identidad difiere y la tanda aborta sin medir. Que una
 tanda tenga ese archivo y la otra no (el árbol pasó de sucio a limpio o al revés) también es una diferencia.
+
+## Pico de memoria en el parseo (`run-parse-cleanup.sh`, C-1) y P1/P2 sin NER
+
+Campaña de 2026-11 ([informe](../../docs/roadmap/memoria/Reduccion_De_Pico_Nube_2026-11.md),
+ADR-225). Dos instrumentos opt-in, ninguno en `pnpm test:perf`:
+
+- `memory-ner-off.spec.ts` (`ANONLY_MEMORY_NER_OFF=1`): P1 y P2 de
+  `memory.spec.ts` con NER apagado, para un banco sin el modelo de NER. Mismo
+  `measureProfile`, misma secuencia frío → cierre → caliente. No reemplaza a
+  `memory.spec.ts`: P1 y P2 llevan NER por definición (ADR-146 §4).
+- `run-parse-cleanup.sh`: A/B intercalado ABBA de C-1 (`pageProxy.cleanup()`
+  al recibir el operator list en `parsePage`). Cada brazo es un renderer
+  construido por `support/parseCleanupBuildCli.ts`, que transforma el fuente en
+  memoria **solo** en el bundle del worker de parseo
+  (`support/parseCleanupTransform.ts`, una coincidencia exacta, con test).
+  `packages/` y `apps/` no se tocan; el script copia el brazo a
+  `apps/react-client/dist` antes de cada corrida y restaura el original al
+  salir. Variables: `ANONLY_C1_ROUNDS`, `ANONLY_C1_SPEC`, `ANONLY_C1_GREP`,
+  `ANONLY_C1_OUT`. En Linux sin pantalla usa `xvfb-run`.
+- `support/summarizeParseCleanupCli.ts <carpeta>` escribe `summary.json`:
+  medianas por brazo, diferencia pareada por ronda, hash del texto de OCR y
+  cantidad de grupos (`support/parseCleanupSummary.ts`, con test).
+
+```bash
+ANONLY_C1_ROUNDS=3 tests/perf/run-parse-cleanup.sh
+ANONLY_MEMORY_NER_OFF=1 ANONLY_C1_SPEC=tests/perf/memory-ner-off.spec.ts ANONLY_C1_GREP="P1-ner-off" tests/perf/run-parse-cleanup.sh
+pnpm exec tsx tests/perf/support/summarizeParseCleanupCli.ts .measure/c1-parse-cleanup/<carpeta>
+```
+
+Con el modelo de NER disponible, la misma campaña sobre los perfiles normativos:
+`ANONLY_C1_SPEC=tests/perf/memory.spec.ts ANONLY_C1_GREP="P1 —|P2 —"`. No
+correr otra medición ni gates pesados en paralelo.
