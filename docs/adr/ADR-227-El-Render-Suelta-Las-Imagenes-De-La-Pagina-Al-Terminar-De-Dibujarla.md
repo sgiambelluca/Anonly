@@ -2,9 +2,11 @@
 
 # ADR-227 — El render suelta las imágenes de la página al terminar de dibujarla
 
-- **Estado**: **Proposed**. A/B intercalado en un contenedor Linux, con NER
-  apagado (§Medición). **Reabre un descarte** (H-10 §5.2, ADR-154 §2) con una
-  condición que aquella medición no cubrió: lo decide el humano.
+- **Estado**: **Accepted**, opción 2, por el humano el 2026-11-05 («dejamos
+  accepted en caso de que sí»), condicionado a que el A/B de la opción 2
+  confirmara la ganancia. La confirmó (§Medición de la opción 2). Se implementa
+  en `perf/pico-memoria`. **Reabre un descarte** (H-10 §5.2, ADR-154 §2) con una
+  condición que aquella medición no cubrió.
 - **Fecha**: 2026-11-05
 - **Propuesto por**: el planificador, en la campaña de reducción de pico
   ([`Reduccion_De_Pico_Nube_2026-11.md`](../roadmap/memoria/Reduccion_De_Pico_Nube_2026-11.md),
@@ -103,7 +105,37 @@ entre paréntesis mínimo y máximo:
   no terminó de navegar a `app://local/index.html` en 30 s, antes de importar.
   Es una falla de arranque del arnés; ese brazo y perfil quedan con 5 corridas.
 
-## Decisión propuesta
+## Medición de la opción 2
+
+Mismo banco y método. Brazo `head` contra `c4r`: `pageProxy.cleanup()` siempre
+después de dibujar en `kernelRasterizePage` (OCR) y en `kernelRenderPage` solo
+con `mode === "full"` (export); el preview no cambia. 12 de 12 corridas válidas
+(`.measure/peak-ab/c4r-neroff-head-c4r/`). MB, medianas, y entre paréntesis
+mínimo y máximo:
+
+| P2 sin NER, 50 páginas | `head` | `c4r` | `c4r` − `head` por ronda |
+|---|---:|---:|---:|
+| 144 dpi, pico frío | 1416 (1398–1430) | 1058 (1053–1084) | −328 / −363 / −369 |
+| 144 dpi, pico caliente | 1431 (1406–1445) | 1050 (1043–1068) | −379 / −361 / −383 |
+| 144 dpi, después de `Ready` | 1155 / 1175 | 786 / 786 | — |
+| 216 dpi, pico frío | 1486 (1465–1502) | 1270 (1262–1274) | −201 / −232 / −215 |
+| 216 dpi, pico caliente | 1474 (1457–1487) | 1270 (1257–1309) | −194 / −210 / −178 |
+| 216 dpi, después de `Ready` | 1080 / 1096 | 920 / 920 | — |
+| 144 dpi, `import → Ready` (frío / caliente) | 20,8 / 19,9 s | 20,8 / 20,0 s | −1,0 a +0,4 s |
+| 216 dpi, `import → Ready` (frío / caliente) | 26,2 / 25,4 s | 27,3 / 26,4 s | +0,5 a +2,7 s |
+
+- **La ganancia de memoria es la misma que con la opción 1**: la acumulación
+  estaba en el OCR. Los rangos no se solapan.
+- **Calidad**: texto de OCR y grupos idénticos en las 24 importaciones.
+- **Tiempo**: a 216 dpi, ~1,1 s de mediana sobre ~26 s (4 %). Es algo más que lo
+  medido con la opción 1 (+0,3 a +1,1 s); las dos tandas no se intercalaron
+  entre sí, así que esa diferencia no se interpreta. La causa probable sigue
+  siendo que una página se rasteriza más de una vez durante el OCR (orientación
+  y reconocimiento) y, después del cleanup, la segunda vez se vuelve a
+  decodificar. **Mejora posible a futuro, sin medir**: limpiar solo después del
+  último rasterizado de cada página, lo que pediría que el kernel sepa cuál es.
+
+## Decisión
 
 Llamar a `pageProxy.cleanup()` al terminar de dibujar una página en el kernel de
 Render. **Hay que elegir el alcance**, porque el brazo medido limpia en todos
@@ -118,9 +150,8 @@ los renders:
    que dibujó y no paga nada al hacer zoom. Captura lo que acumula el OCR; no se
    midió como brazo propio, así que antes de adoptarlo hace falta su A/B.
 
-**Recomendación del planificador: la opción 2**, con un A/B propio antes de
-aceptarla. Evita el costo no medido del preview y apunta a donde está la
-acumulación.
+**Decidido: la opción 2** (el humano, 2026-11-05), confirmada por su A/B. Evita
+el costo no medido del preview y apunta a donde está la acumulación.
 
 En las dos: no cambia `Page`, ni eventos, ni contratos, ni tamaños de pool, ni
 el DPI. Es un cambio interno del kernel de Render (R-1).

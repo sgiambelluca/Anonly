@@ -5,8 +5,10 @@
 > Renderiza páginas del PDF (original o anonimado) a imágenes usando OffscreenCanvas en Web Workers. Produce highlight de grupos habilitados y aplica reemplazos visualmente según `ReplacementMode`. Soporta preview incremental y render full para export.
 
 **EngineId**: `render`
-**Versión del spec**: 1.20.0
-**Última actualización**: 2026-10-07
+**Versión del spec**: 1.21.0
+
+> **Nota (v1.21.0, ADR-227, 2026-11-05 — el render suelta las imágenes de la página al terminar de dibujarla, solo en OCR y export)**: el kernel llama a `pageProxy.cleanup()` después de dibujar una página en `kernelRasterizePage` (la imagen que va al OCR) y en `kernelRenderPage` cuando `mode === "full"` (export). **El preview (`mode: "preview"`) no cambia**: conserva lo que dibujó, así que un zoom o un cambio de vista no vuelve a decodificar la imagen. En pdfjs-dist 4.10.38, después de `render()` con intent `display` pdf.js solo programa una limpieza, con 5 s de retardo y cancelable si la página se vuelve a dibujar, y solo si alguna imagen superó 10e6 bytes; las más chicas quedan en `pageProxy.objs` y `_intentStates` hasta `destroy()`. Cada worker de Render retenía así lo que dibujó para el OCR hasta cerrar el documento. Medido con A/B intercalado (P2 sin NER, Linux): −328 a −383 MB de pico a 144 dpi y −178 a −232 MB a 216 dpi, unos 370 y 160 MB menos después de `Ready`, el mismo texto de OCR y los mismos grupos; a 216 dpi, ~1,1 s más sobre ~26 s (`roadmap/memoria/Reduccion_De_Pico_Nube_2026-11.md` §4.4). El cleanup va **después** de que la imagen quedó dibujada en el canvas: no cambia ningún píxel de lo que se entrega. Si la misma página se vuelve a dibujar, pdf.js la decodifica de nuevo desde el PDF. Sin cambios de tipos, eventos, errores ni configuración. Ver §13 caso 41, §14, §15 ítem 35.
+**Última actualización**: 2026-11-05
 
 > **Nota (v1.20.0, ADR-219 §6, 2026-10-19 — la hoja de referencia se pagina)**: con tipos propios, la hoja de referencia de marcadores deja de tener una cota de 13 filas. `renderLegendPage` pasa a `renderLegendPages` y devuelve una o más imágenes. El kernel dibuja una página por job, desde `RenderLegendPayload.startRow`, con las filas que entran enteras, y devuelve cuántas dibujó (`RenderLegendPageResult`, `03_Data_Model.md`). El host repite hasta terminar. Cada página repite el título. El resto del perfil de ADR-059 §5 no cambia: sin documento, sin eventos, sin cache y sin supersede. Ver §6, caso 29 ampliado, caso nuevo 40, §14 y §15.
 
@@ -420,12 +422,17 @@ RenderPageOutput {
 
 40. **La hoja de referencia se pagina (ADR-219 §6)**: con más filas de las que entran en una página, `renderLegendPages` devuelve varias imágenes. Cada fila aparece **exactamente una vez**, entera, en el orden recibido; cada página repite el título; ninguna página sale vacía. Con las filas de la 1.0.2 (13 tipos como máximo) sigue siendo una sola página, idéntica a la de antes.
 
+
+41. **Cleanup de página después de dibujar, solo en OCR y export** (ADR-227): `kernelRasterizePage` llama a `pageProxy.cleanup()` una vez por página, después de que `renderPageOntoContext` resolvió y antes de codificar o devolver la imagen. `kernelRenderPage` lo hace solo con `mode === "full"`; con `mode: "preview"` no lo llama nunca. Si el render falla o se cancela, no se llama (el error se propaga como hasta hoy, y la página se libera al descargar el documento). La imagen entregada es bit a bit la misma que sin el cleanup.
 ---
 
 ## 14. Casos de prueba
 
 | Test | Archivo | Tipo | Descripción |
 |---|---|---|---|
+| `rasterizePage releases the page objects after drawing it (ADR-227)` | `kernel.test.ts` | unit | caso 41: con un `PDFPageProxy` doble, `cleanup()` se llama una vez, después de `render().promise` y antes de devolver la imagen |
+| `a full render releases the page objects and a preview render does not (ADR-227)` | `kernel.test.ts` | unit | caso 41: `mode: "full"` llama a `cleanup()` una vez; `mode: "preview"` no lo llama, también al redibujar la misma página a otra escala |
+| `a failed or cancelled render does not call cleanup (ADR-227)` | `kernel.test.ts` | edge | caso 41: si `render().promise` rechaza (fallo o cancelación), `cleanup()` no se llama y el error sigue mapeándose como hoy |
 | `mapea la cancelación de pdfjs a CancelledError, no a RenderPageFailedError` | `kernel.test.ts` | unit | ADR-133 |
 | `no se deja engañar por el texto del mensaje` | `kernel.test.ts` | edge | un fallo real cuyo mensaje dice "cancelled" sigue siendo fallo: la decisión es por `err.name`, que es API pública de pdfjs |
 | `un fallo real sigue siendo RenderPageFailedError con su motivo` | `kernel.test.ts` | unit | el mapeo no se traga los fallos de verdad |
@@ -621,6 +628,8 @@ Fixtures: `tests/fixtures/text-10p.pdf`, `scanned-10p.pdf`, una página con rota
 - [x] 33. (1.0.x, Confianza — **ADR-210**) El repintado de línea mueve píxeles: eliminar la calibración de tipografía (candidatos, función, umbral, condición (e)); tamaño de decisión sin redondear; plan con desplazamiento entero; rectángulo de origen que nunca entra en la caja del dato; orden leer, tapar, pegar, dibujar; token con la familia de su modo; mapa de ADR-204 con el mismo desplazamiento. Los siete tests nuevos de la enmienda con sus nombres exactos, y los dos de calibración retirados. Cobertura del módulo ≥ 85 %.
 
 - [x] 34. (1.0.x, Confianza — enmienda de **ADR-210**) Condición (e) del plan de repintado: si la zona tocada (de `bbox.x` al extremo derecho de la última vecina más el desplazamiento, sobre la banda sin redondear) se superpone por `rectsOverlap` con la caja de otro reemplazo de la página, `planLineRepaint` no devuelve plan y se cae al caso 25. Los dos tests de §14 con sus nombres exactos; los vigentes no cambian.
+
+- [ ] 35. (1.1 — ADR-227) `pageProxy.cleanup()` en `kernelRasterizePage` después de `renderPageOntoContext`, y en `kernelRenderPage` solo con `mode === "full"`. El preview no cambia. Tests de §14 con los nombres exactos. Caso 41.
 
 ---
 

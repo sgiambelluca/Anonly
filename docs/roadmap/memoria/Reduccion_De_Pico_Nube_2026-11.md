@@ -40,10 +40,11 @@
   si está ocioso. Implementado; su A/B requiere el modelo de NER (§7).
 - **Después de implementar C-1 y C-2 se midieron dos candidatos más** (§4.4 y
   §5):
-  - **C-4 (ADR-227, Proposed)**: el render suelta las imágenes de cada página.
+  - **C-4 (ADR-227, Accepted con la opción 2: solo OCR y export)**: el render
+    suelta las imágenes de cada página.
     A 144 dpi baja el pico unos 360 MB y la memoria después de `Ready` unos
     390 MB; a 216 dpi, entre 114 y 238 MB y entre 184 y 274 MB. Reabre un descarte de
-    septiembre, y lo decide el humano.
+    septiembre.
   - **C-3, descartado con medición**: dar de baja el worker de parseo da unos
     −20 MB en frío y nada en caliente, con los rangos solapados.
 - **Lo que este banco no puede decir**: nada con NER prendido, y ningún
@@ -299,7 +300,7 @@ Lo esperable es que C-1 pese más con NER que sin él, y que C-2 baje el pico de
 OCR caliente. **Las dos cosas son predicciones**, y el A/B con NER las mide por
 separado y juntas.
 
-### 4.4 C-4 — el render suelta las imágenes de la página (ADR-227, Proposed)
+### 4.4 C-4 — el render suelta las imágenes de la página (ADR-227, Accepted, opción 2)
 
 Medido el 2026-11-05 a pedido del humano, después de implementar C-1 y C-2.
 
@@ -333,6 +334,14 @@ a 216 dpi (P2 de siempre, ~17 MB). Medianas, y entre paréntesis mínimo y máxi
 - **Alcance a decidir** (ADR-227): limpiar en todos los renders, que es lo
   medido, o solo en el OCR y el export, que es la recomendación y necesita su
   propio A/B, porque en el preview un zoom volvería a decodificar la imagen.
+
+**Opción 2 medida y aceptada (2026-11-05)** (`.measure/peak-ab/c4r-neroff-head-c4r/`,
+12/12 válidas): cleanup solo en `kernelRasterizePage` y en `kernelRenderPage` con
+`mode: "full"`. Conserva la ganancia: a 144 dpi, −328 a −383 MB de pico y 1155 →
+786 MB después de `Ready`; a 216 dpi, −178 a −232 MB y 1080 → 920 MB. Texto de
+OCR y grupos idénticos. A 216 dpi, ~1,1 s más de mediana sobre ~26 s (+0,5 a
++2,7 s por ronda). El humano la había aceptado condicionada a que se confirmara;
+detalle en ADR-227.
 
 | Criterio de multidocumento | Cumple |
 |---|---|
@@ -401,7 +410,7 @@ tal como quedó implementado. MB, medianas, y entre paréntesis mínimo y máxim
 | A/B con NER prendido: `base` contra `head`, y `base` contra `c2` para aislar C-2 | el mantenedor, en Windows (o este banco si se permite `*.hf.co`) | el modelo de NER |
 | Veredicto contra los techos de ADR-192 (M2 de P1 y P2, tres corridas frías y tres calientes) | el mantenedor | Windows nativo (ADR-192 §4) |
 | Decidir si el costo de tiempo de C-2 es aceptable (recarga del modelo en el segundo escaneo) | el humano | el A/B con NER |
-| Decidir C-4 (ADR-227) y su alcance: todos los renders, o solo OCR y export | el humano | ADR-227; con el alcance acotado, su A/B propio |
+| ~~Decidir C-4 (ADR-227) y su alcance~~: aceptado con la opción 2 (solo OCR y export) el 2026-11-05 | — | — |
 | **Pendiente a futuro, en Windows**: hilos de NER en los perfiles Alto y Ultra (subirlos, nunca bajarlos). En septiembre, 6 hilos bajaron un 30 % el tiempo de NER en R1 en el Windows del mantenedor y empeoraron en la Mac (`mediciones/ner/Hilos_NER_Medicion.md`); ADR-194 dejó los hilos en automático | el mantenedor, con el arnés portado a Windows | `tests/perf/run-ner-threads.sh` solo corre en macOS y el puerto de septiembre no se commiteó: hay que portarlo. Este banco no sirve (4 CPU y sin el modelo de NER) |
 | **Pendiente a futuro, en Windows**: repetir el empaquetado del modelo de NER con datos externos (ADR-179) con R1. En septiembre bajó la memoria WASM de NER sin superar el ruido del RSS | el mantenedor | el modelo de NER (o `*.hf.co` permitido en este banco) |
 | Validar C-1, C-2 y C-4 con los documentos reales R1 y R2 antes de mergear a `develop` | el mantenedor, en Windows | `ANONLY_REAL_DOC_*`; los fixtures sintéticos subestiman el trabajo por página |
