@@ -629,7 +629,7 @@ Fixtures: `tests/fixtures/text-10p.pdf`, `scanned-10p.pdf`, una página con rota
 
 - [x] 34. (1.0.x, Confianza — enmienda de **ADR-210**) Condición (e) del plan de repintado: si la zona tocada (de `bbox.x` al extremo derecho de la última vecina más el desplazamiento, sobre la banda sin redondear) se superpone por `rectsOverlap` con la caja de otro reemplazo de la página, `planLineRepaint` no devuelve plan y se cae al caso 25. Los dos tests de §14 con sus nombres exactos; los vigentes no cambian.
 
-- [ ] 35. (1.1 — ADR-227) `pageProxy.cleanup()` en `kernelRasterizePage` después de `renderPageOntoContext`, y en `kernelRenderPage` solo con `mode === "full"`. El preview no cambia. Tests de §14 con los nombres exactos. Caso 41.
+- [x] 35. (1.1 — ADR-227) `pageProxy.cleanup()` en `kernelRasterizePage` después de `renderPageOntoContext`, y en `kernelRenderPage` solo con `mode === "full"`. El preview no cambia. Tests de §14 con los nombres exactos. Caso 41.
 
 ---
 

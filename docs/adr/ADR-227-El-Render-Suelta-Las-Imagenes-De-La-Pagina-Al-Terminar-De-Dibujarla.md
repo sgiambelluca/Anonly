@@ -173,3 +173,18 @@ el DPI. Es un cambio interno del kernel de Render (R-1).
   como para ADR-225 y ADR-226.
 - El gate de export verificado (ADR-148) sobre la implementación: el export
   dibuja todas las páginas con este mismo kernel.
+
+## Consecuencias
+
+- Cada worker de Render deja de acumular lo que dibujó para el OCR y el export.
+  El preview conserva lo suyo, como antes.
+- **Caso raro, aceptado** (observación de la revisión): si al terminar un
+  rasterizado o un render `full` hay otro render de la misma página en curso en
+  ese worker, `cleanup()` no puede limpiar en el momento y deja la limpieza
+  marcada. Cuando ese otro render termina, pdf.js limpia 5 s después, aunque sea
+  un preview. El único costo es que ese preview vuelva a decodificar la imagen si
+  se lo redibuja; el OCR y el export rara vez coinciden con un preview de la
+  misma página.
+- **Mejora posible, sin medir**: limpiar solo después del último rasterizado de
+  cada página durante el OCR evitaría la segunda decodificación que
+  probablemente explica el ~1,1 s a 216 dpi.
