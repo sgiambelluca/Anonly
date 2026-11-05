@@ -26,8 +26,12 @@ export). En pdfjs-dist 4.10.38:
   lista de operadores en `pageProxy._intentStates`;
 - `PDFDocumentProxy` guarda cada página en `#pageCache` hasta `destroy()`, es
   decir, hasta que se cierra el documento;
-- después de `render()`, pdf.js limpia solo si alguna imagen supera
-  `MAX_IMAGE_SIZE_TO_CACHE` (10e6 bytes, `_maybeCleanupAfterRender`).
+- después de un `render()` con intent `display` (el que usa el kernel), pdf.js
+  **solo programa** una limpieza si alguna imagen de la página superó
+  `MAX_IMAGE_SIZE_TO_CACHE` (10e6 bytes, `_maybeCleanupAfterRender`), y la
+  difiere 5 s (`DELAYED_CLEANUP_TIMEOUT`, `#tryCleanup(true)`). Si la página
+  vuelve a dibujarse antes, `render()` la cancela (`#abortDelayedCleanup`). Con
+  imágenes más chicas no limpia nunca: quedan hasta `destroy()`.
 
 Con tres workers de Render (perfil Intermedio), cada uno se queda con lo que
 dibujó de cada página hasta cerrar el documento. En un escaneo de 50 páginas,
@@ -45,16 +49,21 @@ Esta campaña midió otra cosa:
 - **Sin NER.** El pico global de H-10 incluía el modelo de NER, y en esa versión
   no caía necesariamente en la fase de OCR. Acá, sin NER, el pico de P2 es el
   del OCR (§2 del informe) y lo que cambia ahí se ve.
-- **Imágenes por debajo del umbral.** A 144 dpi, una página carta queda en
-  1224 × 1584 px (~7,8 MB en RGBA), por debajo de los 10e6 bytes en que pdf.js
-  limpia solo. El P2 de H-10 era a 216 dpi (~17 MB), por encima.
+- **Imágenes de los dos lados del umbral.** A 144 dpi, una página carta queda
+  en 1224 × 1584 px (~7,8 MB en RGBA), por debajo de los 10e6 bytes: pdf.js no
+  la limpia nunca. A 216 dpi (~17 MB, el P2 de H-10) queda por encima: pdf.js
+  la limpia, pero recién 5 s después del último dibujo y solo si la página no
+  se vuelve a dibujar en ese lapso. Durante un OCR de 50 páginas, cada worker
+  retiene las páginas de los últimos segundos. Que esto explique los −114 a
+  −238 MB medidos a 216 dpi es una **inferencia**: el código muestra el retardo
+  y la cancelación, pero no se midió cuántas páginas quedan retenidas a la vez.
 - **El primer argumento de ADR-154 no aplica a lo que se libera.** `objs` e
   `_intentStates` viven del lado principal del kernel: son justo lo que
   `cleanup()` vacía.
 
 **No queda explicado del todo por qué H-10 no vio el efecto a 216 dpi**, que acá
 sí aparece (§Medición). La explicación más probable es la primera: el pico
-global de entonces no estaba en la fase de OCR. Es una inferencia.
+global de entonces, con NER, no estaba en la fase de OCR. Es una inferencia.
 
 ## Medición (provisional)
 
@@ -81,8 +90,8 @@ entre paréntesis mínimo y máximo:
   rondas van en el mismo sentido.
 - **Todo el efecto está en el proceso Tab** (renderer y workers): a 144 dpi,
   1011 → 645 MB en la muestra del pico.
-- **La memoria después de `Ready` baja casi tanto como el pico**, entre 180 y
-  400 MB. Es la que se suma por cada pestaña abierta en la 1.2.
+- **La memoria después de `Ready` baja casi tanto como el pico**, entre 184 y
+  405 MB. Es la que se suma por cada pestaña abierta en la 1.2.
 - **Calidad**: el texto de OCR (hash de las palabras de las 50 páginas) y la
   cantidad de grupos son idénticos en todas las importaciones.
 - **Tiempo**: sin cambio a 144 dpi; a 216 dpi, entre 0,3 y 1,1 s más sobre unos
@@ -120,7 +129,7 @@ el DPI. Es un cambio interno del kernel de Render (R-1).
 
 | Criterio | Cumple | Por qué |
 |---|---|---|
-| 1. No cambia pico por retención | sí, y mejora la retención | la memoria después de `Ready` baja entre 180 y 400 MB |
+| 1. No cambia pico por retención | sí, y mejora la retención | la memoria después de `Ready` baja entre 184 y 405 MB |
 | 2. Nada que suponga un solo documento | sí | actúa por página de cada `PDFDocumentProxy` de cada worker |
 | 3. Liberar al terminar cada etapa, no al cerrar | sí, más fino | por página, al terminar de dibujarla |
 | 4. Medido frío y caliente | sí | §Medición |
