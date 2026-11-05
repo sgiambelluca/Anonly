@@ -4,8 +4,10 @@
 
 > Pedido del mantenedor (2026-11-05): bajar el pico de memoria, cuidando que
 > nada de lo que se decida choque con trabajar varios documentos a la vez en
-> la 1.2. Esta campaña **mide y propone**; no cambia el producto. Cada
-> candidato tiene su ADR en estado Proposed y lo decide el humano.
+> la 1.2. La campaña midió y propuso dos candidatos, cada uno con su ADR.
+> **El humano aceptó los dos el 2026-11-05** y quedaron implementados en
+> `perf/pico-memoria` (§6). Falta la medición con NER y el veredicto en
+> Windows nativo (§7).
 
 ## 0. Resumen
 
@@ -35,7 +37,7 @@
   - Las dos juntas son del orden de los ~630 MB medidos en Windows, cruzando
     mediciones de distintos equipos (§3.2).
 - **C-2 (ADR-226): soltar el modelo de NER al empezar el OCR de un documento**,
-  si está ocioso. Sin A/B: requiere el modelo de NER.
+  si está ocioso. Implementado; su A/B requiere el modelo de NER (§7).
 - **Lo que este banco no puede decir**: nada con NER prendido, y ningún
   veredicto contra los techos de ADR-192, que se juzgan en Windows nativo.
 
@@ -304,23 +306,106 @@ separado y juntas.
 | Los workers de Render que siguen vivos del documento anterior | en caliente se ven 3 `render-page` vivos ya durante el parseo (en frío, 0). Sin atribución por worker, porque su heap de JS es de pocos MB y el resto no se observa por CDP. Además, sirven al preview del documento abierto: soltarlos al cerrar choca con el criterio 3 (con pestañas, el documento no se cierra). Queda como observación, no como candidato |
 | El pico de la fase de OCR | con C-1, pasa a ser el pico de P2 sin NER. Lo domina memoria no atribuida al heap (WASM de Tesseract: 2 reconocedores más el OSD compartido), que solo baja con menos reconocedores (ADR-154) o menos píxeles (DPI). No hay candidato que no toque una de las dos |
 
-## 6. Qué falta y quién lo hace
+## 6. Implementación y validación (2026-11-05)
+
+El humano aceptó ADR-225 y ADR-226 el 2026-11-05. Están implementados en
+`perf/pico-memoria`, un commit por módulo, con los tests de §14 de cada spec
+y el revisor en APPROVED:
+
+| Commit | Módulo | Qué |
+|---|---|---|
+| `e2e7634` | docs | ADR aceptados; PDF Engine v1.21.0, NER Engine v1.13.0, Orchestrator v1.16.0 |
+| `e8f7443` | tests | `cleanup` en los dobles de `PDFPageProxy` de integración y cancelación |
+| `9ead600` | pdf-engine | C-1: `pageProxy.cleanup()` al recibir el operator list |
+| `7c8a571` | ner-engine | C-2: `NerEngine.releaseIdleWorkers()` con guarda de trabajo en curso |
+| `f5ac19a` | façade | C-2: `runOcrStage` da de baja el pool ocioso de NER antes del OCR |
+| `a849279` | ner-engine | el test de contrato exige el puerto con el compilador (rechazo de la primera revisión) |
+
+El caso 2 de §13 de `core/PDF_Engine.md` quedó corregido con la v1.21.0.
+
+**Validación sobre el código implementado**: `run-peak-ab.sh`, brazo `base`
+(sin ninguno de los dos cambios) contra `head` (el producto), ABBA × 3, P2 sin
+NER, mismo banco (`.measure/peak-ab/impl-p2-neroff-base-head/`). Cada build
+transformó `pdf.engine.ts` en los dos bundles y `orchestrator.ts` en el
+principal. Con NER apagado, C-2 no tiene modelo que soltar: esta tanda mide C-1
+tal como quedó implementado. MB, medianas, y entre paréntesis mínimo y máximo:
+
+| | `base` | `head` | `head` − `base` por ronda |
+|---|---:|---:|---:|
+| Pico total, frío | 1588 (1565–1652) | 1492 (1474–1506) | −90 / −110 / −110 |
+| Pico total, caliente | 1666 (1630–1714) | 1479 (1459–1524) | −169 / −163 / −221 |
+| Pico del parseo, frío / caliente | 1588 / 1666 | 932 / 1025 | — |
+| Después de `Ready`, frío / caliente | 1063 / 1109 | 1093 / 1117 | — |
+| `import → Ready`, frío | 26,5 s | 26,1 s | −1,0 / +0,0 / −0,0 s |
+| `import → Ready`, caliente | 26,0 s | 25,8 s | −0,3 / −0,3 / −0,3 s |
+
+- **Reproduce la campaña previa a implementar** (§4.1): los rangos no se
+  solapan y las tres rondas van en el mismo sentido.
+- **El texto de OCR y los grupos son idénticos** en las 24 importaciones.
+- **La memoria después de `Ready` no muestra un cambio consistente**: +30 MB
+  en frío y +8 en caliente acá, −13 y −54 en la campaña de §4.1. Es ruido entre
+  corridas, no retención nueva (criterio 1).
+
+## 7. Qué falta y quién lo hace
 
 | Qué | Quién | Necesita |
 |---|---|---|
-| Decidir si C-1 y C-2 siguen a implementación | el humano | este informe, ADR-225 y ADR-226 |
-| A/B de C-1 con NER prendido, P1/P2/P2-dense de `memory.spec.ts` | campaña siguiente | el modelo de NER: `huggingface.co` permitido en el entorno, o la máquina del mantenedor |
-| A/B de C-2 | campaña siguiente | ídem |
-| Veredicto contra los techos de ADR-192 | el mantenedor | Windows nativo (ADR-192 §4) |
-| Corregir `core/PDF_Engine.md` §13 caso 2 («pdfjs descarta páginas procesadas») | el planificador, con ADR-225 si se acepta | — |
+| A/B con NER prendido: `base` contra `head`, y `base` contra `c2` para aislar C-2 | el mantenedor, en Windows (o este banco si se permite `*.hf.co`) | el modelo de NER |
+| Veredicto contra los techos de ADR-192 (M2 de P1 y P2, tres corridas frías y tres calientes) | el mantenedor | Windows nativo (ADR-192 §4) |
+| Decidir si el costo de tiempo de C-2 es aceptable (recarga del modelo en el segundo escaneo) | el humano | el A/B con NER |
 
-**Hallazgo de spec, para el planificador.** `core/PDF_Engine.md` §13 caso 2
-dice: «Memoria pico gestionada por LRU del `PDFDocumentProxy` (pdfjs descarta
-páginas procesadas)». En pdfjs-dist 4.10.38, `#pageCache` solo se vacía en
-`destroy()` y las imágenes del operator list quedan en `pageProxy.objs`. No se
-editó el spec en esta campaña: el cambio va con ADR-225, si se acepta (R-19).
+**Por qué este banco no midió con NER.** `huggingface.co` quedó permitido, y
+bajaron los cinco archivos chicos del modelo con su sha256. El ONNX de 178 MB
+redirige a un CDN (`us.aws.cdn.hf.co`) que la política de red del entorno sigue
+rechazando. Con `*.hf.co` permitido, el mismo A/B corre en este banco.
 
-## 7. Cómo repetirlo
+### 7.1 Cómo probarlo en Windows
+
+Desde Git Bash, en la raíz del repo, con la máquina sin otra carga y sin que
+entre en suspensión:
+
+```bash
+git fetch origin perf/pico-memoria && git checkout perf/pico-memoria && git pull
+pnpm install
+pnpm assets:mirror
+pnpm exec cross-env VITE_E2E=1 pnpm --filter @anonly/react-client build
+pnpm --filter @anonly/desktop-shell build
+```
+
+1. **Los dos cambios contra ninguno, con NER** (12 corridas de P1 y P2, frío y
+   caliente):
+
+   ```bash
+   ANONLY_AB_GREP="P1 —|P2 —" tests/perf/run-peak-ab.sh
+   ```
+
+2. **C-2 solo**, para ver cuánto aporta y cuánto tiempo cuesta:
+
+   ```bash
+   ANONLY_AB_CANDIDATE=c2 tests/perf/run-peak-ab.sh
+   ```
+
+3. **Resumen de cada carpeta** que imprimen los dos comandos:
+
+   ```bash
+   pnpm exec tsx tests/perf/support/summarizePeakArmsCli.ts .measure/peak-ab/<carpeta> base head
+   pnpm exec tsx tests/perf/support/summarizePeakArmsCli.ts .measure/peak-ab/<carpeta> base c2
+   ```
+
+4. **Techos de ADR-192** sobre el producto (`head`), con el dist recién
+   construido:
+
+   ```bash
+   pnpm exec playwright test --config=playwright.perf.config.ts tests/perf/memory.spec.ts --repeat-each=3 --grep "P1 —|P2 —" --workers=1 --retries=0
+   ```
+
+**Qué mirar**: que el pico caliente de P2 baje más que el ruido (~345 MB entre
+tandas, ADR-146 §7) en las tres rondas; que P1 no se mueva; cuánto sube
+`import → Ready` caliente de P2 con C-2; y que P1 y P2 queden debajo de 2,0 y
+3,0 GB en el paso 4. Los `.measure/` no se commitean: compartí los
+`summary.json` o los números.
+
+## 8. Cómo repetirlo
 
 ```bash
 # Desglose sin NER: P2 salió de «P2-attrib — NER apagado»; P1 de memory-ner-off.spec.ts
