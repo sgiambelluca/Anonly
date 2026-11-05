@@ -62,17 +62,17 @@ describe("peakArmsTransform", () => {
   });
 
   it("each single-change arm keeps only its own change", () => {
-    expect(PEAK_ARMS).toEqual(["base", "c1", "c2", "c4r", "head"]);
+    expect(PEAK_ARMS).toEqual(["base", "c1", "c2", "c4", "head"]);
     const keeps = (arm: (typeof PEAK_ARMS)[number]) => SOURCES.map(([file]) => armKeeps(arm, file));
     expect(keeps("base")).toEqual([false, false, false]);
     expect(keeps("c1")).toEqual([true, false, false]);
     expect(keeps("c2")).toEqual([false, true, false]);
-    expect(keeps("c4r")).toEqual([false, false, true]);
+    expect(keeps("c4")).toEqual([false, false, true]);
     expect(keeps("head")).toEqual([true, true, true]);
   });
 
-  it("the c4r arm keeps the cleanup only after rasterizing and after full renders", () => {
-    const out = transformPeakSource(read("render-kernel"), "render-kernel", "c4r");
+  it("the c4 arm keeps the cleanup only after rasterizing and after full renders", () => {
+    const out = transformPeakSource(read("render-kernel"), "render-kernel", "c4");
     expect(out.split("pageProxy.cleanup()")).toHaveLength(3);
     expect(out).toContain('if (mode === "full") pageProxy.cleanup();');
   });
