@@ -2254,44 +2254,53 @@ la variable no hace nada: no registra salvedad ni escribe esos archivos.
 con distinto contenido de esos archivos ya no se ven iguales: la identidad difiere y la tanda aborta sin medir. Que una
 tanda tenga ese archivo y la otra no (el árbol pasó de sucio a limpio o al revés) también es una diferencia.
 
-## Pico de memoria en el parseo (`run-parse-cleanup.sh`, C-1) y P1/P2 sin NER
+## Reducción de pico: A/B por brazos (`run-peak-ab.sh`) y P1/P2 sin NER
 
 Campaña de 2026-11 ([informe](../../docs/roadmap/memoria/Reduccion_De_Pico_Nube_2026-11.md),
-ADR-225). Dos instrumentos opt-in, ninguno en `pnpm test:perf`:
+ADR-225 y ADR-226). Instrumentos opt-in, ninguno en `pnpm test:perf`:
 
 - `memory-ner-off.spec.ts` (`ANONLY_MEMORY_NER_OFF=1`): P1 y P2 de
-  `memory.spec.ts` con NER apagado, para un banco sin el modelo de NER. Mismo
-  `measureProfile`, misma secuencia frío → cierre → caliente. No reemplaza a
-  `memory.spec.ts`: P1 y P2 llevan NER por definición (ADR-146 §4).
-- `run-parse-cleanup.sh`: A/B intercalado ABBA de C-1 (`pageProxy.cleanup()`
-  al recibir el operator list en `parsePage`). Cada brazo es un renderer
-  construido por `support/parseCleanupBuildCli.ts`, que transforma el fuente en
-  memoria **solo** en el bundle del worker de parseo
-  (`support/parseCleanupTransform.ts`, una coincidencia exacta, con test).
-  `packages/` y `apps/` no se tocan; el script copia el brazo a
-  `apps/react-client/dist` antes de cada corrida y restaura el original al
-  salir. Variables: `ANONLY_C1_ROUNDS`, `ANONLY_C1_SPEC`, `ANONLY_C1_GREP`,
-  `ANONLY_C1_OUT`. En Linux sin pantalla usa `xvfb-run`.
-- `support/summarizeParseCleanupCli.ts <carpeta>` escribe `summary.json`:
-  medianas por brazo, diferencia pareada por ronda, hash del texto de OCR y
-  cantidad de grupos (`support/parseCleanupSummary.ts`, con test).
+  `memory.spec.ts` con NER apagado, para un banco sin el modelo de NER. No
+  reemplaza a `memory.spec.ts`: P1 y P2 llevan NER por definición (ADR-146 §4).
+  `P2-ner-off` equivale a «P2-attrib — NER apagado» de `memory-attribution.spec.ts`.
+- `run-peak-ab.sh`: A/B intercalado ABBA entre dos brazos. El producto trae
+  C-1 (ADR-225, `pageProxy.cleanup()` en `parsePage`) y C-2 (ADR-226, baja del
+  pool de NER al empezar el OCR). Cada brazo se arma **quitando** en el build
+  los cambios que no lleva (`support/peakArmsTransform.ts`, un bloque exacto por
+  archivo, con test):
+
+  | brazo | C-1 | C-2 |
+  |---|---|---|
+  | `base` | no | no |
+  | `c1` | sí | no |
+  | `c2` | no | sí |
+  | `head` | sí | sí (el producto) |
+
+  `support/peakArmsBuildCli.ts` transforma `pdf.engine.ts` y `orchestrator.ts`
+  en el bundle principal y en los de workers. `packages/` y `apps/` no se
+  tocan: el runner copia el brazo a `apps/react-client/dist` antes de cada
+  corrida, verifica el digest del brazo y que `apps/desktop-shell/dist` no
+  cambió, y restaura el dist original al salir. Los `.measure/memory-*.json`
+  previos se apartan a `<carpeta>/preexisting/`, no se borran. El manifest
+  registra `exit=` y cuántos reportes dejó cada corrida. Variables:
+  `ANONLY_AB_CONTROL` (default `base`), `ANONLY_AB_CANDIDATE` (default
+  `head`), `ANONLY_AB_ROUNDS`, `ANONLY_AB_SPEC` (default `tests/perf/memory.spec.ts`),
+  `ANONLY_AB_GREP` (default `"P2 —"`), `ANONLY_AB_OUT`. En Linux sin pantalla
+  usa `xvfb-run`.
+- `support/summarizePeakArmsCli.ts <carpeta> [control] [candidato]` escribe
+  `summary.json`: medianas por brazo, diferencia pareada por ronda, hash del
+  texto de OCR y cantidad de grupos (`support/peakArmsSummary.ts`, con test).
 
 ```bash
-ANONLY_C1_ROUNDS=3 tests/perf/run-parse-cleanup.sh
-ANONLY_MEMORY_NER_OFF=1 ANONLY_C1_SPEC=tests/perf/memory-ner-off.spec.ts ANONLY_C1_GREP="P1-ner-off" tests/perf/run-parse-cleanup.sh
-pnpm exec tsx tests/perf/support/summarizeParseCleanupCli.ts .measure/c1-parse-cleanup/<carpeta>
+# Los dos cambios contra ninguno, P1 y P2 con NER
+ANONLY_AB_GREP="P1 —|P2 —" tests/perf/run-peak-ab.sh
+# Cada cambio por separado
+ANONLY_AB_CONTROL=base ANONLY_AB_CANDIDATE=c1 tests/perf/run-peak-ab.sh
+ANONLY_AB_CONTROL=base ANONLY_AB_CANDIDATE=c2 tests/perf/run-peak-ab.sh
+pnpm exec tsx tests/perf/support/summarizePeakArmsCli.ts .measure/peak-ab/<carpeta> base head
 ```
 
-Límites del instrumento, a endurecer si se reusa (la identidad es más débil que
-la de ADR-218): el digest del `dist` de cada brazo se registra al construirlo
-y no se vuelve a verificar por corrida, `apps/desktop-shell/dist` no se
-congela, y el resumen no cruza el `exit=` del manifest. Una corrida sin JSON
-solo se nota porque `runs` da menos de lo esperado. Los
-`.measure/memory-*.json` que hubiera de antes se apartan a
-`<carpeta>/preexisting/`; no se borran. `P2-ner-off` de `memory-ner-off.spec.ts`
-es equivalente a «P2-attrib — NER apagado» de `memory-attribution.spec.ts`,
-que es el que usó la campaña de 2026-11.
-
-Con el modelo de NER disponible, la misma campaña sobre los perfiles normativos:
-`ANONLY_C1_SPEC=tests/perf/memory.spec.ts ANONLY_C1_GREP="P1 —|P2 —"`. No
-correr otra medición ni gates pesados en paralelo.
+La primera campaña de C-1 (antes de implementarlo) usó una versión anterior de
+este arnés, `run-parse-cleanup.sh` con brazos A/B que **agregaban** el cleanup
+en el build (commit `36e92e3`); sus crudos están en `.measure/c1-parse-cleanup/`.
+No correr otra medición ni gates pesados en paralelo.
