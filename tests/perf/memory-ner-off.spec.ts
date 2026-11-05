@@ -82,3 +82,45 @@ test("P2-ner-off — 50 páginas escaneadas, sin NER", async ({
   expect(report.cold.groupCount).toBeGreaterThanOrEqual(TEXT_50P_ENTITY_PAGE_INDICES.length);
   expect(report.hot.groupCount).toBeGreaterThanOrEqual(TEXT_50P_ENTITY_PAGE_INDICES.length);
 });
+
+/**
+ * C-4 (campaña de reducción de pico): el mismo texto que P2, rasterizado a
+ * escala 2 (144 dpi) en vez de 3. Una página carta queda en 1224 × 1584 px,
+ * ~7,8 MB en RGBA: por debajo de `MAX_IMAGE_SIZE_TO_CACHE` (10e6 bytes) de
+ * pdf.js, que solo limpia solo después de `render()` las imágenes más grandes.
+ * Es la condición que la medición de H-10 §5.2 no cubrió (P2 a escala 3 queda
+ * por encima del umbral). Un escaneo real modesto (gris, 150-200 dpi) cae de
+ * este lado.
+ */
+test("P2-144dpi-ner-off — 50 páginas escaneadas a 144 dpi, sin NER", async ({
+  page,
+  electronApp,
+  electronUserDataDir,
+}, testInfo) => {
+  const textSource = await generateText50p();
+  const file = await getOrGenerateScannedFixture(
+    "p2-scanned-50p-144dpi",
+    new Uint8Array(textSource),
+    { scale: 2 },
+  );
+  await installSettingsOverride(page, { nerEnabled: false });
+  await openApp(page, "networkidle");
+
+  const report = await measureProfile(
+    page,
+    electronApp,
+    electronUserDataDir,
+    "p2-scanned-50p-144dpi-ner-off",
+    file,
+  );
+  printReport(report);
+  await writeReport(report, testInfo.repeatEachIndex);
+
+  expect(report.cold.ok, "la corrida fría terminó en PIPELINE_FAILED").toBe(true);
+  expect(report.hot.ok, "la corrida caliente terminó en PIPELINE_FAILED").toBe(true);
+  // A 144 dpi el OCR puede leer peor: se exige que el pipeline procese y
+  // encuentre algo; la comparación de calidad entre brazos la hace el hash
+  // del texto de OCR en el resumen de la campaña.
+  expect(report.cold.groupCount).toBeGreaterThan(0);
+  expect(report.hot.groupCount).toBeGreaterThan(0);
+});
