@@ -26,14 +26,25 @@ import {
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const APP_ROOT = resolve(REPO_ROOT, "apps/react-client");
-const SOURCES: ReadonlyArray<{ readonly file: PeakSourceFile; readonly path: string }> = [
+/**
+ * `bundles`: cuántas veces tiene que pasar el archivo por el plugin. `pdf.engine.ts`
+ * entra al bundle principal y al del worker de parseo; si el plugin dejara de
+ * aplicarse a uno de los dos, el brazo mediría otra cosa y el build se niega.
+ */
+const SOURCES: ReadonlyArray<{
+  readonly file: PeakSourceFile;
+  readonly path: string;
+  readonly bundles: number;
+}> = [
   {
     file: "pdf-engine",
     path: resolve(REPO_ROOT, "packages/anonymization-core/pdf-engine/src/pdf.engine.ts"),
+    bundles: 2,
   },
   {
     file: "orchestrator",
     path: resolve(REPO_ROOT, "packages/anonymization-core/src/orchestrator.ts"),
+    bundles: 1,
   },
 ];
 
@@ -121,9 +132,12 @@ async function main(): Promise<void> {
   } finally {
     process.chdir(previousCwd);
   }
-  for (const { file } of SOURCES) {
-    if ((seen.get(file) ?? 0) < 1)
-      throw new Error(`arnés de pico: ${file} no pasó por el build; el brazo no se aplicó`);
+  for (const { file, bundles } of SOURCES) {
+    const count = seen.get(file) ?? 0;
+    if (count !== bundles)
+      throw new Error(
+        `arnés de pico: ${file} pasó ${count} veces por el build, se esperaban ${bundles}`,
+      );
   }
   const identity = {
     arm,
