@@ -395,6 +395,12 @@ interface NerJobPool {
    * devolviendo `true`. Devuelve la desuscripción.
    */
   onWorkersReleased(listener: () => void): () => void;
+  /**
+   * ADR-226: espejo de `WorkerPool.releaseIdleWorkers()` (ADR-080) y de
+   * `OcrJobPool.releaseIdleWorkers()` (ADR-157 §1bis): misma guarda, `true`
+   * si la baja fue efectiva (y entonces notifica a `onWorkersReleased`).
+   */
+  releaseIdleWorkers(): boolean;
 }
 
 /**
@@ -411,6 +417,8 @@ const IMMEDIATE_POOL: NerJobPool = {
   // Sin pool real no hay ningún `WorkerLike` que libere nunca — no-op inocuo
   // que devuelve una desuscripción también no-op (ADR-167 §3).
   onWorkersReleased: (): (() => void) => () => {},
+  // ADR-226: sin pool real no hay workers que dar de baja; no notifica.
+  releaseIdleWorkers: (): boolean => false,
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -615,6 +623,11 @@ export class NerEngine implements IEngine {
   // baja; la próxima carga in-process lo espera.
   private kernelLoadedInProcess = false;
   private pendingKernelDispose: Promise<void> | null = null;
+  // ADR-226: `processPage`/`processPages` sin resolver. Guarda de
+  // `releaseIdleWorkers()`: un job en vuelo nunca se interrumpe. Se
+  // decrementan en `finally` (también si la página falla o se cancela).
+  private inFlightPages = 0;
+  private inFlightBatches = 0;
 
   /**
    * `pool` (ADR-046 §2): inyectada por el façade en `createCore`
@@ -675,7 +688,28 @@ export class NerEngine implements IEngine {
     return this.modelId ?? DEFAULT_MODEL_ID;
   }
 
+  /**
+   * ADR-226: da de baja los workers ociosos del pool sin disponer el motor
+   * (sigue usable; el próximo `processPage` recarga el modelo, ADR-080). No-op
+   * si hay un `processPage`/`processPages` en curso. La baja efectiva la
+   * notifica el pool a `onWorkersReleased`, cuyo listener (ADR-167 §3)
+   * reinicia `modelWarm`: no se toca acá.
+   */
+  releaseIdleWorkers(): void {
+    if (this.inFlightPages > 0 || this.inFlightBatches > 0) return;
+    this.pool.releaseIdleWorkers();
+  }
+
   async processPage(input: NerPageInput, ctx: EngineContext): Promise<NerPageOutput> {
+    this.inFlightPages += 1;
+    try {
+      return await this.runProcessPage(input, ctx);
+    } finally {
+      this.inFlightPages -= 1;
+    }
+  }
+
+  private async runProcessPage(input: NerPageInput, ctx: EngineContext): Promise<NerPageOutput> {
     this.assertNotDisposed();
     this.assertInitialized();
 
@@ -779,6 +813,18 @@ export class NerEngine implements IEngine {
   }
 
   async processPages(
+    inputs: ReadonlyArray<NerPageInput>,
+    ctx: EngineContext,
+  ): Promise<ReadonlyArray<NerPageOutput>> {
+    this.inFlightBatches += 1;
+    try {
+      return await this.runProcessPages(inputs, ctx);
+    } finally {
+      this.inFlightBatches -= 1;
+    }
+  }
+
+  private async runProcessPages(
     inputs: ReadonlyArray<NerPageInput>,
     ctx: EngineContext,
   ): Promise<ReadonlyArray<NerPageOutput>> {

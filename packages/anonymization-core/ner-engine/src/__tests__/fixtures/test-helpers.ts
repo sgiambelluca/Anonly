@@ -9,7 +9,10 @@
  * ADR-021 §5; precedente: mockTesseractWorker en ocr-engine).
  */
 import type { EngineConfig, EngineContext, Serializable, Word } from "@anonly/shared";
-import { createEngineContext as sharedCreateEngineContext, createMockConfig as sharedCreateMockConfig } from "@anonly/test-utils";
+import {
+  createEngineContext as sharedCreateEngineContext,
+  createMockConfig as sharedCreateMockConfig,
+} from "@anonly/test-utils";
 import type { pipeline, TokenClassificationOutput } from "@huggingface/transformers";
 import type { Mock } from "vitest";
 
@@ -19,11 +22,7 @@ import type { NerPageInput } from "../../ner.types.js";
  * ADR-129: los dobles genéricos viven en `@anonly/test-utils`. Se re-exportan
  * acá para que cada suite siga importando de un solo lugar.
  */
-export {
-  createMockBus,
-  createMockCache,
-  createMockLogger,
-} from "@anonly/test-utils";
+export { createMockBus, createMockCache, createMockLogger } from "@anonly/test-utils";
 
 /*
  * ADR-025: @huggingface/transformers v4 no exporta un alias público para el
@@ -98,7 +97,12 @@ export function makeNerPageInput(
  * `word` es el texto decodificado del token (con prefijo "##" para
  * continuaciones de wordpiece de BERT).
  */
-export function nerToken(entity: string, word: string, score = 0.95, index = 0): TokenClassificationSingle {
+export function nerToken(
+  entity: string,
+  word: string,
+  score = 0.95,
+  index = 0,
+): TokenClassificationSingle {
   return { entity, score, index, word };
 }
 
@@ -200,7 +204,11 @@ export interface PipelineCallOptions {
 }
 
 type PipelineFactoryMock = Mock<
-  (task: string, model?: string, options?: PipelineCallOptions) => Promise<TokenClassificationPipelineType>
+  (
+    task: string,
+    model?: string,
+    options?: PipelineCallOptions,
+  ) => Promise<TokenClassificationPipelineType>
 >;
 
 /**
@@ -247,6 +255,11 @@ export interface TrackingNerPool {
   readonly dispatch: <T>(params: NerPoolDispatchParams<T>) => Promise<T>;
   readonly calls: NerDispatchCall[];
   readonly onWorkersReleased: (listener: () => void) => () => void;
+  /** ADR-226: baja explícita; cuenta las llamadas y devuelve `releaseResult`. */
+  readonly releaseIdleWorkers: () => boolean;
+  readonly releaseIdleWorkersCalls: { count: number };
+  /** Valor que devuelve `releaseIdleWorkers` (por defecto `true`). */
+  releaseResult: boolean;
   /** Simula una baja efectiva del pool (ADR-167 §3): invoca a los suscriptos. */
   readonly triggerRelease: () => void;
 }
@@ -263,8 +276,18 @@ export interface TrackingNerPool {
 export function createTrackingNerPool(): TrackingNerPool {
   const calls: NerDispatchCall[] = [];
   const listeners = new Set<() => void>();
-  return {
+  const releaseIdleWorkersCalls = { count: 0 };
+  const pool: TrackingNerPool = {
     calls,
+    releaseIdleWorkersCalls,
+    releaseResult: true,
+    // ADR-226: como el `WorkerPool` real, una baja efectiva notifica a los suscriptos.
+    releaseIdleWorkers: (): boolean => {
+      releaseIdleWorkersCalls.count += 1;
+      if (!pool.releaseResult) return false;
+      for (const listener of listeners) listener();
+      return true;
+    },
     dispatch: <T>(params: NerPoolDispatchParams<T>): Promise<T> => {
       calls.push({ payload: params.payload, maxRetriesOverride: params.maxRetriesOverride });
       return params.run();
@@ -277,6 +300,7 @@ export function createTrackingNerPool(): TrackingNerPool {
       for (const listener of listeners) listener();
     },
   };
+  return pool;
 }
 
 /**
@@ -293,10 +317,12 @@ export function createTrackingNerPool(): TrackingNerPool {
 export function createResolvedNerPool(resolvedValue: unknown): {
   readonly dispatch: (params: NerPoolDispatchParams<unknown>) => Promise<unknown>;
   readonly onWorkersReleased: (listener: () => void) => () => void;
+  readonly releaseIdleWorkers: () => boolean;
 } {
   return {
     dispatch: (): Promise<unknown> => Promise.resolve(resolvedValue),
     onWorkersReleased: (): (() => void) => () => {},
+    releaseIdleWorkers: (): boolean => false,
   };
 }
 

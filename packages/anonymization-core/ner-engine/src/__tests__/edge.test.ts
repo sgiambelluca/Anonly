@@ -29,9 +29,11 @@ import {
   asPipelineMock,
   createEngineContext,
   createResolvedNerPool,
+  createTrackingNerPool,
   makeNerPageInput,
   mockTokenClassificationPipeline,
   nerToken,
+  type NerPoolDispatchParams,
 } from "./fixtures/test-helpers.js";
 
 describe("NerEngine — edge case tests", () => {
@@ -611,6 +613,79 @@ describe("NerEngine — edge case tests", () => {
       const horizontal = withRotations(["Vive", "en", "Maipú", "1434"], []);
       const horizontalOutput = await engine.processPage(horizontal, ctx);
       expect(horizontalOutput.occurrences.map((o) => o.value)).toEqual(["Maipú 1434"]);
+    });
+  });
+
+  // Casos 36-37 (§13, ADR-226): baja explícita con trabajo en curso y sin pool.
+  describe("Casos 36-37: releaseIdleWorkers (ADR-226)", () => {
+    it("releaseIdleWorkers does nothing while a page is in flight (ADR-226)", async () => {
+      asPipelineMock(pipeline).mockResolvedValue(
+        mockTokenClassificationPipeline(() => Promise.resolve([])),
+      );
+      const pool = createTrackingNerPool();
+      let unblock: () => void = () => {};
+      const gate = new Promise<void>((resolve) => {
+        unblock = resolve;
+      });
+      const gatedPool = {
+        ...pool,
+        dispatch: async <T>(params: NerPoolDispatchParams<T>): Promise<T> => {
+          await gate;
+          return pool.dispatch(params);
+        },
+      };
+      const pooledEngine = new NerEngine(gatedPool);
+      await pooledEngine.init(ctx);
+
+      const pending = pooledEngine.processPage(makeNerPageInput("doc-inflight", 0, ["Juan"]), ctx);
+      pooledEngine.releaseIdleWorkers();
+      expect(pool.releaseIdleWorkersCalls.count).toBe(0);
+
+      unblock();
+      await pending;
+      pooledEngine.releaseIdleWorkers();
+      expect(pool.releaseIdleWorkersCalls.count).toBe(1);
+
+      // Con un processPages en curso que falla (modelo ausente), el contador
+      // también se decrementa: la baja posterior sí llega al pool.
+      const failingPool = createTrackingNerPool();
+      const failingEngine = new NerEngine({
+        ...failingPool,
+        dispatch: (): Promise<never> =>
+          Promise.reject(new NerModelMissingError("test-model", "no disponible")),
+      });
+      await failingEngine.init(ctx);
+      const failing = failingEngine.processPages(
+        [makeNerPageInput("doc-inflight-fail", 0, ["Juan"])],
+        ctx,
+      );
+      failingEngine.releaseIdleWorkers();
+      expect(failingPool.releaseIdleWorkersCalls.count).toBe(0);
+      await expect(failing).rejects.toBeInstanceOf(NerModelMissingError);
+      failingEngine.releaseIdleWorkers();
+      expect(failingPool.releaseIdleWorkersCalls.count).toBe(1);
+
+      await failingEngine.dispose();
+      await pooledEngine.dispose();
+    });
+
+    it("releaseIdleWorkers without an injected pool is a no-op (ADR-226)", async () => {
+      asPipelineMock(pipeline).mockResolvedValue(
+        mockTokenClassificationPipeline(() => Promise.resolve([])),
+      );
+      await engine.init(ctx);
+      await engine.processPage(makeNerPageInput("doc-no-pool-1", 0, ["Juan"]), ctx);
+      expect(engine.isModelReady()).toBe(true);
+
+      expect(engine.releaseIdleWorkers()).toBeUndefined();
+      expect(engine.isModelReady()).toBe(true);
+
+      const busEmitSpy = vi.spyOn(ctx.bus, "emit");
+      await engine.processPage(makeNerPageInput("doc-no-pool-2", 0, ["Pérez"]), ctx);
+      const loadingCalls = busEmitSpy.mock.calls.filter(
+        ([, event]) => event === EngineEvents.NER_MODEL_LOADING,
+      );
+      expect(loadingCalls).toHaveLength(0);
     });
   });
 });

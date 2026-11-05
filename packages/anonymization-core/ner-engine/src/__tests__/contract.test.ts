@@ -463,4 +463,21 @@ describe("NerEngine — contract tests", () => {
 
     await pooledEngine.dispose();
   });
+
+  it("NerEngine exposes releaseIdleWorkers and its pool port declares it (ADR-226)", async () => {
+    const pool = createTrackingNerPool();
+    const pooledEngine = new NerEngine(pool);
+    await pooledEngine.init(ctx);
+
+    expect(typeof pooledEngine.releaseIdleWorkers).toBe("function");
+    expect(pooledEngine.releaseIdleWorkers()).toBeUndefined();
+    expect(pool.releaseIdleWorkersCalls.count).toBe(1);
+
+    // El puerto exige `releaseIdleWorkers(): boolean`: el pool real de OCR/NER
+    // (`WorkerPool`) y el doble lo cumplen con este tipo.
+    const portShape: { releaseIdleWorkers: () => boolean } = pool;
+    expect(typeof portShape.releaseIdleWorkers()).toBe("boolean");
+
+    await pooledEngine.dispose();
+  });
 });

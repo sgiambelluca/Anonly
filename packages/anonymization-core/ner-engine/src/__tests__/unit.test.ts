@@ -779,6 +779,7 @@ describe("NerEngine — unit tests", () => {
         return params.run();
       },
       onWorkersReleased: (): (() => void) => () => {},
+      releaseIdleWorkers: (): boolean => false,
     };
     const pooledEngine = new NerEngine(pool);
     await pooledEngine.init(warmCtx);
@@ -818,6 +819,7 @@ describe("NerEngine — unit tests", () => {
         return params.run();
       },
       onWorkersReleased: (): (() => void) => () => {},
+      releaseIdleWorkers: (): boolean => false,
     };
     const pooledEngine = new NerEngine(pool);
     await pooledEngine.init(dedupCtx);
@@ -856,6 +858,7 @@ describe("NerEngine — unit tests", () => {
             releaseListener = undefined;
           };
         },
+        releaseIdleWorkers: (): boolean => false,
       };
       const pooledEngine = new NerEngine(pool);
       await pooledEngine.init(ctx);
@@ -912,6 +915,7 @@ describe("NerEngine — unit tests", () => {
             releaseListener = undefined;
           };
         },
+        releaseIdleWorkers: (): boolean => false,
       };
       const pooledEngine = new NerEngine(pool);
       await pooledEngine.init(reloadCtx);
@@ -968,6 +972,7 @@ describe("NerEngine — unit tests", () => {
             releaseListener = undefined;
           };
         },
+        releaseIdleWorkers: (): boolean => false,
       };
       const pooledEngine = new NerEngine(pool);
       await pooledEngine.init(inProcessCtx);
@@ -1018,6 +1023,7 @@ describe("NerEngine — unit tests", () => {
           return params.run();
         },
         onWorkersReleased: (): (() => void) => () => {},
+        releaseIdleWorkers: (): boolean => false,
       };
       const pooledEngine = new NerEngine(pool);
       await pooledEngine.init(noReleaseCtx);
@@ -1057,6 +1063,7 @@ describe("NerEngine — unit tests", () => {
             releaseListener = undefined;
           };
         },
+        releaseIdleWorkers: (): boolean => false,
       };
       const pooledEngine = new NerEngine(pool);
       await pooledEngine.init(ctx);
@@ -1087,6 +1094,7 @@ describe("NerEngine — unit tests", () => {
             releaseListener = undefined;
           };
         },
+        releaseIdleWorkers: (): boolean => false,
       };
       const pooledEngine = new NerEngine(pool);
 
@@ -1133,6 +1141,7 @@ describe("NerEngine — unit tests", () => {
         return params.run();
       },
       onWorkersReleased: (): (() => void) => () => {},
+      releaseIdleWorkers: (): boolean => false,
     };
     const timeoutEngine = new NerEngine(timeoutPool);
     await timeoutEngine.init(ctx);
@@ -1157,6 +1166,7 @@ describe("NerEngine — unit tests", () => {
         return Promise.reject(deserialized);
       },
       onWorkersReleased: (): (() => void) => () => {},
+      releaseIdleWorkers: (): boolean => false,
     };
     const missingEngine = new NerEngine(missingPool);
     await missingEngine.init(ctx);
@@ -1417,5 +1427,66 @@ describe("NerEngine — unit tests", () => {
       const span = addressSpan(text, "Maipú");
       expect(extendAddressSpan(span, text)).toBe(span);
     });
+  });
+
+  // ─── ADR-226 (spec §13 caso 35) — baja explícita con el pool ocioso ───
+
+  it("releaseIdleWorkers with an idle pool releases its workers and the next page reloads the model (ADR-226)", async () => {
+    asPipelineMock(pipeline).mockResolvedValue(
+      mockTokenClassificationPipeline(() => Promise.resolve([])),
+    );
+    const config = createMockConfig({
+      ner: {
+        modelId: "test-model-explicit-release",
+        quantization: "q8",
+        confidenceThreshold: 0.7,
+        batchSize: 1,
+        enabled: true,
+      },
+    });
+    const releaseCtx = createEngineContext({ config });
+
+    const listeners = new Set<() => void>();
+    let releaseCalls = 0;
+    // Reporta el par LOADING/READY en cada dispatch, como un worker recién
+    // reconstruido tras la baja; una baja efectiva notifica a los suscriptos.
+    const pool = {
+      dispatch: <T>(params: NerPoolDispatchParams<T>): Promise<T> => {
+        params.onProgress?.(0.5, {
+          phase: "model-loading",
+          modelId: "test-model-explicit-release",
+        });
+        params.onProgress?.(1, { phase: "model-ready", modelId: "test-model-explicit-release" });
+        return params.run();
+      },
+      onWorkersReleased: (listener: () => void): (() => void) => {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+      releaseIdleWorkers: (): boolean => {
+        releaseCalls += 1;
+        for (const listener of listeners) listener();
+        return true;
+      },
+    };
+    const pooledEngine = new NerEngine(pool);
+    await pooledEngine.init(releaseCtx);
+    await pooledEngine.processPage(makeNerPageInput("doc-explicit-1", 0, ["Juan"]), releaseCtx);
+    expect(pooledEngine.isModelReady()).toBe(true);
+
+    const busEmitSpy = vi.spyOn(releaseCtx.bus, "emit");
+    expect(pooledEngine.releaseIdleWorkers()).toBeUndefined();
+
+    expect(releaseCalls).toBe(1);
+    expect(pooledEngine.isModelReady()).toBe(false);
+
+    await pooledEngine.processPage(makeNerPageInput("doc-explicit-2", 0, ["Pérez"]), releaseCtx);
+
+    const events = busEmitSpy.mock.calls.map(([, event]) => event);
+    expect(events).toContain(EngineEvents.NER_MODEL_LOADING);
+    expect(events).toContain(EngineEvents.NER_MODEL_READY);
+    expect(pooledEngine.isModelReady()).toBe(true);
+
+    await pooledEngine.dispose();
   });
 });
