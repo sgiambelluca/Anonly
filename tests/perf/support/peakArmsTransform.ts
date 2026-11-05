@@ -5,35 +5,26 @@ import { createHash } from "node:crypto";
  * Transformación **solo de build**, aplicada por el arnés a una copia en
  * memoria del fuente: `packages/` no se modifica (ADR-218 §2, mismo método).
  *
- * Desde la implementación de ADR-225 (C-1) y ADR-226 (C-2), el producto trae
- * los dos cambios. Cada brazo se arma **quitando** del fuente los que no lleva:
+ * El producto trae C-1 (ADR-225), C-2 (ADR-226) y C-4 en su opción 2 (ADR-227).
+ * Cada brazo se arma **quitando** del fuente los cambios que no lleva:
  *
- * | brazo  | C-1 (cleanup en `parsePage`) | C-2 (baja de NER al empezar el OCR) |
- * |--------|------------------------------|-------------------------------------|
- * | `base` | no                           | no                                  |
- * | `c1`   | sí                           | no                                  |
- * | `c2`   | no                           | sí                                  |
- * | `head` | sí                           | sí  (el producto tal cual)          |
- *
- * Y dos brazos que **agregan** un candidato sobre `head` (todavía sin
- * implementar, solo build del arnés):
- *
- * - `c3`: `head` + el pool de `pdf-parse` se da de baja al terminar el parseo
- *   (`this.pools.getPool("pdf").releaseIdleWorkers()` en el Orchestrator).
- * - `c4`: `head` + `pageProxy.cleanup()` después de cada `render()` en el
- *   kernel de Render (pdf.js solo programa, con 5 s de retardo, la limpieza de
- *   las páginas con imágenes de más de 10e6 bytes).
- * - `c4r`: `head` + el mismo cleanup, **solo** donde cada página se dibuja una vez
- *   por etapa: siempre en `kernelRasterizePage` (OCR) y en `kernelRenderPage`
- *   cuando `mode === "full"` (export). El preview no cambia (ADR-227, opción 2).
+ * | brazo  | C-1 (`parsePage`) | C-2 (baja de NER antes del OCR) | C-4 (cleanup en OCR y export) |
+ * |--------|-------------------|---------------------------------|-------------------------------|
+ * | `base` | no                | no                              | no                            |
+ * | `c1`   | sí                | no                              | no                            |
+ * | `c2`   | no                | sí                              | no                            |
+ * | `c4r`  | no                | no                              | sí                            |
+ * | `head` | sí                | sí                              | sí (el producto tal cual)     |
  *
  * Cada bloque se busca con una coincidencia exacta: si el fuente cambia, el
- * build se niega en vez de medir otra cosa.
+ * build se niega en vez de medir otra cosa. Los brazos de experimento `c3` y
+ * `c4` (que **agregaban** candidatos sin implementar) se retiraron al
+ * implementar C-4; su versión del arnés es la del commit `8e8e2e4`.
  */
-export type PeakArm = "base" | "c1" | "c2" | "head" | "c3" | "c4" | "c4r";
+export type PeakArm = "base" | "c1" | "c2" | "c4r" | "head";
 export type PeakSourceFile = "pdf-engine" | "orchestrator" | "render-kernel";
 
-export const PEAK_ARMS: ReadonlyArray<PeakArm> = ["base", "c1", "c2", "head", "c3", "c4", "c4r"];
+export const PEAK_ARMS: ReadonlyArray<PeakArm> = ["base", "c1", "c2", "c4r", "head"];
 
 /** C-1, `pdf-engine/src/pdf.engine.ts` (commit 9ead600). */
 export const C1_BLOCK =
@@ -57,105 +48,51 @@ export const C2_BLOCK =
   "      this.engines.ner.releaseIdleWorkers();\n" +
   "\n";
 
-/** C-3: se inserta antes de esta ancla de `src/orchestrator.ts`, al volver el parseo. */
-export const C3_ANCHOR =
-  "    this.documents.set(documentId, pdfOutput.document);\n" +
-  "    this.interactionRevisionsByDocument.set(\n";
-export const C3_INSERTION =
-  "    // experimento C-3 (solo build del arnés): el parseo ya terminó.\n" +
-  '    this.pools.getPool("pdf").releaseIdleWorkers();\n';
-
-/** C-4: se inserta al final del `try` de `renderPageOntoContext` (`render-engine/src/worker/kernel.ts`). */
-export const C4_ANCHOR =
-  "        viewport,\n" + "      }).promise,\n" + "      timeoutPromise,\n" + "    ]);\n";
-export const C4_INSERTION =
-  "    // experimento C-4 (solo build del arnés): suelta las imágenes de la página.\n" +
-  "    pageProxy.cleanup();\n";
-
-/** C-4 restringido: los dos llamados a `renderPageOntoContext`, distinguidos por lo que los precede. */
-const RENDER_CALL =
-  "  try {\n" +
-  "    await renderPageOntoContext(\n" +
-  "      pageProxy,\n" +
-  "      context2d,\n" +
-  "      viewport,\n" +
-  "      documentId,\n" +
-  "      pageIndex,\n" +
-  "      opts.timeoutMs,\n" +
-  "    );\n";
-const CANVAS_LINES =
-  "  const canvas = createCanvas(documentId, pageIndex, viewport.width, viewport.height, opts.onWarn);\n" +
-  "  const context2d = get2dContext(canvas, documentId, pageIndex);\n" +
-  "\n";
-/** `kernelRenderPage` (preview y export). */
-export const C4R_RENDER_ANCHOR =
-  "  const viewport = pageProxy.getViewport({ scale });\n" + CANVAS_LINES + RENDER_CALL;
-export const C4R_RENDER_INSERTION =
-  "    // experimento C-4r (solo build del arnés): solo el export suelta la página.\n" +
+/** C-4, `render-engine/src/worker/kernel.ts`, en `kernelRenderPage` (solo `mode: "full"`). */
+export const C4_RENDER_BLOCK =
+  '    // ADR-227: solo en `mode: "full"` (export, una vez por página). El preview\n' +
+  "    // conserva lo que dibujó para que un zoom o un cambio de vista no vuelva\n" +
+  "    // a decodificar la imagen. Después de este punto la función no vuelve a\n" +
+  "    // usar `pageProxy` (el viewport ya está calculado).\n" +
   '    if (mode === "full") pageProxy.cleanup();\n';
-/** `kernelRasterizePage` (OCR). */
-export const C4R_RASTER_ANCHOR = "      : undefined;\n\n" + CANVAS_LINES + RENDER_CALL;
-export const C4R_RASTER_INSERTION =
-  "    // experimento C-4r (solo build del arnés): el OCR suelta la página.\n" +
+
+/** C-4, `render-engine/src/worker/kernel.ts`, en `kernelRasterizePage` (OCR). */
+export const C4_RASTER_BLOCK =
+  "    // ADR-227: pdf.js deja en `pageProxy.objs` las imágenes decodificadas para\n" +
+  "    // dibujar, y `PDFDocumentProxy` retiene la página hasta `destroy()`. Se\n" +
+  "    // sueltan apenas el dibujo terminó, antes de recortar o codificar. Si el\n" +
+  "    // render falla o se cancela no se llega acá. No se vuelve a usar\n" +
+  "    // `pageProxy` después (viewport y `cropRect` ya están calculados).\n" +
   "    pageProxy.cleanup();\n";
 
 const sha256 = (value: string): string => createHash("sha256").update(value).digest("hex");
 
 export function parsePeakArm(value: string | undefined): PeakArm {
   if ((PEAK_ARMS as ReadonlyArray<string>).includes(value ?? "")) return value as PeakArm;
-  throw new Error("arnés de pico: brazo desconocido (base, c1, c2, head, c3 o c4)");
+  throw new Error("arnés de pico: brazo desconocido (base, c1, c2, c4r o head)");
 }
 
-/** Si el brazo conserva el cambio implementado de ese archivo (C-1 o C-2). `render-kernel` no tiene. */
+/** Si el brazo conserva el cambio implementado de ese archivo. */
 export function armKeeps(arm: PeakArm, file: PeakSourceFile): boolean {
-  const withHead = arm === "head" || arm === "c3" || arm === "c4" || arm === "c4r";
-  if (file === "pdf-engine") return withHead || arm === "c1";
-  if (file === "orchestrator") return withHead || arm === "c2";
-  return true;
+  if (arm === "head") return true;
+  if (file === "pdf-engine") return arm === "c1";
+  if (file === "orchestrator") return arm === "c2";
+  return arm === "c4r";
 }
 
-/** Si el brazo agrega a ese archivo el candidato todavía no implementado (C-3 o C-4). */
-export function armAdds(arm: PeakArm, file: PeakSourceFile): boolean {
-  return (
-    (arm === "c3" && file === "orchestrator") ||
-    ((arm === "c4" || arm === "c4r") && file === "render-kernel")
-  );
+function blocksFor(file: PeakSourceFile): ReadonlyArray<string> {
+  if (file === "pdf-engine") return [C1_BLOCK];
+  if (file === "orchestrator") return [C2_BLOCK];
+  return [C4_RENDER_BLOCK, C4_RASTER_BLOCK];
 }
 
-function requireOnce(source: string, needle: string, what: string): void {
-  if (source.split(needle).length !== 2)
-    throw new Error(`arnés de pico: ${what} no aparece exactamente una vez`);
-}
-
-/**
- * Exige cada bloque y cada ancla exactamente una vez; quita el cambio
- * implementado si el brazo no lo lleva y agrega el candidato si lo lleva.
- */
+/** Exige cada bloque exactamente una vez y los quita si el brazo no lleva ese cambio. */
 export function transformPeakSource(source: string, file: PeakSourceFile, arm: PeakArm): string {
   let out = source;
-  if (file === "pdf-engine") {
-    requireOnce(out, C1_BLOCK, "el bloque de C-1");
-    if (!armKeeps(arm, file)) out = out.replace(C1_BLOCK, "");
-  }
-  if (file === "orchestrator") {
-    requireOnce(out, C2_BLOCK, "el bloque de C-2");
-    requireOnce(out, C3_ANCHOR, "el ancla de C-3");
-    if (out.includes('this.pools.getPool("pdf").releaseIdleWorkers()'))
-      throw new Error("arnés de pico: el fuente ya da de baja el pool de pdf-parse");
-    if (!armKeeps(arm, file)) out = out.replace(C2_BLOCK, "");
-    if (armAdds(arm, file)) out = out.replace(C3_ANCHOR, C3_INSERTION + C3_ANCHOR);
-  }
-  if (file === "render-kernel") {
-    requireOnce(out, C4_ANCHOR, "el ancla de C-4");
-    requireOnce(out, C4R_RENDER_ANCHOR, "el ancla de C-4r en kernelRenderPage");
-    requireOnce(out, C4R_RASTER_ANCHOR, "el ancla de C-4r en kernelRasterizePage");
-    if (out.includes("pageProxy.cleanup()"))
-      throw new Error("arnés de pico: el kernel de Render ya llama a pageProxy.cleanup()");
-    if (arm === "c4") out = out.replace(C4_ANCHOR, C4_ANCHOR + C4_INSERTION);
-    if (arm === "c4r") {
-      out = out.replace(C4R_RENDER_ANCHOR, C4R_RENDER_ANCHOR + C4R_RENDER_INSERTION);
-      out = out.replace(C4R_RASTER_ANCHOR, C4R_RASTER_ANCHOR + C4R_RASTER_INSERTION);
-    }
+  for (const block of blocksFor(file)) {
+    if (out.split(block).length !== 2)
+      throw new Error(`arnés de pico: un bloque de ${file} no aparece exactamente una vez`);
+    if (!armKeeps(arm, file)) out = out.replace(block, "");
   }
   return out;
 }
@@ -165,7 +102,6 @@ export interface PeakArmIdentity {
   readonly arm: PeakArm;
   readonly file: PeakSourceFile;
   readonly kept: boolean;
-  readonly added: boolean;
   readonly sourceSha256: string;
   readonly transformedSha256: string;
 }
@@ -180,7 +116,6 @@ export function createPeakArmIdentity(
     arm,
     file,
     kept: armKeeps(arm, file),
-    added: armAdds(arm, file),
     sourceSha256: sha256(source),
     transformedSha256: sha256(transformPeakSource(source, file, arm)),
   };

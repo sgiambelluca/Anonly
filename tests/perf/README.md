@@ -2264,36 +2264,38 @@ ADR-225 y ADR-226). Instrumentos opt-in, ninguno en `pnpm test:perf`:
   reemplaza a `memory.spec.ts`: P1 y P2 llevan NER por definición (ADR-146 §4).
   `P2-ner-off` equivale a «P2-attrib — NER apagado» de `memory-attribution.spec.ts`.
 - `run-peak-ab.sh`: A/B intercalado ABBA entre dos brazos. El producto trae
-  C-1 (ADR-225, `pageProxy.cleanup()` en `parsePage`) y C-2 (ADR-226, baja del
-  pool de NER al empezar el OCR). Cada brazo se arma **quitando** en el build
-  los cambios que no lleva (`support/peakArmsTransform.ts`, un bloque exacto por
-  archivo, con test):
+  C-1 (ADR-225, `pageProxy.cleanup()` en `parsePage`), C-2 (ADR-226, baja del
+  pool de NER al empezar el OCR) y C-4 en su opción 2 (ADR-227, cleanup después
+  de rasterizar para el OCR y de los renders `full`). Cada brazo se arma
+  **quitando** en el build los cambios que no lleva
+  (`support/peakArmsTransform.ts`, un bloque exacto por cambio, con test):
 
-  | brazo | C-1 | C-2 |
-  |---|---|---|
-  | `base` | no | no |
-  | `c1` | sí | no |
-  | `c2` | no | sí |
-  | `head` | sí | sí (el producto) |
+  | brazo | C-1 | C-2 | C-4 |
+  |---|---|---|---|
+  | `base` | no | no | no |
+  | `c1` | sí | no | no |
+  | `c2` | no | sí | no |
+  | `c4r` | no | no | sí |
+  | `head` | sí | sí | sí (el producto) |
 
-  `support/peakArmsBuildCli.ts` transforma `pdf.engine.ts` y `orchestrator.ts`
-  en el bundle principal y en los de workers. `packages/` y `apps/` no se
-  tocan: el runner copia el brazo a `apps/react-client/dist` antes de cada
-  corrida, verifica el digest del brazo y que `apps/desktop-shell/dist` no
-  cambió, y restaura el dist original al salir. Los `.measure/memory-*.json`
-  previos se apartan a `<carpeta>/preexisting/`, no se borran. El manifest
-  registra `exit=` y cuántos reportes dejó cada corrida. Variables:
-  `ANONLY_AB_CONTROL` (default `base`), `ANONLY_AB_CANDIDATE` (default
-  `head`), `ANONLY_AB_ROUNDS`, `ANONLY_AB_SPEC` (default `tests/perf/memory.spec.ts`),
-  `ANONLY_AB_GREP` (default `"P2 —"`), `ANONLY_AB_OUT`. En Linux sin pantalla
-  usa `xvfb-run`.
+  `support/peakArmsBuildCli.ts` transforma `pdf.engine.ts`, `orchestrator.ts` y
+  el kernel de Render en el bundle principal y en los de workers, y exige la
+  cantidad de pasadas por bundle. `packages/` y `apps/` no se tocan: el runner
+  copia el brazo a `apps/react-client/dist` antes de cada corrida, verifica el
+  digest del brazo y que `apps/desktop-shell/dist` no cambió, y restaura el
+  dist original al salir. Los `.measure/memory-*.json` previos se apartan a
+  `<carpeta>/preexisting/`, no se borran. El manifest registra `exit=` y cuántos
+  reportes dejó cada corrida. Variables: `ANONLY_AB_CONTROL` (default `base`),
+  `ANONLY_AB_CANDIDATE` (default `head`), `ANONLY_AB_ROUNDS`, `ANONLY_AB_SPEC`
+  (default `tests/perf/memory.spec.ts`), `ANONLY_AB_GREP` (default `"P2 —"`),
+  `ANONLY_AB_OUT`. En Linux sin pantalla usa `xvfb-run`. Los brazos `c3` y `c4`
+  con que se midieron esos candidatos antes de implementar C-4 están en la
+  versión del arnés del commit `8e8e2e4`.
 - `support/summarizePeakArmsCli.ts <carpeta> [control] [candidato]` escribe un
   `summary-<perfil>.json` por perfil medido (una corrida puede medir P1 y P2):
   medianas por brazo, diferencia pareada por ronda, hash del texto de OCR y
-  cantidad de grupos (`support/peakArmsSummary.ts`, con test). Brazos `c3`
-  (`head` + baja del pool de `pdf-parse` al terminar el parseo) y `c4` (`head` +
-  `pageProxy.cleanup()` después de cada render) agregan candidatos sin
-  implementar; `P2-144dpi-ner-off` de `memory-ner-off.spec.ts` deja las
+  cantidad de grupos (`support/peakArmsSummary.ts`, con test).
+  `P2-144dpi-ner-off` de `memory-ner-off.spec.ts` deja las
   imágenes debajo del umbral de 10e6 bytes: pdf.js no las limpia después de
   `render()` (las más grandes, con 5 s de retardo).
 

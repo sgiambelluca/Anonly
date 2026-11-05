@@ -7,7 +7,7 @@
  * `apps/react-client/dist` no se toca acá: el runner copia el brazo antes de
  * cada corrida.
  *
- * Uso: `tsx tests/perf/support/peakArmsBuildCli.ts <base|c1|c2|head|c3|c4|c4r> <outDir>`.
+ * Uso: `tsx tests/perf/support/peakArmsBuildCli.ts <base|c1|c2|c4r|head> <outDir>`.
  */
 import { readFile, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
