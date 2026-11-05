@@ -2282,6 +2282,16 @@ ANONLY_MEMORY_NER_OFF=1 ANONLY_C1_SPEC=tests/perf/memory-ner-off.spec.ts ANONLY_
 pnpm exec tsx tests/perf/support/summarizeParseCleanupCli.ts .measure/c1-parse-cleanup/<carpeta>
 ```
 
+Límites del instrumento, a endurecer si se reusa (la identidad es más débil que
+la de ADR-218): el digest del `dist` de cada brazo se registra al construirlo
+y no se vuelve a verificar por corrida, `apps/desktop-shell/dist` no se
+congela, y el resumen no cruza el `exit=` del manifest. Una corrida sin JSON
+solo se nota porque `runs` da menos de lo esperado. Los
+`.measure/memory-*.json` que hubiera de antes se apartan a
+`<carpeta>/preexisting/`; no se borran. `P2-ner-off` de `memory-ner-off.spec.ts`
+es equivalente a «P2-attrib — NER apagado» de `memory-attribution.spec.ts`,
+que es el que usó la campaña de 2026-11.
+
 Con el modelo de NER disponible, la misma campaña sobre los perfiles normativos:
 `ANONLY_C1_SPEC=tests/perf/memory.spec.ts ANONLY_C1_GREP="P1 —|P2 —"`. No
 correr otra medición ni gates pesados en paralelo.

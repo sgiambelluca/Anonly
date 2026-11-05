@@ -33,9 +33,23 @@ restore() {
 }
 trap restore EXIT
 
-RUNNER=()
+# Sin array vacío: con `set -u`, el bash 3.2 de macOS trata "${a[@]}" vacío como no definido.
+USE_XVFB=0
 if [[ "$(uname -s)" == "Linux" && -z "${DISPLAY:-}" ]] && command -v xvfb-run >/dev/null; then
-  RUNNER=(xvfb-run -a -s "-screen 0 1920x1080x24")
+  USE_XVFB=1
+fi
+run_playwright() {
+  if [[ "$USE_XVFB" == "1" ]]; then
+    xvfb-run -a -s "-screen 0 1920x1080x24" "$@"
+  else
+    "$@"
+  fi
+}
+# Mismo criterio que run-ab-intercalado.sh: sha256sum en Linux/Git Bash, shasum en macOS.
+if command -v sha256sum >/dev/null; then
+  SHA256=(sha256sum)
+else
+  SHA256=(shasum -a 256)
 fi
 
 {
@@ -43,14 +57,14 @@ fi
   echo "dirty_packages_apps=$(git status --porcelain -- packages apps | wc -l)"
   echo "spec=$SPEC grep=$GREP rounds=$ROUNDS"
   echo "uname=$(uname -a)"
-  echo "cpus=$(nproc) mem_kb=$(awk '/MemTotal/{print $2}' /proc/meminfo 2>/dev/null || echo unknown)"
+  echo "cpus=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo unknown) mem_kb=$(awk '/MemTotal/{print $2}' /proc/meminfo 2>/dev/null || echo unknown)"
   echo "started=$(date -u +%FT%TZ)"
 } > "$RUN_DIR/manifest.txt"
 
 for arm in A B; do
   pnpm exec tsx tests/perf/support/parseCleanupBuildCli.ts "$arm" "$RUN_DIR/$arm/dist" \
     > "$RUN_DIR/build-$arm.log" 2>&1
-  (cd "$RUN_DIR/$arm/dist" && find . -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1) \
+  (cd "$RUN_DIR/$arm/dist" && find . -type f -print0 | sort -z | xargs -0 "${SHA256[@]}" | "${SHA256[@]}" | cut -d' ' -f1) \
     > "$RUN_DIR/$arm/dist.sha256"
 done
 
@@ -61,10 +75,16 @@ for round in $(seq 1 "$ROUNDS"); do
     tag="$(printf '%02d' "$slot")-r${round}-${arm}"
     rm -rf "$DIST"
     cp -r "$RUN_DIR/$arm/dist" "$DIST"
-    rm -f .measure/memory-*.json
+    # Los reportes que `writeReport` deja en .measure/ se apartan (no se borran)
+    # para no mezclarlos con los de esta corrida.
+    for stale in .measure/memory-*.json; do
+      [[ -e "$stale" ]] || continue
+      mkdir -p "$RUN_DIR/preexisting"
+      mv "$stale" "$RUN_DIR/preexisting/$tag-$(basename "$stale")"
+    done
     echo "$tag start $(date -u +%FT%TZ) load=$(cut -d' ' -f1 /proc/loadavg 2>/dev/null || echo ?)" >> "$RUN_DIR/manifest.txt"
     status=0
-    "${RUNNER[@]}" pnpm exec playwright test --config=playwright.perf.config.ts "$SPEC" \
+    run_playwright pnpm exec playwright test --config=playwright.perf.config.ts "$SPEC" \
       --grep "$GREP" --workers=1 --retries=0 > "$RUN_DIR/runs/$tag.log" 2>&1 || status=$?
     echo "$tag exit=$status end $(date -u +%FT%TZ)" >> "$RUN_DIR/manifest.txt"
     for report in .measure/memory-*.json; do
