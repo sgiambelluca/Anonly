@@ -165,6 +165,7 @@ function createMockPdfPage(textItems: ReadonlyArray<MockTextItem>) {
         })),
       }),
     ),
+    cleanup: vi.fn(),
     getOperatorList: vi.fn(() =>
       Promise.resolve({ fnArray: [] as number[], argsArray: [] as unknown[] }),
     ),
