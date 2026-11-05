@@ -15,13 +15,21 @@ import { createHash } from "node:crypto";
  * | `c2`   | no                           | sí                                  |
  * | `head` | sí                           | sí  (el producto tal cual)          |
  *
+ * Y dos brazos que **agregan** un candidato sobre `head` (todavía sin
+ * implementar, solo build del arnés):
+ *
+ * - `c3`: `head` + el pool de `pdf-parse` se da de baja al terminar el parseo
+ *   (`this.pools.getPool("pdf").releaseIdleWorkers()` en el Orchestrator).
+ * - `c4`: `head` + `pageProxy.cleanup()` después de cada `render()` en el
+ *   kernel de Render (pdf.js solo limpia solo las imágenes de más de 10e6 bytes).
+ *
  * Cada bloque se busca con una coincidencia exacta: si el fuente cambia, el
  * build se niega en vez de medir otra cosa.
  */
-export type PeakArm = "base" | "c1" | "c2" | "head";
-export type PeakSourceFile = "pdf-engine" | "orchestrator";
+export type PeakArm = "base" | "c1" | "c2" | "head" | "c3" | "c4";
+export type PeakSourceFile = "pdf-engine" | "orchestrator" | "render-kernel";
 
-export const PEAK_ARMS: ReadonlyArray<PeakArm> = ["base", "c1", "c2", "head"];
+export const PEAK_ARMS: ReadonlyArray<PeakArm> = ["base", "c1", "c2", "head", "c3", "c4"];
 
 /** C-1, `pdf-engine/src/pdf.engine.ts` (commit 9ead600). */
 export const C1_BLOCK =
@@ -45,28 +53,71 @@ export const C2_BLOCK =
   "      this.engines.ner.releaseIdleWorkers();\n" +
   "\n";
 
+/** C-3: se inserta antes de esta ancla de `src/orchestrator.ts`, al volver el parseo. */
+export const C3_ANCHOR =
+  "    this.documents.set(documentId, pdfOutput.document);\n" +
+  "    this.interactionRevisionsByDocument.set(\n";
+export const C3_INSERTION =
+  "    // experimento C-3 (solo build del arnés): el parseo ya terminó.\n" +
+  '    this.pools.getPool("pdf").releaseIdleWorkers();\n';
+
+/** C-4: se inserta al final del `try` de `renderPageOntoContext` (`render-engine/src/worker/kernel.ts`). */
+export const C4_ANCHOR =
+  "        viewport,\n" + "      }).promise,\n" + "      timeoutPromise,\n" + "    ]);\n";
+export const C4_INSERTION =
+  "    // experimento C-4 (solo build del arnés): suelta las imágenes de la página.\n" +
+  "    pageProxy.cleanup();\n";
+
 const sha256 = (value: string): string => createHash("sha256").update(value).digest("hex");
 
 export function parsePeakArm(value: string | undefined): PeakArm {
-  if (value === "base" || value === "c1" || value === "c2" || value === "head") return value;
-  throw new Error("arnés de pico: brazo desconocido (base, c1, c2 o head)");
+  if ((PEAK_ARMS as ReadonlyArray<string>).includes(value ?? "")) return value as PeakArm;
+  throw new Error("arnés de pico: brazo desconocido (base, c1, c2, head, c3 o c4)");
 }
 
+/** Si el brazo conserva el cambio implementado de ese archivo (C-1 o C-2). `render-kernel` no tiene. */
 export function armKeeps(arm: PeakArm, file: PeakSourceFile): boolean {
-  if (file === "pdf-engine") return arm === "c1" || arm === "head";
-  return arm === "c2" || arm === "head";
+  const withHead = arm === "head" || arm === "c3" || arm === "c4";
+  if (file === "pdf-engine") return withHead || arm === "c1";
+  if (file === "orchestrator") return withHead || arm === "c2";
+  return true;
 }
 
-function blockFor(file: PeakSourceFile): string {
-  return file === "pdf-engine" ? C1_BLOCK : C2_BLOCK;
+/** Si el brazo agrega a ese archivo el candidato todavía no implementado (C-3 o C-4). */
+export function armAdds(arm: PeakArm, file: PeakSourceFile): boolean {
+  return (arm === "c3" && file === "orchestrator") || (arm === "c4" && file === "render-kernel");
 }
 
-/** Exige que el bloque aparezca exactamente una vez y lo quita si el brazo no lo lleva. */
+function requireOnce(source: string, needle: string, what: string): void {
+  if (source.split(needle).length !== 2)
+    throw new Error(`arnés de pico: ${what} no aparece exactamente una vez`);
+}
+
+/**
+ * Exige cada bloque y cada ancla exactamente una vez; quita el cambio
+ * implementado si el brazo no lo lleva y agrega el candidato si lo lleva.
+ */
 export function transformPeakSource(source: string, file: PeakSourceFile, arm: PeakArm): string {
-  const block = blockFor(file);
-  if (source.split(block).length !== 2)
-    throw new Error(`arnés de pico: el bloque de ${file} no aparece exactamente una vez`);
-  return armKeeps(arm, file) ? source : source.replace(block, "");
+  let out = source;
+  if (file === "pdf-engine") {
+    requireOnce(out, C1_BLOCK, "el bloque de C-1");
+    if (!armKeeps(arm, file)) out = out.replace(C1_BLOCK, "");
+  }
+  if (file === "orchestrator") {
+    requireOnce(out, C2_BLOCK, "el bloque de C-2");
+    requireOnce(out, C3_ANCHOR, "el ancla de C-3");
+    if (out.includes('this.pools.getPool("pdf").releaseIdleWorkers()'))
+      throw new Error("arnés de pico: el fuente ya da de baja el pool de pdf-parse");
+    if (!armKeeps(arm, file)) out = out.replace(C2_BLOCK, "");
+    if (armAdds(arm, file)) out = out.replace(C3_ANCHOR, C3_INSERTION + C3_ANCHOR);
+  }
+  if (file === "render-kernel") {
+    requireOnce(out, C4_ANCHOR, "el ancla de C-4");
+    if (out.includes("pageProxy.cleanup()"))
+      throw new Error("arnés de pico: el kernel de Render ya llama a pageProxy.cleanup()");
+    if (armAdds(arm, file)) out = out.replace(C4_ANCHOR, C4_ANCHOR + C4_INSERTION);
+  }
+  return out;
 }
 
 export interface PeakArmIdentity {
@@ -74,6 +125,7 @@ export interface PeakArmIdentity {
   readonly arm: PeakArm;
   readonly file: PeakSourceFile;
   readonly kept: boolean;
+  readonly added: boolean;
   readonly sourceSha256: string;
   readonly transformedSha256: string;
 }
@@ -88,6 +140,7 @@ export function createPeakArmIdentity(
     arm,
     file,
     kept: armKeeps(arm, file),
+    added: armAdds(arm, file),
     sourceSha256: sha256(source),
     transformedSha256: sha256(transformPeakSource(source, file, arm)),
   };

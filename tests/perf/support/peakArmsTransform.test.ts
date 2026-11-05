@@ -6,6 +6,11 @@ import { describe, expect, it } from "vitest";
 import {
   C1_BLOCK,
   C2_BLOCK,
+  C3_ANCHOR,
+  C3_INSERTION,
+  C4_ANCHOR,
+  C4_INSERTION,
+  armAdds,
   PEAK_ARMS,
   armKeeps,
   createPeakArmIdentity,
@@ -16,6 +21,10 @@ import {
 const ROOT = resolve(__dirname, "../../..");
 const PDF_ENGINE = resolve(ROOT, "packages/anonymization-core/pdf-engine/src/pdf.engine.ts");
 const ORCHESTRATOR = resolve(ROOT, "packages/anonymization-core/src/orchestrator.ts");
+const RENDER_KERNEL = resolve(
+  ROOT,
+  "packages/anonymization-core/render-engine/src/worker/kernel.ts",
+);
 
 describe("peakArmsTransform", () => {
   it("each block matches the current product source exactly once", () => {
@@ -32,9 +41,9 @@ describe("peakArmsTransform", () => {
 
   it("the base arm removes both blocks and nothing else", () => {
     const pdf = `a\n${C1_BLOCK}b\n`;
-    const orchestrator = `x\n${C2_BLOCK}y\n`;
+    const orchestrator = `x\n${C2_BLOCK}y\n${C3_ANCHOR}`;
     expect(transformPeakSource(pdf, "pdf-engine", "base")).toBe("a\nb\n");
-    expect(transformPeakSource(orchestrator, "orchestrator", "base")).toBe("x\ny\n");
+    expect(transformPeakSource(orchestrator, "orchestrator", "base")).toBe(`x\ny\n${C3_ANCHOR}`);
   });
 
   it("c1 keeps only the parse cleanup and c2 keeps only the NER release", () => {
@@ -42,7 +51,7 @@ describe("peakArmsTransform", () => {
     expect(armKeeps("c1", "orchestrator")).toBe(false);
     expect(armKeeps("c2", "pdf-engine")).toBe(false);
     expect(armKeeps("c2", "orchestrator")).toBe(true);
-    expect(PEAK_ARMS).toEqual(["base", "c1", "c2", "head"]);
+    expect(PEAK_ARMS).toEqual(["base", "c1", "c2", "head", "c3", "c4"]);
   });
 
   it("the base arm source no longer calls cleanup or releases NER", () => {
@@ -77,5 +86,37 @@ describe("peakArmsTransform", () => {
     for (const arm of PEAK_ARMS) expect(parsePeakArm(arm)).toBe(arm);
     expect(() => parsePeakArm("A")).toThrow(/brazo/);
     expect(() => parsePeakArm(undefined)).toThrow(/brazo/);
+  });
+
+  it("the C-3 and C-4 anchors match the current product source exactly once", () => {
+    expect(readFileSync(ORCHESTRATOR, "utf8").split(C3_ANCHOR)).toHaveLength(2);
+    expect(readFileSync(RENDER_KERNEL, "utf8").split(C4_ANCHOR)).toHaveLength(2);
+  });
+
+  it("c3 is head plus the parse pool release right after parsing", () => {
+    const orchestrator = readFileSync(ORCHESTRATOR, "utf8");
+    const out = transformPeakSource(orchestrator, "orchestrator", "c3");
+    expect(out).toContain(C2_BLOCK);
+    expect(out).toContain(C3_INSERTION + C3_ANCHOR);
+    expect(out.split('this.pools.getPool("pdf").releaseIdleWorkers()')).toHaveLength(2);
+    expect(transformPeakSource(readFileSync(PDF_ENGINE, "utf8"), "pdf-engine", "c3")).toContain(
+      C1_BLOCK,
+    );
+  });
+
+  it("c4 is head plus a page cleanup after each render", () => {
+    const kernel = readFileSync(RENDER_KERNEL, "utf8");
+    const out = transformPeakSource(kernel, "render-kernel", "c4");
+    expect(out).toContain(C4_ANCHOR + C4_INSERTION);
+    expect(out.split("pageProxy.cleanup()")).toHaveLength(2);
+    expect(transformPeakSource(kernel, "render-kernel", "head")).toBe(kernel);
+  });
+
+  it("only c3 adds to the orchestrator and only c4 adds to the render kernel", () => {
+    for (const arm of PEAK_ARMS) {
+      expect(armAdds(arm, "orchestrator")).toBe(arm === "c3");
+      expect(armAdds(arm, "render-kernel")).toBe(arm === "c4");
+      expect(armAdds(arm, "pdf-engine")).toBe(false);
+    }
   });
 });

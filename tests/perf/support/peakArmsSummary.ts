@@ -215,7 +215,7 @@ export function summarizeCampaign(
 
 /** `NN-r<ronda>-<brazo>-memory-...json` → ronda y brazo; `undefined` si el nombre no es de la campaña. */
 export function parseRunFileName(name: string): { round: number; arm: string } | undefined {
-  const match = /^\d{2}-r(\d+)-(base|c1|c2|head)-memory-.+\.json$/.exec(name);
+  const match = /^\d{2}-r(\d+)-(base|c1|c2|head|c3|c4)-memory-.+\.json$/.exec(name);
   if (match === null || match[1] === undefined || match[2] === undefined) return undefined;
   return { round: Number(match[1]), arm: match[2] };
 }
