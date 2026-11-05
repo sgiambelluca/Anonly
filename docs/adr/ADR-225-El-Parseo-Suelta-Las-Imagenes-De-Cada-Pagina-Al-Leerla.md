@@ -38,8 +38,9 @@ y mandarla al lado principal. En pdfjs-dist 4.10.38:
   caso `"Image"`);
 - `PDFDocumentProxy` guarda cada `PDFPageProxy` en `#pageCache`, que solo se
   vacía en `destroy()`;
-- después de `render()`, pdf.js limpia solo las imágenes grandes
-  (`_maybeCleanupAfterRender`). **Después de `getOperatorList()` no lo hace.**
+- después de `render()`, pdf.js programa con 5 s de retardo la limpieza de las
+  páginas con imágenes de más de 10e6 bytes (`_maybeCleanupAfterRender`,
+  ADR-227 §1). **Después de `getOperatorList()` no programa nada.**
 
 Resultado: durante el parseo se acumulan los píxeles decodificados de **todas**
 las páginas escaneadas del documento, hasta que el motor destruye el documento
@@ -50,11 +51,12 @@ operadores y argumentos.
 ### 3. Lo que ya se descartó, y por qué esto es otro sitio
 
 ADR-154 §2 y la bitácora H-10 §5.2 descartaron `pageProxy.cleanup()` **en el
-kernel de Render, durante el OCR**: el pico no se movió. **Una explicación
-probable, sin medir:** después de `render()` pdf.js ya limpia por su cuenta las
-imágenes de más de `MAX_IMAGE_SIZE_TO_CACHE` (10e6 bytes, `pdf.mjs`). Nadie
-midió el tamaño de las imágenes de P2. Los ~620 MB que libera C-1 en 50 páginas
-dan ~12 MB por página, por encima de ese umbral, lo que la hace plausible.
+kernel de Render, durante el OCR**: el pico no se movió. Por qué no se vio entonces queda **sin explicar del todo**: después de
+`render()` pdf.js solo programa, con 5 s de retardo, la limpieza de las páginas
+con imágenes de más de 10e6 bytes, y C-4 (ADR-227) midió después que sin NER el
+`cleanup()` en el kernel de Render sí baja el pico. La explicación más probable
+es que el pico global de H-10, con NER, no caía en la fase de OCR. Es una
+inferencia.
 Este ADR no repite aquel cambio. Propone el cleanup en
 **otra función, de otro motor (PDF Engine), en otra fase (el parseo) y después
 de otra llamada (`getOperatorList()`)**, donde esa limpieza automática no

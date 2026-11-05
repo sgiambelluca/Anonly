@@ -42,10 +42,10 @@
   §5):
   - **C-4 (ADR-227, Proposed)**: el render suelta las imágenes de cada página.
     A 144 dpi baja el pico unos 360 MB y la memoria después de `Ready` unos
-    390 MB; a 216 dpi, entre 114 y 238 MB y unos 180 MB. Reabre un descarte de
+    390 MB; a 216 dpi, entre 114 y 238 MB y entre 184 y 274 MB. Reabre un descarte de
     septiembre, y lo decide el humano.
-  - **C-3, descartado con medición**: dar de baja el worker de parseo no mueve
-    nada.
+  - **C-3, descartado con medición**: dar de baja el worker de parseo da unos
+    −20 MB en frío y nada en caliente, con los rangos solapados.
 - **Lo que este banco no puede decir**: nada con NER prendido, y ningún
   veredicto contra los techos de ADR-192, que se juzgan en Windows nativo.
 
@@ -224,11 +224,8 @@ descartado de `Optimizacion_De_Rendimiento.md` o de la bitácora H-10.
 usa `pageProxy.objs`.
 
 **Por qué no repite el descarte de H-10 §5.2.** Aquel `cleanup()` era en el
-kernel de Render, después de `render()`, donde pdf.js ya limpia solo las
-imágenes de más de 10e6 bytes (`_maybeCleanupAfterRender`). Que eso explique
-el resultado nulo de H-10 es una **inferencia**: no se midió el tamaño de las
-imágenes de P2 (los ~620 MB que libera C-1 en 50 páginas dan ~12 MB por
-página, por encima del umbral). Después de `getOperatorList()`
+kernel de Render, después de `render()`, en otra fase. Por qué no movió nada
+entonces queda sin explicar del todo; C-4 (§4.4) reabrió ese descarte. Después de `getOperatorList()`
 no hay limpieza automática, y `#pageCache` conserva cada página hasta
 `destroy()` (pdfjs-dist 4.10.38, leído en el código).
 
@@ -307,13 +304,14 @@ separado y juntas.
 Medido el 2026-11-05 a pedido del humano, después de implementar C-1 y C-2.
 
 **Qué**: `pageProxy.cleanup()` al terminar de dibujar una página en el kernel
-de Render. pdf.js 4.10.38 solo limpia solo, después de `render()`, las imágenes
-de más de 10e6 bytes. Cada worker de Render conserva el resto hasta cerrar el
-documento.
+de Render. Después de `render()`, pdf.js 4.10.38 solo programa una limpieza, con
+5 s de retardo y cancelable si la página se vuelve a dibujar, y solo para las
+páginas con imágenes de más de 10e6 bytes. Las más chicas quedan hasta cerrar
+el documento.
 
 **Reabre un descarte**: H-10 §5.2 y ADR-154 §2. ADR-227 §2 explica qué midió
-distinto esta campaña (sin NER, con imágenes por debajo del umbral) y qué queda
-sin explicar.
+distinto esta campaña (sin NER, con imágenes a los dos lados del umbral) y qué
+queda sin explicar.
 
 **A/B** (`.measure/peak-ab/c4-neroff-head-c4/`): `head` contra `c4`, ABBA × 3,
 sin NER, P2 a 144 dpi (perfil nuevo `P2-144dpi-ner-off`, imágenes de ~7,8 MB) y
@@ -338,7 +336,7 @@ a 216 dpi (P2 de siempre, ~17 MB). Medianas, y entre paréntesis mínimo y máxi
 
 | Criterio de multidocumento | Cumple |
 |---|---|
-| 1. No cambia pico por retención | sí: la retención después de `Ready` baja entre 180 y 400 MB |
+| 1. No cambia pico por retención | sí: la retención después de `Ready` baja entre 184 y 405 MB |
 | 2. Nada que suponga un solo documento | sí: por página de cada documento en cada worker |
 | 3. Liberar al terminar cada etapa, no al cerrar | sí: por página, al terminar de dibujarla |
 | 4. Medido frío y caliente | sí |
@@ -350,7 +348,7 @@ a 216 dpi (P2 de siempre, ~17 MB). Medianas, y entre paréntesis mínimo y máxi
 | C-3: dar de baja el pool de `pdf-parse` al terminar el parseo | **descartado con medición** (2026-11-05, `.measure/peak-ab/c3-neroff-head-c3/`): `head` contra `c3`, ABBA × 3, sin NER. P2: −27 a +2 MB, con los rangos solapados (frío 1488–1521 contra 1455–1506). P1: −3 a +10 MB, sin costo de tiempo. Ese worker no es el que pesa en el OCR |
 | Bajar `ocrPoolSize`, `renderPoolSize`, hilos de ONNX o reconocedores | ADR-154 §1: la memoria no se compra bajando paralelismo |
 | Bajar el DPI del OCR | cambia la calidad del reconocimiento; ADR-154 §2 lever 6 lo deja al humano con la línea de base de ADR-147 |
-| `pageProxy.cleanup()` en el kernel de Render | descartado en septiembre (H-10 §5.2, ADR-154 §2), **reabierto por C-4** (§4.4, ADR-227): sin NER y con imágenes por debajo del umbral de 10e6 bytes, el efecto sí aparece |
+| `pageProxy.cleanup()` en el kernel de Render | descartado en septiembre (H-10 §5.2, ADR-154 §2), **reabierto por C-4** (§4.4, ADR-227): sin NER el efecto sí aparece, a 144 dpi (imágenes que pdf.js no limpia nunca) y a 216 dpi (que limpia con 5 s de retardo) |
 | Adelantar la carga de NER durante el OCR | descartado con medición (`Optimizacion_De_Rendimiento.md`, «Descartado con medición») |
 | Soltar NER al terminar la detección | ADR-166, retirado por ADR-167: la recarga se apilaba sobre el documento siguiente. C-2 es otro disparador (§4) |
 | Los workers de Render que siguen vivos del documento anterior | en caliente se ven 3 `render-page` vivos ya durante el parseo (en frío, 0). Sin atribución por worker, porque su heap de JS es de pocos MB y el resto no se observa por CDP. Además, sirven al preview del documento abierto: soltarlos al cerrar choca con el criterio 3 (con pestañas, el documento no se cierra). Queda como observación, no como candidato |
