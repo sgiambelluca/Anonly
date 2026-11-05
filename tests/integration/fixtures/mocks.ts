@@ -213,6 +213,7 @@ export function createMockPdfPage(
     // página para detectar image XObjects. Sin esto, el mock lo deja
     // `undefined` y el parseo muere en `PdfCorruptedError`, tumbando el
     // pipeline entero.
+    cleanup: vi.fn(),
     getOperatorList: vi.fn(() => Promise.resolve(buildOperatorList(images, annotations))),
     render: vi.fn(() => ({ promise: Promise.resolve() })),
   };
