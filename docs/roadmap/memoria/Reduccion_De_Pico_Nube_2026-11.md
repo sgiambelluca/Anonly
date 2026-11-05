@@ -66,8 +66,12 @@ la generación del PDF escaneado, que ocurre antes de abrir el Electron medido.
 **Instrumento.** `measureProfile` de `tests/perf/support/memoryProfile.ts`, sin
 cambios: corrida fría → cierre por la UI → espera de la línea de base caliente
 (ADR-146 §7bis) → corrida caliente, en la misma instancia. RSS por proceso
-cada 150 ms (30 ms en P1), heap de JS por target vía CDP (ADR-159), conteo de
-workers vivos por tipo desde los eventos del pool. **El RSS es diagnóstico**:
+cada 150 ms (30 ms en P1). **Heap de JS por target vía CDP con GC forzado**
+(ADR-159 §2): cada 1000 ms, `cdpHeap.ts` ejecuta `HeapProfiler.collectGarbage`
+en cada target vivo antes de leer su heap (`snapshotHeapByTarget(forceGc = true)`,
+el default del sampler periódico). Los **workers vivos** se cuentan como los
+targets `worker` que CDP ve en esas mismas muestras, y los jobs concurrentes
+por tipo salen de los eventos del pool. **El RSS es diagnóstico**:
 el veredicto de retención es heap + workers (ADR-185). Una fase sin muestras
 se declara no medible, no se inventa.
 
@@ -138,7 +142,7 @@ brazo A.** Es la causa que ataca C-1 (§4.1).
 
 ### 2.3 Heap de JS y workers vivos (CDP, ADR-159 y ADR-185)
 
-- **Heap de JS** (usado + embebedor, todos los targets): máximo de 24–26 MB en
+- **Heap de JS con GC forzado** (usado + embebedor, todos los targets): máximo de 24–26 MB en
   P1 y de 27–29 MB en P2. **El pico no es heap de JS.** Lo que crece es memoria
   que CDP no ve como heap (búferes nativos, WASM, imágenes decodificadas):
   `memoryProfile` lo reporta como residuo no atribuido, unos 1120 MB al cerrar
