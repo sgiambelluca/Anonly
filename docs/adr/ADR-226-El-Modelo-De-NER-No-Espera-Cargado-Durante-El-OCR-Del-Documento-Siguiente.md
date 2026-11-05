@@ -2,9 +2,10 @@
 
 # ADR-226 — El modelo de NER no espera cargado durante el OCR del documento siguiente
 
-- **Estado**: **Proposed**. Sin medición propia: el contenedor donde se
-  escribió no tiene el modelo de NER (la red rechaza `huggingface.co`). No se
-  implementa sin el A/B de §5 y sin decisión del humano.
+- **Estado**: **Accepted** por el humano el 2026-11-05 («Acepto los dos cambios»),
+  antes del A/B de §5. Se implementa en `perf/pico-memoria`, y el A/B de §5 se
+  corre sobre la implementación: si no baja el pico caliente de P2, o si el
+  tiempo agregado no es aceptable para el humano, se revierte.
 - **Fecha**: 2026-11-05
 - **Propuesto por**: el planificador, en la campaña de reducción de pico
   ([`Reduccion_De_Pico_Nube_2026-11.md`](../roadmap/memoria/Reduccion_De_Pico_Nube_2026-11.md),

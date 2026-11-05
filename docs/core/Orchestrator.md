@@ -6,7 +6,9 @@
 
 **Componente**: Orchestrator + façade `@anonly/anonymization-core` (no es un motor: **no tiene `EngineId`** y no implementa `IEngine`; este spec adapta la plantilla de 15 secciones de `ai/Module_Specification_Template.md` a un componente host)
 **Ubicación**: `packages/anonymization-core/src/`
-**Versión del spec**: 1.15.0
+**Versión del spec**: 1.16.0
+
+> **Nota (v1.16.0, ADR-226, 2026-11-05 — el pool de NER se da de baja al empezar la etapa de OCR)**: `runOcrStage` invoca `this.engines.ner.releaseIdleWorkers()` (`NER_Engine.md` §6, v1.13.0) **antes de despachar la primera página de OCR**. En caliente, el modelo de NER del documento anterior seguía residente 15 s (ADR-167) y el OCR del documento nuevo corría encima: el pico era OCR + NER, cuando en frío es el mayor de los dos. Con la baja, la recarga del modelo cae en `runDetectionStage`, cuando el pool de OCR ya se dio de baja (ADR-157), igual que en frío. Solo actúa cuando hay etapa de OCR: un documento sin páginas OCR ni regiones no llama a `runOcrStage` y no paga ninguna recarga, que es el caso que hizo retirar ADR-166. `reanalyze` hereda la regla al reutilizar `runOcrStage`. La guarda vive en el motor: con trabajo de NER en curso es un no-op. Sin estado, eventos, errores ni configuración nuevos. Ver §13 caso 53, §14, §15.
 **Última actualización**: 2026-10-19
 
 > **Nota (v1.15.0, ADR-219, ADR-220 y ADR-223, 2026-10-19 — configuración de detección, tipos del documento y funciones de formatos)**: `createCore` reparte `EngineConfig.detection` (país, formatos y tipos del usuario), con un default que es la detección de la 1.0.2, y descarta con `warn` los tipos propios inválidos. `IPipelineOrchestrator` gana `defineDocumentEntityType` y `getDocumentEntityTypes`, que delegan en Grouping. `addManualEntity` valida el tipo propio. El export recibe los tipos propios y la hoja de referencia se pagina. El façade reexporta las funciones puras de tipos y formatos, e implementa `validateFormatsFile`. Ver §2, §6, casos 47 a 52, §14 y §15 ítems 36 a 38.
@@ -360,6 +362,9 @@ El Orchestrator **no define códigos de error nuevos**: propaga `SerializedEngin
     - un formato inválido entre varios válidos da `ok: false` para el archivo entero;
     - un archivo válido da `ok: true` con el contenido.
 
+
+53. **El pool de NER se da de baja al empezar la etapa de OCR** (ADR-226): `runOcrStage` llama a `engines.ner.releaseIdleWorkers()` una sola vez, antes de despachar la primera página de OCR, en el camino del pipeline y en el de `reanalyze` que lo reutiliza. Un documento sin `textlessPages` ni `ocrRegions` no entra a `runOcrStage` y no llama a la baja. Un fallo de la baja no puede escalar a `PIPELINE_FAILED`: el método es `void` y su guarda está en el motor. La baja de OCR del `finally` (ADR-157) no cambia.
+
 ---
 
 ## 14. Casos de prueba
@@ -479,6 +484,9 @@ la nueva clave. Fakes remotos resuelven el sobre real, no ejecutan run().
 | `no precalienta un documento que terminó Cancelled` | `unit.test.ts` | unit | caso 32 (ADR-151 §1: solo Ready/Done — fuerza el camino de reanalyze cancelado, caso 22, y verifica que `renderPage` nunca recibe `kind: "original"`) |
 | `un fallo del precalentado no escala a PIPELINE_FAILED` | `unit.test.ts` | unit | caso 32 (ADR-151 §1, best-effort — mismo criterio que `seed render failure warns without PIPELINE_FAILED`, caso 27) |
 | `first page is prewarmed only on the first Ready of a document` | `unit.test.ts` | unit | caso 32, ADR-189 §3 |
+| `runOcrStage releases idle NER workers before dispatching OCR (ADR-226)` | `unit.test.ts` | unit | caso 53: con un documento escaneado, `ner.releaseIdleWorkers` se llama una vez y antes de la primera llamada a `ocr.processPages` |
+| `a document without OCR pages does not release the NER pool (ADR-226)` | `unit.test.ts` | unit | caso 53: documento con texto nativo y sin regiones OCR; `ner.releaseIdleWorkers` no se llama |
+| `reanalyze through OCR releases idle NER workers before its OCR stage (ADR-226)` | `unit.test.ts` | unit | caso 53: `runReanalyzeOcrFlow` reutiliza `runOcrStage` y hereda la llamada |
 
 Los tests de contract/unit/edge mockean los motores (interfaces de `Contracts.md`); la integración real con motores vive en `tests/integration/` (Hito 9) y E2E (Hito 10). Pares críticos mínimos de `tests/integration/` (ADR-034 §6): Regex+NER → Grouping vía `ENTITY_FOUND`; `OCR_PAGE_FINISHED` → Orchestrator → `fuseOcrPage` (función pura, ADR-014/ADR-041); happy path `createCore` → `PIPELINE_READY` con motores reales y fronteras de libs mockeadas (ADR-021 §5). Corre bajo `pnpm test` y con `pnpm test:integration` (filtro posicional, ADR-033); al crearla, quitar `integration/**` del `exclude` de `tests/tsconfig.json` y agregar alias/`paths` por motor a demanda.
 
@@ -540,6 +548,8 @@ Los tests de contract/unit/edge mockean los motores (interfaces de `Contracts.md
 - [ ] 38. (1.1, F4 — **ADR-220 §3, ADR-223 §6**) Reexportar las funciones puras e implementar `validateFormatsFile` en `src/formats-file.ts`. Casos 51 y 52.
 
 - [x] 35. (ADR-189 §3) `prewarmFirstPagePreview` solo en el primer `Ready` de cada documento; marca en el estado del documento, borrada por `closeDocument`. Test de §14 (caso 32).
+
+- [ ] (1.1 — ADR-226) `runOcrStage` llama a `this.engines.ner.releaseIdleWorkers()` antes de despachar la primera página de OCR. Actualizar los dobles de `NerEngine` de los tests del Orchestrator con el método nuevo. Tests de §14 con los nombres exactos. Caso 53.
 
 ---
 

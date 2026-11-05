@@ -5,7 +5,9 @@
 > Detecta personas, organizaciones, direcciones y fechas mediante un modelo NER local (Transformers.js + ONNX Runtime Web). Emite `Occurrence[]` con `source: "ner"` y `confidence` según el modelo.
 
 **EngineId**: `ner`
-**Versión del spec**: 1.12.0
+**Versión del spec**: 1.13.0
+
+> **Nota (v1.13.0, ADR-226, 2026-11-05 — el motor vuelve a exponer una baja de su pool)**: `NerEngine.releaseIdleWorkers(): void` da de baja los workers ociosos del pool de NER **sin disponer el motor**, que sigue usable y recarga el modelo perezoso en el próximo `processPage` (ADR-080). La invoca el Orchestrator al **empezar** la etapa de OCR (`Orchestrator.md` §13 caso 53): en caliente, el modelo del documento anterior seguía residente durante el OCR del documento nuevo y el pico pasaba a ser OCR + NER. No es la baja que ADR-167 retiró: aquella corría al terminar la detección y trasladaba la recarga a cualquier documento siguiente; esta solo actúa si el documento nuevo hace OCR, y la recarga cae en la detección, cuando el pool de OCR ya se dio de baja (ADR-157). Guarda innegociable: **no hace nada mientras haya un `processPage` o `processPages` en curso** (vuelven los contadores que ADR-167 §1 retiró por no tener llamador). Delega en `NerJobPool.releaseIdleWorkers(): boolean`, el mismo método de `WorkerPool` (ADR-080), con su propia guarda. El ciclo del modelo se reabre por el listener de `onWorkersReleased` que ya existe (ADR-167 §3), sin duplicar la lógica: una baja efectiva reinicia `modelWarm` y la recarga emite `NER_MODEL_LOADING`/`NER_MODEL_READY`. Sin pool inyectado (`IMMEDIATE_POOL`), `releaseIdleWorkers()` del puerto devuelve `false` y no notifica: no-op. Sin tipos, eventos, errores ni configuración nuevos (por eso no toca `Contracts.md`, mismo criterio que la baja de OCR de ADR-157 §1bis). Ver §6, §13 casos 35-37, §14, §15 ítem 35.
 **Última actualización**: 2026-10-07
 
 > **Nota (v1.12.0, ADR-212, 2026-10-07 — la dirección incluye la altura que la sigue)**: el modelo marca la calle y deja el número afuera (§14.1): «con domicilio en Maipú 1434» daba `Maipú`, con la altura a la vista. Un span de `Address` se **extiende** hasta el número que lo sigue, **siempre**, también cuando el número tiene forma de año («Rosario 2019»). Es un paso posterior al modelo, sin contrato nuevo. La v1.11.0, del mismo día, no sumaba un número con forma de año salvo que hubiera una palabra de dirección cerca; el mantenedor la descartó con la medición M-D1 a la vista (ADR-212, «La regla que se probó y se descartó»). Ver caso 34, §14, §14.1 y §15 ítem 34.
@@ -112,6 +114,11 @@ Aplicar un modelo NER local sobre `Page.text` y emitir `Occurrence[]` para entid
 > `NER_MODEL_LOADING`/`NER_MODEL_READY` como una primera carga. **Antes de ADR-167 esa
 > recarga era muda** en el camino del temporizador: medido, el modelo se recargaba en
 > ~2 s sin emitir `NER_MODEL_READY`. Ver §13 casos 28-31.
+>
+> **Desde ADR-226 (v1.13.0) el motor vuelve a exponer una baja**, con otro
+> disparador: `releaseIdleWorkers()`, que el Orchestrator invoca al empezar la
+> etapa de OCR, no al cerrar la detección. Ver la nota de v1.13.0 y §13 casos
+> 35-37.
 
 
 ```ts
@@ -152,6 +159,11 @@ export class NerEngine implements IEngine {
   processPages(inputs: ReadonlyArray<NerPageInput>, ctx: EngineContext): Promise<ReadonlyArray<NerPageOutput>>;
   isModelReady(): boolean;
   getModelId(): string;
+  // ADR-226: da de baja los workers ociosos del pool sin disponer el motor.
+  // No-op si hay un processPage/processPages en curso. Delega en
+  // NerJobPool.releaseIdleWorkers(); el listener de onWorkersReleased reinicia
+  // modelWarm si la baja fue efectiva (ADR-167 §3).
+  releaseIdleWorkers(): void;
   dispose(): Promise<void>;
 }
 ```
@@ -175,6 +187,10 @@ export class NerEngine implements IEngine {
 interface NerJobPool {
   dispatch(params: NerDispatchParams): Promise<unknown>;
   onWorkersReleased(listener: () => void): () => void;
+  // ADR-226: espejo exacto de `WorkerPool.releaseIdleWorkers()` (ADR-080) y de
+  // `OcrJobPool.releaseIdleWorkers()` (ADR-157 §1bis): misma guarda, `true` si
+  // la baja fue efectiva. `IMMEDIATE_POOL` devuelve `false` sin notificar.
+  releaseIdleWorkers(): boolean;
 }
 ```
 
@@ -331,6 +347,11 @@ Las `Occurrence` también se emiten vía `ENTITY_FOUND` (incremental).
     - **No cruza a otro ángulo** (precisado el 2026-10-07, tras la consulta del implementador; es el caso 19 aplicado acá): si alguna `Word` del tramo que se agregaría —conector y dígitos— tiene una `bbox.rotation` distinta de la de la última `Word` del span (ausente ≡ 0), el span no se extiende. Los runs rotados van al final de `Page.text` (ADR-067 §4) y un folio suele ser un número: sin esta guarda, una dirección al final del texto horizontal absorbería el folio del margen. La guarda vive en el enganche, donde están las `Word`, no en la función pura de texto.
     - **Salida**: una sola ocurrencia. `value` es el texto de la página del span extendido, conector incluido. `normalizedValue` se recalcula sobre ese valor con la misma normalización que usa el motor para sus ocurrencias. `bbox`, `fragments`, `rotation` y `wordSpan` salen de las palabras del span extendido, por el camino de siempre. `confidence` es la del span del modelo.
     - Los spans de otros tipos no se tocan, y un número que no cumple la forma no extiende nada.
+
+35. **Baja explícita con el pool ocioso** (ADR-226): `releaseIdleWorkers()` sin ningún `processPage`/`processPages` en curso llama una vez a `NerJobPool.releaseIdleWorkers()`. Si la baja es efectiva, el pool notifica a `onWorkersReleased` y el listener de ADR-167 §3 reinicia `modelWarm` (y descarta el kernel in-process si estaba cargado, caso 33). La página siguiente recarga el modelo y emite `NER_MODEL_LOADING`/`NER_MODEL_READY`. El motor sigue usable: no es `dispose()`.
+36. **Baja explícita con trabajo en curso** (ADR-226): mientras haya un `processPage` o `processPages` sin resolver, `releaseIdleWorkers()` no llama al pool ni cambia `modelWarm`. Un job en vuelo nunca se interrumpe. Los contadores se decrementan en un `finally`, también si la página falla o se cancela.
+37. **Baja explícita sin pool inyectado** (ADR-226): con `IMMEDIATE_POOL`, `releaseIdleWorkers()` del puerto devuelve `false` y no notifica; el motor no cambia de estado.
+
 ---
 
 ## 14. Casos de prueba
@@ -348,6 +369,10 @@ Las `Occurrence` también se emiten vía `ENTITY_FOUND` (incremental).
 | `address extension is idempotent and leaves other entity types untouched` | `unit.test.ts` | unit | caso 34: un span que ya termina en dígitos no cambia; `Person` y `Organization` seguidas de un número no se extienden |
 | `extended address maps value, normalized value and geometry to street and number` | `contract.test.ts` | contract | caso 34: `value` del texto de la página con conector, `normalizedValue` recalculado, `bbox`/`wordSpan` abarcando la palabra del número, `confidence` del modelo, una sola `ENTITY_FOUND` |
 | `an in-process pool release unloads the model and the next page reloads it` | `unit.test.ts` | unit | caso 33 (enmienda de ADR-167): doble de pool que ejecuta `run()` en el mismo hilo con el kernel real (P-1 impide importar `WorkerPool`); control que falla contra `768e5d3`. La cadena real la cubre Orchestrator §14 |
+| `releaseIdleWorkers with an idle pool releases its workers and the next page reloads the model (ADR-226)` | `unit.test.ts` | unit | caso 35: doble de pool que registra la llamada y notifica `onWorkersReleased`; la página siguiente emite `NER_MODEL_LOADING` y `NER_MODEL_READY` |
+| `releaseIdleWorkers does nothing while a page is in flight (ADR-226)` | `edge.test.ts` | edge | caso 36: con un `processPage` pendiente, el pool no recibe la llamada; al resolver (también con fallo), una llamada posterior sí llega |
+| `releaseIdleWorkers without an injected pool is a no-op (ADR-226)` | `edge.test.ts` | edge | caso 37: sin pool, el motor queda en el mismo estado y la página siguiente no recarga el modelo |
+| `NerEngine exposes releaseIdleWorkers and its pool port declares it (ADR-226)` | `contract.test.ts` | contract | §6: el método existe, devuelve `undefined`, y el puerto exige `releaseIdleWorkers(): boolean` |
 | `apaga Cache Storage: el target es escritorio y el modelo es local (ADR-132 §7)` | `kernel.test.ts` | unit | ADR-132 §7: `env.useBrowserCache = false`, con `allowRemoteModels`/`allowLocalModels` sin cambios |
 | `decodes the remote envelope { spans } from NerWorker` | `unit.test.ts` | unit | pool fake que **ignora `run()`** y resuelve exactamente lo que postea `worker/entry.ts`; se emiten `ENTITY_FOUND × N` y `NER_PAGE_FINISHED` con `occurrenceCount > 0` |
 | `decodes the in-process bare array identically` | `unit.test.ts` | unit | mismo fake resolviendo `[...]`; resultado idéntico al de arriba (paridad remoto/in-process) |
@@ -512,6 +537,8 @@ Nada de esto lo frena hoy el umbral de sugerencia de ADR-094 (`MIN_SUGGESTION_CO
 - [x] 34. (1.0.x, Confianza — **ADR-212**) Extensión de los spans de `Address` hasta la altura que los sigue, como función pura sobre el texto de la página, aplicada en el host antes de `mapSpanToWords`: número candidato con sus conectores y su frontera, extensión sin mirar el contexto ni si el número tiene forma de año, idempotencia, y `value`, `normalizedValue` y geometría del span extendido. Los siete tests de §14 con sus nombres exactos (incluida la guarda de ángulo). El código no conserva el criterio de año ni las listas de palabras de la v1.11.0. Cobertura del módulo ≥ 85 %.
 - [x] 33. (Enmienda de ADR-167, 2026-09-30) El listener de `onWorkersReleased` descarta el kernel in-process si el motor lo cargó, y la siguiente carga in-process espera ese descarte. Caso 33.
 
+- [ ] 35. (1.1 — ADR-226) `releaseIdleWorkers(): void` en `NerEngine`, con contadores de `processPage`/`processPages` en curso como guarda (decrementados en `finally`), y `releaseIdleWorkers(): boolean` en `NerJobPool` e `IMMEDIATE_POOL` (este devuelve `false`). Reusar el listener de `onWorkersReleased`; no reiniciar `modelWarm` en otro lado. Tests de §14 con los nombres exactos. Casos 35-37.
+
 ---
 
 ## Referencias
@@ -527,3 +554,4 @@ Nada de esto lo frena hoy el umbral de sugerencia de ADR-094 (`MIN_SUGGESTION_CO
 - `adr/ADR-088-El-Texto-Que-Recibe-El-NER.md` §1 (batch por corrida rotada), §2 (Title Case solo para inferir)
 - `adr/ADR-179-El-Empaquetado-De-NER-Se-Evalua-Sin-Cambiar-El-Modelo.md` (experimento de empaquetado del mismo ONNX, con gates antes de adoptar)
 - `adr/ADR-212-La-Direccion-Incluye-La-Altura-Que-La-Sigue.md` (v1.11.0: extensión de `Address` hasta la altura)
+- `adr/ADR-226-El-Modelo-De-NER-No-Espera-Cargado-Durante-El-OCR-Del-Documento-Siguiente.md` (v1.13.0: `releaseIdleWorkers()` al empezar el OCR)

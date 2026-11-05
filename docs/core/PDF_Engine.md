@@ -5,7 +5,9 @@
 > Extrae texto y posiciones de cada página del PDF. Marca las páginas sin texto para que OCR las procese. Descarta metadata sensible.
 
 **EngineId**: `pdf` (valor del enum `EngineId`)
-**Versión del spec**: 1.20.0 (cierre ADR-148, política vigente de 100 pt)
+**Versión del spec**: 1.21.0 (ADR-225: el parseo suelta las imágenes de cada página)
+
+> **Nota (v1.21.0, ADR-225, 2026-11-05 — el parseo suelta las imágenes de cada página al terminar de leerla)**: `parsePage` llama a `pageProxy.cleanup()` apenas termina de recibir `getOperatorList()`, antes de recorrerlo. En pdfjs-dist 4.10.38 armar el operator list de una página escaneada decodifica su imagen, que queda en `pageProxy.objs`, y `PDFDocumentProxy` conserva cada página en `#pageCache` hasta `destroy()`: el parseo acumulaba las imágenes de **todas** las páginas escaneadas. Medido con A/B intercalado (P2 sin NER, Linux): −620 MB de pico del parseo, el mismo texto de OCR y los mismos grupos (`roadmap/memoria/Reduccion_De_Pico_Nube_2026-11.md`). El recorrido del operator list no usa `objs`, y `rotate`/viewport siguen disponibles. Sin cambios de `Page`, eventos, errores ni configuración. Corrige §13 caso 2, que suponía que pdf.js descartaba las páginas procesadas.
 **Última actualización**: 2026-10-05
 
 > **Nota (v1.20.0, ADR-203):** el experimento local ADR-202 terminó con H2
@@ -360,7 +362,7 @@ PdfEngineOutput {
 ## 13. Casos límite
 
 1. **PDF vacío (0 páginas)**: `process` retorna con `pageCount = 0`, `textlessPages = []`, `sourceKind = "text"`. Emite `DOCUMENT_PARSED` con `pageCount = 0`.
-2. **PDF con 1000 páginas**: procesa en paralelo (respetando pool size). Emite 1000 `PAGE_PARSED`. Memoria pico gestionada por LRU del `PDFDocumentProxy` (pdfjs descarta páginas procesadas).
+2. **PDF con 1000 páginas**: procesa en paralelo (respetando pool size). Emite 1000 `PAGE_PARSED`. **pdf.js no tiene LRU de páginas**: `PDFDocumentProxy` conserva cada `PDFPageProxy` hasta `destroy()`. Lo que acota la memoria es que `parsePage` libera los objetos de cada página (`pageProxy.cleanup()`) al terminar de recibir su operator list (ADR-225, caso 72).
 3. **PDF protegido con password correcto**: parseo normal.
 4. **PDF protegido con password incorrecto**: lanza `PdfPasswordRequiredError`. El caller reintenta con password correcto.
 5. **Página sin texto**: `requiresOCR = true`, `words = []`, `text = ""`. Se agrega a `textlessPages`.
@@ -438,6 +440,9 @@ PdfEngineOutput {
 71. **Mixed pequeño histórico de 300 × 56 pt**, texto nativo separado:
     no emite región OCR con el mínimo vigente de 100 pt. Es una limitación
     documentada, no una prueba de eliminación del DNI de esa imagen.
+
+
+72. **Imágenes decodificadas para el operator list** (ADR-225): en una página escaneada, `getOperatorList()` hace que pdf.js decodifique la imagen y la guarde en `pageProxy.objs`. `parsePage` llama a `pageProxy.cleanup()` una vez por página, inmediatamente después de recibir el operator list y antes de recorrerlo, así que el parseo nunca retiene las imágenes de más de una página a la vez. La salida (`Page`, `ocrRegionBbox`, `ocrDpiCap`) es idéntica a la de antes del cambio. Si `getOperatorList()` falla, el error se propaga como hasta hoy y el documento se destruye en el camino de fallo; no hace falta el cleanup.
 
 ---
 
@@ -572,6 +577,8 @@ PdfEngineOutput {
 | `raw horizontal text on a /Rotate 90 page composes to a 270°-labeled vertical bbox` | `unit.test.ts` | unit | 11 | caso 64 (ADR-141 §2/§3): página `/Rotate` genuino simulada vía `viewport.transform`, guard de ADR-140 aislado a propósito (ver comentario del describe) |
 | `bbox rotation is populated only for right angles` (caso `Rot90`, `dir` crudo vertical sobre página `rotate: 0`) | `unit.test.ts` | unit | 11 | caso 65 (ADR-141 §3, control discriminante): sin la negación de `deriveRotation`, este caso da `270` en vez de `90` |
 | `el bbox fusionado por OCR cae dentro del marco rotado (300×200), y el render full dibuja el reemplazo en ese mismo marco` | `tests/integration/scanned-rotated-export.test.ts` | integration | ADR-140 §2, §15 ítem 35: humo de fusión y render `full` sobre una página escaneada con `/Rotate 90` |
+| `parsePage releases the page objects right after reading the operator list (ADR-225)` | `unit.test.ts` | unit | 1.1 | caso 72: con un `PDFPageProxy` doble, `cleanup()` se llama exactamente una vez por página, después de `getOperatorList()` y antes de que `parsePage` resuelva; la `Page` resultante es igual a la que da el mismo doble sin la llamada |
+| `parsing a scanned document never keeps more than one page of decoded objects (ADR-225)` | `edge.test.ts` | edge | 1.1 | caso 72 + caso 2: un documento de varias páginas solo imagen; al pedir el operator list de la página N, las páginas anteriores ya llamaron a `cleanup()` |
 | `hoja escaneada con /Rotate 90: la censura cae sobre la entidad y el texto vecino sobrevive (ADR-140 §2, PDF_Engine.md item 35)` | `tests/e2e/scanned-rotated-export.spec.ts` | e2e | ADR-140 §2, §15 ítem 35: export real leído píxel a píxel, con control sobre el original |
 
 **Fixtures**: los binarios `.pdf` siguen el patrón definido en `tests/fixtures/README.md` (source of truth: PDFs < 5 MB commiteados en `tests/fixtures/`, ≥ 5 MB a Git LFS en Hito 11; `generate.ts` ya commiteado en Hito 1). Estado actual en Hito 2: commiteados `text-10p.pdf`, `empty.pdf`, `corrupt.pdf` (generados por `generate.ts`); `protected.pdf` pendiente (Hito 2b, requiere `qpdf`); `huge-1000p.pdf` y resto pendientes Hito 11. Los tests **unit / contract / edge / snapshot** (Hito 2) mockean la frontera `pdfjs-dist` (deterministas, sin wasm, sin dependencia de binarios físicos — consistente con `tests/fixtures/README.md`). Los tests **stress / cancel / perf** (Hito 11) usarán PDFs reales generados por `generate.ts`. `generate.ts` debe saber producir: `text-10p`, `scanned-10p`, `protected` (password "test1234"), `corrupt`, `empty`, `text-50p`, `huge-1000p`, `mixed-30p`.
@@ -634,6 +641,8 @@ PdfEngineOutput {
 
 - [x] 35. (ADR-140 §2, revisión de la ronda A, B-5) Verificar el export de una **hoja escaneada con `/Rotate 90`** sobre el producto: escenario E2E en Electron con `tests/e2e/support/scannedPdf.ts` más `setRotation(degrees(90))`, export y comprobación de los píxeles del PDF exportado sobre la entidad (tapada, en su lugar, con el texto vecino intacto). Si sale rojo, el guard se ensancha según ADR-140 §2, con decisión del planificador. El test de integración `scanned-rotated-export.test.ts` cubre la fusión y el render `full`, pero no reemplaza esta verificación. Verde el 2026-09-27 (`tests/e2e/scanned-rotated-export.spec.ts`). Queda sin cubrir la variante inversa, la más común en escáneres: imagen almacenada de costado y `/Rotate` que la endereza (revisión de la ronda A, N-8).
 
+- [ ] 36. (1.1 — ADR-225) `parsePage` llama a `pageProxy.cleanup()` inmediatamente después de `getOperatorList()`, dentro del mismo `try`, antes de recorrer el operator list. Tests de §14 con los nombres exactos. Caso 72.
+
 ---
 
 ## Referencias
@@ -657,3 +666,4 @@ PdfEngineOutput {
 - `adr/ADR-108-El-Avance-De-Un-Espacio-Incluye-El-Word-Spacing.md` (`Tw` en el avance de los glifos de espacio; supersede ADR-097 §4 y acota ADR-068)
 - `adr/ADR-109-La-Caja-De-Una-Palabra-Es-Su-Caja-De-Tinta.md` (la caja va del descenso al ascenso; su §3, la clave de orden, queda superseded por ADR-110)
 - `adr/ADR-110-El-Renglon-Es-Un-Grupo-No-Una-Coordenada.md` (el texto horizontal se agrupa en renglones; desaparece el comparador con tolerancia)
+- `adr/ADR-225-El-Parseo-Suelta-Las-Imagenes-De-Cada-Pagina-Al-Leerla.md` (v1.21.0: `pageProxy.cleanup()` al recibir el operator list)

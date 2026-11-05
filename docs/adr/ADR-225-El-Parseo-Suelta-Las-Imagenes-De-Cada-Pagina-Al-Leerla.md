@@ -2,9 +2,10 @@
 
 # ADR-225 — El parseo suelta las imágenes de cada página al terminar de leerla
 
-- **Estado**: **Proposed**. A/B intercalado en un contenedor Linux, con NER
-  apagado («A/B medido»). Falta la confirmación con NER y en Windows nativo
-  («Qué falta antes de aceptarlo») y la decisión del humano.
+- **Estado**: **Accepted** por el humano el 2026-11-05 («Acepto los dos cambios»).
+  Se implementa en `perf/pico-memoria`. La repetición del A/B con NER y la
+  confirmación en Windows nativo («Qué falta antes de aceptarlo») pasan a ser
+  verificaciones de la implementación: si refutan la ganancia, se revierte.
 - **Fecha**: 2026-11-05
 - **Propuesto por**: el planificador, en la campaña de reducción de pico
   ([`Reduccion_De_Pico_Nube_2026-11.md`](../roadmap/memoria/Reduccion_De_Pico_Nube_2026-11.md),
