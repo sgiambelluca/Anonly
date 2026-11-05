@@ -616,6 +616,10 @@ asignada.
 - Navegación por teclado del árbol de entidades y auditoría de accesibilidad
   (§22).
 - Bajar los techos de memoria para equipos de menos de 8 GB (ADR-192).
+- Hilos de NER según el perfil (subirlos en Alto y Ultra, nunca bajarlos) y el
+  empaquetado del modelo con datos externos (ADR-179): mediciones pendientes en
+  el Windows del mantenedor, anotadas en
+  `memoria/Reduccion_De_Pico_Nube_2026-11.md` §7 (2026-11-05).
 - Búsqueda difusa al agregar una entidad a mano (`Future_Ideas.md` §5.1b) y
   un control para restaurar el reemplazo automático (§5.6).
 

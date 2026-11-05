@@ -402,6 +402,9 @@ tal como quedó implementado. MB, medianas, y entre paréntesis mínimo y máxim
 | Veredicto contra los techos de ADR-192 (M2 de P1 y P2, tres corridas frías y tres calientes) | el mantenedor | Windows nativo (ADR-192 §4) |
 | Decidir si el costo de tiempo de C-2 es aceptable (recarga del modelo en el segundo escaneo) | el humano | el A/B con NER |
 | Decidir C-4 (ADR-227) y su alcance: todos los renders, o solo OCR y export | el humano | ADR-227; con el alcance acotado, su A/B propio |
+| **Pendiente a futuro, en Windows**: hilos de NER en los perfiles Alto y Ultra (subirlos, nunca bajarlos). En septiembre, 6 hilos bajaron un 30 % el tiempo de NER en R1 en el Windows del mantenedor y empeoraron en la Mac (`mediciones/ner/Hilos_NER_Medicion.md`); ADR-194 dejó los hilos en automático | el mantenedor, con el arnés portado a Windows | `tests/perf/run-ner-threads.sh` solo corre en macOS y el puerto de septiembre no se commiteó: hay que portarlo. Este banco no sirve (4 CPU y sin el modelo de NER) |
+| **Pendiente a futuro, en Windows**: repetir el empaquetado del modelo de NER con datos externos (ADR-179) con R1. En septiembre bajó la memoria WASM de NER sin superar el ruido del RSS | el mantenedor | el modelo de NER (o `*.hf.co` permitido en este banco) |
+| Validar C-1, C-2 y C-4 con los documentos reales R1 y R2 antes de mergear a `develop` | el mantenedor, en Windows | `ANONLY_REAL_DOC_*`; los fixtures sintéticos subestiman el trabajo por página |
 
 **Por qué este banco no midió con NER.** `huggingface.co` quedó permitido, y
 bajaron los cinco archivos chicos del modelo con su sha256. El ONNX de 178 MB
