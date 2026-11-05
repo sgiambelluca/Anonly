@@ -213,9 +213,16 @@ export function summarizeCampaign(
   };
 }
 
-/** `NN-r<ronda>-<brazo>-memory-...json` → ronda y brazo; `undefined` si el nombre no es de la campaña. */
-export function parseRunFileName(name: string): { round: number; arm: string } | undefined {
-  const match = /^\d{2}-r(\d+)-(base|c1|c2|head|c3|c4)-memory-.+\.json$/.exec(name);
-  if (match === null || match[1] === undefined || match[2] === undefined) return undefined;
-  return { round: Number(match[1]), arm: match[2] };
+/**
+ * `NN-r<ronda>-<brazo>-memory-<perfil>-run<i>.json` → ronda, brazo y perfil;
+ * `undefined` si el nombre no es de la campaña. Una corrida puede dejar varios
+ * perfiles (P1 y P2): se resumen por separado.
+ */
+export function parseRunFileName(
+  name: string,
+): { round: number; arm: string; profile: string } | undefined {
+  const match = /^\d{2}-r(\d+)-(base|c1|c2|head|c3|c4)-memory-(.+)-run\d+\.json$/.exec(name);
+  if (match === null || match[1] === undefined || match[2] === undefined || match[3] === undefined)
+    return undefined;
+  return { round: Number(match[1]), arm: match[2], profile: match[3] };
 }

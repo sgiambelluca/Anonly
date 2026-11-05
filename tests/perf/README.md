@@ -2287,9 +2287,14 @@ ADR-225 y ADR-226). Instrumentos opt-in, ninguno en `pnpm test:perf`:
   `head`), `ANONLY_AB_ROUNDS`, `ANONLY_AB_SPEC` (default `tests/perf/memory.spec.ts`),
   `ANONLY_AB_GREP` (default `"P2 —"`), `ANONLY_AB_OUT`. En Linux sin pantalla
   usa `xvfb-run`.
-- `support/summarizePeakArmsCli.ts <carpeta> [control] [candidato]` escribe
-  `summary.json`: medianas por brazo, diferencia pareada por ronda, hash del
-  texto de OCR y cantidad de grupos (`support/peakArmsSummary.ts`, con test).
+- `support/summarizePeakArmsCli.ts <carpeta> [control] [candidato]` escribe un
+  `summary-<perfil>.json` por perfil medido (una corrida puede medir P1 y P2):
+  medianas por brazo, diferencia pareada por ronda, hash del texto de OCR y
+  cantidad de grupos (`support/peakArmsSummary.ts`, con test). Brazos `c3`
+  (`head` + baja del pool de `pdf-parse` al terminar el parseo) y `c4` (`head` +
+  `pageProxy.cleanup()` después de cada render) agregan candidatos sin
+  implementar; `P2-144dpi-ner-off` de `memory-ner-off.spec.ts` deja las
+  imágenes debajo del umbral de 10e6 bytes en que pdf.js limpia solo.
 
 ```bash
 # Los dos cambios contra ninguno, P1 y P2 con NER
