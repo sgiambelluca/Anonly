@@ -537,7 +537,7 @@ Nada de esto lo frena hoy el umbral de sugerencia de ADR-094 (`MIN_SUGGESTION_CO
 - [x] 34. (1.0.x, Confianza — **ADR-212**) Extensión de los spans de `Address` hasta la altura que los sigue, como función pura sobre el texto de la página, aplicada en el host antes de `mapSpanToWords`: número candidato con sus conectores y su frontera, extensión sin mirar el contexto ni si el número tiene forma de año, idempotencia, y `value`, `normalizedValue` y geometría del span extendido. Los siete tests de §14 con sus nombres exactos (incluida la guarda de ángulo). El código no conserva el criterio de año ni las listas de palabras de la v1.11.0. Cobertura del módulo ≥ 85 %.
 - [x] 33. (Enmienda de ADR-167, 2026-09-30) El listener de `onWorkersReleased` descarta el kernel in-process si el motor lo cargó, y la siguiente carga in-process espera ese descarte. Caso 33.
 
-- [ ] 35. (1.1 — ADR-226) `releaseIdleWorkers(): void` en `NerEngine`, con contadores de `processPage`/`processPages` en curso como guarda (decrementados en `finally`), y `releaseIdleWorkers(): boolean` en `NerJobPool` e `IMMEDIATE_POOL` (este devuelve `false`). Reusar el listener de `onWorkersReleased`; no reiniciar `modelWarm` en otro lado. Tests de §14 con los nombres exactos. Casos 35-37.
+- [x] 35. (1.1 — ADR-226) `releaseIdleWorkers(): void` en `NerEngine`, con contadores de `processPage`/`processPages` en curso como guarda (decrementados en `finally`), y `releaseIdleWorkers(): boolean` en `NerJobPool` e `IMMEDIATE_POOL` (este devuelve `false`). Reusar el listener de `onWorkersReleased`; no reiniciar `modelWarm` en otro lado. Tests de §14 con los nombres exactos. Casos 35-37.
 
 ---
 
