@@ -10,6 +10,10 @@ import {
   C3_INSERTION,
   C4_ANCHOR,
   C4_INSERTION,
+  C4R_RASTER_ANCHOR,
+  C4R_RASTER_INSERTION,
+  C4R_RENDER_ANCHOR,
+  C4R_RENDER_INSERTION,
   armAdds,
   PEAK_ARMS,
   armKeeps,
@@ -51,7 +55,7 @@ describe("peakArmsTransform", () => {
     expect(armKeeps("c1", "orchestrator")).toBe(false);
     expect(armKeeps("c2", "pdf-engine")).toBe(false);
     expect(armKeeps("c2", "orchestrator")).toBe(true);
-    expect(PEAK_ARMS).toEqual(["base", "c1", "c2", "head", "c3", "c4"]);
+    expect(PEAK_ARMS).toEqual(["base", "c1", "c2", "head", "c3", "c4", "c4r"]);
   });
 
   it("the base arm source no longer calls cleanup or releases NER", () => {
@@ -112,11 +116,23 @@ describe("peakArmsTransform", () => {
     expect(transformPeakSource(kernel, "render-kernel", "head")).toBe(kernel);
   });
 
-  it("only c3 adds to the orchestrator and only c4 adds to the render kernel", () => {
+  it("only c3 adds to the orchestrator and only c4 or c4r add to the render kernel", () => {
     for (const arm of PEAK_ARMS) {
       expect(armAdds(arm, "orchestrator")).toBe(arm === "c3");
-      expect(armAdds(arm, "render-kernel")).toBe(arm === "c4");
+      expect(armAdds(arm, "render-kernel")).toBe(arm === "c4" || arm === "c4r");
       expect(armAdds(arm, "pdf-engine")).toBe(false);
     }
+  });
+
+  it("c4r cleans after rasterizing and only after full renders, never after previews", () => {
+    const kernel = readFileSync(RENDER_KERNEL, "utf8");
+    expect(kernel.split(C4R_RENDER_ANCHOR)).toHaveLength(2);
+    expect(kernel.split(C4R_RASTER_ANCHOR)).toHaveLength(2);
+    const out = transformPeakSource(kernel, "render-kernel", "c4r");
+    expect(out).toContain(C4R_RENDER_ANCHOR + C4R_RENDER_INSERTION);
+    expect(out).toContain(C4R_RASTER_ANCHOR + C4R_RASTER_INSERTION);
+    expect(out).not.toContain(C4_INSERTION);
+    expect(out.split("pageProxy.cleanup()")).toHaveLength(3);
+    expect(out).toContain('if (mode === "full") pageProxy.cleanup();');
   });
 });
