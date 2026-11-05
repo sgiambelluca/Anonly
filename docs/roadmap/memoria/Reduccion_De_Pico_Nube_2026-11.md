@@ -75,12 +75,14 @@ por tipo salen de los eventos del pool. **El RSS es diagnóstico**:
 el veredicto de retención es heap + workers (ADR-185). Una fase sin muestras
 se declara no medible, no se inventa.
 
-**A/B.** Cada brazo es un renderer construido aparte con
-`tests/perf/support/parseCleanupBuildCli.ts`, que aplica la transformación de
-`parseCleanupTransform.ts` al fuente en memoria **solo** dentro del bundle del
-worker de parseo, con una coincidencia exacta verificada (mismo método que
-ADR-218). `packages/` y `apps/` no se modifican. `tests/perf/run-parse-cleanup.sh`
-copia el brazo que toca a `apps/react-client/dist` antes de cada corrida, en
+**A/B.** Cada brazo es un renderer construido aparte, con una transformación
+del fuente en memoria verificada por coincidencia exacta (mismo método que
+ADR-218). `packages/` y `apps/` no se modifican. La campaña de C-1 de este
+informe, anterior a implementarlo, usó la primera versión del arnés
+(`run-parse-cleanup.sh`, commit `36e92e3`): el brazo B **agregaba** el cleanup,
+solo en el bundle del worker de parseo. Desde que C-1 y C-2 están implementados,
+el arnés es `tests/perf/run-peak-ab.sh`, que arma los brazos `base`, `c1`, `c2`
+y `head` **quitando** los cambios (`tests/perf/README.md`). El runner copia el brazo que toca a `apps/react-client/dist` antes de cada corrida, en
 orden ABBA, y restaura el dist original al salir. Una instancia nueva de
 Electron por corrida, seriales. Artefactos crudos en `.measure/c1-parse-cleanup/`,
 fuera del repo.
@@ -324,14 +326,12 @@ editó el spec en esta campaña: el cambio va con ADR-225, si se acepta (R-19).
 # Desglose sin NER: P2 salió de «P2-attrib — NER apagado»; P1 de memory-ner-off.spec.ts
 pnpm exec playwright test --config=playwright.perf.config.ts tests/perf/memory-attribution.spec.ts --grep "NER apagado" --workers=1 --retries=0
 ANONLY_MEMORY_NER_OFF=1 pnpm exec playwright test --config=playwright.perf.config.ts tests/perf/memory-ner-off.spec.ts --grep "P1-ner-off" --workers=1 --retries=0
-# A/B de C-1 (ABBA × 3) sobre P2 sin NER
-ANONLY_C1_ROUNDS=3 tests/perf/run-parse-cleanup.sh
-# Lo mismo sobre P1 sin NER
-ANONLY_C1_SPEC=tests/perf/memory-ner-off.spec.ts ANONLY_C1_GREP="P1-ner-off" ANONLY_MEMORY_NER_OFF=1 tests/perf/run-parse-cleanup.sh
+# A/B con el arnés actual: sin ninguno de los dos cambios contra el producto
+ANONLY_AB_GREP="P1 —|P2 —" tests/perf/run-peak-ab.sh
+# Solo C-1 sobre P2 sin NER (equivalente a la campaña de este informe)
+ANONLY_AB_CANDIDATE=c1 ANONLY_AB_SPEC=tests/perf/memory-attribution.spec.ts ANONLY_AB_GREP="NER apagado" tests/perf/run-peak-ab.sh
 # Resumen de una campaña
-pnpm exec tsx tests/perf/support/summarizeParseCleanupCli.ts .measure/c1-parse-cleanup/<carpeta>
+pnpm exec tsx tests/perf/support/summarizePeakArmsCli.ts .measure/peak-ab/<carpeta> base head
 ```
 
-En Linux sin pantalla, `run-parse-cleanup.sh` usa `xvfb-run` solo. Para
-correrlo con NER, en `memory.spec.ts`: `ANONLY_C1_SPEC=tests/perf/memory.spec.ts
-ANONLY_C1_GREP="P1 —|P2 —"`.
+En Linux sin pantalla, `run-peak-ab.sh` usa `xvfb-run` solo.

@@ -363,7 +363,7 @@ El Orchestrator **no define códigos de error nuevos**: propaga `SerializedEngin
     - un archivo válido da `ok: true` con el contenido.
 
 
-53. **El pool de NER se da de baja al empezar la etapa de OCR** (ADR-226): `runOcrStage` llama a `engines.ner.releaseIdleWorkers()` una sola vez, antes de despachar la primera página de OCR, en el camino del pipeline y en el de `reanalyze` que lo reutiliza. Un documento sin `textlessPages` ni `ocrRegions` no entra a `runOcrStage` y no llama a la baja. Un fallo de la baja no puede escalar a `PIPELINE_FAILED`: el método es `void` y su guarda está en el motor. La baja de OCR del `finally` (ADR-157) no cambia.
+53. **El pool de NER se da de baja al empezar la etapa de OCR** (ADR-226): `runOcrStage` llama a `engines.ner.releaseIdleWorkers()` una sola vez, antes de despachar la primera página de OCR, en el camino del pipeline y en el de `reanalyze` que lo reutiliza. Un documento sin `textlessPages` ni `ocrRegions` no entra a `runOcrStage` y no llama a la baja. La guarda vive en el motor. La baja no lanza en la práctica (`WorkerPool.releaseIdleWorkers` solo termina workers ociosos); si lanzara, escalaría como cualquier fallo de la etapa, igual que la baja de OCR del `finally` (ADR-157). La baja de OCR del `finally` (ADR-157) no cambia.
 
 ---
 
@@ -484,7 +484,7 @@ la nueva clave. Fakes remotos resuelven el sobre real, no ejecutan run().
 | `no precalienta un documento que terminó Cancelled` | `unit.test.ts` | unit | caso 32 (ADR-151 §1: solo Ready/Done — fuerza el camino de reanalyze cancelado, caso 22, y verifica que `renderPage` nunca recibe `kind: "original"`) |
 | `un fallo del precalentado no escala a PIPELINE_FAILED` | `unit.test.ts` | unit | caso 32 (ADR-151 §1, best-effort — mismo criterio que `seed render failure warns without PIPELINE_FAILED`, caso 27) |
 | `first page is prewarmed only on the first Ready of a document` | `unit.test.ts` | unit | caso 32, ADR-189 §3 |
-| `runOcrStage releases idle NER workers before dispatching OCR (ADR-226)` | `unit.test.ts` | unit | caso 53: con un documento escaneado, `ner.releaseIdleWorkers` se llama una vez y antes de la primera llamada a `ocr.processPages` |
+| `runOcrStage releases idle NER workers before dispatching OCR (ADR-226)` | `unit.test.ts` | unit | caso 53: con un documento escaneado, `ner.releaseIdleWorkers` se llama una vez y antes de la primera llamada a `ocr.processSession` (el despacho de OCR desde ADR-143) |
 | `a document without OCR pages does not release the NER pool (ADR-226)` | `unit.test.ts` | unit | caso 53: documento con texto nativo y sin regiones OCR; `ner.releaseIdleWorkers` no se llama |
 | `reanalyze through OCR releases idle NER workers before its OCR stage (ADR-226)` | `unit.test.ts` | unit | caso 53: `runReanalyzeOcrFlow` reutiliza `runOcrStage` y hereda la llamada |
 
@@ -549,7 +549,7 @@ Los tests de contract/unit/edge mockean los motores (interfaces de `Contracts.md
 
 - [x] 35. (ADR-189 §3) `prewarmFirstPagePreview` solo en el primer `Ready` de cada documento; marca en el estado del documento, borrada por `closeDocument`. Test de §14 (caso 32).
 
-- [ ] (1.1 — ADR-226) `runOcrStage` llama a `this.engines.ner.releaseIdleWorkers()` antes de despachar la primera página de OCR. Actualizar los dobles de `NerEngine` de los tests del Orchestrator con el método nuevo. Tests de §14 con los nombres exactos. Caso 53.
+- [x] 39. (1.1 — ADR-226) `runOcrStage` llama a `this.engines.ner.releaseIdleWorkers()` antes de despachar la primera página de OCR. Actualizar los dobles de `NerEngine` de los tests del Orchestrator con el método nuevo. Tests de §14 con los nombres exactos. Caso 53.
 
 ---
 

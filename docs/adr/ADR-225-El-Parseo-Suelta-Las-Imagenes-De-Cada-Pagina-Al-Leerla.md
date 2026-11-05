@@ -71,7 +71,8 @@ Banco: contenedor Linux x86_64 de 4 CPU y 16 GB, Electron empaquetado, NER
 apagado. ABBA × 3, una instancia de Electron por corrida, 12 corridas por
 perfil, cada una con su importación fría y su caliente. Brazo A: producto
 tal cual. Brazo B: el cambio de §Decisión, aplicado solo en el build del
-arnés (`tests/perf/support/parseCleanupTransform.ts`, una coincidencia exacta).
+arnés (`parseCleanupTransform.ts`, una coincidencia exacta; versión del arnés
+de `36e92e3`, reemplazada por `run-peak-ab.sh` al implementar).
 Detalle y crudos en el informe de la campaña, §4.
 
 **P2 sin NER (50 páginas escaneadas)**, MB del árbol de procesos, medianas de 6

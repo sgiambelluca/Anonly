@@ -641,7 +641,7 @@ PdfEngineOutput {
 
 - [x] 35. (ADR-140 §2, revisión de la ronda A, B-5) Verificar el export de una **hoja escaneada con `/Rotate 90`** sobre el producto: escenario E2E en Electron con `tests/e2e/support/scannedPdf.ts` más `setRotation(degrees(90))`, export y comprobación de los píxeles del PDF exportado sobre la entidad (tapada, en su lugar, con el texto vecino intacto). Si sale rojo, el guard se ensancha según ADR-140 §2, con decisión del planificador. El test de integración `scanned-rotated-export.test.ts` cubre la fusión y el render `full`, pero no reemplaza esta verificación. Verde el 2026-09-27 (`tests/e2e/scanned-rotated-export.spec.ts`). Queda sin cubrir la variante inversa, la más común en escáneres: imagen almacenada de costado y `/Rotate` que la endereza (revisión de la ronda A, N-8).
 
-- [ ] 36. (1.1 — ADR-225) `parsePage` llama a `pageProxy.cleanup()` inmediatamente después de `getOperatorList()`, dentro del mismo `try`, antes de recorrer el operator list. Tests de §14 con los nombres exactos. Caso 72.
+- [x] 36. (1.1 — ADR-225) `parsePage` llama a `pageProxy.cleanup()` inmediatamente después de `getOperatorList()`, dentro del mismo `try`, antes de recorrer el operator list. Tests de §14 con los nombres exactos. Caso 72.
 
 ---
 
