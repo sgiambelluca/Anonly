@@ -87,7 +87,8 @@ test("P2-ner-off — 50 páginas escaneadas, sin NER", async ({
  * C-4 (campaña de reducción de pico): el mismo texto que P2, rasterizado a
  * escala 2 (144 dpi) en vez de 3. Una página carta queda en 1224 × 1584 px,
  * ~7,8 MB en RGBA: por debajo de `MAX_IMAGE_SIZE_TO_CACHE` (10e6 bytes) de
- * pdf.js, que solo limpia solo después de `render()` las imágenes más grandes.
+ * pdf.js, que después de `render()` solo programa (con 5 s de retardo) la
+ * limpieza de las páginas con imágenes más grandes; estas no se limpian nunca.
  * Es la condición que la medición de H-10 §5.2 no cubrió (P2 a escala 3 queda
  * por encima del umbral). Un escaneo real modesto (gris, 150-200 dpi) cae de
  * este lado.

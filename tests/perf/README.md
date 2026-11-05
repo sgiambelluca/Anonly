@@ -2294,7 +2294,8 @@ ADR-225 y ADR-226). Instrumentos opt-in, ninguno en `pnpm test:perf`:
   (`head` + baja del pool de `pdf-parse` al terminar el parseo) y `c4` (`head` +
   `pageProxy.cleanup()` después de cada render) agregan candidatos sin
   implementar; `P2-144dpi-ner-off` de `memory-ner-off.spec.ts` deja las
-  imágenes debajo del umbral de 10e6 bytes en que pdf.js limpia solo.
+  imágenes debajo del umbral de 10e6 bytes: pdf.js no las limpia después de
+  `render()` (las más grandes, con 5 s de retardo).
 
 ```bash
 # Los dos cambios contra ninguno, P1 y P2 con NER

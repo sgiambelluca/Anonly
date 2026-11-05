@@ -21,7 +21,8 @@ import { createHash } from "node:crypto";
  * - `c3`: `head` + el pool de `pdf-parse` se da de baja al terminar el parseo
  *   (`this.pools.getPool("pdf").releaseIdleWorkers()` en el Orchestrator).
  * - `c4`: `head` + `pageProxy.cleanup()` después de cada `render()` en el
- *   kernel de Render (pdf.js solo limpia solo las imágenes de más de 10e6 bytes).
+ *   kernel de Render (pdf.js solo programa, con 5 s de retardo, la limpieza de
+ *   las páginas con imágenes de más de 10e6 bytes).
  *
  * Cada bloque se busca con una coincidencia exacta: si el fuente cambia, el
  * build se niega en vez de medir otra cosa.
