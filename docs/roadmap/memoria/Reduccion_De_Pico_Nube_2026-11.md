@@ -38,6 +38,14 @@
     mediciones de distintos equipos (§3.2).
 - **C-2 (ADR-226): soltar el modelo de NER al empezar el OCR de un documento**,
   si está ocioso. Implementado; su A/B requiere el modelo de NER (§7).
+- **Después de implementar C-1 y C-2 se midieron dos candidatos más** (§4.4 y
+  §5):
+  - **C-4 (ADR-227, Proposed)**: el render suelta las imágenes de cada página.
+    A 144 dpi baja el pico unos 360 MB y la memoria después de `Ready` unos
+    390 MB; a 216 dpi, entre 114 y 238 MB y unos 180 MB. Reabre un descarte de
+    septiembre, y lo decide el humano.
+  - **C-3, descartado con medición**: dar de baja el worker de parseo no mueve
+    nada.
 - **Lo que este banco no puede decir**: nada con NER prendido, y ningún
   veredicto contra los techos de ADR-192, que se juzgan en Windows nativo.
 
@@ -294,17 +302,59 @@ Lo esperable es que C-1 pese más con NER que sin él, y que C-2 baje el pico de
 OCR caliente. **Las dos cosas son predicciones**, y el A/B con NER las mide por
 separado y juntas.
 
+### 4.4 C-4 — el render suelta las imágenes de la página (ADR-227, Proposed)
+
+Medido el 2026-11-05 a pedido del humano, después de implementar C-1 y C-2.
+
+**Qué**: `pageProxy.cleanup()` al terminar de dibujar una página en el kernel
+de Render. pdf.js 4.10.38 solo limpia solo, después de `render()`, las imágenes
+de más de 10e6 bytes. Cada worker de Render conserva el resto hasta cerrar el
+documento.
+
+**Reabre un descarte**: H-10 §5.2 y ADR-154 §2. ADR-227 §2 explica qué midió
+distinto esta campaña (sin NER, con imágenes por debajo del umbral) y qué queda
+sin explicar.
+
+**A/B** (`.measure/peak-ab/c4-neroff-head-c4/`): `head` contra `c4`, ABBA × 3,
+sin NER, P2 a 144 dpi (perfil nuevo `P2-144dpi-ner-off`, imágenes de ~7,8 MB) y
+a 216 dpi (P2 de siempre, ~17 MB). Medianas, y entre paréntesis mínimo y máximo:
+
+| | `head` | `c4` | por ronda |
+|---|---:|---:|---:|
+| 144 dpi, pico frío / caliente | 1423 / 1423 | 1062 / 1052 | −345 a −379 |
+| 144 dpi, después de `Ready` | 1139 / 1149 | 751 / 744 | — |
+| 216 dpi, pico frío / caliente | 1487 / 1474 | 1268 / 1298 | −114 a −238 |
+| 216 dpi, después de `Ready` | 1081 / 1128 | 897 / 854 | — |
+| `import → Ready`, 144 dpi | 20,6 / 20,1 s | 20,4 / 20,1 s | −0,6 a +0,4 s |
+| `import → Ready`, 216 dpi | 26,5 / 25,3 s | 27,0 / 26,2 s | +0,3 a +1,1 s |
+
+- Los rangos no se solapan. El texto de OCR y los grupos son idénticos.
+- Es el candidato con más efecto de la campaña. También es el que más baja la
+  memoria después de `Ready`, la que cuenta por pestaña en la 1.2.
+- Una corrida de 24 falló al arrancar la app, antes de importar (ADR-227).
+- **Alcance a decidir** (ADR-227): limpiar en todos los renders, que es lo
+  medido, o solo en el OCR y el export, que es la recomendación y necesita su
+  propio A/B, porque en el preview un zoom volvería a decodificar la imagen.
+
+| Criterio de multidocumento | Cumple |
+|---|---|
+| 1. No cambia pico por retención | sí: la retención después de `Ready` baja entre 180 y 400 MB |
+| 2. Nada que suponga un solo documento | sí: por página de cada documento en cada worker |
+| 3. Liberar al terminar cada etapa, no al cerrar | sí: por página, al terminar de dibujarla |
+| 4. Medido frío y caliente | sí |
+
 ## 5. Lo que no entra como candidato, y por qué
 
 | Idea | Por qué no |
 |---|---|
+| C-3: dar de baja el pool de `pdf-parse` al terminar el parseo | **descartado con medición** (2026-11-05, `.measure/peak-ab/c3-neroff-head-c3/`): `head` contra `c3`, ABBA × 3, sin NER. P2: −27 a +2 MB, con los rangos solapados (frío 1488–1521 contra 1455–1506). P1: −3 a +10 MB, sin costo de tiempo. Ese worker no es el que pesa en el OCR |
 | Bajar `ocrPoolSize`, `renderPoolSize`, hilos de ONNX o reconocedores | ADR-154 §1: la memoria no se compra bajando paralelismo |
 | Bajar el DPI del OCR | cambia la calidad del reconocimiento; ADR-154 §2 lever 6 lo deja al humano con la línea de base de ADR-147 |
-| `pageProxy.cleanup()` en el kernel de Render | descartado con medición (H-10 §5.2, ADR-154 §2). explicación probable, sin medir: después de `render()` pdf.js ya limpia solo las imágenes de más de 10e6 bytes (ADR-225, Contexto §3) |
+| `pageProxy.cleanup()` en el kernel de Render | descartado en septiembre (H-10 §5.2, ADR-154 §2), **reabierto por C-4** (§4.4, ADR-227): sin NER y con imágenes por debajo del umbral de 10e6 bytes, el efecto sí aparece |
 | Adelantar la carga de NER durante el OCR | descartado con medición (`Optimizacion_De_Rendimiento.md`, «Descartado con medición») |
 | Soltar NER al terminar la detección | ADR-166, retirado por ADR-167: la recarga se apilaba sobre el documento siguiente. C-2 es otro disparador (§4) |
 | Los workers de Render que siguen vivos del documento anterior | en caliente se ven 3 `render-page` vivos ya durante el parseo (en frío, 0). Sin atribución por worker, porque su heap de JS es de pocos MB y el resto no se observa por CDP. Además, sirven al preview del documento abierto: soltarlos al cerrar choca con el criterio 3 (con pestañas, el documento no se cierra). Queda como observación, no como candidato |
-| El pico de la fase de OCR | con C-1, pasa a ser el pico de P2 sin NER. Lo domina memoria no atribuida al heap (WASM de Tesseract: 2 reconocedores más el OSD compartido), que solo baja con menos reconocedores (ADR-154) o menos píxeles (DPI). No hay candidato que no toque una de las dos |
+| El resto del pico de la fase de OCR | con C-1, pasa a ser el pico de P2 sin NER. Una parte eran las imágenes que retienen los workers de Render (C-4, §4.4). Lo que queda es memoria no atribuida al heap (WASM de Tesseract: 2 reconocedores más el OSD compartido), que solo baja con menos reconocedores (ADR-154) o menos píxeles (DPI) |
 
 ## 6. Implementación y validación (2026-11-05)
 
@@ -353,6 +403,7 @@ tal como quedó implementado. MB, medianas, y entre paréntesis mínimo y máxim
 | A/B con NER prendido: `base` contra `head`, y `base` contra `c2` para aislar C-2 | el mantenedor, en Windows (o este banco si se permite `*.hf.co`) | el modelo de NER |
 | Veredicto contra los techos de ADR-192 (M2 de P1 y P2, tres corridas frías y tres calientes) | el mantenedor | Windows nativo (ADR-192 §4) |
 | Decidir si el costo de tiempo de C-2 es aceptable (recarga del modelo en el segundo escaneo) | el humano | el A/B con NER |
+| Decidir C-4 (ADR-227) y su alcance: todos los renders, o solo OCR y export | el humano | ADR-227; con el alcance acotado, su A/B propio |
 
 **Por qué este banco no midió con NER.** `huggingface.co` quedó permitido, y
 bajaron los cinco archivos chicos del modelo con su sha256. El ONNX de 178 MB
