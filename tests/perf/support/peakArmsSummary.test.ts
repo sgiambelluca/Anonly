@@ -7,7 +7,7 @@ import {
   toTemperatureRow,
   type LabeledReport,
   type RunRecordInput,
-} from "./parseCleanupSummary.js";
+} from "./peakArmsSummary.js";
 
 const MB = 1_000_000;
 
@@ -30,7 +30,7 @@ function run(overrides: Partial<RunRecordInput> = {}): RunRecordInput {
   };
 }
 
-describe("parseCleanupSummary", () => {
+describe("peakArmsSummary", () => {
   it("extracts the parse and OCR phase peaks and the Tab peak", () => {
     const row = toTemperatureRow(run());
     expect(row.peakMb).toBe(1600);
@@ -79,45 +79,47 @@ describe("parseCleanupSummary", () => {
 
   it("pairs each round as mean(B) minus mean(A) and excludes failed runs", () => {
     const reports: LabeledReport[] = [
-      { round: 1, arm: "A", report: { cold: run(), hot: run() } },
-      { round: 1, arm: "B", report: { cold: run({ peakSumBytes: 1500 * MB }), hot: run() } },
-      { round: 1, arm: "B", report: { cold: run({ peakSumBytes: 1400 * MB }), hot: run() } },
+      { round: 1, arm: "base", report: { cold: run(), hot: run() } },
+      { round: 1, arm: "head", report: { cold: run({ peakSumBytes: 1500 * MB }), hot: run() } },
+      { round: 1, arm: "head", report: { cold: run({ peakSumBytes: 1400 * MB }), hot: run() } },
       {
         round: 1,
-        arm: "A",
+        arm: "base",
         report: { cold: run({ ok: false, peakSumBytes: 9000 * MB }), hot: run() },
       },
     ];
-    const summary = summarizeCampaign(reports);
+    const summary = summarizeCampaign(reports, "base", "head");
     expect(summary.cold.paired).toEqual([{ round: 1, peakDeltaMb: -150, readyDeltaMs: 0 }]);
-    expect(summary.cold.A.failed).toBe(1);
-    expect(summary.cold.A.medianPeakMb).toBe(1600);
+    expect(summary.cold.control.failed).toBe(1);
+    expect(summary.cold.control.medianPeakMb).toBe(1600);
     expect(summary.ocrTextIdentical).toBe(true);
     expect(summary.groupCountsIdentical).toBe(true);
   });
 
   it("flags differing OCR text or group counts between arms", () => {
     const reports: LabeledReport[] = [
-      { round: 1, arm: "A", report: { cold: run(), hot: run() } },
+      { round: 1, arm: "base", report: { cold: run(), hot: run() } },
       {
         round: 1,
-        arm: "B",
+        arm: "head",
         report: {
           cold: run({ ocrWords: [{ pageIndex: 0, words: [{ text: "otro" }] }], groupCount: 4 }),
           hot: run(),
         },
       },
     ];
-    const summary = summarizeCampaign(reports);
+    const summary = summarizeCampaign(reports, "base", "head");
     expect(summary.ocrTextIdentical).toBe(false);
     expect(summary.groupCountsIdentical).toBe(false);
   });
 
   it("parses only campaign file names", () => {
-    expect(parseRunFileName("03-r1-B-memory-p2-attrib-ner-off-run0.json")).toEqual({
+    expect(parseRunFileName("03-r1-head-memory-p2-scanned-50p-run0.json")).toEqual({
       round: 1,
-      arm: "B",
+      arm: "head",
     });
+    // Los nombres de la campaña anterior (brazos A/B) no son de este arnés.
+    expect(parseRunFileName("03-r1-B-memory-p2-attrib-ner-off-run0.json")).toBeUndefined();
     expect(parseRunFileName("summary.json")).toBeUndefined();
   });
 });

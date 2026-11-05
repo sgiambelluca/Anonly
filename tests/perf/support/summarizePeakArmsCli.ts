@@ -1,5 +1,5 @@
 /**
- * C-1: `tsx tests/perf/support/summarizeParseCleanupCli.ts <RUN_DIR>` lee
+ * `tsx tests/perf/support/summarizePeakArmsCli.ts <RUN_DIR> [control] [candidato]` lee
  * `<RUN_DIR>/runs/*.json` y escribe `<RUN_DIR>/summary.json`, además de
  * imprimir cada corrida. Solo agrega números ya medidos: no reescribe crudos.
  */
@@ -12,11 +12,11 @@ import {
   toTemperatureRow,
   type LabeledReport,
   type ProfileReportInput,
-} from "./parseCleanupSummary.js";
+} from "./peakArmsSummary.js";
 
 async function main(): Promise<void> {
   const runDir = process.argv[2];
-  if (runDir === undefined) throw new Error("C-1: falta el directorio de la campaña");
+  if (runDir === undefined) throw new Error("arnés de pico: falta el directorio de la campaña");
   const runsDir = join(runDir, "runs");
   const names = (await readdir(runsDir)).filter((name) => name.endsWith(".json")).sort();
   const reports: LabeledReport[] = [];
@@ -35,7 +35,9 @@ async function main(): Promise<void> {
       );
     }
   }
-  const summary = summarizeCampaign(reports);
+  const control = process.argv[3] ?? "base";
+  const candidate = process.argv[4] ?? "head";
+  const summary = summarizeCampaign(reports, control, candidate);
   await writeFile(join(runDir, "summary.json"), JSON.stringify(summary, null, 2));
   process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
 }
