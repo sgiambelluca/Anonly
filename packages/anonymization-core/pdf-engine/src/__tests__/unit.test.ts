@@ -947,6 +947,7 @@ describe("PdfEngine — unit tests", () => {
               transform: [1, 0, 0, -1, 0, 842],
             })),
             getTextContent: vi.fn(() => Promise.resolve({ items: [] })),
+            cleanup: vi.fn(),
             getOperatorList: vi.fn(() => Promise.resolve({ fnArray: [], argsArray: [] })),
           })),
         ),
@@ -1119,6 +1120,7 @@ describe("PdfEngine — unit tests", () => {
                     transform: [1, 0, 0, -1, 0, 842],
                   })),
                   getTextContent: vi.fn(() => Promise.resolve({ items: [] })),
+                  cleanup: vi.fn(),
                   getOperatorList: vi.fn(() => Promise.resolve({ fnArray: [], argsArray: [] })),
                 }
               : createMockPage(i);
@@ -1253,6 +1255,7 @@ describe("PdfEngine — unit tests", () => {
                 ],
               }),
             ),
+            cleanup: vi.fn(),
             getOperatorList: vi.fn(() => Promise.resolve({ fnArray: [], argsArray: [] })),
           })),
         ),
@@ -1288,6 +1291,7 @@ describe("PdfEngine — unit tests", () => {
                     ],
                   }),
                 ),
+                cleanup: vi.fn(),
                 getOperatorList: vi.fn(() => Promise.resolve({ fnArray: [], argsArray: [] })),
               };
             }
@@ -1306,6 +1310,7 @@ describe("PdfEngine — unit tests", () => {
                   ],
                 }),
               ),
+              cleanup: vi.fn(),
               getOperatorList: vi.fn(() => Promise.resolve({ fnArray: [], argsArray: [] })),
             };
           }),
@@ -1344,6 +1349,7 @@ describe("PdfEngine — unit tests", () => {
                 ],
               }),
             ),
+            cleanup: vi.fn(),
             getOperatorList: vi.fn(() => Promise.resolve({ fnArray: [], argsArray: [] })),
           })),
         ),
@@ -1375,6 +1381,7 @@ describe("PdfEngine — unit tests", () => {
                 ],
               }),
             ),
+            cleanup: vi.fn(),
             getOperatorList: vi.fn(() => Promise.resolve({ fnArray: [], argsArray: [] })),
           })),
         ),
@@ -1425,6 +1432,7 @@ describe("PdfEngine — unit tests", () => {
                 items: [{ str: "Diagonal45", transform: [a, b, c, d, e, f], width, height }],
               }),
             ),
+            cleanup: vi.fn(),
             getOperatorList: vi.fn(() => Promise.resolve({ fnArray: [], argsArray: [] })),
           })),
         ),
@@ -1508,6 +1516,7 @@ describe("PdfEngine — unit tests", () => {
                 ],
               }),
             ),
+            cleanup: vi.fn(),
             getOperatorList: vi.fn(() => Promise.resolve({ fnArray: [], argsArray: [] })),
           })),
         ),
@@ -1557,6 +1566,7 @@ describe("PdfEngine — unit tests", () => {
                 ],
               }),
             ),
+            cleanup: vi.fn(),
             getOperatorList: vi.fn(() => Promise.resolve({ fnArray: [], argsArray: [] })),
           })),
         ),
@@ -1837,6 +1847,7 @@ describe("PdfEngine — unit tests", () => {
               transform: [1, 0, 0, -1, 0, 800],
             })),
             getTextContent: vi.fn(() => Promise.resolve({ items: [] })),
+            cleanup: vi.fn(),
             getOperatorList: vi.fn(() => Promise.resolve({ fnArray, argsArray })),
           })),
         ),
@@ -2011,6 +2022,7 @@ describe("PdfEngine — unit tests", () => {
               transform: [1, 0, 0, -1, 0, 842],
             })),
             getTextContent: vi.fn(() => Promise.resolve({ items: [] })),
+            cleanup: vi.fn(),
             getOperatorList: vi.fn(() => Promise.resolve({ fnArray, argsArray })),
           })),
         ),
@@ -2075,6 +2087,7 @@ describe("PdfEngine — unit tests", () => {
               transform: [1, 0, 0, -1, 0, 842],
             })),
             getTextContent: vi.fn(() => Promise.resolve({ items: [] })),
+            cleanup: vi.fn(),
             getOperatorList: vi.fn(() => Promise.resolve({ fnArray: [], argsArray: [] })),
           })),
         ),
@@ -2173,6 +2186,7 @@ describe("PdfEngine — unit tests", () => {
                 transform: [1, 0, 0, -1, 0, 842],
               })),
               getTextContent: vi.fn(() => Promise.resolve({ items: [] })),
+              cleanup: vi.fn(),
               getOperatorList: vi.fn(() => Promise.resolve({ fnArray: [], argsArray: [] })),
             })),
           ),
@@ -2230,6 +2244,7 @@ describe("PdfEngine — unit tests", () => {
               transform: [1, 0, 0, -1, 0, 842],
             })),
             getTextContent: vi.fn(() => Promise.resolve({ items: [] })),
+            cleanup: vi.fn(),
             getOperatorList: vi.fn(() => Promise.resolve({ fnArray: [], argsArray: [] })),
           })),
         ),
@@ -2693,6 +2708,53 @@ describe("PdfEngine — unit tests", () => {
       await expect(
         engine.process(createValidInput("doc-operator-list-fails"), ctx),
       ).rejects.toThrow("PDF corrupto");
+    });
+  });
+
+  // ADR-225 (§13 caso 72): el parseo suelta los objetos de cada página apenas
+  // recibe su operator list.
+  describe("Liberación de objetos de página (ADR-225, §13 caso 72)", () => {
+    it("parsePage releases the page objects right after reading the operator list (ADR-225)", async () => {
+      const events: string[] = [];
+      const withTracking = (pageIndex: number): Record<string, unknown> => {
+        const page = createMockPage(pageIndex, [
+          { str: `Hola ${pageIndex}`, x: 10, y: 20, width: 40, height: 12 },
+        ]);
+        const originalGetOperatorList = page["getOperatorList"] as () => Promise<unknown>;
+        page["getOperatorList"] = vi.fn(async () => {
+          events.push(`ops:${pageIndex}`);
+          return originalGetOperatorList();
+        });
+        page["cleanup"] = vi.fn(() => {
+          events.push(`cleanup:${pageIndex}`);
+        });
+        return page;
+      };
+      const tracked = createMockPdfDocument(2, withTracking);
+      vi.mocked(getDocument).mockReturnValue(mockGetDocumentResult(tracked));
+
+      await engine.init(ctx);
+      const trackedOutput = await engine.process(createValidInput("doc-adr225-unit"), ctx);
+
+      const getPage = tracked["getPage"] as (n: number) => Promise<Record<string, unknown>>;
+      for (const pageNum of [1, 2]) {
+        const page = await getPage(pageNum);
+        expect(page["cleanup"]).toHaveBeenCalledTimes(1);
+      }
+      for (const i of [0, 1]) {
+        const opsAt = events.indexOf(`ops:${i}`);
+        const cleanupAt = events.indexOf(`cleanup:${i}`);
+        expect(opsAt).toBeGreaterThanOrEqual(0);
+        expect(cleanupAt).toBeGreaterThan(opsAt);
+      }
+
+      // Misma salida que el mismo doble con un cleanup inerte.
+      const plain = createMockPdfDocument(2, (i) =>
+        createMockPage(i, [{ str: `Hola ${i}`, x: 10, y: 20, width: 40, height: 12 }]),
+      );
+      vi.mocked(getDocument).mockReturnValue(mockGetDocumentResult(plain));
+      const plainOutput = await engine.process(createValidInput("doc-adr225-unit"), ctx);
+      expect(trackedOutput.document.pages).toEqual(plainOutput.document.pages);
     });
   });
 

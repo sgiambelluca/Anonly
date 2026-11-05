@@ -42,6 +42,7 @@ function createSnapshotPdfDocument(): Record<string, unknown> {
               ],
             }),
           ),
+          cleanup: vi.fn(),
           getOperatorList: vi.fn(() => Promise.resolve({ fnArray: [], argsArray: [] })),
         },
         {
@@ -56,12 +57,14 @@ function createSnapshotPdfDocument(): Record<string, unknown> {
               ],
             }),
           ),
+          cleanup: vi.fn(),
           getOperatorList: vi.fn(() => Promise.resolve({ fnArray: [], argsArray: [] })),
         },
         {
           rotate: 0,
           getViewport: vi.fn(() => ({ width: 595, height: 842, transform: [1, 0, 0, -1, 0, 842] })),
           getTextContent: vi.fn(() => Promise.resolve({ items: [] })),
+          cleanup: vi.fn(),
           getOperatorList: vi.fn(() => Promise.resolve({ fnArray: [], argsArray: [] })),
         },
       ];

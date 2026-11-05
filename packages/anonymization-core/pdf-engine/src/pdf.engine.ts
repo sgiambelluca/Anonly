@@ -2331,6 +2331,13 @@ async function parsePage(
     // criterio que `TextContentLike` arriba): `PDFOperatorList.argsArray`
     // tipa `Array<any>`; narrowing a la forma local evita propagar `any`.
     operatorList = (await pageProxy.getOperatorList()) as OperatorListLike;
+    // ADR-225: pdf.js decodifica las imágenes de la página para armar el
+    // operator list y las deja en `pageProxy.objs`; `PDFDocumentProxy` retiene
+    // cada página hasta `destroy()`. El recorrido de abajo solo lee operadores
+    // y argumentos, así que se sueltan ya (`rotate` y el viewport siguen
+    // disponibles). Si `getOperatorList()` falla, el documento se destruye en
+    // el camino de fallo: no hace falta el cleanup.
+    pageProxy.cleanup();
   } catch (err: unknown) {
     if (err instanceof PdfTimeoutError) {
       throw err;

@@ -240,6 +240,7 @@ describe("PdfEngine — contract tests", () => {
                 transform: [1, 0, 0, -1, 0, 842],
               })),
               getTextContent: vi.fn(() => Promise.resolve({ items: [] })),
+              cleanup: vi.fn(),
               getOperatorList: vi.fn(() => Promise.resolve({ fnArray: [], argsArray: [] })),
             };
           }

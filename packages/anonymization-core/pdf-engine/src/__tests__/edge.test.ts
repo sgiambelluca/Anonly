@@ -190,6 +190,7 @@ describe("PdfEngine — edge case tests", () => {
                   items: [{ str: "Safe", transform: [1, 0, 0, 1, 50, 800], width: 30, height: 12 }],
                 }),
               ),
+              cleanup: vi.fn(),
               getOperatorList: vi.fn(() => Promise.resolve({ fnArray: [], argsArray: [] })),
             }),
           ),
@@ -376,6 +377,7 @@ describe("PdfEngine — edge case tests", () => {
                     transform: [1, 0, 0, -1, 0, 842],
                   })),
                   getTextContent: vi.fn(() => Promise.resolve({ items: [] })),
+                  cleanup: vi.fn(),
                   getOperatorList: vi.fn(() => Promise.resolve({ fnArray: [], argsArray: [] })),
                 }
               : {
@@ -392,6 +394,7 @@ describe("PdfEngine — edge case tests", () => {
                       ],
                     }),
                   ),
+                  cleanup: vi.fn(),
                   getOperatorList: vi.fn(() => Promise.resolve({ fnArray: [], argsArray: [] })),
                 };
           }),
@@ -429,6 +432,7 @@ describe("PdfEngine — edge case tests", () => {
                 ],
               }),
             ),
+            cleanup: vi.fn(),
             getOperatorList: vi.fn(() => Promise.resolve({ fnArray: [], argsArray: [] })),
           })),
         ),
@@ -632,6 +636,7 @@ describe("PdfEngine — edge case tests", () => {
       const mockPage = {
         getViewport: vi.fn(() => ({ width: 595, height: 842, transform: [1, 0, 0, -1, 0, 842] })),
         getTextContent: vi.fn(() => Promise.resolve({ items: [] })),
+        cleanup: vi.fn(),
         getOperatorList: vi.fn(() => Promise.resolve({ fnArray: [], argsArray: [] })),
       };
 
@@ -876,6 +881,40 @@ describe("PdfEngine — edge case tests", () => {
         words,
       );
       expect(fused.pages[0]!.text).toBe("a b c");
+    });
+  });
+
+  // Caso 72 + caso 2 (§13, ADR-225): el parseo no acumula objetos decodificados.
+  describe("Caso 72: objetos decodificados del operator list (ADR-225)", () => {
+    it("parsing a scanned document never keeps more than one page of decoded objects (ADR-225)", async () => {
+      const pageCount = 5;
+      const cleaned = new Set<number>();
+      const retainedAtOperatorList: number[] = [];
+      const scannedPage = (pageIndex: number): Record<string, unknown> => {
+        const page = createMockPage(pageIndex, [], [{ x: 0, y: 0, width: 595, height: 842 }]);
+        const originalGetOperatorList = page["getOperatorList"] as () => Promise<unknown>;
+        page["getOperatorList"] = vi.fn(() => {
+          // Páginas ya pedidas y todavía sin cleanup = páginas con imágenes retenidas.
+          let retained = 0;
+          for (let i = 0; i < pageIndex; i++) if (!cleaned.has(i)) retained += 1;
+          retainedAtOperatorList.push(retained);
+          return originalGetOperatorList();
+        });
+        page["cleanup"] = vi.fn(() => {
+          cleaned.add(pageIndex);
+        });
+        return page;
+      };
+      vi.mocked(getDocument).mockReturnValue(
+        mockGetDocumentResult(createMockPdfDocument(pageCount, scannedPage)),
+      );
+
+      await engine.init(ctx);
+      const output = await engine.process(createValidInput("doc-adr225-edge"), ctx);
+
+      expect(output.document.pages).toHaveLength(pageCount);
+      expect(retainedAtOperatorList).toEqual(new Array(pageCount).fill(0));
+      expect(cleaned.size).toBe(pageCount);
     });
   });
 });
