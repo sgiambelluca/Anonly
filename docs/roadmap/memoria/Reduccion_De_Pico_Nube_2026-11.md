@@ -377,6 +377,8 @@ y el revisor en APPROVED:
 | `7c8a571` | ner-engine | C-2: `NerEngine.releaseIdleWorkers()` con guarda de trabajo en curso |
 | `f5ac19a` | façade | C-2: `runOcrStage` da de baja el pool ocioso de NER antes del OCR |
 | `a849279` | ner-engine | el test de contrato exige el puerto con el compilador (rechazo de la primera revisión) |
+| `0326120` | docs | ADR-227 aceptado con la opción 2; Render Engine v1.21.0 |
+| `61fa7c4` | render-engine | C-4: `pageProxy.cleanup()` después de rasterizar para el OCR y de los renders `full` |
 
 El caso 2 de §13 de `core/PDF_Engine.md` quedó corregido con la v1.21.0.
 
@@ -403,6 +405,15 @@ tal como quedó implementado. MB, medianas, y entre paréntesis mínimo y máxim
   en frío y +8 en caliente acá, −13 y −54 en la campaña de §4.1. Es ruido entre
   corridas, no retención nueva (criterio 1).
 
+**C-4 implementado y validado** (`61fa7c4`, revisor APPROVED): `base` contra `c4`
+(solo C-4, como quedó en el producto), P2 a 144 dpi sin NER, ABBA × 3, 12/12
+válidas (`.measure/peak-ab/impl-c4-144-base-c4/`). Pico frío 1412 → 1055 MB
+(−342 / −353 / −365 por ronda), caliente 1422 → 1120 MB (−329 / −321 / −286);
+después de `Ready`, 1147 → 776 y 1155 → 798 MB; `import → Ready` sin cambio
+(20,1 contra 20,0 s). Texto de OCR y grupos idénticos. En caliente, el brazo
+`c4` no lleva C-1, así que su pico cae en el parseo: en el producto, con C-1 y
+C-4 juntos, ese pico ya no está.
+
 ## 7. Qué falta y quién lo hace
 
 | Qué | Quién | Necesita |
@@ -413,7 +424,7 @@ tal como quedó implementado. MB, medianas, y entre paréntesis mínimo y máxim
 | ~~Decidir C-4 (ADR-227) y su alcance~~: aceptado con la opción 2 (solo OCR y export) el 2026-11-05 | — | — |
 | **Pendiente a futuro, en Windows**: hilos de NER en los perfiles Alto y Ultra (subirlos, nunca bajarlos). En septiembre, 6 hilos bajaron un 30 % el tiempo de NER en R1 en el Windows del mantenedor y empeoraron en la Mac (`mediciones/ner/Hilos_NER_Medicion.md`); ADR-194 dejó los hilos en automático | el mantenedor, con el arnés portado a Windows | `tests/perf/run-ner-threads.sh` solo corre en macOS y el puerto de septiembre no se commiteó: hay que portarlo. Este banco no sirve (4 CPU y sin el modelo de NER) |
 | **Pendiente a futuro, en Windows**: repetir el empaquetado del modelo de NER con datos externos (ADR-179) con R1. En septiembre bajó la memoria WASM de NER sin superar el ruido del RSS | el mantenedor | el modelo de NER (o `*.hf.co` permitido en este banco) |
-| Validar C-1, C-2 y C-4 con los documentos reales R1 y R2 antes de mergear a `develop` | el mantenedor, en Windows | `ANONLY_REAL_DOC_*`; los fixtures sintéticos subestiman el trabajo por página |
+| Validar C-1, C-2 y C-4 con los documentos reales R1 y R2 antes de mergear a `develop` (con NER prendido, `ANONLY_AB_GREP="P1 —|P2 —" tests/perf/run-peak-ab.sh` para `base` contra `head`, y `ANONLY_AB_CANDIDATE=c4` para C-4 solo) | el mantenedor, en Windows | `ANONLY_REAL_DOC_*`; los fixtures sintéticos subestiman el trabajo por página |
 | **Pendiente a futuro**: casos peores con fixtures realistas. Fixtures sintéticos con densidad de palabras por hoja parecida a la de un documento real (unas 300 palabras por página contra 20 en P2, `mediciones/transversal/Ciclos_Y_Documentos_Reales_Medicion.md` §2.1), y PDFs pesados (ADR-180) para medir C-4 en el render completo y el export | el planificador, cuando el mantenedor consiga documentos reales o se acuerde la densidad | decisión del mantenedor sobre la densidad objetivo |
 
 **Por qué este banco no midió con NER.** `huggingface.co` quedó permitido, y
