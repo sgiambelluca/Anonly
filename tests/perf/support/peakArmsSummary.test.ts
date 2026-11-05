@@ -117,6 +117,12 @@ describe("peakArmsSummary", () => {
     expect(parseRunFileName("03-r1-head-memory-p2-scanned-50p-run0.json")).toEqual({
       round: 1,
       arm: "head",
+      profile: "p2-scanned-50p",
+    });
+    expect(parseRunFileName("07-r2-c4-memory-p2-scanned-50p-144dpi-ner-off-run0.json")).toEqual({
+      round: 2,
+      arm: "c4",
+      profile: "p2-scanned-50p-144dpi-ner-off",
     });
     // Los nombres de la campaña anterior (brazos A/B) no son de este arnés.
     expect(parseRunFileName("03-r1-B-memory-p2-attrib-ner-off-run0.json")).toBeUndefined();
