@@ -473,10 +473,13 @@ describe("NerEngine — contract tests", () => {
     expect(pooledEngine.releaseIdleWorkers()).toBeUndefined();
     expect(pool.releaseIdleWorkersCalls.count).toBe(1);
 
-    // El puerto exige `releaseIdleWorkers(): boolean`: el pool real de OCR/NER
-    // (`WorkerPool`) y el doble lo cumplen con este tipo.
-    const portShape: { releaseIdleWorkers: () => boolean } = pool;
-    expect(typeof portShape.releaseIdleWorkers()).toBe("boolean");
+    // El compilador hace cumplir el puerto real (`NerJobPool`, no exportado),
+    // derivado del constructor: si su `releaseIdleWorkers` deja de devolver
+    // `boolean`, esta asignación deja de compilar.
+    type NerPoolPort = NonNullable<ConstructorParameters<typeof NerEngine>[0]>;
+    const portReleaseResult: (port: NerPoolPort) => boolean = (port) => port.releaseIdleWorkers();
+    expect(typeof portReleaseResult(pool)).toBe("boolean");
+    expect(pool.releaseIdleWorkersCalls.count).toBe(2);
 
     await pooledEngine.dispose();
   });
