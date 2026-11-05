@@ -399,6 +399,7 @@ export function createMockPage(
     // ADR-065 §1 (compuerta 1): default sin imágenes — preserva el
     // comportamiento de todos los tests que no pasan `images` explícitamente.
     // ADR-066 §1: default sin anotaciones, mismo criterio.
+    cleanup: vi.fn(),
     getOperatorList: vi.fn(() =>
       Promise.resolve(buildMockOperatorList(images ?? [], annotations ?? [], pageTextOps ?? [])),
     ),
@@ -448,6 +449,7 @@ export function createMockPdfDocument(
         // texto de anotaciones puede ser la única fuente de texto), no solo
         // en las que ya tienen texto nativo — a diferencia de antes de
         // ADR-066, una página textless también necesita este mock.
+        cleanup: vi.fn(),
         getOperatorList: vi.fn(() => Promise.resolve({ fnArray: [], argsArray: [] })),
       });
     } else {
