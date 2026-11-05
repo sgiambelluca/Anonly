@@ -1256,6 +1256,15 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     ctx: EngineContext,
   ): Promise<void> {
     try {
+      // ADR-226: en caliente, el modelo de NER del documento anterior sigue
+      // residente (ADR-167: 15 s de inactividad) y el OCR de este documento
+      // correría apilado sobre él. Se pide la baja UNA vez, antes de despachar
+      // la primera página de OCR. `NerEngine.releaseIdleWorkers()` es `void` y
+      // trae su guarda (no hace nada con un `processPage`/`processPages` en
+      // curso); la recarga cae en la detección, con el pool de OCR ya dado de
+      // baja (ADR-157). Un documento sin páginas OCR nunca entra acá.
+      this.engines.ner.releaseIdleWorkers();
+
       // Progreso granular OCR (spec Orchestrator.md §8, ADR-065 §2): total fijo
       // para toda la etapa (textlessPages.length + ocrRegions.length, ambos
       // conjuntos disjuntos); current arranca en 0 y lo incrementa

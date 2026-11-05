@@ -3309,6 +3309,103 @@ describe("PIPELINE_PROGRESS (Orchestrator.md §8, ADR-034 §4)", () => {
     );
   });
 
+  // ─── ADR-226: el pool de NER se da de baja al empezar runOcrStage ───
+
+  it("runOcrStage releases idle NER workers before dispatching OCR (ADR-226)", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    const pdfOutput = createPdfEngineOutput({
+      document: createDocument({
+        pageCount: 1,
+        pages: [createPage({ index: 0, requiresOCR: true })],
+      }),
+      textlessPages: [0],
+    });
+    wireHappyPathSpies(engines, bus, { pdfOutput });
+    const nerReleaseSpy = vi.spyOn(engines.ner, "releaseIdleWorkers").mockReturnValue(undefined);
+    const processSessionSpy = vi.spyOn(engines.ocr, "processSession");
+
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+
+    await orchestrator.importDocument(createImportInput());
+
+    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+    expect(nerReleaseSpy).toHaveBeenCalledTimes(1);
+    expect(processSessionSpy).toHaveBeenCalled();
+    expect(nerReleaseSpy.mock.invocationCallOrder[0]).toBeLessThan(
+      processSessionSpy.mock.invocationCallOrder[0] ?? Number.NEGATIVE_INFINITY,
+    );
+  });
+
+  it("a document without OCR pages does not release the NER pool (ADR-226)", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    const pdfOutput = createPdfEngineOutput({
+      document: createDocument({
+        pageCount: 1,
+        pages: [createPage({ index: 0, requiresOCR: false })],
+      }),
+      textlessPages: [],
+      ocrRegions: [],
+    });
+    wireHappyPathSpies(engines, bus, { pdfOutput });
+    const nerReleaseSpy = vi.spyOn(engines.ner, "releaseIdleWorkers").mockReturnValue(undefined);
+
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+
+    await orchestrator.importDocument(createImportInput());
+
+    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+    expect(nerReleaseSpy).not.toHaveBeenCalled();
+  });
+
+  it("reanalyze through OCR releases idle NER workers before its OCR stage (ADR-226)", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    const pdfOutput = createPdfEngineOutput({
+      document: createDocument({
+        pageCount: 1,
+        pages: [createPage({ index: 0, requiresOCR: true })],
+      }),
+      textlessPages: [0],
+    });
+    wireHappyPathSpies(engines, bus, { pdfOutput });
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+
+    await orchestrator.importDocument(createImportInput());
+    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+
+    const nerReleaseSpy = vi.spyOn(engines.ner, "releaseIdleWorkers").mockReturnValue(undefined);
+    const processSessionSpy = vi.spyOn(engines.ocr, "processSession");
+    processSessionSpy.mockClear();
+
+    await orchestrator.reanalyze("doc-1", { ocr: { languages: ["eng"] } });
+
+    expect(processSessionSpy).toHaveBeenCalledTimes(1);
+    expect(nerReleaseSpy).toHaveBeenCalledTimes(1);
+    expect(nerReleaseSpy.mock.invocationCallOrder[0]).toBeLessThan(
+      processSessionSpy.mock.invocationCallOrder[0] ?? Number.NEGATIVE_INFINITY,
+    );
+  });
+
   // ─── ADR-157: el pool de OCR se da de baja al terminar runOcrStage ───
 
   it("ADR-157: releases the OCR pool's idle workers after a successful OCR stage", async () => {
