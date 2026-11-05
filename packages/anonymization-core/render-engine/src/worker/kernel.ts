@@ -1558,6 +1558,11 @@ export async function kernelRenderPage(
       pageIndex,
       opts.timeoutMs,
     );
+    // ADR-227: solo en `mode: "full"` (export, una vez por página). El preview
+    // conserva lo que dibujó para que un zoom o un cambio de vista no vuelva
+    // a decodificar la imagen. Después de este punto la función no vuelve a
+    // usar `pageProxy` (el viewport ya está calculado).
+    if (mode === "full") pageProxy.cleanup();
   } catch (err: unknown) {
     throw toPageFailure(documentId, pageIndex, err);
   }
@@ -1757,6 +1762,12 @@ export async function kernelRasterizePage(
       pageIndex,
       opts.timeoutMs,
     );
+    // ADR-227: pdf.js deja en `pageProxy.objs` las imágenes decodificadas para
+    // dibujar, y `PDFDocumentProxy` retiene la página hasta `destroy()`. Se
+    // sueltan apenas el dibujo terminó, antes de recortar o codificar. Si el
+    // render falla o se cancela no se llega acá. No se vuelve a usar
+    // `pageProxy` después (viewport y `cropRect` ya están calculados).
+    pageProxy.cleanup();
   } catch (err: unknown) {
     throw toPageFailure(documentId, pageIndex, err);
   }

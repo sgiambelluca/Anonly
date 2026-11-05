@@ -34,6 +34,7 @@ import {
   fitReplacementFontSized,
   kernelLoadDocument,
   kernelRenderLegendPage,
+  kernelRasterizePage,
   kernelRenderPage,
   RenderKernelCanvasFactory,
   RenderKernelCMapReaderFactory,
@@ -983,5 +984,143 @@ describe("toPageFailure — una cancelación no es una falla (ADR-133)", () => {
     expect(mapped).toBeInstanceOf(RenderPageFailedError);
     expect(mapped.message).toContain("canvas sin contexto 2D");
     expect(mapped.details["pageIndex"]).toBe(3);
+  });
+});
+
+describe("cleanup de página después de dibujar (ADR-227, §13 caso 41)", () => {
+  const renderOpts: KernelRenderOptions = {
+    jpegQuality: 0.85,
+    timeoutMs: 5000,
+    abortSignal: new AbortController().signal,
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    installOffscreenCanvasStub();
+    resetCreatedCanvases();
+    resetConvertToBlobCalls();
+  });
+
+  /** Página doble que registra el orden entre `render().promise` y `cleanup()`. */
+  function createTrackedPage(
+    events: string[],
+    renderOutcome: "resolve" | "reject" = "resolve",
+  ): { readonly page: Record<string, unknown>; readonly cleanup: ReturnType<typeof vi.fn> } {
+    const base = createMockPage({ width: 300, height: 200 });
+    const cleanup = vi.fn(() => {
+      events.push(`cleanup(blobs=${String(getConvertToBlobCalls().length)})`);
+    });
+    const page: Record<string, unknown> = {
+      ...base,
+      cleanup,
+      render: vi.fn(() => {
+        events.push("render");
+        const promise =
+          renderOutcome === "resolve"
+            ? Promise.resolve().then(() => {
+                events.push("render-resolved");
+              })
+            : Promise.reject(new Error("render roto"));
+        return { promise };
+      }),
+    };
+    return { page, cleanup };
+  }
+
+  async function loadDoc(docId: string, page: Record<string, unknown>): Promise<void> {
+    vi.mocked(getDocument).mockReturnValue(
+      mockGetDocumentResult(createMockPdfDocument({ pageCount: 1, pageFactory: () => page })),
+    );
+    await kernelLoadDocument({ documentId: docId, buffer: createValidBuffer() });
+  }
+
+  it("rasterizePage releases the page objects after drawing it (ADR-227)", async () => {
+    const events: string[] = [];
+    const { page, cleanup } = createTrackedPage(events);
+    await loadDoc("doc-adr227-raster", page);
+
+    const image = await kernelRasterizePage(
+      { documentId: "doc-adr227-raster", pageIndex: 0, scale: 1 },
+      { timeoutMs: 5000, abortSignal: new AbortController().signal },
+    );
+
+    expect(image.format).toBe("png");
+    expect(cleanup).toHaveBeenCalledTimes(1);
+    // Después de que el dibujo resolvió y antes de codificar (ningún blob aún).
+    expect(events).toEqual(["render", "render-resolved", "cleanup(blobs=0)"]);
+  });
+
+  it("a full render releases the page objects and a preview render does not (ADR-227)", async () => {
+    const fullEvents: string[] = [];
+    const full = createTrackedPage(fullEvents);
+    await loadDoc("doc-adr227-full", full.page);
+    await kernelRenderPage(
+      { documentId: "doc-adr227-full", pageIndex: 0, kind: "original", mode: "full" },
+      renderOpts,
+    );
+    expect(full.cleanup).toHaveBeenCalledTimes(1);
+    expect(fullEvents).toEqual(["render", "render-resolved", "cleanup(blobs=0)"]);
+
+    const previewEvents: string[] = [];
+    const preview = createTrackedPage(previewEvents);
+    await loadDoc("doc-adr227-preview", preview.page);
+    await kernelRenderPage(
+      {
+        documentId: "doc-adr227-preview",
+        pageIndex: 0,
+        kind: "original",
+        mode: "preview",
+        scale: 1,
+      },
+      renderOpts,
+    );
+    // Redibujar la misma página a otra escala tampoco lo llama.
+    await kernelRenderPage(
+      {
+        documentId: "doc-adr227-preview",
+        pageIndex: 0,
+        kind: "original",
+        mode: "preview",
+        scale: 2,
+      },
+      renderOpts,
+    );
+    expect(preview.page["render"]).toHaveBeenCalledTimes(2);
+    expect(preview.cleanup).not.toHaveBeenCalled();
+  });
+
+  it("a failed or cancelled render does not call cleanup (ADR-227)", async () => {
+    const failedEvents: string[] = [];
+    const failing = createTrackedPage(failedEvents, "reject");
+    await loadDoc("doc-adr227-fail", failing.page);
+
+    await expect(
+      kernelRasterizePage(
+        { documentId: "doc-adr227-fail", pageIndex: 0, scale: 1 },
+        { timeoutMs: 5000, abortSignal: new AbortController().signal },
+      ),
+    ).rejects.toBeInstanceOf(RenderPageFailedError);
+    await expect(
+      kernelRenderPage(
+        { documentId: "doc-adr227-fail", pageIndex: 0, kind: "original", mode: "full" },
+        renderOpts,
+      ),
+    ).rejects.toBeInstanceOf(RenderPageFailedError);
+    expect(failing.cleanup).not.toHaveBeenCalled();
+
+    // Cancelación de pdf.js durante el dibujo: se mapea a CancelledError y
+    // tampoco se llama.
+    const cancelled = createTrackedPage([]);
+    const cancelError = new Error("Rendering cancelled, page 1");
+    cancelError.name = "RenderingCancelledException";
+    cancelled.page["render"] = vi.fn(() => ({ promise: Promise.reject(cancelError) }));
+    await loadDoc("doc-adr227-cancel", cancelled.page);
+    await expect(
+      kernelRasterizePage(
+        { documentId: "doc-adr227-cancel", pageIndex: 0, scale: 1 },
+        { timeoutMs: 5000, abortSignal: new AbortController().signal },
+      ),
+    ).rejects.toBeInstanceOf(CancelledError);
+    expect(cancelled.cleanup).not.toHaveBeenCalled();
   });
 });

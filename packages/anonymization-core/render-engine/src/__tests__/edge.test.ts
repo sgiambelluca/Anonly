@@ -715,6 +715,7 @@ describe("RenderEngine — edge cases", () => {
         pageCount: 1,
         pageFactory: () => ({
           getViewport: vi.fn(() => ({ width: 100, height: 100 })),
+          cleanup: vi.fn(),
           render: vi.fn(() => ({ promise: new Promise<void>(() => undefined) })), // nunca resuelve
         }),
       });
@@ -1100,6 +1101,7 @@ describe("RenderEngine — edge cases", () => {
       pageCount: 1,
       pageFactory: () => ({
         getViewport: vi.fn(() => ({ width: 100, height: 100 })),
+        cleanup: vi.fn(),
         render: renderSpy,
       }),
     });
@@ -1305,6 +1307,7 @@ describe("RenderEngine — edge cases", () => {
       pageCount: 1,
       pageFactory: () => ({
         getViewport: vi.fn(() => ({ width: 100, height: 100 })),
+        cleanup: vi.fn(),
         render: renderSpy,
       }),
     });

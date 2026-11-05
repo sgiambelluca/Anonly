@@ -107,6 +107,7 @@ export function createMockPage(options?: MockPageOptions): Record<string, unknow
       width: width * scale,
       height: height * scale,
     })),
+    cleanup: vi.fn(),
     render: vi.fn(() => {
       if (options?.renderNeverResolves === true) {
         return { promise: new Promise<void>(() => undefined) };
