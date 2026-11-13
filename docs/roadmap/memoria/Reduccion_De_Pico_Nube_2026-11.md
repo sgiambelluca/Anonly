@@ -458,6 +458,53 @@ pica 1910 MB, contra 1271 en frío. El heap de JS no lo explica (decenas de MB),
 soltar el worker de NER tampoco. Es el próximo objetivo de la foto de memoria en
 el pico (MemoryInfra, por tipo de asignador y proceso).
 
+### 6.2 Dónde cae el pico caliente, y la variante C-2b (2026-11-13)
+
+**La sonda MemoryInfra no sirve para esto.** Durante el pipeline los volcados
+exceden su timeout de 3 s en las tres corridas (`.measure/memory-infra-pipeline/20261113184355514-387/`),
+y en reposo el renderer reporta ~90 MB de huella privada cuando su RSS está en
+cientos de MB: no ve los workers ni su WASM.
+
+**Muestreo de `/proc/<pid>/smaps` del renderer**, una vez por segundo durante P2
+con NER sobre `head` (exploratorio, fuera del repo, una corrida): agrupa el RSS
+por tipo de región. Las regiones anónimas de 64 MiB a 1 GiB se comportan como la
+memoria lineal de WASM (Tesseract en el OCR, el modelo en NER). Lo que mostró:
+
+| Momento | Regiones tipo WASM | Anónimas de 1 a 64 MiB | Total del renderer |
+|---|---:|---:|---:|
+| OCR frío | ~318 MB (Tesseract) | ~200 MB | ~650 MB |
+| Arranque del OCR caliente (+41 s) | **439 MB (modelo de NER del documento anterior)** | **715 MB (transitorio)** | **1303 MB** |
+| 2 s después (C-2 ya actuó) | 233 → ~311 MB (Tesseract) | ~210 MB | ~600 MB |
+
+- **El pico caliente cae en un segundo**: el transitorio de arranque del OCR
+  (~700 MB; en frío ~527) coincide con el modelo todavía cargado.
+- **C-2 llegaba tarde**: suelta el modelo al empezar `runOcrStage`, y el RSS baja
+  1–2 s después.
+
+**C-2b**: soltar el modelo en el primer `PAGE_PARSED` con `requiresOCR: true`
+(los eventos del worker de parseo llegan al bus del host en vivo), unos 3 s
+antes. Un documento sin páginas OCR no la dispara. A/B `head` contra `c2b`, P2
+con NER, ABBA × 3, 12/12 válidas (`.measure/peak-ab/ner-head-c2b/`):
+
+| P2 con NER | `head` (C-2 en `runOcrStage`) | `c2b` | por ronda |
+|---|---:|---:|---:|
+| Pico caliente | 1961 (1831–2017) | 1716 (1680–1736) | −266 / −200 / −236 |
+| Pico de la fase de OCR caliente | 1961 | 1296 | — |
+| Pico frío | 1623 (1572–1718) | 1603 (1552–1739) | +13 / −25 / −24 |
+| `import → Ready`, caliente | 33,9 s | 34,3 s | −0,9 a +0,3 s |
+
+- **Los rangos calientes no se solapan.** El OCR caliente queda como el frío
+  (1296 contra 1263–1272 MB).
+- **El exceso caliente que queda es chico** (1716 contra 1603 MB) y está en el
+  parseo: el modelo sigue cargado hasta la primera página con OCR.
+- Texto de OCR y grupos idénticos; sin costo de tiempo en P2, porque ahí el
+  modelo se recarga igual (§6.1).
+- **Sin medir**: un escaneo corto, cuyo OCR dure menos de 15 s. Ahí hoy el modelo
+  queda cargado, y C-2b (como C-2) lo haría recargar: 1–2 s más en el segundo
+  documento.
+- Resumen del segundo escaneo con NER: 2313 MB sin cambios → ~1865–1960 con
+  C-1, C-2 y C-4 → ~1716 con C-2b en lugar de C-2.
+
 ## 7. Qué falta y quién lo hace
 
 | Qué | Quién | Necesita |
