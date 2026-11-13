@@ -2,10 +2,11 @@
 
 # ADR-226 — El modelo de NER no espera cargado durante el OCR del documento siguiente
 
-- **Estado**: **Accepted** por el humano el 2026-11-05 («Acepto los dos cambios»),
-  antes del A/B de §5. Se implementa en `perf/pico-memoria`, y el A/B de §5 se
-  corre sobre la implementación: si no baja el pico caliente de P2, o si el
-  tiempo agregado no es aceptable para el humano, se revierte.
+- **Estado**: **Accepted** por el humano el 2026-11-05 e implementado en
+  `perf/pico-memoria`. **Refutado en el banco Linux con NER (2026-11-13)**: no
+  baja el pico caliente de P2, ni solo ni en combinación
+  (`Reduccion_De_Pico_Nube_2026-11.md` §6.1). Por la condición de §5 corresponde
+  revertirlo; falta la confirmación en Windows y la decisión del humano.
 - **Fecha**: 2026-11-05
 - **Propuesto por**: el planificador, en la campaña de reducción de pico
   ([`Reduccion_De_Pico_Nube_2026-11.md`](../roadmap/memoria/Reduccion_De_Pico_Nube_2026-11.md),

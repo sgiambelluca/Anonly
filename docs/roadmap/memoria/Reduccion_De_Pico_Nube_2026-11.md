@@ -414,6 +414,50 @@ después de `Ready`, 1147 → 776 y 1155 → 798 MB; `import → Ready` sin camb
 `c4` no lleva C-1, así que su pico cae en el parseo: en el producto, con C-1 y
 C-4 juntos, ese pico ya no está.
 
+### 6.1 Con NER, en el flujo real (2026-11-13)
+
+Con el entorno nuevo de la sesión, este banco bajó el modelo de NER
+(`us.aws.cdn.hf.co`), con su sha256 de `assets.lock.json`. Perfiles P1 y P2 de
+`memory.spec.ts`, ABBA × 3, 12/12 válidas en cada campaña. MB, medianas, y entre
+paréntesis mínimo y máximo:
+
+| | sin cambios (`base`) | producto (`head`) | por ronda |
+|---|---:|---:|---:|
+| P2 caliente | 2313 (2277–2380) | 1865 (1803–1934) | −500 / −504 / −362 |
+| P2 frío | 1700 (1642–1824) | 1588 (1560–1723) | −61 / −55 / −199 |
+| P1 caliente / frío | 1317 / 1577 | 1322 / 1579 | −18 a +26 |
+| `import → Ready`, P2 caliente | 31,5 s | 32,1 s | −0,8 a +3,0 s |
+
+- **El segundo escaneo baja unos 450 MB**, que es el caso que dejaba a P2 cerca
+  de su techo en Windows. En `base`, P2 caliente supera a frío en ~610 MB, como
+  en Windows (~630 MB).
+- **P1 no cambia**, el texto de OCR y los grupos son idénticos, y el tiempo no se
+  mueve más allá del ruido.
+
+**C-2 no aporta en este banco** (`.measure/peak-ab/ner-base-c2/` y
+`ner-c14-head/`):
+
+- Solo contra `base`: P2 caliente 2295 → 2317 MB (−30 / +21 / +37), rangos
+  solapados.
+- En combinación, `head` contra `c14` (C-1 y C-4, sin C-2): 1910 → 1920 MB
+  (+42 / +31 / −27), rangos solapados. Frío, igual.
+- **C-2 sí suelta el worker**: en `head`, al empezar el OCR caliente desaparecen
+  dos targets de CDP (el worker de NER y su hilo); en `c14` siguen. Pero el pico
+  del OCR no baja: terminar ese worker no se refleja en el RSS de la fase.
+- **La hipótesis de ADR-226 era parcial.** En P2 el modelo ya se soltaba solo a
+  mitad del OCR: las 6 corridas calientes de `base` recargan el modelo, porque el
+  OCR dura ~23 s, más que los 15 s de ADR-167. El exceso caliente de `base`
+  estaba sobre todo en el parseo (2295 MB), que C-1 resolvió.
+- ADR-226 §5 fija que C-2 se revierte si no baja el pico caliente de P2. **Esa
+  condición se cumple en este banco.** Falta confirmar en Windows, y la decisión
+  de revertir es del mantenedor.
+
+**Lo que queda del exceso caliente** con los tres cambios: la base caliente es de
+~1300 MB al importar el segundo documento, contra ~600 en frío. El OCR caliente
+pica 1910 MB, contra 1271 en frío. El heap de JS no lo explica (decenas de MB), y
+soltar el worker de NER tampoco. Es el próximo objetivo de la foto de memoria en
+el pico (MemoryInfra, por tipo de asignador y proceso).
+
 ## 7. Qué falta y quién lo hace
 
 | Qué | Quién | Necesita |
