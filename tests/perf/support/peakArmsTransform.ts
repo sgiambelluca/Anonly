@@ -14,6 +14,7 @@ import { createHash } from "node:crypto";
  * | `c1`   | sí                | no                              | no                            |
  * | `c2`   | no                | sí                              | no                            |
  * | `c4`   | no                | no                              | sí                            |
+ * | `c14`  | sí                | no                              | sí                            |
  * | `head` | sí                | sí                              | sí (el producto tal cual)     |
  *
  * Cada bloque se busca con una coincidencia exacta: si el fuente cambia, el
@@ -23,10 +24,10 @@ import { createHash } from "node:crypto";
  * (`c4r` era C-4 restringido). Desde entonces `c4` es «solo C-4». Los
  * `transform-<brazo>.json` de cada campaña registran qué se midió.
  */
-export type PeakArm = "base" | "c1" | "c2" | "c4" | "head";
+export type PeakArm = "base" | "c1" | "c2" | "c4" | "c14" | "head";
 export type PeakSourceFile = "pdf-engine" | "orchestrator" | "render-kernel";
 
-export const PEAK_ARMS: ReadonlyArray<PeakArm> = ["base", "c1", "c2", "c4", "head"];
+export const PEAK_ARMS: ReadonlyArray<PeakArm> = ["base", "c1", "c2", "c4", "c14", "head"];
 
 /** C-1, `pdf-engine/src/pdf.engine.ts` (commit 9ead600). */
 export const C1_BLOCK =
@@ -71,15 +72,15 @@ const sha256 = (value: string): string => createHash("sha256").update(value).dig
 
 export function parsePeakArm(value: string | undefined): PeakArm {
   if ((PEAK_ARMS as ReadonlyArray<string>).includes(value ?? "")) return value as PeakArm;
-  throw new Error("arnés de pico: brazo desconocido (base, c1, c2, c4 o head)");
+  throw new Error("arnés de pico: brazo desconocido (base, c1, c2, c4, c14 o head)");
 }
 
 /** Si el brazo conserva el cambio implementado de ese archivo. */
 export function armKeeps(arm: PeakArm, file: PeakSourceFile): boolean {
   if (arm === "head") return true;
-  if (file === "pdf-engine") return arm === "c1";
+  if (file === "pdf-engine") return arm === "c1" || arm === "c14";
   if (file === "orchestrator") return arm === "c2";
-  return arm === "c4";
+  return arm === "c4" || arm === "c14";
 }
 
 function blocksFor(file: PeakSourceFile): ReadonlyArray<string> {

@@ -62,12 +62,13 @@ describe("peakArmsTransform", () => {
   });
 
   it("each single-change arm keeps only its own change", () => {
-    expect(PEAK_ARMS).toEqual(["base", "c1", "c2", "c4", "head"]);
+    expect(PEAK_ARMS).toEqual(["base", "c1", "c2", "c4", "c14", "head"]);
     const keeps = (arm: (typeof PEAK_ARMS)[number]) => SOURCES.map(([file]) => armKeeps(arm, file));
     expect(keeps("base")).toEqual([false, false, false]);
     expect(keeps("c1")).toEqual([true, false, false]);
     expect(keeps("c2")).toEqual([false, true, false]);
     expect(keeps("c4")).toEqual([false, false, true]);
+    expect(keeps("c14")).toEqual([true, false, true]);
     expect(keeps("head")).toEqual([true, true, true]);
   });
 
@@ -97,7 +98,7 @@ describe("peakArmsTransform", () => {
     expect(base.transformedSha256).not.toBe(base.sourceSha256);
   });
 
-  it("parses only the five declared arms", () => {
+  it("parses only the six declared arms", () => {
     for (const arm of PEAK_ARMS) expect(parsePeakArm(arm)).toBe(arm);
     expect(() => parsePeakArm("c3")).toThrow(/brazo/);
     expect(() => parsePeakArm(undefined)).toThrow(/brazo/);
