@@ -15,7 +15,12 @@ import { createHash } from "node:crypto";
  * | `c2`   | no                | sí                              | no                            |
  * | `c4`   | no                | no                              | sí                            |
  * | `c14`  | sí                | no                              | sí                            |
+ * | `c2b`  | sí                | **movido** (ver abajo)          | sí                            |
  * | `head` | sí                | sí                              | sí (el producto tal cual)     |
+ *
+ * `c2b` es un experimento sobre `head`: quita la baja de NER de `runOcrStage` y
+ * la pone en `handlePageParsed`, para la primera página que pide OCR (unos 3 s
+ * antes, antes del transitorio de arranque del OCR).
  *
  * Cada bloque se busca con una coincidencia exacta: si el fuente cambia, el
  * build se niega en vez de medir otra cosa. **Los nombres cambiaron de
@@ -24,10 +29,10 @@ import { createHash } from "node:crypto";
  * (`c4r` era C-4 restringido). Desde entonces `c4` es «solo C-4». Los
  * `transform-<brazo>.json` de cada campaña registran qué se midió.
  */
-export type PeakArm = "base" | "c1" | "c2" | "c4" | "c14" | "head";
+export type PeakArm = "base" | "c1" | "c2" | "c4" | "c14" | "c2b" | "head";
 export type PeakSourceFile = "pdf-engine" | "orchestrator" | "render-kernel";
 
-export const PEAK_ARMS: ReadonlyArray<PeakArm> = ["base", "c1", "c2", "c4", "c14", "head"];
+export const PEAK_ARMS: ReadonlyArray<PeakArm> = ["base", "c1", "c2", "c4", "c14", "c2b", "head"];
 
 /** C-1, `pdf-engine/src/pdf.engine.ts` (commit 9ead600). */
 export const C1_BLOCK =
@@ -68,19 +73,25 @@ export const C4_RASTER_BLOCK =
   "    // `pageProxy` después (viewport y `cropRect` ya están calculados).\n" +
   "    pageProxy.cleanup();\n";
 
+/** C-2b: ancla en `src/orchestrator.ts` donde el brazo `c2b` pone la baja de NER. */
+export const C2B_ANCHOR = "  private handlePageParsed(_payload: PageParsed): void {\n";
+export const C2B_INSERTION =
+  "    // experimento C-2b (solo build del arnés): suelta NER en la primera página con OCR.\n" +
+  "    if (_payload.requiresOCR) this.engines.ner.releaseIdleWorkers();\n";
+
 const sha256 = (value: string): string => createHash("sha256").update(value).digest("hex");
 
 export function parsePeakArm(value: string | undefined): PeakArm {
   if ((PEAK_ARMS as ReadonlyArray<string>).includes(value ?? "")) return value as PeakArm;
-  throw new Error("arnés de pico: brazo desconocido (base, c1, c2, c4, c14 o head)");
+  throw new Error("arnés de pico: brazo desconocido (base, c1, c2, c4, c14, c2b o head)");
 }
 
 /** Si el brazo conserva el cambio implementado de ese archivo. */
 export function armKeeps(arm: PeakArm, file: PeakSourceFile): boolean {
   if (arm === "head") return true;
-  if (file === "pdf-engine") return arm === "c1" || arm === "c14";
+  if (file === "pdf-engine") return arm === "c1" || arm === "c14" || arm === "c2b";
   if (file === "orchestrator") return arm === "c2";
-  return arm === "c4" || arm === "c14";
+  return arm === "c4" || arm === "c14" || arm === "c2b";
 }
 
 function blocksFor(file: PeakSourceFile): ReadonlyArray<string> {
@@ -96,6 +107,11 @@ export function transformPeakSource(source: string, file: PeakSourceFile, arm: P
     if (out.split(block).length !== 2)
       throw new Error(`arnés de pico: un bloque de ${file} no aparece exactamente una vez`);
     if (!armKeeps(arm, file)) out = out.replace(block, "");
+  }
+  if (file === "orchestrator") {
+    if (out.split(C2B_ANCHOR).length !== 2)
+      throw new Error("arnés de pico: el ancla de C-2b no aparece exactamente una vez");
+    if (arm === "c2b") out = out.replace(C2B_ANCHOR, C2B_ANCHOR + C2B_INSERTION);
   }
   return out;
 }

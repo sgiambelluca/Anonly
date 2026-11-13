@@ -2277,6 +2277,7 @@ ADR-225 y ADR-226). Instrumentos opt-in, ninguno en `pnpm test:perf`:
   | `c2` | no | sí | no |
   | `c4` | no | no | sí |
   | `c14` | sí | no | sí |
+  | `c2b` | sí | movido a la primera página con OCR | sí |
   | `head` | sí | sí | sí (el producto) |
 
   `support/peakArmsBuildCli.ts` transforma `pdf.engine.ts`, `orchestrator.ts` y

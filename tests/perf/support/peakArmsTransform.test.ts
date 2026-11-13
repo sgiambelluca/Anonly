@@ -6,6 +6,8 @@ import { describe, expect, it } from "vitest";
 import {
   C1_BLOCK,
   C2_BLOCK,
+  C2B_ANCHOR,
+  C2B_INSERTION,
   C4_RASTER_BLOCK,
   C4_RENDER_BLOCK,
   PEAK_ARMS,
@@ -43,7 +45,9 @@ describe("peakArmsTransform", () => {
 
   it("the base arm removes every implemented change and nothing else", () => {
     expect(transformPeakSource(`a\n${C1_BLOCK}b\n`, "pdf-engine", "base")).toBe("a\nb\n");
-    expect(transformPeakSource(`x\n${C2_BLOCK}y\n`, "orchestrator", "base")).toBe("x\ny\n");
+    expect(transformPeakSource(`x\n${C2_BLOCK}y\n${C2B_ANCHOR}`, "orchestrator", "base")).toBe(
+      `x\ny\n${C2B_ANCHOR}`,
+    );
     expect(
       transformPeakSource(`p\n${C4_RENDER_BLOCK}q\n${C4_RASTER_BLOCK}r\n`, "render-kernel", "base"),
     ).toBe("p\nq\nr\n");
@@ -62,13 +66,14 @@ describe("peakArmsTransform", () => {
   });
 
   it("each single-change arm keeps only its own change", () => {
-    expect(PEAK_ARMS).toEqual(["base", "c1", "c2", "c4", "c14", "head"]);
+    expect(PEAK_ARMS).toEqual(["base", "c1", "c2", "c4", "c14", "c2b", "head"]);
     const keeps = (arm: (typeof PEAK_ARMS)[number]) => SOURCES.map(([file]) => armKeeps(arm, file));
     expect(keeps("base")).toEqual([false, false, false]);
     expect(keeps("c1")).toEqual([true, false, false]);
     expect(keeps("c2")).toEqual([false, true, false]);
     expect(keeps("c4")).toEqual([false, false, true]);
     expect(keeps("c14")).toEqual([true, false, true]);
+    expect(keeps("c2b")).toEqual([true, false, true]);
     expect(keeps("head")).toEqual([true, true, true]);
   });
 
@@ -80,9 +85,9 @@ describe("peakArmsTransform", () => {
 
   it("rejects a source where a block is missing or repeated", () => {
     expect(() => transformPeakSource("nada", "pdf-engine", "base")).toThrow(/exactamente una vez/);
-    expect(() => transformPeakSource(`${C2_BLOCK}${C2_BLOCK}`, "orchestrator", "head")).toThrow(
-      /exactamente una vez/,
-    );
+    expect(() =>
+      transformPeakSource(`${C2_BLOCK}${C2_BLOCK}${C2B_ANCHOR}`, "orchestrator", "head"),
+    ).toThrow(/exactamente una vez/);
     expect(() => transformPeakSource(C4_RENDER_BLOCK, "render-kernel", "head")).toThrow(
       /exactamente una vez/,
     );
@@ -98,9 +103,16 @@ describe("peakArmsTransform", () => {
     expect(base.transformedSha256).not.toBe(base.sourceSha256);
   });
 
-  it("parses only the six declared arms", () => {
+  it("parses only the seven declared arms", () => {
     for (const arm of PEAK_ARMS) expect(parsePeakArm(arm)).toBe(arm);
     expect(() => parsePeakArm("c3")).toThrow(/brazo/);
     expect(() => parsePeakArm(undefined)).toThrow(/brazo/);
+  });
+
+  it("c2b moves the NER release from runOcrStage to the first page that needs OCR", () => {
+    const out = transformPeakSource(read("orchestrator"), "orchestrator", "c2b");
+    expect(out).not.toContain(C2_BLOCK);
+    expect(out).toContain(C2B_ANCHOR + C2B_INSERTION);
+    expect(out.split("this.engines.ner.releaseIdleWorkers()")).toHaveLength(2);
   });
 });

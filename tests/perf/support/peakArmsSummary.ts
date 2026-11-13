@@ -221,7 +221,7 @@ export function summarizeCampaign(
 export function parseRunFileName(
   name: string,
 ): { round: number; arm: string; profile: string } | undefined {
-  const match = /^\d{2}-r(\d+)-(base|c1|c2|head|c3|c4|c4r|c14)-memory-(.+)-run\d+\.json$/.exec(
+  const match = /^\d{2}-r(\d+)-(base|c1|c2|head|c3|c4|c4r|c14|c2b)-memory-(.+)-run\d+\.json$/.exec(
     name,
   );
   if (match === null || match[1] === undefined || match[2] === undefined || match[3] === undefined)
