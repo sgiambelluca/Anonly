@@ -4,7 +4,12 @@
 
 - **Estado**: Aceptado por el mantenedor el 2026-10-19. Define **qué hace**
   cada cambio, no cómo se ve. El diseño lo hace el mantenedor más adelante, y cada pantalla
-  tendrá su ADR de interfaz, como ADR-168 y ADR-169.
+  tendrá su ADR de interfaz, como ADR-168 y ADR-169. **Modificado por
+  ADR-226** (§2, §3 y §4: el subnivel, el filtro por formato y el renglón
+  del formato en el tooltip valen solo para los formatos del usuario) y
+  **por ADR-229** (§5: la ayuda de atajos se abre desde Configuración; §6:
+  los selectores ofrecen «Nuevo tipo» en línea). Los ADR de interfaz son
+  ADR-227, ADR-228 y ADR-229.
 - **Fecha**: 2026-10-19.
 - **Decidido por**: el mantenedor, a propuesta del planificador.
 - **Origen**: `Roadmap_1.x.md` §4 y [`Plan_1.1.md`](../roadmap/Plan_1.1.md).

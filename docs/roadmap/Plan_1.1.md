@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=plan-1.1 | dependencias=roadmap/Roadmap_1.x.md,core/Contracts.md,core/Regex_Engine.md,core/Grouping_Engine.md,core/Orchestrator.md,architecture/03_Data_Model.md,architecture/04_Event_System.md,architecture/08_Security_Model.md,ui/UX_Guidelines.md,adr/ADR-125-La-Configuracion-Se-Toca-Antes-Del-Primer-Documento.md,adr/ADR-219-Un-Tipo-De-Entidad-Puede-Ser-Del-Usuario.md,adr/ADR-220-Un-Formato-Se-Arma-Con-Piezas-Y-Se-Recorre-En-Tiempo-Lineal.md,adr/ADR-221-Los-Formatos-Base-Salen-De-Un-Catalogo-Por-Pais.md,adr/ADR-222-Dos-Formatos-Que-Se-Pisan-Van-Al-Panel-De-Conflicto.md,adr/ADR-223-Los-Formatos-Se-Configuran-Desde-Inicio-Y-Viajan-En-Un-Archivo.md,adr/ADR-224-Lo-Que-La-1.1-Cambia-En-El-Panel-De-Entidades-Y-El-Visor.md | audiencia=humanos+IA | fase=1.1-planificacion -->
+<!-- CONTEXT: scope=plan-1.1 | dependencias=roadmap/Roadmap_1.x.md,core/Contracts.md,core/Regex_Engine.md,core/Grouping_Engine.md,core/Orchestrator.md,architecture/03_Data_Model.md,architecture/04_Event_System.md,architecture/08_Security_Model.md,ui/UX_Guidelines.md,adr/ADR-125-La-Configuracion-Se-Toca-Antes-Del-Primer-Documento.md,adr/ADR-219-Un-Tipo-De-Entidad-Puede-Ser-Del-Usuario.md,adr/ADR-220-Un-Formato-Se-Arma-Con-Piezas-Y-Se-Recorre-En-Tiempo-Lineal.md,adr/ADR-221-Los-Formatos-Base-Salen-De-Un-Catalogo-Por-Pais.md,adr/ADR-222-Dos-Formatos-Que-Se-Pisan-Van-Al-Panel-De-Conflicto.md,adr/ADR-223-Los-Formatos-Se-Configuran-Desde-Inicio-Y-Viajan-En-Un-Archivo.md,adr/ADR-224-Lo-Que-La-1.1-Cambia-En-El-Panel-De-Entidades-Y-El-Visor.md,adr/ADR-225-Un-Tipo-Del-Documento-Se-Edita-Se-Borra-Y-Se-Guarda.md,adr/ADR-226-El-Formato-Se-Nombra-Solo-Cuando-Es-Del-Usuario.md,adr/ADR-227-Los-Formatos-De-Deteccion-Se-Abren-Desde-Inicio-Y-Se-Guardan-A-Pedido.md,adr/ADR-228-El-Generador-Se-Arma-Con-Piezas-Que-Se-Arrastran.md,adr/ADR-229-La-Pantalla-De-Trabajo-En-La-1.1.md | audiencia=humanos+IA | fase=1.1-planificacion -->
 
 # 1.1 — Detección a medida del usuario: plan
 
@@ -8,6 +8,13 @@ dos sesiones (2026-10-13 en Codex y 2026-10-19 con Claude). Los seis ADR
 detalles técnicos de §4. Los contratos y los specs de motor están escritos
 (§6): la implementación puede arrancar por F0. El diseño de la interfaz lo hace el mantenedor más
 adelante, y por eso este plan no anota nada de diseño.
+
+**Estado (2026-11-16):** el mantenedor cerró el diseño de la interfaz sobre
+el lienzo «Anonly 1.1 — UI final» y aceptó cinco ADR más (ADR-225 a
+ADR-229). ADR-225 cambia el contrato; los otros cuatro son de interfaz. El
+contrato, los specs de Grouping y del Orchestrator y los tres documentos de
+`ui/` están escritos (§6). Ya no falta nada para que arranque F7 más que
+los frentes de los que depende.
 
 Reemplaza a `Plan_Funcional_1.1.md`, el borrador del 2026-10-13, que no
 llegó a commitearse.
@@ -36,7 +43,9 @@ Se suman dos cosas que no estaban en el roadmap:
 - **Tipo base**: los que trae la aplicación. No se borran.
 - **Tipo propio**: lo crea el usuario. Si se crea desde inicio, se guarda.
   Si se crea con un documento abierto, es **del documento** y se pierde al
-  cerrarlo.
+  cerrarlo, salvo que el usuario lo guarde (ADR-225 §5). En la
+  documentación, el guardado se llama **concreto** y el del documento,
+  **auxiliar**; la interfaz no usa esas palabras.
 - **Formato base**: viene en el catálogo de un país. Hay dos clases:
   - **de pura forma**, que se edita como copia;
   - **con control** (dígito verificador, lista de nombres o de meses,
@@ -115,6 +124,28 @@ Se suman dos cosas que no estaban en el roadmap:
 | Lo que sale de un formato va en un subnivel bajo su tipo; lo del modelo y lo manual, directo bajo el tipo | 10-19 | 224 §2 |
 | Cuatro filtros: formato, modo, desactivadas o con conflicto, y agregadas o editadas a mano. Discretos; el diseño, después | 10-19 | 224 §3 |
 
+### 3.8 Interfaz
+
+Decisiones del mantenedor al diseñar, sobre el lienzo «Anonly 1.1 — UI
+final».
+
+| Decisión | Fecha | ADR |
+|---|---|---|
+| El formato se nombra solo cuando es del usuario: subnivel, filtro «Tus formatos» y tooltip. El panel de conflicto es la excepción. Modifica la fila del subnivel de §3.7 | 10-20 | 226 |
+| Un tipo creado con el PDF abierto se ve aunque esté vacío, y tiene menú ⋯: editar nombre y abreviaturas, y borrar | 10-20 | 225 §1 a §4 |
+| Borrar un tipo del documento elimina sus entidades, que quedan «libres y descubiertas», con aviso y deshacer | 10-20 | 225 §4 |
+| Una banda «Nuevo tipo» arriba de la lista de entidades | 10-20 | 229 §1 |
+| La ayuda de atajos está en Configuración, no en la barra | 10-20 | 229 §8 |
+| Los formatos que no se aplicaron se avisan también en el diálogo de exportar, sin bloquear | 10-20 | 229 §7 |
+| Un tipo del documento se puede guardar para los próximos documentos. Revierte §4 punto 4 | 11-15 | 225 §5 |
+| La entrada a los formatos es la tarjeta «Detección automática» de inicio; las garantías van debajo de la zona de carga | 11-15 y 11-16 | 227 §1 |
+| En el árbol, «Nuevo tipo» es una banda punteada y «Nuevo formato» pesa más que «Editar»; se prende y apaga con casilla, no con interruptor | 11-15 | 227 §2 |
+| El árbol se guarda con un botón, con contador de cambios y confirmación al descartar | 11-16 | 227 §3 |
+| El archivo exportado se llama `formatos.anonly-formatos`, y los ejemplos de los formatos con control salen de una tabla de textos de la aplicación | 11-16 | 227 §5 y §6 |
+| El selector de país de la 1.1.1 va en «Formatos de detección» | 11-15 | 227 §7 |
+| Generador de una columna: piezas que se arrastran, prueba en un panel flotante, estado en una caja al final y confirmación antes de perder algo | 11-15 y 11-16 | 228 |
+| Los cuatro selectores de tipo ofrecen «Nuevo tipo» en línea, pidiendo solo el nombre | 11-16 | 229 §2 |
+
 ## 4. Propuestas del planificador sin objeción del mantenedor
 
 Se presentaron el 2026-10-19 como «salvo que me digas otra cosa»:
@@ -125,8 +156,9 @@ Se presentaron el 2026-10-19 como «salvo que me digas otra cosa»:
    contar espacios, separadores ni mayúsculas, y no hay agrupación por
    parecido (ADR-219 §4).
 3. Un formato agregado desde otro país conserva su control (ADR-221 §5).
-4. Un tipo del documento no se puede pasar a guardado en la 1.1 (ADR-219
-   §5).
+4. ~~Un tipo del documento no se puede pasar a guardado en la 1.1 (ADR-219
+   §5).~~ **Revertido por el mantenedor el 2026-11-15**: se puede guardar
+   desde su menú ⋯ (ADR-225 §5).
 5. El tooltip suma el nombre del formato, y la ayuda lista los atajos que ya
    existen, sin agregar nuevos (ADR-224 §4 y §5).
 
@@ -160,6 +192,11 @@ para aceptar junto con los ADR**:
 | [ADR-222](../adr/ADR-222-Dos-Formatos-Que-Se-Pisan-Van-Al-Panel-De-Conflicto.md) | Colisiones entre formatos al panel de conflicto | `Contracts.md`, `03_Data_Model.md`, Regex, Grouping |
 | [ADR-223](../adr/ADR-223-Los-Formatos-Se-Configuran-Desde-Inicio-Y-Viajan-En-Un-Archivo.md) | `DetectionConfig`, guardado, borrar, exportar e importar | `Contracts.md`, Orchestrator, `08_Security_Model.md`, app |
 | [ADR-224](../adr/ADR-224-Lo-Que-La-1.1-Cambia-En-El-Panel-De-Entidades-Y-El-Visor.md) | Búsqueda con regex afuera, subnivel por formato, filtros, tooltip, ayuda de atajos, «Custom» afuera | `03_Data_Model.md`, Grouping, app, `UX_Guidelines.md` |
+| [ADR-225](../adr/ADR-225-Un-Tipo-Del-Documento-Se-Edita-Se-Borra-Y-Se-Guarda.md) | Editar, borrar y guardar un tipo del documento; las definiciones de tipo entran al deshacer | `Contracts.md`, Grouping, Orchestrator, `08_Security_Model.md`, app |
+| [ADR-226](../adr/ADR-226-El-Formato-Se-Nombra-Solo-Cuando-Es-Del-Usuario.md) | Cuándo la interfaz nombra el formato. Modifica ADR-224 §2 a §4 | app |
+| [ADR-227](../adr/ADR-227-Los-Formatos-De-Deteccion-Se-Abren-Desde-Inicio-Y-Se-Guardan-A-Pedido.md) | Interfaz de inicio, del árbol de formatos, de los tipos guardados y de exportar e importar. Modifica ADR-168 §1 | app |
+| [ADR-228](../adr/ADR-228-El-Generador-Se-Arma-Con-Piezas-Que-Se-Arrastran.md) | Interfaz del generador | app |
+| [ADR-229](../adr/ADR-229-La-Pantalla-De-Trabajo-En-La-1.1.md) | Interfaz de la pantalla de trabajo. Modifica ADR-224 §5 y §6 | app |
 
 ## 6. Qué falta antes de implementar
 
@@ -187,10 +224,19 @@ para aceptar junto con los ADR**:
 1. **Celular y matrícula pasan a `control`**: solo se prenden y apagan. El generador no los puede expresar, así que se aplicó la regla de ADR-220 §4. Quedan cinco formatos editables: DNI, teléfono fijo y las tres patentes (`Regex_Engine.md`, «Catálogo»).
 2. **La hoja de referencia se pagina** (ADR-219 §6). Con tipos propios, sus filas ya no tienen el tope de 13 que suponía ADR-059. Render la pagina y Export agrega todas las páginas.
 
+**Hecho el 2026-11-16:**
+
+- El mantenedor cerró el diseño y aceptó ADR-225 a ADR-229.
+- Se escribió el contrato de ADR-225, en el orden de R-19:
+  - `Contracts.md` §3.5: `updateDocumentEntityType`, `removeDocumentEntityType` y la nota de los puntos de restauración;
+  - `Grouping_Engine.md` v1.19.0: casos 89 a 91 e ítem 15aj;
+  - `Orchestrator.md` v1.16.0: casos 53 y 54 e ítem 39;
+  - `08_Security_Model.md` §10.2.
+- Se escribieron los specs de interfaz: `Components.md` §13b, `UX_Guidelines.md` §11b y `React_Client.md` §3b.
+
 **Falta:**
 
 1. **El frente F6** (Chile y Uruguay, para la 1.1.1) tiene su propia aprobación de tablas antes de escribir sus filas (ADR-221 §6). Su investigación no necesita código y puede arrancar en paralelo.
-2. **Los specs de interfaz** (`ui/Components.md`, `ui/UX_Guidelines.md` y `ui/React_Client.md`) se escriben después del diseño. Este plan no los adelanta.
 
 ## 7. Frentes de implementación
 
@@ -202,12 +248,12 @@ un hito, y cada commit toca un solo módulo (R-1).
 | F0 | Cambio de contrato: `EntityTypeId`, `FormatDefinition`, `DetectionConfig`, `CountryCode`, campos nuevos en `Occurrence`, `OccurrenceRef`, `EntityGroup`, `ConflictCandidate`, `RegexFinished` y `SyntheticRequest`, los tipos de la hoja paginada, `alphanumericKey`, `maskByCharacters`, `DEFAULT_DETECTION_CONFIG` y las constantes `FORMAT_*`/`USER_TYPE_*` (`Contracts.md` §5.2 y §6) | `shared` | ADR aceptados y contratos escritos |
 | F1 | Generador: compilar, recorrido lineal, `validateFormat`, `testFormat` y `compareFormat`; retiro de `addPattern` | `regex-engine` | F0 |
 | F2 | Catálogo argentino como catálogo (sin cambio de conducta, con celular y matrícula como `control`), `detection.country`, ajustes de formatos base, referencias, emitir los dos matches de ADR-222 y `skippedFormats` | `regex-engine` | F1 |
-| F3 | Tipos propios (etiquetas, modos, máscara, clave), tipos del documento, etiquetas por país, desempate del conflicto y `formatId` del grupo | `grouping-engine` | F0 |
-| F4 | `DetectionConfig` en `createCore`, `defineDocumentEntityType`, validar el tipo del agregado manual, reexportar las funciones puras y `validateFormatsFile` | façade | F1, F3, F4b |
+| F3 | Tipos propios (etiquetas, modos, máscara, clave), tipos del documento con su edición, su borrado y su lugar en los puntos de restauración (ADR-225), etiquetas por país, desempate del conflicto y `formatId` del grupo | `grouping-engine` | F0 |
+| F4 | `DetectionConfig` en `createCore`, `defineDocumentEntityType`, `updateDocumentEntityType` y `removeDocumentEntityType` (ADR-225), validar el tipo del agregado manual, reexportar las funciones puras y `validateFormatsFile` | façade | F1, F3, F4b |
 | F4b | Hoja de referencia paginada: `renderLegendPages` en Render y varias páginas de leyenda en Export (ADR-219 §6) | `render-engine`, `export-engine` (un commit cada uno) | F0 |
 | F5 | Sintetizador por país, con Argentina idéntica | `shared` | F0 |
 | F6 (1.1.1) | Chile y Uruguay: investigación, corpus sintético, medición, tablas aprobadas, y después filas de catálogo, etiquetas y generadores. Muestra el selector de país y «agregar desde otro país» | `regex-engine`, `grouping-engine`, `shared`, `react-client` | F2, F3, F5; la investigación, de nada |
-| F7 | Aplicación: guardado, generador, exportar e importar, subnivel, filtros, tooltip, ayuda de atajos, «Nuevo tipo» y el aviso de `skippedFormats` | `react-client` | Diseño del mantenedor, F4 |
+| F7 | Aplicación: guardado, generador, exportar e importar, subnivel, filtros, tooltip, ayuda de atajos, «Nuevo tipo», tipos del documento y el aviso de `skippedFormats`. Specs: `Components.md` §13b, `UX_Guidelines.md` §11b y `React_Client.md` §3b | `react-client` | F4. El diseño está cerrado (2026-11-16) |
 | F8 | Verificación: línea de base de calidad idéntica con Argentina y sin formatos propios, E2E de punta a punta y la suite pesada de una versión menor | `tests/` | Todo lo anterior |
 
 F1, F3, F4b y F5 no dependen entre sí y pueden ir en paralelo después de F0.
@@ -220,7 +266,9 @@ tope, lleva su ADR.
 ## 8. Fuera de la 1.1
 
 - Escribir una regex a mano, en el generador o en el buscador.
-- Pasar un tipo del documento a guardado.
+- Editar o borrar un tipo guardado con un documento abierto. Guardar un
+  tipo del documento sí entra (ADR-225 §5).
+- Abrir el generador con un documento abierto.
 - Modo sintético para tipos propios (`Future_Ideas.md` §5.5 sigue abierto).
 - Cifrar los formatos guardados.
 - Plantillas de reglas reutilizables (`Future_Ideas.md` §4.2).
