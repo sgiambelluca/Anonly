@@ -1,17 +1,25 @@
-<!-- CONTEXT: scope=grouping-engine | dependencias=adr/ADR-219-Un-Tipo-De-Entidad-Puede-Ser-Del-Usuario.md,adr/ADR-221-Los-Formatos-Base-Salen-De-Un-Catalogo-Por-Pais.md,adr/ADR-222-Dos-Formatos-Que-Se-Pisan-Van-Al-Panel-De-Conflicto.md,adr/ADR-224-Lo-Que-La-1.1-Cambia-En-El-Panel-De-Entidades-Y-El-Visor.md,adr/ADR-193-Dos-Escrituras-Que-Solo-Difieren-En-Mayusculas-No-Son-Un-Empate.md,adr/ADR-214-La-Que-Pierde-Un-Conflicto-No-Se-Descarta-Si-Cubre-Mas-Texto.md,adr/ADR-191-Lo-Que-Muestra-La-Vista-Previa-Es-Lo-Que-Se-Exporta.md,core/Contracts.md,architecture/03_Data_Model.md,architecture/04_Event_System.md,adr/ADR-011-Grouping-First.md,adr/ADR-012-Replacement-Modes.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-073-Difuso-Solo-Para-Tipos-De-Texto-Libre.md,adr/ADR-074-Una-Entidad-Partida-En-Varias-Lineas.md,adr/ADR-076-La-Edicion-Manual-Del-Valor-De-Reemplazo-Gana.md,adr/ADR-094-Lo-Que-El-Detector-Duda-No-Se-Tira-En-Silencio.md,adr/ADR-116-Un-Valor-Que-El-Documento-Ya-Confirmo-No-Se-Descarta.md,adr/ADR-117-Una-Ocurrencia-Contenida-No-Aporta-Tinta.md,adr/ADR-170-Las-Vistas-Previas-De-Edicion-Las-Calcula-El-Core.md,adr/ADR-171-El-Usuario-Puede-Eliminar-Una-Entidad.md,adr/ADR-172-Deshacer-Y-Rehacer-Exactos.md,adr/ADR-173-El-Motor-Rechaza-Fusiones-Y-Divisiones-Invalidas.md,adr/ADR-174-Un-Agregado-Manual-Que-Choca-Se-Resuelve-En-El-Momento.md,adr/ADR-175-Un-Choque-Manual-No-Queda-Colgado.md,adr/ADR-176-Un-Choque-Pendiente-Bloquea-El-Export.md,adr/ADR-177-Una-Entidad-Eliminada-No-Ocupa-Lugar.md,adr/ADR-178-Lo-Contenido-Se-Oculta-Solo-Si-Su-Contenedor-Se-Elimina.md,adr/ADR-182-Distancia-Acotada-Para-Grouping.md,adr/ADR-183-Recortar-Afijos-Comunes-En-Distancia-Acotada.md,adr/ADR-184-Indice-Exacto-De-Candidatos-Para-Grouping.md | audiencia=IA-implementador | fase=3 (Hito 12.5: §13 casos 46-69 y §15 15r-15z; Hito 11: §13 casos 70-73 y §15 15aa-15ac) -->
+<!-- CONTEXT: scope=grouping-engine | dependencias=adr/ADR-225-Un-Tipo-Del-Documento-Se-Edita-Se-Borra-Y-Se-Guarda.md,adr/ADR-219-Un-Tipo-De-Entidad-Puede-Ser-Del-Usuario.md,adr/ADR-221-Los-Formatos-Base-Salen-De-Un-Catalogo-Por-Pais.md,adr/ADR-222-Dos-Formatos-Que-Se-Pisan-Van-Al-Panel-De-Conflicto.md,adr/ADR-224-Lo-Que-La-1.1-Cambia-En-El-Panel-De-Entidades-Y-El-Visor.md,adr/ADR-193-Dos-Escrituras-Que-Solo-Difieren-En-Mayusculas-No-Son-Un-Empate.md,adr/ADR-214-La-Que-Pierde-Un-Conflicto-No-Se-Descarta-Si-Cubre-Mas-Texto.md,adr/ADR-191-Lo-Que-Muestra-La-Vista-Previa-Es-Lo-Que-Se-Exporta.md,core/Contracts.md,architecture/03_Data_Model.md,architecture/04_Event_System.md,adr/ADR-011-Grouping-First.md,adr/ADR-012-Replacement-Modes.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-073-Difuso-Solo-Para-Tipos-De-Texto-Libre.md,adr/ADR-074-Una-Entidad-Partida-En-Varias-Lineas.md,adr/ADR-076-La-Edicion-Manual-Del-Valor-De-Reemplazo-Gana.md,adr/ADR-094-Lo-Que-El-Detector-Duda-No-Se-Tira-En-Silencio.md,adr/ADR-116-Un-Valor-Que-El-Documento-Ya-Confirmo-No-Se-Descarta.md,adr/ADR-117-Una-Ocurrencia-Contenida-No-Aporta-Tinta.md,adr/ADR-170-Las-Vistas-Previas-De-Edicion-Las-Calcula-El-Core.md,adr/ADR-171-El-Usuario-Puede-Eliminar-Una-Entidad.md,adr/ADR-172-Deshacer-Y-Rehacer-Exactos.md,adr/ADR-173-El-Motor-Rechaza-Fusiones-Y-Divisiones-Invalidas.md,adr/ADR-174-Un-Agregado-Manual-Que-Choca-Se-Resuelve-En-El-Momento.md,adr/ADR-175-Un-Choque-Manual-No-Queda-Colgado.md,adr/ADR-176-Un-Choque-Pendiente-Bloquea-El-Export.md,adr/ADR-177-Una-Entidad-Eliminada-No-Ocupa-Lugar.md,adr/ADR-178-Lo-Contenido-Se-Oculta-Solo-Si-Su-Contenedor-Se-Elimina.md,adr/ADR-182-Distancia-Acotada-Para-Grouping.md,adr/ADR-183-Recortar-Afijos-Comunes-En-Distancia-Acotada.md,adr/ADR-184-Indice-Exacto-De-Candidatos-Para-Grouping.md | audiencia=IA-implementador | fase=3 (Hito 12.5: §13 casos 46-69 y §15 15r-15z; Hito 11: §13 casos 70-73 y §15 15aa-15ac) -->
 # Grouping Engine — Spec de Motor
 
 > Agrupa las `Occurrence` emitidas por Regex y NER en `EntityGroup` por tipo y valor canónico. Detecta conflictos. Expone grupos a la UI (la unidad de operación). Resuelve reemplazos según `ReplacementMode` y `Rule`.
 
 **EngineId**: `grouping`
-**Versión del spec**: 1.18.0
-**Última actualización**: 2026-10-19
+**Versión del spec**: 1.19.0
+**Última actualización**: 2026-11-16
+
+> **Nota (v1.19.0, ADR-225, 2026-11-16 — un tipo del documento se edita, se borra y entra a los puntos de restauración)**:
+>
+> 1. **`updateSessionType`** reemplaza la definición de un tipo de la sesión. Recalcula el reemplazo de sus grupos y emite los eventos de siempre.
+> 2. **`removeSessionType`** borra un tipo de la sesión. Sus grupos se eliminan con las reglas de `applyGroupRemove` (ADR-171 §2), y se descartan las correcciones de tipo y las reglas que apuntaban a él.
+> 3. **Las definiciones de los tipos de la sesión entran a los puntos de restauración.** Cambia lo que decía la v1.18.0: `restoreCheckpoint` las deja como estaban en la copia.
+>
+> Ver §6, los casos 83 y 89 a 91 de §13, §14 y el ítem 15aj de §15.
 
 > **Nota (v1.18.0, ADR-219, ADR-221, ADR-222 y ADR-224, 2026-10-19 — tipos propios, etiquetas por país, desempate entre formatos y formato del grupo)**:
 >
 > 1. **Tipos propios** (ADR-219). `EntityGroup.type` pasa a `EntityTypeId`.
 >    - Los guardados llegan en `ctx.config.detection.userTypes`.
->    - Los del documento llegan por `defineSessionType`, que el Orchestrator llama desde `defineDocumentEntityType`. Viven en la sesión, sobreviven a `reopenSession` y a `restoreCheckpoint`, y mueren en `closeSession`.
+>    - Los del documento llegan por `defineSessionType`, que el Orchestrator llama desde `defineDocumentEntityType`. Viven en la sesión, sobreviven a `reopenSession` y mueren en `closeSession`. Desde la v1.19.0 entran a los puntos de restauración (ADR-225 §6): `restoreCheckpoint` ya no las deja intactas, las restaura.
 >    - La etiqueta se deriva del nombre con `userTypeLabel`. Las versiones cortas son las que escribió el usuario, o automáticas.
 >    - Modos: `placeholder`, `mask` (`maskByCharacters(canonicalValue)`) y `redact`. Un `synthetic` que llega por el modo por defecto, por una regla global o por reclasificar se resuelve como `placeholder`; pedido por patch o por regla de tipo, se rechaza.
 >    - Agrupación exacta por `alphanumericKey`, sin pase difuso.
@@ -211,7 +219,8 @@ export class GroupingEngine implements IEngine {
   previewEdit(documentId: string, request: EditPreviewRequest): EditPreview;
   // ADR-172 §1: copia estructural de la sesión completa (grupos con campos
   // internos, registros de ocurrencias, reglas, conflictos, typeCorrections,
-  // removedValues, contadores de nextIndex); hasta MAX_EDIT_CHECKPOINTS por sesión.
+  // removedValues, contadores de nextIndex y, por ADR-225 §6, las definiciones de
+  // los tipos de la sesión); hasta MAX_EDIT_CHECKPOINTS por sesión.
   createCheckpoint(documentId: string): string;
   // Reemplaza la sesión por la copia y emite la diferencia: ENTITY_GROUP_REMOVED /
   // _CREATED / _UPDATED (changes = claves que difieren), CONFLICT_DETECTED /
@@ -222,10 +231,26 @@ export class GroupingEngine implements IEngine {
   // defineDocumentEntityType. Valida con validateUserEntityType contra los tipos
   // base del país, los guardados (ctx.config.detection.userTypes) y los de la
   // sesión; inválido, repetido o sin sesión -> InvalidInputError. No emite
-  // eventos. Fuera de los puntos de restauración (ADR-172): restoreCheckpoint
-  // no lo borra. Sobrevive a reopenSession; muere en closeSession.
+  // eventos. Dentro de los puntos de restauración (ADR-225 §6): restoreCheckpoint
+  // deja las definiciones como estaban en la copia, sin emitir nada por ellas.
+  // Sobrevive a reopenSession; muere en closeSession.
   defineSessionType(documentId: string, definition: UserEntityTypeDefinition): void;
   getSessionTypes(documentId: string): ReadonlyArray<UserEntityTypeDefinition>;   // en orden de creación; sin sesión -> []
+  // ADR-225 §3: reemplaza la definición del tipo de la sesión que tiene ese id.
+  // Valida como defineSessionType, sin comparar la etiqueta contra sí mismo.
+  // En cada grupo del tipo recalcula replacementPreviews y, si el modo es
+  // placeholder y el valor no lo escribió el usuario (replacementValueUserSet),
+  // replacementValue; emite ENTITY_GROUP_UPDATED y GROUP_REPLACEMENT_CHANGED por
+  // el camino de siempre. No cambia id, indexInType ni modo. Definición inválida,
+  // etiqueta repetida, id que no es de un tipo de la sesión, o sin sesión
+  // -> InvalidInputError, sin mutar nada.
+  updateSessionType(documentId: string, definition: UserEntityTypeDefinition): Promise<void>;
+  // ADR-225 §4: borra un tipo de la sesión. Cada grupo del tipo pasa por
+  // applyGroupRemove (ENTITY_GROUP_REMOVED, CONFLICT_RESOLVED, removedValues).
+  // Después descarta la definición, las entradas de typeCorrections que apuntan
+  // a ese tipo y las reglas que lo tienen de objetivo. Id que no es de un tipo
+  // de la sesión, o sin sesión -> InvalidInputError, sin mutar nada.
+  removeSessionType(documentId: string, typeId: UserEntityTypeId): Promise<void>;
   closeSession(documentId: string): Promise<void>;
   dispose(): Promise<void>;
 }
@@ -469,7 +494,7 @@ Casos de tipos propios, país, desempate entre formatos y formato del grupo (v1.
 83. **Tipo del documento** (ADR-219 §5):
     - `defineSessionType` lo registra y `getSessionTypes` lo devuelve;
     - una etiqueta repetida lanza `InvalidInputError`, sea contra un tipo base («Teléfono» da `TELEFONO`), contra uno guardado o contra otro del documento;
-    - sobrevive a `reopenSession` y a `restoreCheckpoint`, y muere en `closeSession`.
+    - sobrevive a `reopenSession` y muere en `closeSession`. Frente a `restoreCheckpoint` vale el caso 91 (ADR-225 §6, que cambia lo que este caso decía en la v1.18.0).
 84. **Reclasificar y resolver conflictos con tipos propios**:
     - `patch.type` hacia un tipo propio guardado o del documento funciona como con un tipo base (ADR-082);
     - hacia un tipo propio desconocido se rechaza;
@@ -485,6 +510,25 @@ Casos de tipos propios, país, desempate entre formatos y formato del grupo (v1.
     - la fusión y la división lo recalculan.
 87. **Etiquetas por país** (ADR-221 §3). Con `country: "AR"`, la escalera es exactamente la tabla de siempre, y `synthesize` recibe `country: "AR"` y da el mismo valor que antes del campo.
 88. **Ocurrencia de un tipo propio desconocido**: se descarta con `warn` y no crea grupo.
+89. **Editar un tipo de la sesión** (ADR-225 §3). Con «Número de afiliado» y un grupo `[NUMERO DE AFILIADO 01]`, `updateSessionType` con el nombre «Afiliado» deja el grupo en `[AFILIADO 01]`:
+    - el grupo conserva `id`, `indexInType` y modo, y emite `ENTITY_GROUP_UPDATED` y `GROUP_REPLACEMENT_CHANGED`;
+    - un grupo en `mask` o en `redact` no cambia su `replacementValue`, pero sí `replacementPreviews.placeholder`;
+    - un grupo con `replacementValueUserSet` conserva su `replacementValue`;
+    - cambiar solo las versiones cortas cambia los niveles 1 y 2 de la escalera;
+    - una etiqueta que repite la de otro tipo, base, guardado o de la sesión, lanza `InvalidInputError` y no muta nada; la misma etiqueta que ya tenía no es una repetición;
+    - el `id` de un tipo guardado, o uno desconocido, lanza `InvalidInputError`.
+90. **Borrar un tipo de la sesión** (ADR-225 §4):
+    - cada grupo del tipo se elimina como en el caso de `applyGroupRemove`: `ENTITY_GROUP_REMOVED`, conflictos descartados con `CONFLICT_RESOLVED` y sus valores en `removedValues`;
+    - `getSessionTypes` deja de devolverlo;
+    - una ocurrencia posterior de uno de esos valores se descarta, venga de la fuente que venga, y `liftRemoval` la vuelve a admitir;
+    - las entradas de `typeCorrections` hacia ese tipo y las reglas que lo tienen de objetivo se descartan;
+    - un tipo sin grupos se borra sin emitir eventos;
+    - el `id` de un tipo guardado, o uno desconocido, lanza `InvalidInputError`.
+91. **Los tipos de la sesión en los puntos de restauración** (ADR-225 §6):
+    - un punto tomado antes de `defineSessionType`, al restaurarse, deja la sesión sin ese tipo;
+    - uno tomado antes de `updateSessionType` devuelve la definición anterior y el `replacementValue` anterior de sus grupos;
+    - uno tomado antes de `removeSessionType` devuelve el tipo y sus grupos con el mismo `id`, el mismo `indexInType` y el mismo `replacementValue`, y saca sus valores de `removedValues`;
+    - `restoreCheckpoint` no emite ningún evento por las definiciones: emite solo la diferencia de grupos y conflictos.
 
 ---
 
@@ -678,7 +722,7 @@ Casos de tipos propios, país, desempate entre formatos y formato del grupo (v1.
 | **`synthetic never reaches a user type`** | `unit.test.ts` | unit | caso 81: regla global, modo heredado y preview vacío |
 | `synthetic for a user type is rejected by patch and by type rule` | `edge.test.ts` | edge | caso 81 |
 | `user type groups by alphanumeric key, never fuzzy` | `unit.test.ts` | unit | caso 82 |
-| `document types live in the session and survive reopen and restore` | `unit.test.ts` | unit | caso 83 |
+| `document types live in the session and survive reopen` | `unit.test.ts` | unit | caso 83. Renombrado en la v1.19.0: antes terminaba en `and restore` |
 | `defineSessionType rejects a label already taken` | `edge.test.ts` | edge | caso 83: contra un base, un guardado y otro del documento |
 | `reclassify and resolve conflicts to a user type` | `unit.test.ts` | unit | caso 84 |
 | **`a user format beats a base format in a regex-regex conflict`** | `unit.test.ts` | unit | caso 85 (ADR-222 §3) |
@@ -688,6 +732,14 @@ Casos de tipos propios, país, desempate entre formatos y formato del grupo (v1.
 | `an occurrence of an unknown user type is discarded` | `edge.test.ts` | edge | caso 88 |
 | `userTypeLabel strips accents and uppercases` | `unit.test.ts` | unit | ADR-219 §2 |
 | `validateUserEntityType reports each issue code` | `unit.test.ts` | unit | ADR-219 §2 |
+| **`updateSessionType relabels the groups of the type and keeps id, index and mode`** | `unit.test.ts` | unit | caso 89 (ADR-225 §3) |
+| `updateSessionType keeps a replacement value written by the user` | `unit.test.ts` | unit | caso 89 |
+| `updateSessionType rejects a taken label and an id that is not a session type` | `edge.test.ts` | edge | caso 89: contra un base, un guardado y otro de la sesión; no muta nada |
+| **`removeSessionType removes every group of the type and suppresses its values`** | `unit.test.ts` | unit | caso 90 (ADR-225 §4) |
+| `removeSessionType drops type corrections and rules that target the type` | `unit.test.ts` | unit | caso 90 |
+| `removeSessionType rejects an id that is not a session type` | `edge.test.ts` | edge | caso 90: uno guardado y uno desconocido |
+| **`restoreCheckpoint restores session types exactly`** | `unit.test.ts` | unit | caso 91 (ADR-225 §6): tras definir, tras editar y tras borrar |
+| `updateSessionType and removeSessionType emit only existing grouping events` | `contract.test.ts` | contract | casos 89 y 90: no hay evento nuevo en el canal |
 
 Fixtures: `tests/fixtures/text-10p.pdf` con entidades conocidas que generan grupos predecibles.
 
@@ -750,12 +802,17 @@ Fixtures: `tests/fixtures/text-10p.pdf` con entidades conocidas que generan grup
     - `maskByCharacters` para `mask`.
     - `synthetic` resuelto como `placeholder` en `resolveMode`, y rechazado por patch o por regla de tipo.
     - Pase exacto por `alphanumericKey`.
-    - `defineSessionType`/`getSessionTypes`, con los tipos de la sesión fuera de los puntos de restauración.
+    - `defineSessionType`/`getSessionTypes`. Los tipos de la sesión van dentro de los puntos de restauración (ítem 15aj; la v1.18.0 decía «fuera»).
     - `userTypeLabel` y `validateUserEntityType` exportadas.
     - Casos 78 a 84 y 88.
 - [ ] 15ag. (1.1, F3 — **ADR-221** §3 y §4) **País.** Tabla de etiquetas elegida por `detection.country` (solo `AR` en la 1.1) y `country` en cada `SyntheticRequest`. Caso 87.
 - [ ] 15ah. (1.1, F3 — **ADR-222** §3) **Desempate.** Dos ocurrencias de Regex en `conflictWinnerIsNew`, y `formatId` en los candidatos. Caso 85.
 - [ ] 15ai. (1.1, F3 — **ADR-224** §2) **Formato del grupo.** `formatId` del grupo, recalculado en cada cambio de miembros o de tipo; `toOccurrenceRef` propaga `formatId`. Caso 86.
+- [ ] 15aj. (1.1, frente F3 — **ADR-225**) **Editar y borrar un tipo de la sesión.**
+    - `updateSessionType`: validar sin compararse contra sí mismo, recalcular `replacementPreviews` y, si corresponde, `replacementValue`, y emitir por `emitReplacementChangeIfNeeded`.
+    - `removeSessionType`: `applyGroupRemove` por cada grupo del tipo, y después descartar la definición, sus `typeCorrections` y sus reglas.
+    - Las definiciones de la sesión dentro de la copia de `createCheckpoint` y de la restauración de `restoreCheckpoint`.
+    - Casos 89 a 91.
 - [ ] 16. Escribir `contract.test.ts` con todos los tests contractuales.
 - [ ] 17. Escribir `unit.test.ts` con cobertura ≥ 85%.
 - [ ] 18. Escribir `edge.test.ts` con todos los casos límite.
