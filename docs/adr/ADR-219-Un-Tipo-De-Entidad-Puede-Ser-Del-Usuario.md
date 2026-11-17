@@ -3,7 +3,9 @@
 # ADR-219 — Un tipo de entidad puede ser del usuario
 
 - **Estado**: Aceptado por el mantenedor el 2026-10-19, con los detalles
-  técnicos del planificador (`Plan_1.1.md` §4).
+  técnicos del planificador (`Plan_1.1.md` §4). **Modificado por ADR-225**
+  (§5: un tipo del documento se edita, se borra y se puede guardar; sin
+  grupos igual se ve; y el deshacer sí lo alcanza).
 - **Fecha**: 2026-10-19.
 - **Decidido por**: el mantenedor (2026-10-13 y 2026-10-19), a propuesta del
   planificador en lo técnico.

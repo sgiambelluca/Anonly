@@ -357,7 +357,8 @@ cierre. [Riesgo, evidencia y condiciones de retoma](ocr/Orientacion_SV_CP_Retoma
 **Definición funcional cerrada el 2026-10-19**, en dos sesiones con el
 mantenedor (2026-10-13 y 2026-10-19). ADR-219 a ADR-224 están aceptados
 desde el 2026-10-19, y los contratos y los specs de motor ya están
-escritos. El diseño de la interfaz lo hace el mantenedor más adelante. Todo el
+escritos. **El diseño de la interfaz se cerró el 2026-11-16**, con ADR-225
+a ADR-229 aceptados y los specs de `ui/` escritos. Todo el
 detalle está en [`Plan_1.1.md`](./Plan_1.1.md).
 
 - **Generador de formatos**, en lugar de patrones regex. El usuario no
@@ -374,19 +375,22 @@ detalle está en [`Plan_1.1.md`](./Plan_1.1.md).
   documento (ADR-219).
 - **«Nuevo tipo» con el documento abierto.** Si una entidad no entra en
   ninguna categoría, el usuario crea una aparte, le pone nombre y la manda
-  ahí, al agregarla, al cambiarle el tipo o desde el panel de conflicto. Es
-  un tipo auxiliar: se pierde al cerrar el documento y no se guarda para
-  el próximo análisis. Reemplaza a «Custom», que deja de ofrecerse
-  (ADR-219 §5, ADR-224 §6).
+  ahí, al agregarla o al cambiarle el tipo. También lo puede crear vacío,
+  desde una banda arriba de la lista. Es un tipo auxiliar: se puede
+  renombrar y borrar, y se pierde al cerrar el documento salvo que el
+  usuario lo guarde para los próximos (ADR-225). Reemplaza a «Custom», que
+  deja de ofrecerse (ADR-219 §5, ADR-224 §6, ADR-229 §2).
 - **Dos formatos que se pisan van al panel de conflicto** cuando uno es
   propio (ADR-222).
 - **Exportar e importar formatos**, para que un usuario experto arme
   formatos y otros los usen (ADR-223).
-- **Filtros en el panel de entidades**: por formato, por modo, desactivadas
-  o con conflicto, y agregadas o editadas a mano (ADR-224).
+- **Filtros en el panel de entidades**: por formato del usuario, por modo,
+  desactivadas o con conflicto, y agregadas o editadas a mano (ADR-224,
+  ADR-226).
 - **Panel de ayuda de atajos de teclado**, con los atajos que ya existen.
+  Se abre desde Configuración (ADR-229 §8).
 - **Tooltips enriquecidos en el visor**: valor original, tipo, modo,
-  cantidad de apariciones y formato.
+  cantidad de apariciones y, si es del usuario, el formato (ADR-226 §4).
 
 **Decidido el 2026-10-19:** la **búsqueda con regex** en el árbol sale de la
 1.1 y del roadmap. La lupa y el buscador del panel no cambian (ADR-224 §1).
