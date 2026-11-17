@@ -348,7 +348,7 @@ Para evitar reidentificación por patrones:
 >
 > - un valor detectado, una aparición o cualquier contenido del documento;
 > - el texto de la prueba en vivo del generador (ADR-220 §3), que tampoco se loguea;
-> - un tipo creado con el documento abierto (ADR-219 §5), que muere al cerrarlo.
+> - un tipo creado con el documento abierto (ADR-219 §5), que muere al cerrarlo. **La excepción es que el usuario lo guarde** con «Guardar para los próximos documentos» (ADR-225 §5). Ahí se guarda **solo su definición**, el nombre y las versiones cortas, como la de cualquier tipo propio. Sus entidades, sus valores y sus apariciones siguen sin guardarse.
 >
 > **El riesgo residual es el texto fijo de un formato y las palabras de contexto**, que se guardan tal cual se escribieron. Lo acotan dos cosas: cada variante tiene que tener una pieza de caracteres, así que un formato no puede ser una lista de palabras (ADR-220 §1), y el generador avisa que lo que se escribe en un formato queda guardado. Se decidió no cifrarlo: son estructuras, y el cifrado queda para el glosario de la 1.4, que sí guarda valores originales.
 >
