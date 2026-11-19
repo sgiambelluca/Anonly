@@ -1,13 +1,13 @@
-<!-- CONTEXT: scope=memoria-reduccion-de-pico | dependencias=adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-154-La-Memoria-No-Se-Compra-Bajando-El-Paralelismo.md,adr/ADR-159-La-Retencion-Se-Lee-Del-Heap-No-Del-RSS.md,adr/ADR-167-El-Modelo-De-NER-Se-Libera-A-Los-15-s-De-Inactividad.md,adr/ADR-192-El-Pico-Total-De-Memoria-Tiene-Un-Techo-Medido-Por-Perfil.md,adr/ADR-218-El-Costo-De-RC-Se-Mide-Sin-Forzar-Todas-Las-Paginas.md,adr/ADR-230-El-Parseo-Suelta-Las-Imagenes-De-Cada-Pagina-Al-Leerla.md,adr/ADR-231-El-Modelo-De-NER-No-Espera-Cargado-Durante-El-OCR-Del-Documento-Siguiente.md,roadmap/rendimiento/Optimizacion_De_Rendimiento.md,roadmap/memoria/H-10_Bitacora_De_Memoria.md,roadmap/mediciones/transversal/Memoria_Final_Confianza_2026-10-11.md,tests/perf/README.md | audiencia=humanos+IA | fase=1.x -->
+<!-- CONTEXT: scope=memoria-reduccion-de-pico | dependencias=adr/ADR-146-Son-Dos-Presupuestos-De-Memoria-No-Dos-Limites.md,adr/ADR-154-La-Memoria-No-Se-Compra-Bajando-El-Paralelismo.md,adr/ADR-159-La-Retencion-Se-Lee-Del-Heap-No-Del-RSS.md,adr/ADR-167-El-Modelo-De-NER-Se-Libera-A-Los-15-s-De-Inactividad.md,adr/ADR-192-El-Pico-Total-De-Memoria-Tiene-Un-Techo-Medido-Por-Perfil.md,adr/ADR-218-El-Costo-De-RC-Se-Mide-Sin-Forzar-Todas-Las-Paginas.md,adr/ADR-230-El-Parseo-Suelta-Las-Imagenes-De-Cada-Pagina-Al-Leerla.md,adr/ADR-231-El-Modelo-De-NER-No-Espera-Cargado-Durante-El-OCR-Del-Documento-Siguiente.md,adr/ADR-232-El-Render-Suelta-Las-Imagenes-De-La-Pagina-Al-Terminar-De-Dibujarla.md,roadmap/rendimiento/Optimizacion_De_Rendimiento.md,roadmap/memoria/H-10_Bitacora_De_Memoria.md,roadmap/mediciones/transversal/Memoria_Final_Confianza_2026-10-11.md,tests/perf/README.md | audiencia=humanos+IA | fase=1.x -->
 
 # Reducción del pico de memoria — campaña en la nube, 2026-11
 
 > Pedido del mantenedor (2026-11-05): bajar el pico de memoria, cuidando que
 > nada de lo que se decida choque con trabajar varios documentos a la vez en
-> la 1.2. La campaña midió y propuso dos candidatos, cada uno con su ADR.
-> **El humano aceptó los dos el 2026-11-05** y quedaron implementados en
-> `perf/pico-memoria` (§6). Falta la medición con NER y el veredicto en
-> Windows nativo (§7).
+> la 1.2. La campaña midió y propuso tres candidatos, cada uno con su ADR
+> (ADR-230 a 232). **El humano los aceptó el 2026-11-05**, y quedaron
+> implementados en `perf/pico-memoria` (§6). La validación en Windows nativo,
+> con NER y con documentos reales, se hizo el 2026-11-19 (§6.3).
 
 ## 0. Resumen
 
@@ -49,6 +49,15 @@
     −20 MB en frío y nada en caliente, con los rangos solapados.
 - **Lo que este banco no puede decir**: nada con NER prendido, y ningún
   veredicto contra los techos de ADR-192, que se juzgan en Windows nativo.
+- **Windows nativo, con NER y documentos reales (2026-11-19, §6.3)**:
+  - el producto baja P2 caliente unos 430 MB y queda debajo de los techos de
+    ADR-192, con P1 a 1,59 GB y P2 a 2,46 GB;
+  - C-2 solo baja P2 caliente unos 460 MB en las tres rondas, al revés que en
+    Linux, y cuesta ~0,3 s en el segundo escaneo;
+  - con los documentos reales no hay regresiones, y en el escaneo real la baja
+    queda dentro del ruido;
+  - C-2b no suma nada medible sobre C-2, ni en sintético ni en el escaneo real
+    (§6.4): no se adopta.
 
 ## 1. Banco y método
 
@@ -505,17 +514,123 @@ con NER, ABBA × 3, 12/12 válidas (`.measure/peak-ab/ner-head-c2b/`):
 - Resumen del segundo escaneo con NER: 2313 MB sin cambios → ~1865–1960 con
   C-1, C-2 y C-4 → ~1716 con C-2b en lugar de C-2.
 
+### 6.3 Validación en Windows nativo, con NER y con documentos reales (2026-11-19)
+
+**Banco.** El Windows 11 del mantenedor: i5-12400 (12 CPU), 16,9 GB de RAM, nativo
+y sin otra carga, con el modelo de NER de `pnpm assets:mirror`. Los mismos brazos
+de `peakArmsTransform.ts`, ABBA × 3, sobre el renderer de `VITE_E2E=1`. Todas las
+corridas fueron válidas: 12/12 en cada campaña sintética, 24/24 y 12/12 en las
+reales. El texto de OCR y los grupos fueron idénticos entre brazos en las cuatro
+campañas. MB, medianas, y entre paréntesis mínimo y máximo.
+
+**Sintéticos, `memory.spec.ts`** (`.measure/peak-ab/win-base-head/` y `win-base-c2/`):
+
+| | `base` | candidato | por ronda |
+|---|---:|---:|---:|
+| P2 caliente, `head` | 2816 (2800–2830) | 2388 (2329–2503) | −330 / −434 / −451 |
+| P2 frío, `head` | 2090 (2001–2170) | 2086 (1975–2109) | −31 / −6 / −10 |
+| P1 caliente / frío, `head` | 1289 / 1599 | 1288 / 1586 | −12 a +15 |
+| P2 caliente, **`c2` solo** | 2794 (2720–2942) | 2351 (2311–2377) | **−449 / −477 / −462** |
+| P2 frío, `c2` solo | 2142 (2058–2233) | 2102 (2048–2182) | −47 / +16 / −65 |
+| `import → Ready`, P2 caliente, `c2` solo | 19,2 s | 19,5 s | +0,0 a +0,6 s |
+
+- **En este banco, C-2 sí baja el pico caliente de P2.** En las tres rondas baja
+  más que el ruido (~345 MB, ADR-146 §7), los rangos no se solapan y P1 no se
+  mueve. Es lo contrario de lo que dio el banco Linux (§6.1).
+  - La diferencia es plausible: acá el OCR de P2 dura menos de 15 s. El modelo
+    sigue cargado durante todo el OCR del segundo documento, y en Linux, en
+    cambio, se soltaba solo a la mitad.
+  - En `base`, el pico caliente cae entero en la fase de OCR (2794 MB); con C-2,
+    esa fase queda en 2345.
+- **Costo de tiempo**: unos 0,3 s, un 1,5 %, en el segundo escaneo, por la
+  recarga del modelo. En frío no hay costo.
+- **El producto completo (`head`) baja P2 caliente unos 430 MB.** La primera
+  ronda (−330) queda apenas debajo del ruido, y las otras dos lo superan.
+
+**Documentos reales, `real-docs.spec.ts`**: R1 es el de texto nativo y R2 el
+escaneado, y se pasan por `ANONLY_REAL_DOC_*`. El A/B usó el mismo método, con
+un runner fuera del repo que copia `run-peak-ab.sh`. Cada brazo corre R2 y R1 en
+el mismo slot.
+
+| | `base` | candidato | por ronda |
+|---|---:|---:|---:|
+| R2 caliente, `head` | 2425 (2340–2456) | 2304 (2191–2452) | −236 / −97 / +45 |
+| R2 frío, `head` | 2150 (2071–2244) | 2055 (2009–2155) | −143 / −28 / −80 |
+| R1 caliente / frío, `head` | 1357 / 1637 | 1343 / 1629 | −30 a +21 |
+| R2 caliente, `c2` solo | 2424 (2401–2488) | 2368 (2281–2496) | −84 / −2 / −79 |
+| `import → Ready`, R2 caliente | 45,5 s | 45,4 s | sin cambio |
+
+- **En R2, C-2 y el producto bajan el pico entre 50 y 120 MB, sin superar el
+  ruido.** El OCR de R2 dura bastante más de 15 s, así que el modelo ya se
+  soltaba solo durante el OCR: es el caso de §6.1.
+- **Sin regresiones con documentos reales**: R1 no se mueve, el tiempo tampoco, y
+  los grupos y el texto son idénticos.
+
+**Techos de ADR-192 sobre `head`**: `memory.spec.ts` P1 y P2, tres corridas frías
+y tres calientes.
+
+| | M2 máximo | Techo | |
+|---|---:|---:|---|
+| P1 (frío) | 1590 MB | 2,0 GB | debajo |
+| P2 (caliente) | 2456 MB | 3,0 GB | debajo |
+
+En `base`, P2 caliente llegaba a 2942 MB en este banco, a 58 MB del techo.
+
+**Lectura contra ADR-231 §5.**
+
+- La condición para que C-2 gane se cumple en Windows nativo, que es el banco
+  donde se juzgan los techos (ADR-192 §4).
+- El banco Linux lo refutó (§6.1), y con un escaneo real cuyo OCR dura más de
+  15 s el efecto queda dentro del ruido.
+- El costo de tiempo es de 0,3 s en el segundo escaneo.
+- **El mantenedor decidió mantenerlo (2026-11-19)**, por el procesamiento
+  secuencial de varios documentos de la 1.2.
+- C-2b (§6.2) se mide aparte, en §6.4.
+
+### 6.4 C-2b en Windows (2026-11-19)
+
+Mismo banco y método que §6.3, con `head` (C-2 en `runOcrStage`) como control y
+`c2b` (baja en el primer `PAGE_PARSED` con OCR) como candidato. Fueron 12/12
+corridas válidas en cada campaña, con texto de OCR y grupos idénticos
+(`.measure/peak-ab/win-head-c2b/` y `.measure/peak-real/head-c2b/`).
+
+| | `head` | `c2b` | por ronda |
+|---|---:|---:|---:|
+| P2 caliente | 2444 (2362–2471) | 2427 (2292–2451) | −29 / −39 / +15 |
+| Pico de la fase de OCR, P2 caliente | 2357 | 2307 | — |
+| P2 frío | 2048 (2028–2074) | 2045 (2006–2161) | +84 / −34 / −16 |
+| P1 caliente / frío | 1287 / 1610 | 1290 / 1604 | −46 a +36 |
+| R2 caliente | 2264 (2207–2386) | 2297 (2250–2618) | +161 / −27 / +82 |
+| R2 frío | 2034 (1986–2083) | 2053 (1954–2108) | −27 / +24 / +42 |
+| `import → Ready`, P2 caliente | 19,8 s | 19,2 s | −0,9 a +0,1 s |
+| `import → Ready`, R2 caliente | 44,2 s | 42,3 s | −2,3 a −0,5 s |
+
+- **C-2b no baja el pico sobre C-2 en este banco.** Las diferencias por ronda
+  quedan muy debajo del ruido (~345 MB) en P2 y en R2, y los rangos se solapan.
+  En R2 caliente, el máximo de `c2b` (2618 MB) es el más alto de la campaña,
+  aunque sigue debajo del techo.
+- **Es lo contrario de Linux** (§6.2: −200 a −266 MB). Allí, C-2 llegaba tarde y
+  el arranque del OCR caliente encontraba el modelo todavía cargado. En Windows,
+  con C-2, la fase de OCR caliente ya queda cerca de la fría más el residuo del
+  documento anterior, y no queda ventana que adelantar. Es una inferencia: este
+  banco no tiene la sonda de `smaps` de §6.2.
+- **Tiempo**: sin costo. Las diferencias son del orden de las del frío, donde
+  `c2b` no hace nada (en R2 frío, hasta −2,7 s), así que son ruido.
+- **Lectura**: C-2 queda como está y C-2b no se adopta. El brazo `c2b` sigue en
+  el arnés por si un banco o un documento muestran otra cosa.
+
 ## 7. Qué falta y quién lo hace
 
 | Qué | Quién | Necesita |
 |---|---|---|
-| A/B con NER prendido: `base` contra `head`, y `base` contra `c2` para aislar C-2 | el mantenedor, en Windows (o este banco si se permite `*.hf.co`) | el modelo de NER |
-| Veredicto contra los techos de ADR-192 (M2 de P1 y P2, tres corridas frías y tres calientes) | el mantenedor | Windows nativo (ADR-192 §4) |
-| Decidir si el costo de tiempo de C-2 es aceptable (recarga del modelo en el segundo escaneo) | el humano | el A/B con NER |
+| ~~A/B con NER prendido: `base` contra `head`, y `base` contra `c2` para aislar C-2~~: hecho en Linux (§6.1) y en Windows (§6.3) | — | — |
+| ~~Veredicto contra los techos de ADR-192~~: P1 y P2 debajo, en Windows (§6.3) | — | — |
+| ~~Decidir si C-2 queda o se revierte~~: el humano lo mantiene, con su costo de ~0,3 s (2026-11-19). En la 1.2 la app va a procesar varios documentos en secuencia, y el siguiente que necesite OCR no tiene por qué esperar los 15 s del modelo de NER | — | — |
+| ~~Medir C-2b (§6.2) en Windows: `head` contra `c2b`, sintético y real~~: no suma sobre C-2, no se adopta (§6.4) | — | — |
 | ~~Decidir C-4 (ADR-232) y su alcance~~: aceptado con la opción 2 (solo OCR y export) el 2026-11-05 | — | — |
 | **Pendiente a futuro, en Windows**: hilos de NER en los perfiles Alto y Ultra (subirlos, nunca bajarlos). En septiembre, 6 hilos bajaron un 30 % el tiempo de NER en R1 en el Windows del mantenedor y empeoraron en la Mac (`mediciones/ner/Hilos_NER_Medicion.md`); ADR-194 dejó los hilos en automático | el mantenedor, con el arnés portado a Windows | `tests/perf/run-ner-threads.sh` solo corre en macOS y el puerto de septiembre no se commiteó: hay que portarlo. Este banco no sirve (4 CPU y sin el modelo de NER) |
 | **Pendiente a futuro, en Windows**: repetir el empaquetado del modelo de NER con datos externos (ADR-179) con R1. En septiembre bajó la memoria WASM de NER sin superar el ruido del RSS | el mantenedor | el modelo de NER (o `*.hf.co` permitido en este banco) |
-| Validar C-1, C-2 y C-4 con los documentos reales R1 y R2 antes de mergear a `develop` (con NER prendido, `ANONLY_AB_GREP="P1 —|P2 —" tests/perf/run-peak-ab.sh` para `base` contra `head`, y `ANONLY_AB_CANDIDATE=c4` para C-4 solo) | el mantenedor, en Windows | `ANONLY_REAL_DOC_*`; los fixtures sintéticos subestiman el trabajo por página |
+| ~~Validar C-1, C-2 y C-4 con los documentos reales R1 y R2 antes de mergear a `develop`~~: sin regresiones, con NER, en Windows (§6.3). C-4 solo no se midió aparte porque `head` no mostró regresión | — | — |
 | **Pendiente a futuro**: casos peores con fixtures realistas. Fixtures sintéticos con densidad de palabras por hoja parecida a la de un documento real (unas 300 palabras por página contra 20 en P2, `mediciones/transversal/Ciclos_Y_Documentos_Reales_Medicion.md` §2.1), y PDFs pesados (ADR-180) para medir C-4 en el render completo y el export | el planificador, cuando el mantenedor consiga documentos reales o se acuerde la densidad | decisión del mantenedor sobre la densidad objetivo |
 
 **Por qué este banco no midió con NER.** `huggingface.co` quedó permitido, y

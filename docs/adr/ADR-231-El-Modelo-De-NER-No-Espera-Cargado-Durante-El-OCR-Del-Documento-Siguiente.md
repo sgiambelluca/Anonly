@@ -5,8 +5,16 @@
 - **Estado**: **Accepted** por el humano el 2026-11-05 e implementado en
   `perf/pico-memoria`. **Refutado en el banco Linux con NER (2026-11-13)**: no
   baja el pico caliente de P2, ni solo ni en combinación
-  (`Reduccion_De_Pico_Nube_2026-11.md` §6.1). Por la condición de §5 corresponde
-  revertirlo; falta la confirmación en Windows y la decisión del humano.
+  (`Reduccion_De_Pico_Nube_2026-11.md` §6.1). Allí, por la condición de §5,
+  correspondía revertirlo. **En Windows nativo con NER (2026-11-19) sí lo baja**: P2 caliente
+  −449 / −477 / −462 MB por ronda contra `base`, más que el ruido, con P1 quieto y
+  ~0,3 s más en el segundo escaneo. Con un escaneo real (R2) baja entre 2 y 84 MB,
+  dentro del ruido (`Reduccion_De_Pico_Nube_2026-11.md` §6.3). **El humano lo
+  mantiene (2026-11-19)**, porque en la 1.2 la app va a procesar varios
+  documentos en secuencia, y el siguiente que necesite OCR no tiene por qué
+  esperar los 15 s del modelo de NER del anterior. La variante C-2b, que suelta
+  el modelo en la primera página con OCR, no baja más el pico en Windows, así
+  que no se adopta (informe, §6.4).
 - **Fecha**: 2026-11-05
 - **Propuesto por**: el planificador, en la campaña de reducción de pico
   ([`Reduccion_De_Pico_Nube_2026-11.md`](../roadmap/memoria/Reduccion_De_Pico_Nube_2026-11.md),
