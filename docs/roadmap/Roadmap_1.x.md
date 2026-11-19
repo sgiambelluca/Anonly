@@ -459,6 +459,15 @@ decisión, como «Novedades» en la 1.0.2 (§2ter).
 - WebGPU: la medición de hilos de NER dio resultados opuestos en macOS y en
   Windows (`mediciones/ner/Hilos_NER_Medicion.md`). La de WebGPU también
   puede depender del equipo, y tocaría los perfiles.
+- **C-2b, posible optimización de la cola.** Con la cola, el documento
+  siguiente arranca con el modelo de NER del anterior cargado: es el caso
+  caliente. C-2 (ADR-231) suelta el modelo al empezar el OCR. La variante C-2b
+  lo suelta antes, en la primera página que pide OCR.
+  - En Linux bajó el pico caliente entre 200 y 266 MB más que C-2. En Windows
+    no sumó nada medible.
+  - Por eso no se adoptó
+    (`memoria/Reduccion_De_Pico_Nube_2026-11.md` §6.2 y §6.4).
+  - Se vuelve a medir con la cola real, sobre el brazo `c2b` del arnés de pico.
 
 ## 6. 1.3 — Otros formatos
 
