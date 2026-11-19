@@ -90,7 +90,7 @@ se declara no medible, no se inventa.
 del fuente en memoria verificada por coincidencia exacta (mismo método que
 ADR-218). `packages/` y `apps/` no se modifican. La campaña de C-1 de este
 informe, anterior a implementarlo, usó la primera versión del arnés
-(`run-parse-cleanup.sh`, commit `36e92e3`): el brazo B **agregaba** el cleanup,
+(`run-parse-cleanup.sh`): el brazo B **agregaba** el cleanup,
 solo en el bundle del worker de parseo. Desde que C-1 y C-2 están implementados,
 el arnés es `tests/perf/run-peak-ab.sh`, que arma los brazos `base`, `c1`, `c2`
 y `head` **quitando** los cambios (`tests/perf/README.md`). El runner copia el brazo que toca a `apps/react-client/dist` antes de cada corrida, en
@@ -369,16 +369,16 @@ El humano aceptó ADR-230 y ADR-231 el 2026-11-05. Están implementados en
 `perf/pico-memoria`, un commit por módulo, con los tests de §14 de cada spec
 y el revisor en APPROVED:
 
-| Commit | Módulo | Qué |
-|---|---|---|
-| `e2e7634` | docs | ADR aceptados; PDF Engine v1.21.0, NER Engine v1.13.0, Orchestrator v1.16.0 |
-| `e8f7443` | tests | `cleanup` en los dobles de `PDFPageProxy` de integración y cancelación |
-| `9ead600` | pdf-engine | C-1: `pageProxy.cleanup()` al recibir el operator list |
-| `7c8a571` | ner-engine | C-2: `NerEngine.releaseIdleWorkers()` con guarda de trabajo en curso |
-| `f5ac19a` | façade | C-2: `runOcrStage` da de baja el pool ocioso de NER antes del OCR |
-| `a849279` | ner-engine | el test de contrato exige el puerto con el compilador (rechazo de la primera revisión) |
-| `0326120` | docs | ADR-232 aceptado con la opción 2; Render Engine v1.21.0 |
-| `61fa7c4` | render-engine | C-4: `pageProxy.cleanup()` después de rasterizar para el OCR y de los renders `full` |
+| Módulo | Qué |
+|---|---|
+| docs | ADR aceptados; PDF Engine v1.21.0, NER Engine v1.13.0, Orchestrator v1.16.0, que pasó a v1.17.0 al integrarse a develop |
+| tests | `cleanup` en los dobles de `PDFPageProxy` de integración y cancelación |
+| pdf-engine | C-1: `pageProxy.cleanup()` al recibir el operator list |
+| ner-engine | C-2: `NerEngine.releaseIdleWorkers()` con guarda de trabajo en curso |
+| façade | C-2: `runOcrStage` da de baja el pool ocioso de NER antes del OCR |
+| ner-engine | el test de contrato exige el puerto con el compilador (rechazo de la primera revisión) |
+| docs | ADR-232 aceptado con la opción 2; Render Engine v1.21.0 |
+| render-engine | C-4: `pageProxy.cleanup()` después de rasterizar para el OCR y de los renders `full` |
 
 El caso 2 de §13 de `core/PDF_Engine.md` quedó corregido con la v1.21.0.
 
@@ -405,7 +405,7 @@ tal como quedó implementado. MB, medianas, y entre paréntesis mínimo y máxim
   en frío y +8 en caliente acá, −13 y −54 en la campaña de §4.1. Es ruido entre
   corridas, no retención nueva (criterio 1).
 
-**C-4 implementado y validado** (`61fa7c4`, revisor APPROVED): `base` contra `c4`
+**C-4 implementado y validado** (revisor APPROVED): `base` contra `c4`
 (solo C-4, como quedó en el producto), P2 a 144 dpi sin NER, ABBA × 3, 12/12
 válidas (`.measure/peak-ab/impl-c4-144-base-c4/`). Pico frío 1412 → 1055 MB
 (−342 / −353 / −365 por ronda), caliente 1422 → 1120 MB (−329 / −321 / −286);
