@@ -24,8 +24,8 @@ import { createHash } from "node:crypto";
  *
  * Cada bloque se busca con una coincidencia exacta: si el fuente cambia, el
  * build se niega en vez de medir otra cosa. **Los nombres cambiaron de
- * significado** al implementar C-4: en la versión del arnés del commit
- * `8e8e2e4`, `c3`, `c4` y `c4r` **agregaban** candidatos sobre `head`
+ * significado** al implementar C-4: en la versión del arnés anterior a C-4,
+ * `c3`, `c4` y `c4r` **agregaban** candidatos sobre `head`
  * (`c4r` era C-4 restringido). Desde entonces `c4` es «solo C-4». Los
  * `transform-<brazo>.json` de cada campaña registran qué se midió.
  */
@@ -34,7 +34,7 @@ export type PeakSourceFile = "pdf-engine" | "orchestrator" | "render-kernel";
 
 export const PEAK_ARMS: ReadonlyArray<PeakArm> = ["base", "c1", "c2", "c4", "c14", "c2b", "head"];
 
-/** C-1, `pdf-engine/src/pdf.engine.ts` (commit 9ead600). */
+/** C-1, `pdf-engine/src/pdf.engine.ts` (ADR-230). */
 export const C1_BLOCK =
   "    // ADR-230: pdf.js decodifica las imágenes de la página para armar el\n" +
   "    // operator list y las deja en `pageProxy.objs`; `PDFDocumentProxy` retiene\n" +
@@ -44,7 +44,7 @@ export const C1_BLOCK =
   "    // el camino de fallo: no hace falta el cleanup.\n" +
   "    pageProxy.cleanup();\n";
 
-/** C-2, `src/orchestrator.ts` (commit f5ac19a). */
+/** C-2, `src/orchestrator.ts` (ADR-231). */
 export const C2_BLOCK =
   "      // ADR-231: en caliente, el modelo de NER del documento anterior sigue\n" +
   "      // residente (ADR-167: 15 s de inactividad) y el OCR de este documento\n" +

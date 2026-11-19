@@ -2292,7 +2292,7 @@ ADR-230 y ADR-231). Instrumentos opt-in, ninguno en `pnpm test:perf`:
   (default `tests/perf/memory.spec.ts`), `ANONLY_AB_GREP` (default `"P2 —"`),
   `ANONLY_AB_OUT`. En Linux sin pantalla usa `xvfb-run`. **Los nombres de los
   brazos cambiaron de significado** al implementar C-4: en la versión del arnés
-  del commit `8e8e2e4`, `c3`, `c4` y `c4r` **agregaban** candidatos sobre
+  anterior a C-4, `c3`, `c4` y `c4r` **agregaban** candidatos sobre
   `head` (`c4r` era C-4 restringido a OCR y export, el que se adoptó). Desde
   entonces `c4` es «solo C-4». Los `transform-<brazo>.json` de cada campaña
   registran qué se midió.
@@ -2315,5 +2315,5 @@ pnpm exec tsx tests/perf/support/summarizePeakArmsCli.ts .measure/peak-ab/<carpe
 
 La primera campaña de C-1 (antes de implementarlo) usó una versión anterior de
 este arnés, `run-parse-cleanup.sh` con brazos A/B que **agregaban** el cleanup
-en el build (commit `36e92e3`); sus crudos están en `.measure/c1-parse-cleanup/`.
+en el build; sus crudos están en `.measure/c1-parse-cleanup/`.
 No correr otra medición ni gates pesados en paralelo.
