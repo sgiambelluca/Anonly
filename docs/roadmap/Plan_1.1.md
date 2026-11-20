@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=plan-1.1 | dependencias=roadmap/Roadmap_1.x.md,core/Contracts.md,core/Regex_Engine.md,core/Grouping_Engine.md,core/Orchestrator.md,architecture/03_Data_Model.md,architecture/04_Event_System.md,architecture/08_Security_Model.md,ui/UX_Guidelines.md,adr/ADR-125-La-Configuracion-Se-Toca-Antes-Del-Primer-Documento.md,adr/ADR-219-Un-Tipo-De-Entidad-Puede-Ser-Del-Usuario.md,adr/ADR-220-Un-Formato-Se-Arma-Con-Piezas-Y-Se-Recorre-En-Tiempo-Lineal.md,adr/ADR-221-Los-Formatos-Base-Salen-De-Un-Catalogo-Por-Pais.md,adr/ADR-222-Dos-Formatos-Que-Se-Pisan-Van-Al-Panel-De-Conflicto.md,adr/ADR-223-Los-Formatos-Se-Configuran-Desde-Inicio-Y-Viajan-En-Un-Archivo.md,adr/ADR-224-Lo-Que-La-1.1-Cambia-En-El-Panel-De-Entidades-Y-El-Visor.md,adr/ADR-225-Un-Tipo-Del-Documento-Se-Edita-Se-Borra-Y-Se-Guarda.md,adr/ADR-226-El-Formato-Se-Nombra-Solo-Cuando-Es-Del-Usuario.md,adr/ADR-227-Los-Formatos-De-Deteccion-Se-Abren-Desde-Inicio-Y-Se-Guardan-A-Pedido.md,adr/ADR-228-El-Generador-Se-Arma-Con-Piezas-Que-Se-Arrastran.md,adr/ADR-229-La-Pantalla-De-Trabajo-En-La-1.1.md | audiencia=humanos+IA | fase=1.1-planificacion -->
+<!-- CONTEXT: scope=plan-1.1 | dependencias=roadmap/Roadmap_1.x.md,core/Contracts.md,core/Regex_Engine.md,core/Grouping_Engine.md,core/Orchestrator.md,architecture/03_Data_Model.md,architecture/04_Event_System.md,architecture/08_Security_Model.md,ui/UX_Guidelines.md,adr/ADR-124-La-Unidad-De-Alcance-Es-El-Commit-No-El-PR.md,adr/ADR-125-La-Configuracion-Se-Toca-Antes-Del-Primer-Documento.md,adr/ADR-219-Un-Tipo-De-Entidad-Puede-Ser-Del-Usuario.md,adr/ADR-220-Un-Formato-Se-Arma-Con-Piezas-Y-Se-Recorre-En-Tiempo-Lineal.md,adr/ADR-221-Los-Formatos-Base-Salen-De-Un-Catalogo-Por-Pais.md,adr/ADR-222-Dos-Formatos-Que-Se-Pisan-Van-Al-Panel-De-Conflicto.md,adr/ADR-223-Los-Formatos-Se-Configuran-Desde-Inicio-Y-Viajan-En-Un-Archivo.md,adr/ADR-224-Lo-Que-La-1.1-Cambia-En-El-Panel-De-Entidades-Y-El-Visor.md,adr/ADR-225-Un-Tipo-Del-Documento-Se-Edita-Se-Borra-Y-Se-Guarda.md,adr/ADR-226-El-Formato-Se-Nombra-Solo-Cuando-Es-Del-Usuario.md,adr/ADR-227-Los-Formatos-De-Deteccion-Se-Abren-Desde-Inicio-Y-Se-Guardan-A-Pedido.md,adr/ADR-228-El-Generador-Se-Arma-Con-Piezas-Que-Se-Arrastran.md,adr/ADR-229-La-Pantalla-De-Trabajo-En-La-1.1.md | audiencia=humanos+IA | fase=1.1-planificacion -->
 
 # 1.1 — Detección a medida del usuario: plan
 
@@ -245,18 +245,44 @@ un hito, y cada commit toca un solo módulo (R-1).
 
 | Frente | Qué | Módulo | Depende de |
 |---|---|---|---|
-| F0 | Cambio de contrato: `EntityTypeId`, `FormatDefinition`, `DetectionConfig`, `CountryCode`, campos nuevos en `Occurrence`, `OccurrenceRef`, `EntityGroup`, `ConflictCandidate`, `RegexFinished` y `SyntheticRequest`, los tipos de la hoja paginada, `alphanumericKey`, `maskByCharacters`, `DEFAULT_DETECTION_CONFIG` y las constantes `FORMAT_*`/`USER_TYPE_*` (`Contracts.md` §5.2 y §6) | `shared` | ADR aceptados y contratos escritos |
-| F1 | Generador: compilar, recorrido lineal, `validateFormat`, `testFormat` y `compareFormat`; retiro de `addPattern` | `regex-engine` | F0 |
-| F2 | Catálogo argentino como catálogo (sin cambio de conducta, con celular y matrícula como `control`), `detection.country`, ajustes de formatos base, referencias, emitir los dos matches de ADR-222 y `skippedFormats` | `regex-engine` | F1 |
+| F0 | Cambio de contrato: `EntityTypeId`, `FormatDefinition`, `DetectionConfig`, `CountryCode`, campos nuevos en `Occurrence`, `OccurrenceRef`, `EntityGroup`, `ConflictCandidate`, `RegexFinished` y `SyntheticRequest`, `EngineConfig.detection`, `isUserEntityType`, `alphanumericKey`, `maskByCharacters`, `DEFAULT_DETECTION_CONFIG` y las constantes `FORMAT_*`/`USER_TYPE_*` (`Contracts.md` §3.1, §5.2, §6 y §8). Los tipos de la hoja paginada pasan a F4b. Cómo se adaptan los consumidores: abajo | `shared`, con la adaptación de sus consumidores (ADR-124 §1) | ADR aceptados y contratos escritos |
+| F1 | Generador: compilar, recorrido lineal, `validateFormat`, `testFormat` y `compareFormat`; retiro de `addPattern`. Desde el 2026-11-20 también lleva el catálogo argentino como dato (`BASE_CATALOG` y `getCatalog`, con celular y matrícula como `control`) y el cableado mínimo: los formatos propios prendidos corren después de los base (`Regex_Engine.md` v2.0.1, §15 ítem 25) | `regex-engine` | F0 |
+| F2 | Qué formatos base corren (`detection.baseFormats` y copias editadas), `detection.country`, ajustes de formatos base, referencias, `formatId` de los base, emitir los dos matches de ADR-222 y `skippedFormats` (§15 ítems 26 a 28) | `regex-engine` | F1 |
 | F3 | Tipos propios (etiquetas, modos, máscara, clave), tipos del documento con su edición, su borrado y su lugar en los puntos de restauración (ADR-225), etiquetas por país, desempate del conflicto y `formatId` del grupo | `grouping-engine` | F0 |
 | F4 | `DetectionConfig` en `createCore`, `defineDocumentEntityType`, `updateDocumentEntityType` y `removeDocumentEntityType` (ADR-225), validar el tipo del agregado manual, reexportar las funciones puras y `validateFormatsFile` | façade | F1, F3, F4b |
-| F4b | Hoja de referencia paginada: `renderLegendPages` en Render y varias páginas de leyenda en Export (ADR-219 §6) | `render-engine`, `export-engine` (un commit cada uno) | F0 |
+| F4b | Hoja de referencia paginada: los tipos (`RenderLegendPayload.startRow`, `RenderLegendPageResult`, `ExportSavePayload.legendImages`), `renderLegendPages` en Render y varias páginas de leyenda en Export (ADR-219 §6) | `shared` (contrato), `render-engine`, `export-engine` (un commit cada uno) | F0 |
 | F5 | Sintetizador por país, con Argentina idéntica | `shared` | F0 |
 | F6 (1.1.1) | Chile y Uruguay: investigación, corpus sintético, medición, tablas aprobadas, y después filas de catálogo, etiquetas y generadores. Muestra el selector de país y «agregar desde otro país» | `regex-engine`, `grouping-engine`, `shared`, `react-client` | F2, F3, F5; la investigación, de nada |
 | F7 | Aplicación: guardado, generador, exportar e importar, subnivel, filtros, tooltip, ayuda de atajos, «Nuevo tipo», tipos del documento y el aviso de `skippedFormats`. Specs: `Components.md` §13b, `UX_Guidelines.md` §11b y `React_Client.md` §3b | `react-client` | F4. El diseño está cerrado (2026-11-16) |
 | F8 | Verificación: línea de base de calidad idéntica con Argentina y sin formatos propios, E2E de punta a punta y la suite pesada de una versión menor | `tests/` | Todo lo anterior |
 
 F1, F3, F4b y F5 no dependen entre sí y pueden ir en paralelo después de F0.
+
+**Cómo F0 adapta a sus consumidores** (decisión del mantenedor, 2026-11-19).
+F0 es el commit de contrato de ADR-219, y ADR-124 §1 le pide el cambio de
+tipo más la adaptación mecánica de sus consumidores, sin conducta nueva. Al
+auditarlo se midió el ensanche a `EntityTypeId` de los campos que ya
+existían: da unos 72 errores de typecheck en unos 30 archivos de grouping,
+export, el façade, la aplicación y `tests/`. Casi todos son tablas indexadas
+por `EntityType`, y resolver ahí un tipo propio es conducta de F3, F4, F4b y
+F7.
+
+- **Lo que se adapta de forma mecánica** sigue así:
+  - `EngineConfig.detection` lleva `DEFAULT_DETECTION_CONFIG` donde se arma
+    una `EngineConfig` (precedente: el commit de ADR-167);
+  - `SyntheticRequest.country` lleva el país donde se llama a `synthesize`.
+- **Donde un `EntityTypeId` llega a código tipado con `EntityType`**, va una
+  guarda provisional.
+  - Es un helper privado del módulo que estrecha con `isUserEntityType` y,
+    ante un tipo propio, tira un error interno: `InvalidInputError` en el
+    Core y `Error` en la aplicación.
+  - Hoy es inalcanzable: nada produce un tipo propio hasta que F4 y F7 dejen
+    entrar `DetectionConfig` y «Nuevo tipo».
+  - Cada frente (F3, F4, F4b y F7) reemplaza las guardas de su módulo por la
+    resolución de su spec, y la 1.1 no sale con ninguna. Las guardas no
+    llevan tests: su rama se prueba con el reemplazo.
+- **Los tipos de la hoja paginada pasan a F4b.** Sus dos consumidores son
+  render y export, y adaptarlos es justo la paginación.
 
 **Una medición pendiente.** No hay tope para la cantidad de formatos propios
 prendidos. Cada uno suma un recorrido lineal por página, así que F1 mide el
