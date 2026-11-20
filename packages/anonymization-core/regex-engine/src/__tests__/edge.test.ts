@@ -9,10 +9,12 @@ import {
   type EntityFound,
   type EntityTypeId,
   type FormatDefinition,
+  type RegexFinished,
 } from "@anonly/shared";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 import { compileFormat, scanFormat } from "../formats/format-automaton.js";
+import type * as formatDetect from "../formats/format-detect.js";
 import { testFormat } from "../formats/format-validation.js";
 import { RegexEngine } from "../regex.engine.js";
 import { RegexInvalidPatternError } from "../regex.errors.js";
@@ -38,6 +40,35 @@ import {
   makeSourcedPage,
   processPage,
 } from "./fixtures/test-helpers.js";
+
+/*
+ * Caso 48: el recorrido de un formato del generador deja pasar a la función
+ * real y lanza solo cuando el test lo pide (una vez por página que lleva la
+ * marca), sin una costura en el código de producción.
+ */
+const detectFault = vi.hoisted(() => ({
+  marker: null as string | null,
+  thrown: new Set<string>(),
+}));
+vi.mock("../formats/format-detect.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof formatDetect>();
+  return {
+    ...actual,
+    detectFormatSpans: (...args: Parameters<typeof actual.detectFormatSpans>) => {
+      const [, text] = args;
+      // Lanza una sola vez por página: solo el primer formato que la recorre.
+      if (
+        detectFault.marker !== null &&
+        text.includes(detectFault.marker) &&
+        !detectFault.thrown.has(text)
+      ) {
+        detectFault.thrown.add(text);
+        throw new RangeError(`fallo sobre el texto: ${text}`);
+      }
+      return actual.detectFormatSpans(...args);
+    },
+  };
+});
 
 describe("RegexEngine — edge case tests", () => {
   let engine: RegexEngine;
@@ -830,6 +861,20 @@ describe("RegexEngine — edge case tests", () => {
       const occurrences = await processPage(failing, formatCtx, makePage(0, ["ABC", "12345"]));
       expect(occurrences.map((o) => [o.value, o.formatId])).toEqual([["12345", valid.id]]);
 
+      // Los dos descartes figuran en skippedFormats con todas las páginas, en el
+      // orden de la configuración (ADR-220 §6).
+      const emitSpy = vi.spyOn(formatCtx.bus, "emit");
+      emitSpy.mockClear();
+      const pages = [makePage(0, ["ABC", "12345"]), makePage(1, ["12345"]), makePage(2, ["ABC"])];
+      await failing.process({ document: makeDocument("doc-47", pages) }, formatCtx);
+      const finished = emitSpy.mock.calls.find(
+        ([, event]) => event === EngineEvents.REGEX_FINISHED,
+      )?.[2] as RegexFinished | undefined;
+      expect(finished?.skippedFormats).toEqual([
+        { formatId: withoutChars.id, pageIndices: [0, 1, 2] },
+        { formatId: unknownType.id, pageIndices: [0, 1, 2] },
+      ]);
+
       // El error que se reporta es el de ADR-220 §6.
       const error = new RegexInvalidPatternError(withoutChars.id, "variant_without_chars");
       expect(error.code).toBe(EngineErrorCode.REGEX_INVALID_PATTERN);
@@ -889,6 +934,141 @@ describe("RegexEngine — edge case tests", () => {
       expect(await values(contextual, "Micuenta: 12345")).toEqual([]);
       expect(await values(contextual, "Cuenta; 12345")).toEqual([]);
       expect(await values(contextual, "12345")).toEqual([]);
+    });
+  });
+
+  // ─── 1.1, F2: catálogo, referencias y fallos (ADR-220 §6, ADR-221 §7) ───
+
+  describe("Formatos salteados y REGEX_FINISHED.skippedFormats", () => {
+    /** Corre `process` y devuelve el payload de `REGEX_FINISHED` y las ocurrencias. */
+    const runDocument = async (
+      detection: Parameters<typeof createDetectionContext>[0],
+      pages: ReadonlyArray<ReadonlyArray<string>>,
+    ) => {
+      const runEngine = new RegexEngine();
+      const runCtx = createDetectionContext(detection);
+      const warnSpy = vi.spyOn(runCtx.logger, "warn");
+      const emitSpy = vi.spyOn(runCtx.bus, "emit");
+      await runEngine.init(runCtx);
+      await runEngine.process(
+        {
+          document: makeDocument(
+            "doc-skipped",
+            pages.map((tokens, i) => makePage(i, tokens)),
+          ),
+        },
+        runCtx,
+      );
+      await runEngine.dispose();
+      const finished = emitSpy.mock.calls
+        .filter(([, event]) => event === EngineEvents.REGEX_FINISHED)
+        .map(([, , payload]) => payload as RegexFinished);
+      const occurrences = emitSpy.mock.calls
+        .filter(([, event]) => event === EngineEvents.ENTITY_FOUND)
+        .map(([, , payload]) => (payload as EntityFound).occurrence);
+      return { finished: finished[0], occurrences, warnSpy };
+    };
+
+    afterEach(() => {
+      detectFault.marker = null;
+      detectFault.thrown.clear();
+    });
+
+    // Caso 39: la copia rota se descarta y el original corre.
+    it("an invalid edited copy does not replace its base format", async () => {
+      const brokenCopy = makeFormat(1, EntityType.DNI, [fixedText("DNI")], { basedOn: "dni-ar" });
+      const { finished, occurrences, warnSpy } = await runDocument({ userFormats: [brokenCopy] }, [
+        ["DNI", "34.567.891"],
+        ["sin", "datos"],
+      ]);
+      expect(occurrences.map((o) => [o.value, o.formatId, o.formatOrigin])).toEqual([
+        ["34.567.891", "dni-ar", "base"],
+      ]);
+      expect(finished?.skippedFormats).toEqual([{ formatId: brokenCopy.id, pageIndices: [0, 1] }]);
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          code: EngineErrorCode.REGEX_INVALID_PATTERN,
+          formatId: brokenCopy.id,
+        }),
+      );
+    });
+
+    // Caso 48.
+    it("a user format that throws on a page is skipped on that page and reported without page text", async () => {
+      const failing = makeFormat(1, CBU_TYPE.id, [digits(5)]);
+      const healthy = makeFormat(2, LEGAJO_TYPE.id, [letters(4)]);
+      detectFault.marker = "MARCA3";
+      const pages: ReadonlyArray<ReadonlyArray<string>> = [
+        ["12345", "abcd"],
+        ["12345", "abcd"],
+        ["12345", "abcd"],
+        ["12345", "abcd", "MARCA3", "34.567.891"],
+        ["12345", "abcd"],
+      ];
+      const { finished, occurrences, warnSpy } = await runDocument(
+        { userTypes: [CBU_TYPE, LEGAJO_TYPE], userFormats: [failing, healthy] },
+        pages,
+      );
+
+      const onPage = (pageIndex: number) =>
+        occurrences.filter((o) => o.pageIndex === pageIndex).map((o) => o.formatId);
+      // Ese formato no emite en esa página; los demás sí; y sigue en las siguientes.
+      expect(onPage(3)).toEqual([healthy.id, "dni-ar"]);
+      expect(onPage(2)).toEqual([failing.id, healthy.id]);
+      expect(onPage(4)).toEqual([failing.id, healthy.id]);
+      expect(finished?.skippedFormats).toEqual([{ formatId: failing.id, pageIndices: [3] }]);
+
+      // El warn lleva el id, la página y el name del error: ni message ni stack, ni code.
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      const [, metadata] = warnSpy.mock.calls[0] ?? [];
+      expect(metadata).toEqual({ formatId: failing.id, pageIndex: 3, errorName: "RangeError" });
+      expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("MARCA3");
+      expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("fallo sobre el texto");
+    });
+
+    // Caso 51.
+    it("a catalog reference is skipped in 1.1", async () => {
+      const ref = {
+        id: "ref:7b0f6d5e-2f3a-4c1d-9a8b-0c1d2e3f4a5b",
+        country: "AR" as const,
+        catalogFormatId: "dni-ar",
+        enabled: true,
+      };
+      const off = { ...ref, id: "ref:7b0f6d5e-2f3a-4c1d-9a8b-0c1d2e3f4a5c", enabled: false };
+      const { finished, occurrences, warnSpy } = await runDocument({ catalogRefs: [ref, off] }, [
+        ["DNI", "34.567.891"],
+        ["nada"],
+      ]);
+      // El análisis sigue: el catálogo base detecta como siempre.
+      expect(occurrences.map((o) => o.formatId)).toEqual(["dni-ar"]);
+      // Solo la referencia prendida figura, con todas las páginas.
+      expect(finished?.skippedFormats).toEqual([{ formatId: ref.id, pageIndices: [0, 1] }]);
+      // El warn lleva el id de la referencia y no lleva code.
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      const [, metadata] = warnSpy.mock.calls[0] ?? [];
+      expect(metadata).toEqual({ formatId: ref.id });
+    });
+
+    it("skippedFormats lists references first, then user formats, each with ascending pages", async () => {
+      const broken = makeFormat(1, CBU_TYPE.id, [fixedText("X")]);
+      const failing = makeFormat(2, CBU_TYPE.id, [digits(5)]);
+      const ref = {
+        id: "ref:7b0f6d5e-2f3a-4c1d-9a8b-0c1d2e3f4a5b",
+        country: "AR" as const,
+        catalogFormatId: "dni-ar",
+        enabled: true,
+      };
+      detectFault.marker = "MARCA";
+      const { finished } = await runDocument(
+        { userTypes: [CBU_TYPE], userFormats: [broken, failing], catalogRefs: [ref] },
+        [["MARCA"], ["x"], ["MARCA", "y"]],
+      );
+      expect(finished?.skippedFormats).toEqual([
+        { formatId: ref.id, pageIndices: [0, 1, 2] },
+        { formatId: broken.id, pageIndices: [0, 1, 2] },
+        { formatId: failing.id, pageIndices: [0, 2] },
+      ]);
     });
   });
 });

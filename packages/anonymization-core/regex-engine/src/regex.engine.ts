@@ -28,6 +28,7 @@ import { compileFormat, type CompiledFormat } from "./formats/format-automaton.j
 import { detectFormatSpans } from "./formats/format-detect.js";
 import { validateFormat } from "./formats/format-validation.js";
 import { userFormatMaskFormat, userFormatNormalizedValue } from "./formats/format-values.js";
+import { BASE_CATALOG } from "./patterns/catalog.js";
 import { DEFAULT_PATTERNS_AR } from "./patterns/default-ar.js";
 import { RegexInvalidPatternError } from "./regex.errors.js";
 import type {
@@ -51,9 +52,9 @@ interface RawMatch {
   readonly checksumPassed: boolean;
   /** Ausente bajo un tipo propio (ADR-219 §3). */
   readonly maskFormat?: string;
-  /** ADR-222 §2: solo los formatos del generador, en F1. */
-  readonly formatId?: string;
-  readonly formatOrigin?: "base" | "user";
+  /** ADR-222 §2: el id del formato o patrón que matcheó. */
+  readonly formatId: string;
+  readonly formatOrigin: "base" | "user";
 }
 
 interface WordMapping {
@@ -149,6 +150,8 @@ function buildRawMatch(
     normalizedValue,
     checksumPassed,
     maskFormat: pattern.maskFormat,
+    formatId: pattern.id,
+    formatOrigin: "base",
   };
 }
 
@@ -273,29 +276,48 @@ function runEmailDefaultPattern(pattern: RegexPattern, page: Page): RawMatch[] {
 }
 
 /*
- * Caso 10: overlap entre dos patrones (DNI dentro de CUIT) → gana el match
- * más largo en el mismo span. Algoritmo genérico (no hardcodea DNI/CUIT):
- * ordena por longitud de span descendente y hace un barrido greedy que
- * descarta cualquier match que se superponga con uno ya aceptado. Ante
- * empate de longitud, gana el de menor startIndex, y como último desempate
- * el orden original (estable).
+ * Caso 10 e ADR-222: overlap entre dos matches de una página. Algoritmo
+ * genérico (no hardcodea DNI/CUIT): ordena por largo descendente, formato
+ * propio antes que base, `startIndex` ascendente y orden de la lista que corre
+ * (estable). Un match se acepta si no choca con ninguno ya aceptado, o si con
+ * cada uno de los que choca cumple `emitBoth` (`emitirAmbos` del spec). Entre
+ * dos formatos base el origen empata y `emitBoth` es falso: es la resolución
+ * de siempre.
  */
+function containsStrictly(outer: RawMatch, inner: RawMatch): boolean {
+  return (
+    outer.startIndex <= inner.startIndex &&
+    inner.endIndexExclusive <= outer.endIndexExclusive &&
+    outer.endIndexExclusive - outer.startIndex > inner.endIndexExclusive - inner.startIndex
+  );
+}
+
+function emitBoth(a: RawMatch, m: RawMatch): boolean {
+  return (
+    a.entityType !== m.entityType &&
+    !containsStrictly(a, m) &&
+    !containsStrictly(m, a) &&
+    (a.formatOrigin === "user" || m.formatOrigin === "user")
+  );
+}
+
 function resolveOverlaps(matches: ReadonlyArray<RawMatch>): RawMatch[] {
   const indexed = matches.map((m, i) => ({ m, i }));
   indexed.sort((a, b) => {
     const lenA = a.m.endIndexExclusive - a.m.startIndex;
     const lenB = b.m.endIndexExclusive - b.m.startIndex;
     if (lenA !== lenB) return lenB - lenA;
+    if (a.m.formatOrigin !== b.m.formatOrigin) return a.m.formatOrigin === "user" ? -1 : 1;
     if (a.m.startIndex !== b.m.startIndex) return a.m.startIndex - b.m.startIndex;
     return a.i - b.i;
   });
 
   const accepted: RawMatch[] = [];
   for (const { m } of indexed) {
-    const overlaps = accepted.some(
+    const clashes = accepted.filter(
       (a) => m.startIndex < a.endIndexExclusive && a.startIndex < m.endIndexExclusive,
     );
-    if (!overlaps) accepted.push(m);
+    if (clashes.every((a) => emitBoth(a, m))) accepted.push(m);
   }
 
   accepted.sort((a, b) => a.startIndex - b.startIndex);
@@ -407,11 +429,9 @@ function buildOccurrence(match: RawMatch, page: Page): Occurrence {
     // ver runPattern). De un formato del generador bajo un tipo propio queda
     // ausente (ADR-219 §3): nunca se asigna explícitamente `undefined`.
     ...(match.maskFormat !== undefined ? { maskFormat: match.maskFormat } : {}),
-    // ADR-222 §2: formatId y formatOrigin viajan juntos (los formatos base los
-    // suman en F2).
-    ...(match.formatId !== undefined && match.formatOrigin !== undefined
-      ? { formatId: match.formatId, formatOrigin: match.formatOrigin }
-      : {}),
+    // ADR-222 §2: formatId y formatOrigin viajan juntos en toda ocurrencia de process.
+    formatId: match.formatId,
+    formatOrigin: match.formatOrigin,
   };
   // exactOptionalPropertyTypes: wordSpan, fragments y context solo se incluyen
   // si existen (nunca se asigna explícitamente `undefined`).
@@ -683,9 +703,24 @@ interface CompiledUserFormat {
   readonly compiled: CompiledFormat;
 }
 
-function compileUserFormats(ctx: EngineContext): ReadonlyArray<CompiledUserFormat> {
+/** Un formato del generador prendido, en el orden de la configuración. `format: null` = descartado al init. */
+interface UserFormatEntry {
+  readonly id: string;
+  readonly basedOn: string | undefined;
+  readonly format: CompiledUserFormat | null;
+}
+
+/** La lista que corre, armada por `init` (§6, «Qué corre»). */
+interface RunPlan {
+  readonly basePatterns: ReadonlyArray<RegexPattern>;
+  /** Referencias a otros catálogos descartadas, en el orden de la configuración. */
+  readonly skippedRefIds: ReadonlyArray<string>;
+  readonly userFormats: ReadonlyArray<UserFormatEntry>;
+}
+
+function compileUserFormats(ctx: EngineContext): ReadonlyArray<UserFormatEntry> {
   const { userFormats, userTypes } = ctx.config.detection;
-  const compiled: CompiledUserFormat[] = [];
+  const entries: UserFormatEntry[] = [];
   for (const definition of userFormats) {
     if (!definition.enabled) continue;
     const { ok, issues } = validateFormat(definition, { userTypes, existingFormats: [] });
@@ -698,15 +733,56 @@ function compileUserFormats(ctx: EngineContext): ReadonlyArray<CompiledUserForma
         formatId: definition.id,
         issues: issues.map((issue) => issue.code),
       });
+      entries.push({ id: definition.id, basedOn: definition.basedOn, format: null });
       continue;
     }
-    compiled.push({
+    entries.push({
       id: definition.id,
-      entityType: definition.entityType,
-      compiled: compileFormat(definition),
+      basedOn: definition.basedOn,
+      format: {
+        id: definition.id,
+        entityType: definition.entityType,
+        compiled: compileFormat(definition),
+      },
     });
   }
-  return compiled;
+  return entries;
+}
+
+/*
+ * §6, «Qué corre»: los base del país activo y los universales, sin los
+ * apagados por `baseFormats` ni los que tienen una copia prendida y válida;
+ * las referencias (todas se descartan en la 1.1, caso 51); y los formatos del
+ * generador.
+ */
+function buildRunPlan(ctx: EngineContext): RunPlan {
+  const { country, baseFormats, catalogRefs } = ctx.config.detection;
+  const userFormats = compileUserFormats(ctx);
+
+  const replaced = new Set<string>();
+  for (const entry of userFormats) {
+    if (entry.format !== null && entry.basedOn !== undefined) replaced.add(entry.basedOn);
+  }
+  const disabled = new Set(
+    baseFormats.filter((setting) => !setting.enabled).map((setting) => setting.formatId),
+  );
+  const basePatterns = BASE_CATALOG.filter(
+    ({ info }) => info.country === country || info.country === "universal",
+  )
+    .map(({ pattern }) => pattern)
+    .filter((pattern) => !disabled.has(pattern.id) && !replaced.has(pattern.id));
+
+  const skippedRefIds: string[] = [];
+  for (const ref of catalogRefs) {
+    if (!ref.enabled) continue;
+    // En la 1.1 no hay otro catálogo (ADR-221 §7): toda referencia se descarta.
+    ctx.logger.warn("Referencia a otro catálogo descartada: no hay otro catálogo en la 1.1", {
+      formatId: ref.id,
+    });
+    skippedRefIds.push(ref.id);
+  }
+
+  return { basePatterns, skippedRefIds, userFormats };
 }
 
 /*
@@ -739,9 +815,8 @@ export class RegexEngine implements IEngine {
   readonly id = EngineId.Regex;
 
   private ctx: EngineContext | null = null;
-  private activePatterns: ReadonlyArray<RegexPattern> = DEFAULT_PATTERNS_AR;
-  /** Los formatos del generador prendidos y válidos, en el orden de la configuración (ADR-220). */
-  private userFormats: ReadonlyArray<CompiledUserFormat> = [];
+  /** La lista que corre (ADR-221, ADR-223 §2): base, referencias descartadas y formatos del generador. */
+  private plan: RunPlan = { basePatterns: DEFAULT_PATTERNS_AR, skippedRefIds: [], userFormats: [] };
   private initialized = false;
   private disposed = false;
 
@@ -755,8 +830,7 @@ export class RegexEngine implements IEngine {
    */
   init(ctx: EngineContext): Promise<void> {
     this.ctx = ctx;
-    this.activePatterns = DEFAULT_PATTERNS_AR;
-    this.userFormats = compileUserFormats(ctx);
+    this.plan = buildRunPlan(ctx);
     this.initialized = true;
     this.disposed = false;
     ctx.logger.info("Regex Engine initialized");
@@ -793,6 +867,7 @@ export class RegexEngine implements IEngine {
       }
 
       let occurrenceCount = 0;
+      const failedPages = new Map<string, number[]>();
 
       for (const page of document.pages) {
         // Caso 11 (§13): cancelación entre páginas.
@@ -806,7 +881,7 @@ export class RegexEngine implements IEngine {
         }
 
         const rawMatches: RawMatch[] = [];
-        for (const pattern of this.activePatterns) {
+        for (const pattern of this.plan.basePatterns) {
           const patternMatches =
             pattern === DEFAULT_EMAIL_PATTERN
               ? runEmailDefaultPattern(pattern, page)
@@ -815,8 +890,22 @@ export class RegexEngine implements IEngine {
         }
         // ADR-220: los formatos del generador corren después de los base, y
         // siguen el camino de cualquier match (checksum, guarda, solapamientos).
-        for (const userFormat of this.userFormats) {
-          rawMatches.push(...runUserFormat(userFormat, page.text));
+        // ADR-220 §6: un fallo del recorrido saltea el formato en esa página.
+        for (const entry of this.plan.userFormats) {
+          if (entry.format === null) continue;
+          try {
+            rawMatches.push(...runUserFormat(entry.format, page.text));
+          } catch (err: unknown) {
+            const pages = failedPages.get(entry.id) ?? [];
+            pages.push(page.index);
+            failedPages.set(entry.id, pages);
+            // Nunca el message ni el stack: pueden arrastrar texto de la página (§11).
+            ctx.logger.warn("Un formato del generador falló en una página y se salteó", {
+              formatId: entry.id,
+              pageIndex: page.index,
+              errorName: err instanceof Error ? err.name : "UnknownError",
+            });
+          }
         }
 
         // Casos 4-5 (§13): checksum inválido (CUIT, Luhn) descarta el match.
@@ -841,10 +930,12 @@ export class RegexEngine implements IEngine {
       }
 
       const durationMs = Date.now() - startedAt;
+      const skippedFormats = this.collectSkippedFormats(document.pages.length, failedPages);
       ctx.bus.emit(EventChannel.Regex, EngineEvents.REGEX_FINISHED, {
         documentId: document.id,
         occurrenceCount,
         durationMs,
+        ...(skippedFormats.length > 0 ? { skippedFormats } : {}),
       });
 
       ctx.logger.info(`Regex Engine terminó documento ${document.id}`, {
@@ -950,10 +1041,30 @@ export class RegexEngine implements IEngine {
   dispose(): Promise<void> {
     this.disposed = true;
     this.initialized = false;
-    this.activePatterns = [];
-    this.userFormats = [];
+    this.plan = { basePatterns: [], skippedRefIds: [], userFormats: [] };
     this.ctx = null;
     return Promise.resolve();
+  }
+
+  /*
+   * §6: una entrada por formato, en el orden de la lista que corre (primero las
+   * referencias, después los formatos del generador). Los descartados al init
+   * figuran con todas las páginas; los que fallaron, con esas páginas en orden.
+   */
+  private collectSkippedFormats(
+    pageCount: number,
+    failedPages: ReadonlyMap<string, ReadonlyArray<number>>,
+  ): ReadonlyArray<{ readonly formatId: string; readonly pageIndices: ReadonlyArray<number> }> {
+    const allPages = Array.from({ length: pageCount }, (_, index) => index);
+    const skipped: Array<{ formatId: string; pageIndices: ReadonlyArray<number> }> = [];
+    for (const formatId of this.plan.skippedRefIds) {
+      skipped.push({ formatId, pageIndices: allPages });
+    }
+    for (const entry of this.plan.userFormats) {
+      const pageIndices = entry.format === null ? allPages : (failedPages.get(entry.id) ?? []);
+      if (pageIndices.length > 0) skipped.push({ formatId: entry.id, pageIndices });
+    }
+    return skipped;
   }
 
   private assertInitialized(): void {
