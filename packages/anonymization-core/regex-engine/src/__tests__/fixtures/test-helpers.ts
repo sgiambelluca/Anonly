@@ -7,18 +7,25 @@
  * terceros — no hay ninguno en este archivo.
  */
 import {
+  DEFAULT_DETECTION_CONFIG,
   EngineEvents,
   EntityType,
+  type DetectionConfig,
   type Document,
   type EngineContext,
   type EntityFound,
+  type EntityTypeId,
+  type FormatDefinition,
+  type FormatPiece,
   type Occurrence,
   type Page,
+  type UserEntityTypeDefinition,
   type Word,
 } from "@anonly/shared";
+import { createEngineContext, createMockConfig } from "@anonly/test-utils";
 import { vi } from "vitest";
 
-import type { RegexEngine } from "../../regex.engine.js";
+import { RegexEngine } from "../../regex.engine.js";
 
 /*
  * ADR-129: los dobles genéricos —logger, cache, bus, `EngineContext` y los
@@ -187,4 +194,90 @@ export function makeDocument(id: string, pages: ReadonlyArray<Page>): Document {
 /** Atajo: documento de una sola página con los tokens dados. */
 export function makeSinglePageDocument(id: string, tokens: ReadonlyArray<string>): Document {
   return makeDocument(id, [makePage(0, tokens)]);
+}
+
+// ─── Formatos del generador (1.1, ADR-220) ───
+
+/** Un tipo propio de prueba. */
+export const CBU_TYPE: UserEntityTypeDefinition = {
+  id: "user:5b6f0f2e-6d0e-4c3b-8f4a-2f6a1c9d7e01",
+  name: "CBU",
+};
+
+export const LEGAJO_TYPE: UserEntityTypeDefinition = {
+  id: "user:5b6f0f2e-6d0e-4c3b-8f4a-2f6a1c9d7e02",
+  name: "Legajo",
+};
+
+/** `fmt:` + UUID v4 determinista, para que `validateFormat` lo acepte. */
+export function formatIdOf(n: number): string {
+  return `fmt:00000000-0000-4000-8000-${n.toString().padStart(12, "0")}`;
+}
+
+export const digits = (min: number, max = min): FormatPiece => ({
+  kind: "chars",
+  charClass: "digit",
+  min,
+  max,
+});
+export const letters = (min: number, max = min): FormatPiece => ({
+  kind: "chars",
+  charClass: "letter",
+  min,
+  max,
+});
+export const fixedText = (value: string): FormatPiece => ({ kind: "text", value });
+export const separator = (
+  chars: ReadonlyArray<" " | "-" | "." | "/">,
+  optional = false,
+): FormatPiece => ({ kind: "separator", chars, optional });
+export const optionalOf = (...pieces: ReadonlyArray<FormatPiece>): FormatPiece => ({
+  kind: "optional",
+  pieces,
+});
+
+/** Un `FormatDefinition` válido de una sola variante, prendido y bajo el tipo dado. */
+export function makeFormat(
+  n: number,
+  entityType: EntityTypeId,
+  pieces: ReadonlyArray<FormatPiece>,
+  overrides: Partial<FormatDefinition> = {},
+): FormatDefinition {
+  return {
+    id: formatIdOf(n),
+    name: `Formato ${n}`,
+    entityType,
+    variants: [pieces],
+    enabled: true,
+    ...overrides,
+  };
+}
+
+/**
+ * Corre `process` sobre una página con los formatos dados (más los base de
+ * siempre) y devuelve solo las ocurrencias que salieron de un formato propio.
+ * `text` se parte por espacios, como `Page.text`.
+ */
+export async function userFormatOccurrences(
+  formats: ReadonlyArray<FormatDefinition>,
+  text: string,
+  userTypes: ReadonlyArray<UserEntityTypeDefinition> = [CBU_TYPE, LEGAJO_TYPE],
+): Promise<ReadonlyArray<Occurrence>> {
+  const engine = new RegexEngine();
+  const ctx = createDetectionContext({ userTypes, userFormats: formats });
+  await engine.init(ctx);
+  const occurrences = await processPage(engine, ctx, makePage(0, text.split(" ")));
+  await engine.dispose();
+  return occurrences.filter((occurrence) => occurrence.formatOrigin === "user");
+}
+
+/** `EngineContext` con `config.detection` armada a partir de `DEFAULT_DETECTION_CONFIG`. */
+export function createDetectionContext(
+  detection: Partial<DetectionConfig>,
+  overrides?: Partial<EngineContext>,
+): EngineContext {
+  return createEngineContext({
+    config: createMockConfig({ detection: { ...DEFAULT_DETECTION_CONFIG, ...detection } }),
+    ...overrides,
+  });
 }

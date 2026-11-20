@@ -15,18 +15,20 @@ Corre en el **main thread**, sin Worker y sin pool. Es deliberado y no una deuda
 
 ## Contenido
 
-- `regex.types.ts` — `RegexPattern`, `RegexEngineConfig`, `RegexEngineInput`, `RegexEngineOutput`.
+- `regex.types.ts` — `RegexPattern`, `CatalogFormat`, `RegexEngineInput`, `RegexEngineOutput`.
 - `regex.errors.ts` — `RegexInvalidPatternError`.
 - `patterns/default-ar.ts` — `DEFAULT_PATTERNS_AR` (11 patrones AR con checksum/normalizer/maskFormat).
-- `regex.engine.ts` — clase `RegexEngine` (implementa `IEngine`): `init`, `process`, `addPattern`, `removePattern`, `dispose`.
+- `patterns/catalog.ts` — `BASE_CATALOG` y `getCatalog` (ADR-221 §2): los patrones base con su `CatalogFormatInfo`.
+- `formats/` — el generador de formatos (ADR-220): autómata de Thompson y recorrido lineal (`format-automaton.ts`), `validateFormat` y `testFormat` (`format-validation.ts`), `compareFormat` (`format-compare.ts`).
+- `regex.engine.ts` — clase `RegexEngine` (implementa `IEngine`): `init`, `process`, `findLiteral`, `searchText`, `dispose`.
 
 ## Reglas
 
 - Nunca importa otro motor ni React (spec §5 "Dependencias prohibidas"). Solo `@anonly/shared`; sin dependencias externas (usa `RegExp` nativo de JS).
 - No se suscribe al bus: solo emite `ENTITY_FOUND` (interno, solo lo escucha Grouping Engine) y `REGEX_FINISHED`.
-- `addPattern`/`removePattern` existen en la interfaz pública (contrato del motor, spec §6) pero la UI de patrones custom está fuera de alcance MVP (`docs/roadmap/MVP.md` §3).
+- Los formatos del usuario llegan por `ctx.config.detection.userFormats` (ADR-223 §2) y se compilan en `init`; `addPattern`, `removePattern` y los patrones con `RegExp` del usuario se retiraron en la v2.0.0 (ADR-220 §7).
 - Overlap entre patrones (p. ej. DNI dentro de un CUIT): gana el match más largo en el mismo span (spec §13 caso 10).
-- Patrones custom: timeout best-effort de 1000ms por página por patrón y try/catch ante regex que lanza al ejecutarse (spec §12, §13 casos 8-9). Ambos mecanismos están implementados; los tests dedicados de cancelación/perf (`cancel.test.ts`, `perf.test.ts` de la sección 14 del spec) quedan diferidos a Hito 11, igual que en PDF Engine (`docs/roadmap/MVP.md` §4 Hito 2).
+- Los formatos del generador no usan `RegExp`: un autómata propio sin retroceso, O(caracteres × estados) por página, con `FORMAT_MAX_STATES` como tope (spec §6, §12). No hay presupuesto de tiempo.
 
 ## Scripts
 

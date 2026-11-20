@@ -1,8 +1,17 @@
 import {
   EngineEvents,
   EntityType,
+  FORMAT_MAX_CONTEXT,
+  FORMAT_MAX_PIECES,
+  FORMAT_MAX_REPEAT,
+  FORMAT_MAX_TEXT,
+  FORMAT_MAX_VARIANTS,
   type EngineContext,
   type EntityFound,
+  type FormatDefinition,
+  type FormatIssueCode,
+  type FormatPiece,
+  type FormatValidationContext,
   type Page,
   type Word,
 } from "@anonly/shared";
@@ -10,13 +19,25 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 import { normalizeEmailReadWithQ, scanEmailReadWithQ } from "../email-q-scanner.js";
 import { scanEmailDefault } from "../email-scanner.js";
+import { compareFormat } from "../formats/format-compare.js";
+import { testFormat, validateFormat } from "../formats/format-validation.js";
+import { BASE_CATALOG, getCatalog } from "../patterns/catalog.js";
 import { DEFAULT_PATTERNS_AR } from "../patterns/default-ar.js";
 import { RegexEngine } from "../regex.engine.js";
 
 import {
   addressValuesOf,
+  CBU_TYPE,
+  createDetectionContext,
   createEngineContext,
+  digits,
+  fixedText,
+  formatIdOf,
+  letters,
   makeDocument,
+  makeFormat,
+  optionalOf,
+  separator,
   makeEmptyPage,
   makePage,
   makePageFromWords,
@@ -24,6 +45,7 @@ import {
   makeSourcedPage,
   makeWord,
   processPage,
+  userFormatOccurrences,
 } from "./fixtures/test-helpers.js";
 
 async function firstOccurrence(
@@ -721,20 +743,6 @@ describe("RegexEngine — unit tests", () => {
       expect(byType.get("PLATE:ABC 123")).toBe("XXX XXX");
       expect(byType.get("PLATE:AB 123 CD")).toBe("XX XXX XX");
     });
-
-    it("a custom pattern's occurrence carries its own maskFormat", async () => {
-      engine.addPattern({
-        id: "custom-code",
-        entityType: EntityType.Custom,
-        pattern: /\bCODE-\d{4}\b/g,
-        normalizer: (v: string) => v.toUpperCase(),
-        maskFormat: "CODE-XXXX",
-      });
-
-      const occurrence = await firstOccurrence(engine, ctx, ["Referencia", "CODE-1234"]);
-      expect(occurrence?.entityType).toBe(EntityType.Custom);
-      expect(occurrence?.maskFormat).toBe("CODE-XXXX");
-    });
   });
 
   describe("Word span / bbox mapping", () => {
@@ -854,38 +862,24 @@ describe("RegexEngine — unit tests", () => {
   });
 
   describe("Overlap resolution (caso 10 generalizado, no específico a DNI/CUIT)", () => {
-    it("keeps the longest of two overlapping custom patterns", async () => {
-      // "short-digits" (sin \b) matchea "12" y "34" como dos ocurrencias
-      // separadas de su propio scan; "long-digits" matchea "1234" completo.
-      // Los tres matches crudos se superponen entre sí (mismo span [0,4)
-      // cubierto). El barrido por longitud descendente debe quedarse solo
-      // con "1234" (longitud 4), descartando ambos submatches de longitud 2.
-      engine.addPattern({
-        id: "short-digits",
-        entityType: EntityType.Custom,
-        pattern: /\d{2}/g,
-        normalizer: (v: string) => v,
-        maskFormat: "XX",
+    it("keeps the longest of two overlapping user formats", async () => {
+      // El formato corto reconoce "1234" y "5678" por separado; el largo
+      // reconoce "1234-5678" completo. Los tres matches crudos se superponen,
+      // y el barrido por longitud descendente se queda solo con el largo.
+      const formatCtx = createDetectionContext({
+        userTypes: [CBU_TYPE],
+        userFormats: [
+          makeFormat(1, CBU_TYPE.id, [digits(4)]),
+          makeFormat(2, CBU_TYPE.id, [digits(4), separator(["-"]), digits(4)]),
+        ],
       });
-      engine.addPattern({
-        id: "long-digits",
-        entityType: EntityType.Custom,
-        pattern: /\d{4}/g,
-        normalizer: (v: string) => v,
-        maskFormat: "XXXX",
-      });
+      await engine.init(formatCtx);
 
-      const document = makeSinglePageDocument("doc-overlap-custom", ["1234"]);
-      const busEmitSpy = vi.spyOn(ctx.bus, "emit");
-      const output = await engine.process({ document }, ctx);
+      const occurrences = await processPage(engine, formatCtx, makePage(0, ["1234-5678"]));
 
-      expect(output.occurrenceCount).toBe(1);
-      const calls = busEmitSpy.mock.calls.filter(
-        ([, event]) => event === EngineEvents.ENTITY_FOUND,
-      );
-      const occurrence = (calls[0]?.[2] as EntityFound).occurrence;
-      expect(occurrence.value).toBe("1234");
-      expect(occurrence.entityType).toBe(EntityType.Custom);
+      expect(occurrences).toHaveLength(1);
+      expect(occurrences[0]?.value).toBe("1234-5678");
+      expect(occurrences[0]?.entityType).toBe(CBU_TYPE.id);
     });
   });
 
@@ -1006,45 +1000,31 @@ describe("RegexEngine — unit tests", () => {
     });
   });
 
-  describe("addPattern / removePattern", () => {
-    it("re-adding a custom pattern with the same id replaces it", async () => {
-      engine.addPattern({
-        id: "dup",
-        entityType: EntityType.Custom,
-        pattern: /\bFOO\b/g,
-        normalizer: (v: string) => v,
-        maskFormat: "FOO",
+  describe("User formats at init", () => {
+    it("init() resets user formats compiled in a previous session", async () => {
+      const withFormat = createDetectionContext({
+        userTypes: [CBU_TYPE],
+        userFormats: [makeFormat(1, CBU_TYPE.id, [digits(3)])],
       });
-      engine.addPattern({
-        id: "dup",
-        entityType: EntityType.Custom,
-        pattern: /\bBAR\b/g,
-        normalizer: (v: string) => v,
-        maskFormat: "BAR",
-      });
+      const document = makeSinglePageDocument("doc-reset", ["123"]);
+      await engine.init(withFormat);
+      expect((await engine.process({ document }, withFormat)).occurrenceCount).toBe(1);
 
-      const document = makeSinglePageDocument("doc-dup-pattern", ["FOO", "BAR"]);
-      const output = await engine.process({ document }, ctx);
-      // Solo "BAR" quedó activo bajo el id "dup"; "FOO" ya no matchea.
-      expect(output.occurrenceCount).toBe(1);
-    });
-
-    it("removePattern with unknown id is a no-op", () => {
-      expect(() => engine.removePattern("does-not-exist")).not.toThrow();
-    });
-
-    it("init() resets custom patterns added in a previous session", async () => {
-      engine.addPattern({
-        id: "session-pattern",
-        entityType: EntityType.Custom,
-        pattern: /\bZZZ\b/g,
-        normalizer: (v: string) => v,
-        maskFormat: "ZZZ",
-      });
       await engine.init(ctx);
+      expect((await engine.process({ document }, ctx)).occurrenceCount).toBe(0);
+    });
 
-      const document = makeSinglePageDocument("doc-reset", ["ZZZ"]);
-      const output = await engine.process({ document }, ctx);
+    it("a disabled user format does not run", async () => {
+      const withDisabled = createDetectionContext({
+        userTypes: [CBU_TYPE],
+        userFormats: [makeFormat(1, CBU_TYPE.id, [digits(6)], { enabled: false })],
+      });
+      await engine.init(withDisabled);
+
+      const output = await engine.process(
+        { document: makeSinglePageDocument("doc-disabled", ["123456"]) },
+        withDisabled,
+      );
       expect(output.occurrenceCount).toBe(0);
     });
   });
@@ -1059,51 +1039,18 @@ describe("RegexEngine — unit tests", () => {
   });
 
   describe("Defensive paths", () => {
-    it("a pattern that can match an empty string does not loop infinitely and produces no occurrence", async () => {
-      engine.addPattern({
-        id: "empty-matcher",
-        entityType: EntityType.Custom,
-        pattern: /x*/g,
-        normalizer: (v: string) => v,
-        maskFormat: "X",
+    it("a user format that can match an empty string does not loop infinitely and produces no occurrence", async () => {
+      // Una variante cuya única pieza `chars` está adentro de un `optional`
+      // reconoce también la cadena vacía: un match vacío no se emite.
+      const emptyMatcherCtx = createDetectionContext({
+        userTypes: [CBU_TYPE],
+        userFormats: [makeFormat(1, CBU_TYPE.id, [optionalOf(digits(1, 2))])],
       });
+      await engine.init(emptyMatcherCtx);
 
       const document = makeSinglePageDocument("doc-empty-match-guard", ["abc"]);
-      const output = await engine.process({ document }, ctx);
+      const output = await engine.process({ document }, emptyMatcherCtx);
       expect(output.occurrenceCount).toBe(0);
-    });
-
-    it("custom pattern that throws only on real text (passes addPattern's smoke test) is discarded during process()", async () => {
-      // A diferencia del caso 8 (edge.test.ts), acá el patrón NO lanza contra
-      // "" (pasa la validación de addPattern) pero SÍ lanza al ejecutarse
-      // contra texto real — ejercita el catch de runCustomPatternWithBudget
-      // dentro de process(), no el de addPattern.
-      const conditionallyThrowingPattern = /foo/g;
-      const originalExec = conditionallyThrowingPattern.exec.bind(conditionallyThrowingPattern);
-      conditionallyThrowingPattern.exec = (str: string) => {
-        if (str === "") return originalExec(str);
-        throw new Error("boom-during-process");
-      };
-
-      expect(() =>
-        engine.addPattern({
-          id: "throws-on-real-text",
-          entityType: EntityType.Custom,
-          pattern: conditionallyThrowingPattern,
-          normalizer: (v: string) => v,
-          maskFormat: "X",
-        }),
-      ).not.toThrow();
-
-      const warnSpy = vi.spyOn(ctx.logger, "warn");
-      const document = makeSinglePageDocument("doc-throws-during-process", ["foo"]);
-      const output = await engine.process({ document }, ctx);
-
-      expect(output.occurrenceCount).toBe(0);
-      expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining("es inválido y se descarta"),
-        expect.objectContaining({ patternId: "throws-on-real-text" }),
-      );
     });
   });
 
@@ -1864,6 +1811,442 @@ describe("RegexEngine — unit tests", () => {
           withoutAccents(expectedValue.toUpperCase()),
         ]);
       }
+    });
+  });
+
+  // ─── 1.1, F1: el generador de formatos (ADR-220, ADR-221 §2) ───
+
+  describe("Catálogo (ADR-221 §2)", () => {
+    it("getCatalog returns the AR and universal formats in run order", () => {
+      const catalog = getCatalog("AR");
+      expect(catalog.map((info) => info.id)).toEqual(DEFAULT_PATTERNS_AR.map((p) => p.id));
+      expect(BASE_CATALOG.map(({ info }) => info)).toEqual(catalog);
+      // El patrón envuelto es el mismo objeto de DEFAULT_PATTERNS_AR.
+      expect(BASE_CATALOG.map(({ pattern }) => pattern)).toEqual([...DEFAULT_PATTERNS_AR]);
+
+      const byId = new Map(catalog.map((info) => [info.id, info]));
+      expect(byId.get("phone-mobile-ar")).toMatchObject({
+        country: "AR",
+        name: "Celular",
+        kind: "control",
+      });
+      expect(byId.get("email")).toMatchObject({ country: "universal", kind: "control" });
+      expect(byId.get("caratula-ar")?.country).toBe("universal");
+
+      // Cinco `structure`, con su definición; el resto no la lleva.
+      const structure = catalog.filter((info) => info.kind === "structure");
+      expect(structure.map((info) => info.id)).toEqual([
+        "dni-ar",
+        "phone-landline-ar",
+        "plate-vieja-ar",
+        "plate-mercosur-ar",
+        "plate-mercosur-moto-ar",
+      ]);
+      for (const info of structure) {
+        expect(info.definition?.id).toBe(`fmt:base:${info.id}`);
+        expect(info.definition?.entityType).toBe(info.entityType);
+        expect(info.definition?.variants).toHaveLength(1);
+      }
+      expect(catalog.filter((info) => info.kind === "control").every((i) => !i.definition)).toBe(
+        true,
+      );
+    });
+  });
+
+  describe("Formatos del generador (ADR-220)", () => {
+    // Caso 40: el texto de la ocurrencia de cada pieza. Las páginas se arman
+    // con `Page.text` partido por espacios; cada ejemplo va en su propia página.
+    const values = async (format: FormatDefinition, text: string): Promise<ReadonlyArray<string>> =>
+      (await userFormatOccurrences([format], text)).map((occurrence) => occurrence.value);
+
+    it("user format pieces: context, fixed text, optional part, separators and variants", async () => {
+      // Contexto.
+      const cbu = makeFormat(1, CBU_TYPE.id, [digits(22)], { contextBefore: ["CBU"] });
+      const account = "0170099220000067797370";
+      expect(await values(cbu, `CBU: ${account}`)).toEqual([account]);
+      expect(await values(cbu, `cbu ${account}`)).toEqual([account]);
+      expect(await values(cbu, account)).toEqual([]);
+      expect(await values(cbu, `CBU${account}`)).toEqual([]);
+      // La palabra de contexto no forma parte del match, y tiene borde.
+      expect(await values(cbu, `XCBU ${account}`)).toEqual([]);
+
+      // Texto fijo, con pliegue de mayúsculas.
+      const fixed = makeFormat(2, CBU_TYPE.id, [fixedText("AR-"), digits(6)]);
+      expect(await values(fixed, "ar-123456")).toEqual(["ar-123456"]);
+      expect(await values(fixed, "AR-123456")).toEqual(["AR-123456"]);
+
+      // Parte opcional.
+      const withOptional = makeFormat(3, CBU_TYPE.id, [
+        digits(4),
+        optionalOf(separator(["/"]), digits(4)),
+      ]);
+      expect(await values(withOptional, "1234/2024")).toEqual(["1234/2024"]);
+      expect(await values(withOptional, "1234")).toEqual(["1234"]);
+
+      // Separadores: el opcional con dos caracteres. Los nueve dígitos no
+      // chocan con ningún formato base (un celular tiene diez).
+      const separators = makeFormat(4, CBU_TYPE.id, [
+        digits(2),
+        separator([" ", "-"], true),
+        digits(7),
+      ]);
+      expect(await values(separators, "20 1234567")).toEqual(["20 1234567"]);
+      expect(await values(separators, "20-1234567")).toEqual(["20-1234567"]);
+      expect(await values(separators, "201234567")).toEqual(["201234567"]);
+
+      // Variantes: cualquiera de las dos emite.
+      const variants = makeFormat(5, CBU_TYPE.id, [digits(5), separator(["/"]), letters(2)], {
+        variants: [
+          [digits(5), separator(["/"]), letters(2)],
+          [letters(3), separator(["-"]), digits(4)],
+        ],
+      });
+      expect(await values(variants, "12345/ab")).toEqual(["12345/ab"]);
+      expect(await values(variants, "abc-1234")).toEqual(["abc-1234"]);
+    });
+
+    it("user format takes the leftmost longest match", async () => {
+      const format = makeFormat(1, CBU_TYPE.id, [digits(4)], {
+        variants: [[digits(4)], [digits(4), separator(["-"]), digits(4)]],
+      });
+      // Un solo match, el más largo desde la izquierda; no "1234" más "5678".
+      expect(await userFormatOccurrences([format], "1234-5678")).toHaveLength(1);
+      expect((await userFormatOccurrences([format], "1234-5678")).map((o) => o.value)).toEqual([
+        "1234-5678",
+      ]);
+
+      // Sigue desde el final del match: dos matches seguidos, sin solaparse.
+      expect((await userFormatOccurrences([format], "1234-5678 9012")).map((o) => o.value)).toEqual(
+        ["1234-5678", "9012"],
+      );
+
+      // Más largo gana aunque la variante corta aparezca primero en la definición.
+      expect(testFormat(format, "x 1234-5678 y")).toEqual([{ start: 2, end: 11 }]);
+    });
+
+    it("user format normalizes like its type and masks by characters", async () => {
+      // Bajo un tipo propio: alphanumericKey, sin maskFormat.
+      const own = makeFormat(1, CBU_TYPE.id, [
+        digits(4),
+        separator(["-"]),
+        digits(4),
+        separator([" "]),
+        digits(2),
+      ]);
+      const [ownOccurrence] = await userFormatOccurrences([own], "0170-0994 11");
+      expect(ownOccurrence?.value).toBe("0170-0994 11");
+      expect(ownOccurrence?.normalizedValue).toBe("0170099411");
+      expect(ownOccurrence?.maskFormat).toBeUndefined();
+      expect(ownOccurrence).not.toHaveProperty("maskFormat");
+      expect(ownOccurrence?.formatId).toBe(own.id);
+      expect(ownOccurrence?.formatOrigin).toBe("user");
+
+      // Bajo DNI: el normalizador del tipo, tras quitar los separadores del
+      // generador, y la máscara por caracteres.
+      const dni = makeFormat(2, EntityType.DNI, [
+        digits(2),
+        separator(["-"]),
+        digits(3),
+        separator(["-"]),
+        digits(3),
+      ]);
+      const [dniOccurrence] = await userFormatOccurrences([dni], "34-567-891");
+      expect(dniOccurrence?.entityType).toBe(EntityType.DNI);
+      expect(dniOccurrence?.normalizedValue).toBe("34567891");
+      expect(dniOccurrence?.maskFormat).toBe("XX-XXX-XXX");
+
+      // Los demás tipos base que admiten formatos propios.
+      const cases: ReadonlyArray<
+        readonly [EntityType, ReadonlyArray<FormatPiece>, string, string]
+      > = [
+        [
+          EntityType.CUIT,
+          [digits(2), separator(["-"]), digits(8), separator(["-"]), digits(1)],
+          "20-12345678-1",
+          "20123456781",
+        ],
+        [
+          EntityType.Phone,
+          [digits(3), separator([" ", "-"]), digits(6)],
+          "221 456789",
+          "221456789",
+        ],
+        [EntityType.License, [letters(2), separator(["-"]), digits(5)], "mp-12345", "MP12345"],
+        [
+          EntityType.Plate,
+          [letters(3), separator([" "]), digits(3), separator([" "]), letters(1)],
+          "abc 123 d",
+          "ABC123D",
+        ],
+      ];
+      for (const [type, pieces, text, expected] of cases) {
+        const occurrences = await userFormatOccurrences([makeFormat(3, type, pieces)], text);
+        expect(occurrences[0]?.normalizedValue, `${type}: ${text}`).toBe(expected);
+        expect(occurrences[0]?.maskFormat, `${type}: ${text}`).toBe(
+          text.replace(/[\p{L}\p{N}]/gu, "X"),
+        );
+      }
+    });
+  });
+
+  describe("Funciones puras del generador (ADR-220 §3)", () => {
+    const valid = makeFormat(1, CBU_TYPE.id, [digits(4)]);
+    const context: FormatValidationContext = { userTypes: [CBU_TYPE], existingFormats: [] };
+    const codesOf = (definition: FormatDefinition, ctx = context): FormatIssueCode[] =>
+      validateFormat(definition, ctx).issues.map((issue) => issue.code);
+
+    it("validateFormat reports each issue code", () => {
+      expect(validateFormat(valid, context)).toEqual({ ok: true, issues: [] });
+
+      // Nombre.
+      expect(validateFormat({ ...valid, name: "  " }, context).issues).toEqual([
+        { code: "name_empty" },
+      ]);
+      expect(codesOf({ ...valid, name: "x".repeat(FORMAT_MAX_TEXT + 1) })).toEqual([
+        "name_too_long",
+      ]);
+      expect(
+        codesOf(
+          { ...valid, name: "Mi fórmato" },
+          {
+            userTypes: [CBU_TYPE],
+            existingFormats: [{ id: formatIdOf(9), name: "MI FORMATO" }],
+          },
+        ),
+      ).toEqual(["name_taken"]);
+
+      // Variantes.
+      expect(codesOf({ ...valid, variants: [] })).toEqual(["no_variants"]);
+      expect(
+        codesOf({
+          ...valid,
+          variants: Array.from({ length: FORMAT_MAX_VARIANTS + 1 }, () => [digits(1)]),
+        }),
+      ).toEqual(["too_many_variants"]);
+      expect(validateFormat({ ...valid, variants: [[digits(1)], []] }, context).issues).toEqual([
+        { code: "variant_empty", variantIndex: 1 },
+      ]);
+      expect(
+        validateFormat({ ...valid, variants: [[digits(1)], [fixedText("A")]] }, context).issues,
+      ).toEqual([{ code: "variant_without_chars", variantIndex: 1 }]);
+      expect(
+        validateFormat(
+          {
+            ...valid,
+            variants: [
+              [digits(1), ...Array.from({ length: FORMAT_MAX_PIECES }, () => separator(["-"]))],
+            ],
+          },
+          context,
+        ).issues,
+      ).toEqual([{ code: "too_many_pieces", variantIndex: 0 }]);
+
+      // Piezas: con su variantIndex y pieceIndex.
+      const withPiece = (piece: FormatPiece): FormatDefinition => ({
+        ...valid,
+        variants: [[digits(1), piece]],
+      });
+      expect(validateFormat(withPiece(digits(0, 3)), context).issues).toEqual([
+        { code: "chars_range_invalid", variantIndex: 0, pieceIndex: 1 },
+      ]);
+      expect(validateFormat(withPiece(digits(5, 3)), context).issues).toEqual([
+        { code: "chars_range_invalid", variantIndex: 0, pieceIndex: 1 },
+      ]);
+      expect(validateFormat(withPiece(digits(1, FORMAT_MAX_REPEAT + 1)), context).issues).toEqual([
+        { code: "chars_repeat_too_large", variantIndex: 0, pieceIndex: 1 },
+      ]);
+      expect(validateFormat(withPiece(fixedText("")), context).issues).toEqual([
+        { code: "text_empty", variantIndex: 0, pieceIndex: 1 },
+      ]);
+      expect(
+        validateFormat(withPiece(fixedText("x".repeat(FORMAT_MAX_TEXT + 1))), context).issues,
+      ).toEqual([{ code: "text_too_long", variantIndex: 0, pieceIndex: 1 }]);
+      expect(validateFormat(withPiece(separator([])), context).issues).toEqual([
+        { code: "separator_empty", variantIndex: 0, pieceIndex: 1 },
+      ]);
+      expect(validateFormat(withPiece(optionalOf()), context).issues).toEqual([
+        { code: "optional_empty", variantIndex: 0, pieceIndex: 1 },
+      ]);
+      // El índice cuenta las piezas de un optional en orden: el anidado es la 3.ª.
+      expect(validateFormat(withPiece(optionalOf(optionalOf(digits(1)))), context).issues).toEqual([
+        { code: "optional_nested", variantIndex: 0, pieceIndex: 2 },
+      ]);
+
+      // Contexto.
+      expect(codesOf({ ...valid, contextBefore: [""] })).toEqual(["context_empty"]);
+      expect(codesOf({ ...valid, contextBefore: [] })).toEqual(["context_empty"]);
+      expect(codesOf({ ...valid, contextBefore: ["x".repeat(FORMAT_MAX_TEXT + 1)] })).toEqual([
+        "context_too_long",
+      ]);
+      expect(
+        codesOf({
+          ...valid,
+          contextBefore: Array.from({ length: FORMAT_MAX_CONTEXT + 1 }, (_, i) => `w${i}`),
+        }),
+      ).toEqual(["too_many_context_words"]);
+
+      // Estados: ocho variantes de 64 dígitos pasan de FORMAT_MAX_STATES; siete no.
+      const wide = (count: number): FormatDefinition => ({
+        ...valid,
+        variants: Array.from({ length: count }, () => [digits(FORMAT_MAX_REPEAT)]),
+      });
+      expect(codesOf(wide(FORMAT_MAX_VARIANTS))).toEqual(["too_many_states"]);
+      expect(codesOf(wide(7))).toEqual([]);
+
+      // Tipo.
+      expect(
+        codesOf({ ...valid, entityType: "user:00000000-0000-4000-8000-00000000ffff" }),
+      ).toEqual(["type_unknown"]);
+      expect(codesOf({ ...valid, entityType: EntityType.Email })).toEqual(["type_not_admitted"]);
+      expect(codesOf({ ...valid, entityType: EntityType.DNI })).toEqual([]);
+
+      // Id.
+      expect(codesOf({ ...valid, id: "fmt:123" })).toEqual(["id_invalid"]);
+      expect(codesOf({ ...valid, id: "fmt:base:dni-ar" })).toEqual(["id_invalid"]);
+      expect(codesOf({ ...valid, id: formatIdOf(1).replace("-4000-", "-1000-") })).toEqual([
+        "id_invalid",
+      ]);
+    });
+
+    it("testFormat finds the same spans as process", async () => {
+      const format = makeFormat(1, CBU_TYPE.id, [digits(5)]);
+      // La guarda de corrida y los bordes valen para las dos entradas.
+      const text = "Ref 12345 y 67890. EXP-11111 ok (22222) 123456 x12345";
+      const spans = testFormat(format, text);
+      const occurrences = await userFormatOccurrences([format], text);
+
+      expect(spans.map(({ start, end }) => text.slice(start, end))).toEqual([
+        "12345",
+        "67890",
+        "22222",
+      ]);
+      expect(occurrences.map((o) => o.value)).toEqual(
+        spans.map(({ start, end }) => text.slice(start, end)),
+      );
+
+      // `enabled` no cuenta, y un problema de forma da `[]`.
+      expect(testFormat({ ...format, enabled: false }, text)).toEqual(spans);
+      expect(testFormat({ ...format, variants: [[fixedText("A")]] }, "A")).toEqual([]);
+      // Nombre y tipo no cambian qué se reconoce.
+      expect(testFormat({ ...format, name: "", entityType: EntityType.Email }, text)).toEqual(
+        spans,
+      );
+
+      // Contexto y borde con el ejemplo de la ficha: 8 dígitos, sin base de por medio.
+      const eight = makeFormat(2, CBU_TYPE.id, [digits(8)]);
+      expect(testFormat(eight, "(12345678) 12345678. 123456789 X12345678 12345678Y")).toEqual([
+        { start: 1, end: 9 },
+        { start: 11, end: 19 },
+      ]);
+    });
+
+    it("compareFormat detects identical structure regardless of order and case", () => {
+      const a = makeFormat(
+        1,
+        CBU_TYPE.id,
+        [fixedText("AR-"), digits(6), separator([" ", "-"], true), letters(2)],
+        {
+          variants: [
+            [fixedText("AR-"), digits(6), separator([" ", "-"], true), letters(2)],
+            [digits(3), separator(["/", "-", "/"]), digits(4)],
+          ],
+          contextBefore: ["Cuenta", "CBU"],
+        },
+      );
+      const b = makeFormat(2, EntityType.DNI, [], {
+        name: "Otro nombre",
+        enabled: false,
+        basedOn: "dni-ar",
+        variants: [
+          [digits(3), separator(["-", "/"]), digits(4)],
+          [fixedText("ar-"), digits(6), separator(["-", " "], true), letters(2)],
+        ],
+        contextBefore: ["cbu", "CUENTA", "cuenta"],
+      });
+      const others = { country: "AR" as const, baseFormats: [], userFormats: [b], catalogRefs: [] };
+
+      const result = compareFormat(a, others);
+      expect(result.identicalTo).toBe(b.id);
+      // Un formato idéntico figura solo en identicalTo.
+      expect(result.overlaps.map((overlap) => overlap.formatId)).not.toContain(b.id);
+
+      // Una diferencia de estructura ya no es idéntico.
+      const c = { ...b, variants: [[digits(3), separator(["-"]), digits(4)]] };
+      expect(compareFormat(a, { ...others, userFormats: [c] }).identicalTo).toBeNull();
+    });
+
+    it("compareFormat gives the shortest shared text against an automaton format", () => {
+      const eightDigits = makeFormat(1, CBU_TYPE.id, [digits(8)]);
+      const none = { country: "AR" as const, baseFormats: [], userFormats: [], catalogRefs: [] };
+
+      const result = compareFormat(eightDigits, none);
+      expect(result.identicalTo).toBeNull();
+      // dni-ar es `structure`: el texto más corto que reconocen los dos.
+      expect(result.overlaps).toContainEqual({ formatId: "dni-ar", example: "11111111" });
+
+      // Un formato base apagado no se compara.
+      const dniOff = { ...none, baseFormats: [{ formatId: "dni-ar", enabled: false }] };
+      expect(
+        compareFormat(eightDigits, dniOff).overlaps.map((overlap) => overlap.formatId),
+      ).not.toContain("dni-ar");
+
+      // Con una copia editada prendida, se compara contra la copia (propia), no contra el original.
+      const copy = makeFormat(2, EntityType.DNI, [digits(7, 9)], { basedOn: "dni-ar" });
+      const withCopy = compareFormat(eightDigits, { ...none, userFormats: [copy] });
+      const ids = withCopy.overlaps.map((overlap) => overlap.formatId);
+      expect(ids).toContain(copy.id);
+      expect(ids).not.toContain("dni-ar");
+      expect(withCopy.overlaps.find((o) => o.formatId === copy.id)?.example).toBe("11111111");
+
+      // Los propios apagados también se comparan, y las referencias también.
+      const off = makeFormat(3, EntityType.Phone, [digits(8)], { enabled: false });
+      expect(compareFormat(eightDigits, { ...none, userFormats: [off] }).identicalTo).toBe(off.id);
+      const ref = {
+        id: "ref:00000000-0000-4000-8000-000000000001",
+        country: "AR" as const,
+        catalogFormatId: "dni-ar",
+        enabled: false,
+      };
+      expect(compareFormat(eightDigits, { ...none, catalogRefs: [ref] }).overlaps).toContainEqual({
+        formatId: ref.id,
+        example: "11111111",
+      });
+
+      // Formatos que no comparten ningún texto, y nunca contra sí mismo.
+      const letters3 = makeFormat(4, CBU_TYPE.id, [letters(3)]);
+      expect(
+        compareFormat(eightDigits, { ...none, userFormats: [letters3] }).overlaps.map(
+          (overlap) => overlap.formatId,
+        ),
+      ).not.toContain(letters3.id);
+      expect(
+        compareFormat(eightDigits, { ...none, userFormats: [eightDigits] }).identicalTo,
+      ).toBeNull();
+    });
+
+    it("compareFormat finds overlap with a control format by examples", () => {
+      const email = makeFormat(1, CBU_TYPE.id, [
+        letters(3, 10),
+        fixedText("@"),
+        letters(3, 10),
+        fixedText(".com"),
+      ]);
+      const none = { country: "AR" as const, baseFormats: [], userFormats: [], catalogRefs: [] };
+
+      const result = compareFormat(email, none);
+      expect(result.overlaps).toContainEqual({ formatId: "email", example: "AAA@AAA.com" });
+
+      // Apagar el control lo saca de la comparación.
+      const emailOff = { ...none, baseFormats: [{ formatId: "email", enabled: false }] };
+      expect(
+        compareFormat(email, emailOff).overlaps.map((overlap) => overlap.formatId),
+      ).not.toContain("email");
+
+      // Un formato que ningún control reconoce no tiene solapamiento con ellos.
+      const lettersOnly = makeFormat(2, CBU_TYPE.id, [letters(4, 6)]);
+      const controlIds = ["cuit-ar", "email", "iban", "credit-card", "date-ar", "license-ar"];
+      const overlapIds = compareFormat(lettersOnly, none).overlaps.map((o) => o.formatId);
+      expect(overlapIds.filter((id) => controlIds.includes(id))).toEqual([]);
     });
   });
 });

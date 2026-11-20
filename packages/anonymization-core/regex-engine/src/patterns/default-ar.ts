@@ -24,15 +24,15 @@ import type { RegexPattern } from "../regex.types.js";
 
 // ─── Normalizers ───
 
-function stripNonDigits(value: string): string {
+export function stripNonDigits(value: string): string {
   return value.replace(/\D+/g, "");
 }
 
-function stripDots(value: string): string {
+export function stripDots(value: string): string {
   return value.replace(/\./g, "");
 }
 
-function stripDashes(value: string): string {
+export function stripDashes(value: string): string {
   return value.replace(/-/g, "");
 }
 
@@ -40,11 +40,11 @@ function normalizeEmail(value: string): string {
   return value.toLowerCase();
 }
 
-function normalizeUppercaseNoSpaces(value: string): string {
+export function normalizeUppercaseNoSpaces(value: string): string {
   return value.toUpperCase().replace(/\s+/g, "");
 }
 
-function normalizeUppercaseNoDashes(value: string): string {
+export function normalizeUppercaseNoDashes(value: string): string {
   return value.toUpperCase().replace(/-/g, "");
 }
 
