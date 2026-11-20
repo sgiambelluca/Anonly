@@ -123,6 +123,7 @@ import type {
   PersonGenderChoice,
   PreviewUpdated,
   RenderLegendPayload,
+  RenderLegendPageResult,
   WorkerJob,
   WorkerJobPayload,
   RenderPagePayload,
@@ -1717,6 +1718,7 @@ describe("@anonly/shared — Contracts", () => {
       };
       const payload: RenderLegendPayload = {
         rows: [row],
+        startRow: 0,
         pageWidthPt: 595,
         pageHeightPt: 842,
       };
@@ -1724,9 +1726,31 @@ describe("@anonly/shared — Contracts", () => {
       expect("documentId" in payload).toBe(false);
     });
 
+    it("RenderLegendPayload.startRow es requerido y RenderLegendPageResult lleva imagen y filas dibujadas (ADR-219 §6)", () => {
+      const payload: RenderLegendPayload = {
+        rows: [],
+        startRow: 13,
+        pageWidthPt: 595,
+        pageHeightPt: 842,
+      };
+      const result: RenderLegendPageResult = {
+        image: {
+          bytes: new Uint8Array([1]).buffer,
+          format: "png",
+          widthPx: 595,
+          heightPx: 842,
+        },
+        rowsDrawn: 13,
+      };
+      expect(payload.startRow).toBe(13);
+      expect(result.rowsDrawn).toBe(13);
+      expect(result.image.format).toBe("png");
+    });
+
     it("RenderLegendPayload.imageFormat es opcional", () => {
       const payload: RenderLegendPayload = {
         rows: [],
+        startRow: 0,
         pageWidthPt: 595,
         pageHeightPt: 842,
         imageFormat: "png",
@@ -1736,7 +1760,7 @@ describe("@anonly/shared — Contracts", () => {
   });
 
   describe("ExportSavePayload extendido con la leyenda (ADR-059 §6)", () => {
-    it("legendImage/legendPageWidthPt/legendPageHeightPt son opcionales (caso sin leyenda)", () => {
+    it("legendImages/legendPageWidthPt/legendPageHeightPt son opcionales (caso sin leyenda)", () => {
       const payload: ExportSavePayload = {
         documentId: "d1",
         metadata: {
@@ -1745,12 +1769,12 @@ describe("@anonly/shared — Contracts", () => {
           creationDate: new Date(0),
         },
       };
-      expect(payload.legendImage).toBeUndefined();
+      expect(payload.legendImages).toBeUndefined();
       expect(payload.legendPageWidthPt).toBeUndefined();
       expect(payload.legendPageHeightPt).toBeUndefined();
     });
 
-    it("acepta legendImage ya rasterizada junto a sus dimensiones en puntos PDF", () => {
+    it("acepta legendImages ya rasterizadas, en orden, junto a sus dimensiones en puntos PDF", () => {
       const legendImage: EncodedPageImage = {
         bytes: new Uint8Array([9, 9]).buffer,
         format: "png",
@@ -1764,11 +1788,12 @@ describe("@anonly/shared — Contracts", () => {
           creator: "Anonly",
           creationDate: new Date(0),
         },
-        legendImage,
+        legendImages: [legendImage, legendImage],
         legendPageWidthPt: 595,
         legendPageHeightPt: 842,
       };
-      expect(payload.legendImage?.format).toBe("png");
+      expect(payload.legendImages).toHaveLength(2);
+      expect(payload.legendImages?.[0]?.format).toBe("png");
       expect(payload.legendPageWidthPt).toBe(595);
       expect(payload.legendPageHeightPt).toBe(842);
     });

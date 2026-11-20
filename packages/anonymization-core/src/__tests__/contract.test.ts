@@ -1156,7 +1156,7 @@ describe("Orchestrator — contract tests", () => {
 
   // ─── Mediación de la leyenda de marcadores (ADR-059 §5) ───
 
-  it("renderLegend delegates to RenderEngine.renderLegendPage and returns its EncodedPageImage", async () => {
+  it("renderLegend delegates to RenderEngine.renderLegendPages and returns its images", async () => {
     const bus = createRealBus();
     const engines = createMockEngines();
     const document = createDocument({ pages: [createPage({ index: 0, width: 595, height: 842 })] });
@@ -1168,7 +1168,7 @@ describe("Orchestrator — contract tests", () => {
       widthPx: 595,
       heightPx: 842,
     };
-    vi.spyOn(engines.render, "renderLegendPage").mockResolvedValue(legendImage);
+    vi.spyOn(engines.render, "renderLegendPages").mockResolvedValue([legendImage, legendImage]);
 
     const orchestrator = new PipelineOrchestrator({
       bus,
@@ -1195,7 +1195,10 @@ describe("Orchestrator — contract tests", () => {
     });
     const exportCall = (engines.export.export as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as {
       renderPageProvider: RenderPageProvider;
+      userTypes: ReadonlyArray<unknown>;
     };
+    // Provisional hasta F4 (Plan_1.1.md §7).
+    expect(exportCall.userTypes).toEqual([]);
 
     const rows = [{ prefixes: "DNI", typeName: "DNI", countLabel: "1 marcador" }];
     const result = await exportCall.renderPageProvider.renderLegend(
@@ -1203,8 +1206,13 @@ describe("Orchestrator — contract tests", () => {
       new AbortController().signal,
     );
 
-    expect(engines.render.renderLegendPage).toHaveBeenCalledWith(rows, 595, 842, expect.anything());
-    expect(result).toEqual(legendImage);
+    expect(engines.render.renderLegendPages).toHaveBeenCalledWith(
+      rows,
+      595,
+      842,
+      expect.anything(),
+    );
+    expect(result).toEqual([legendImage, legendImage]);
   });
 
   it("group events during detection accumulate without rendering", async () => {

@@ -926,59 +926,59 @@ describe("RenderEngine — edge cases", () => {
     await expect(engine.rasterizePage(docId, 0, 1, ctx, region)).rejects.toThrow(InvalidInputError);
   });
 
-  // ─── ADR-059 §5: renderLegendPage validaciones y perfil sin efectos ───
+  // ─── ADR-059 §5: renderLegendPages validaciones y perfil sin efectos ───
 
-  it("renderLegendPage throws EngineNotInitializedError before init()", async () => {
-    await expect(engine.renderLegendPage([makeMarkerLegendRow()], 400, 300, ctx)).rejects.toThrow(
+  it("renderLegendPages throws EngineNotInitializedError before init()", async () => {
+    await expect(engine.renderLegendPages([makeMarkerLegendRow()], 400, 300, ctx)).rejects.toThrow(
       EngineNotInitializedError,
     );
   });
 
-  it("renderLegendPage throws EngineDisposedError after dispose()", async () => {
+  it("renderLegendPages throws EngineDisposedError after dispose()", async () => {
     await engine.init(ctx);
     await engine.dispose();
-    await expect(engine.renderLegendPage([makeMarkerLegendRow()], 400, 300, ctx)).rejects.toThrow(
+    await expect(engine.renderLegendPages([makeMarkerLegendRow()], 400, 300, ctx)).rejects.toThrow(
       EngineDisposedError,
     );
   });
 
-  it("renderLegendPage throws InvalidInputError when rows is null or undefined", async () => {
+  it("renderLegendPages throws InvalidInputError when rows is null or undefined", async () => {
     await engine.init(ctx);
     await expect(
       // @ts-expect-error — assert de runtime: §9 exige rechazar rows null con InvalidInputError (mismo patrón que pdf-engine/regex-engine edge.test.ts).
-      engine.renderLegendPage(null, 400, 300, ctx),
+      engine.renderLegendPages(null, 400, 300, ctx),
     ).rejects.toThrow(InvalidInputError);
     await expect(
       // @ts-expect-error — assert de runtime: ídem con undefined.
-      engine.renderLegendPage(undefined, 400, 300, ctx),
+      engine.renderLegendPages(undefined, 400, 300, ctx),
     ).rejects.toThrow(InvalidInputError);
   });
 
-  it("renderLegendPage throws InvalidInputError when pageWidthPt/pageHeightPt are not greater than 0", async () => {
+  it("renderLegendPages throws InvalidInputError when pageWidthPt/pageHeightPt are not greater than 0", async () => {
     await engine.init(ctx);
-    await expect(engine.renderLegendPage([makeMarkerLegendRow()], 0, 300, ctx)).rejects.toThrow(
+    await expect(engine.renderLegendPages([makeMarkerLegendRow()], 0, 300, ctx)).rejects.toThrow(
       InvalidInputError,
     );
-    await expect(engine.renderLegendPage([makeMarkerLegendRow()], 400, -1, ctx)).rejects.toThrow(
+    await expect(engine.renderLegendPages([makeMarkerLegendRow()], 400, -1, ctx)).rejects.toThrow(
       InvalidInputError,
     );
   });
 
-  it("renderLegendPage throws CancelledError when ctx.abortSignal is already aborted", async () => {
+  it("renderLegendPages throws CancelledError when ctx.abortSignal is already aborted", async () => {
     await engine.init(ctx);
     const abortController = new AbortController();
     abortController.abort();
     const abortedCtx = createEngineContext({ abortSignal: abortController.signal });
 
     await expect(
-      engine.renderLegendPage([makeMarkerLegendRow()], 400, 300, abortedCtx),
+      engine.renderLegendPages([makeMarkerLegendRow()], 400, 300, abortedCtx),
     ).rejects.toThrow(CancelledError);
   });
 
-  it("renderLegendPage does not require loadDocument — no documents retained at all", async () => {
+  it("renderLegendPages does not require loadDocument — no documents retained at all", async () => {
     await engine.init(ctx);
 
-    await engine.renderLegendPage([makeMarkerLegendRow()], 400, 300, ctx);
+    await engine.renderLegendPages([makeMarkerLegendRow()], 400, 300, ctx);
 
     // A diferencia de renderPage/rasterizePage, no hay ningún documentId
     // involucrado: `documents` sigue vacío tras la llamada (ADR-059 §5).
@@ -1598,7 +1598,7 @@ describe("RenderEngine — edge cases", () => {
       await pooledEngine.dispose();
     });
 
-    it("renderLegendPage throws RenderPageFailedError for each garbage dispatch result (never a silent default, ADR-059 §5)", async () => {
+    it("renderLegendPages throws RenderPageFailedError for each garbage dispatch result (never a silent default, ADR-059 §5)", async () => {
       const garbageValues: ReadonlyArray<unknown> = [{}, null, "not-a-recognized-shape"];
 
       for (const garbage of garbageValues) {
@@ -1607,29 +1607,32 @@ describe("RenderEngine — edge cases", () => {
         await pooledEngine.init(ctx);
 
         const rejection: unknown = await pooledEngine
-          .renderLegendPage([makeMarkerLegendRow()], 400, 300, ctx)
+          .renderLegendPages([makeMarkerLegendRow()], 400, 300, ctx)
           .catch((err: unknown) => err);
 
         expect(rejection).toBeInstanceOf(RenderPageFailedError);
         expect((rejection as RenderPageFailedError).message).toContain(
-          "RenderJobPool.dispatch() resolvió renderLegendPage con una forma no reconocida",
+          "RenderJobPool.dispatch() resolvió renderLegendPages con una forma no reconocida",
         );
 
         await pooledEngine.dispose();
       }
     });
 
-    it("renderLegendPage throws even when the malformed shape would NOT crash a blind destructure (EncodedPageImage without heightPx, ADR-055 §3)", async () => {
+    it("renderLegendPages throws even when the malformed shape would NOT crash a blind destructure (image without heightPx, or the pre-ADR-219 bare EncodedPageImage, ADR-055 §3)", async () => {
       const pool = createResolvedRenderDispatchPool({
-        bytes: new Uint8Array([1, 2, 3]).buffer,
-        format: "png",
-        widthPx: 400,
+        image: {
+          bytes: new Uint8Array([1, 2, 3]).buffer,
+          format: "png",
+          widthPx: 400,
+        },
+        rowsDrawn: 1,
       });
       const pooledEngine = new RenderEngine(pool);
       await pooledEngine.init(ctx);
 
       await expect(
-        pooledEngine.renderLegendPage([makeMarkerLegendRow()], 400, 300, ctx),
+        pooledEngine.renderLegendPages([makeMarkerLegendRow()], 400, 300, ctx),
       ).rejects.toBeInstanceOf(RenderPageFailedError);
 
       await pooledEngine.dispose();

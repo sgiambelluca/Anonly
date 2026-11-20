@@ -49,6 +49,7 @@ import {
   type PreviewInteractionGeometry,
   type PreviewWordPosition,
   type RasterizePagePayload,
+  type RenderLegendPageResult,
   type RenderLegendPayload,
   type RenderPagePayload,
   type Replacement,
@@ -1889,9 +1890,10 @@ function wrapCellText(
 function paintLegendTable(
   context: OffscreenCanvasRenderingContext2D,
   rows: ReadonlyArray<MarkerLegendRow>,
+  startRow: number,
   pageWidthPt: number,
   pageHeightPt: number,
-): void {
+): number {
   context.fillStyle = LEGEND_BACKGROUND_COLOR;
   context.fillRect(0, 0, pageWidthPt, pageHeightPt);
 
@@ -1930,7 +1932,8 @@ function paintLegendTable(
   // La tabla arranca bajo la ÚLTIMA línea del título, no bajo la primera.
   let y = titleY - LEGEND_TITLE_LINE_HEIGHT_PT + LEGEND_TITLE_TO_TABLE_GAP_PT;
 
-  for (const row of rows) {
+  let rowsDrawn = 0;
+  for (const row of rows.slice(startRow)) {
     const cells = [
       { text: row.prefixes, offset: offsets.prefixes, width: columnWidths.prefixes },
       { text: row.typeName, offset: offsets.typeName, width: columnWidths.typeName },
@@ -1954,10 +1957,8 @@ function paintLegendTable(
     const rowLines = Math.max(...cells.map((cell) => cell.lines.length));
     const rowHeightPt = Math.max(LEGEND_ROW_HEIGHT_PT, rowLines * LEGEND_LINE_HEIGHT_PT);
 
-    // Sin paginación (ADR-059 §5): si la tabla no entra, se corta acá en vez
-    // de dibujar fuera de la página. Con 13 tipos (cota de ADR-059 §2) y los
-    // prefijos reales no se alcanza; queda como guarda, no como camino
-    // esperado.
+    // Sin paginación todavía (ADR-219 §6, fase de contrato): si la tabla no
+    // entra, se corta acá en vez de dibujar fuera de la página.
     if (y + rowHeightPt > bottomLimitPt) break;
 
     for (const cell of cells) {
@@ -1968,7 +1969,9 @@ function paintLegendTable(
       }
     }
     y += rowHeightPt;
+    rowsDrawn += 1;
   }
+  return rowsDrawn;
 }
 
 export interface KernelRenderLegendOptions {
@@ -1988,8 +1991,8 @@ export interface KernelRenderLegendOptions {
 export async function kernelRenderLegendPage(
   payload: RenderLegendPayload,
   opts: KernelRenderLegendOptions,
-): Promise<EncodedPageImage> {
-  const { rows, pageWidthPt, pageHeightPt } = payload;
+): Promise<RenderLegendPageResult> {
+  const { rows, startRow, pageWidthPt, pageHeightPt } = payload;
   // Default "png" (no está en el spec, que no expone `imageFormat` en la
   // firma pública §6): es texto sobre fondo blanco, sin degradado ni foto —
   // el caso exacto para el que PNG sin pérdida es la elección barata, mismo
@@ -2005,10 +2008,10 @@ export async function kernelRenderLegendPage(
   );
   const context = get2dContext(canvas, LEGEND_DOCUMENT_LABEL, LEGEND_PAGE_LABEL);
 
-  paintLegendTable(context, rows, pageWidthPt, pageHeightPt);
+  const rowsDrawn = paintLegendTable(context, rows, startRow, pageWidthPt, pageHeightPt);
 
   const imageData = context.getImageData(0, 0, pageWidthPt, pageHeightPt);
-  return encodeImageData(
+  const image = await encodeImageData(
     imageData,
     imageFormat,
     opts.jpegQuality,
@@ -2016,6 +2019,7 @@ export async function kernelRenderLegendPage(
     LEGEND_PAGE_LABEL,
     opts.onWarn,
   );
+  return { image, rowsDrawn };
 }
 
 /**

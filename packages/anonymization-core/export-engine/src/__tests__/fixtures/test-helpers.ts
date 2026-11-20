@@ -259,7 +259,8 @@ export interface MockRenderPageProviderOptions {
   readonly neverResolves?: boolean;
   readonly perPageImage?: (pageIndex: number) => EncodedPageImage;
   // ─── ADR-059 §5/§8 — renderLegend ───
-  readonly legendImage?: EncodedPageImage;
+  // ADR-219 §6: una o más páginas de leyenda, en orden.
+  readonly legendImages?: ReadonlyArray<EncodedPageImage>;
   readonly legendError?: Error;
 }
 
@@ -301,13 +302,15 @@ export function createMockRenderPageProvider(
       if (options?.legendError) {
         return Promise.reject(options.legendError);
       }
-      return Promise.resolve<EncodedPageImage>(
-        options?.legendImage ?? {
-          bytes: new Uint8Array([9, 9, 9, 9]).buffer,
-          format: "png",
-          widthPx: 50,
-          heightPx: 50,
-        },
+      return Promise.resolve<ReadonlyArray<EncodedPageImage>>(
+        options?.legendImages ?? [
+          {
+            bytes: new Uint8Array([9, 9, 9, 9]).buffer,
+            format: "png",
+            widthPx: 50,
+            heightPx: 50,
+          },
+        ],
       );
     },
   );
@@ -418,6 +421,7 @@ export function createExportEngineInput(overrides?: Partial<ExportEngineInput>):
     rules: [],
     options: createExportOptions(),
     renderPageProvider: createMockRenderPageProvider(),
+    userTypes: [],
     ...overrides,
   };
 }

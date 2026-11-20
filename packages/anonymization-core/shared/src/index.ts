@@ -125,6 +125,7 @@ export type {
   UnloadDocumentPayload,
   RasterizePagePayload,
   RenderLegendPayload,
+  RenderLegendPageResult,
   MarkerLegendEntry,
   MarkerLegendRow,
   NerKernelSpan,

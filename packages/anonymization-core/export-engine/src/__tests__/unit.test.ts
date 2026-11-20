@@ -809,12 +809,14 @@ describe("ExportEngine — unit", () => {
       vi.mocked(PDFDocument.create).mockResolvedValue(asPdfDocument(mockDoc));
       await engine.init(ctx);
       const provider = createMockRenderPageProvider({
-        legendImage: {
-          bytes: new Uint8Array([9, 9, 9, 9]).buffer,
-          format: "jpeg",
-          widthPx: 50,
-          heightPx: 50,
-        },
+        legendImages: [
+          {
+            bytes: new Uint8Array([9, 9, 9, 9]).buffer,
+            format: "jpeg",
+            widthPx: 50,
+            heightPx: 50,
+          },
+        ],
       });
 
       await engine.export(
