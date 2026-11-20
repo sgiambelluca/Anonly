@@ -284,10 +284,16 @@ F7.
 - **Los tipos de la hoja paginada pasan a F4b.** Sus dos consumidores son
   render y export, y adaptarlos es justo la paginación.
 
-**Una medición pendiente.** No hay tope para la cantidad de formatos propios
-prendidos. Cada uno suma un recorrido lineal por página, así que F1 mide el
-costo con 10, 50 y 200 formatos sobre un documento largo. Si hace falta un
-tope, lleva su ADR.
+**Sin tope de formatos propios** (decisión del mantenedor, 2026-11-20). F1
+midió el costo con 10, 50 y 200 formatos prendidos: crece lineal, unos 11 ms
+por formato cada 100 000 caracteres. Proyectado a un documento como R1, 200
+formatos suman 1,5 s. Los números están en
+`mediciones/regex/Formatos_Generador_Costo_Medicion.md` y en
+`Regex_Engine.md` §12.
+
+**Ante una copia rota corre el original** (decisión del mantenedor,
+2026-11-20). Una copia editada que no pasa `validateFormat` no reemplaza al
+formato base: se descarta y el original corre (`Regex_Engine.md` §6). Es F2.
 
 **Cómo se revisa** (decisión del mantenedor, 2026-11-20). Hay un revisor por
 bloque de frentes que comparten spec, no uno por frente. El costo fijo de una
