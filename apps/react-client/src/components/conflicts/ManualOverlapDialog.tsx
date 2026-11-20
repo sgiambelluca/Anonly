@@ -33,6 +33,7 @@ import type { EntityType } from "@anonly/anonymization-core";
 import { useEffect } from "react";
 import { useShallow } from "zustand/react/shallow";
 
+import { toBaseEntityType } from "../../baseEntityType.js";
 import { useEntitiesStore } from "../../store/entities.store.js";
 import { Button } from "../common/Button.js";
 import { Dialog } from "../common/Dialog.js";
@@ -118,12 +119,12 @@ export function ManualOverlapDialog({ conflictIds, open, onClose }: ManualOverla
           <CandidateCard
             label="Lo que marcaste"
             value={first.manual.value}
-            type={first.manual.entityType}
+            type={toBaseEntityType(first.manual.entityType)}
           />
           <CandidateCard
             label="Lo que ya estaba detectado"
             value={first.detected.value}
-            type={first.detected.entityType}
+            type={toBaseEntityType(first.detected.entityType)}
           />
           {/* Copy literal de ADR-175 §4: "y N−1 lugares más", plural fijo. */}
           {extra > 0 ? <p className="text-text-secondary">y {extra} lugares más</p> : null}

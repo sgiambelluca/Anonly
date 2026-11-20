@@ -13,9 +13,12 @@ import {
   EntityType,
   type Conflict,
   type EntityGroup,
+  type EntityTypeId,
   type ReplacementMode,
 } from "@anonly/anonymization-core";
 import { create } from "zustand";
+
+import { toBaseEntityType } from "../baseEntityType.js";
 
 export interface EntitiesSlice {
   readonly groupsByType: ReadonlyMap<EntityType, ReadonlyArray<EntityGroup>>;
@@ -26,7 +29,7 @@ export interface EntitiesSlice {
   updateReplacement(groupId: string, mode: ReplacementMode, value: string): void;
   addConflict(conflict: Conflict): void;
   /** `resolvedType` (ADR-083 §3): el tipo con el que quedó clasificado el grupo. */
-  resolveConflict(conflictId: string, resolvedType?: EntityType): void;
+  resolveConflict(conflictId: string, resolvedType?: EntityTypeId): void;
   /**
    * ADR-169 §2: orden de presentación de las filas. **Solo UI**: no cambia
    * `indexInType` ni emite nada al Core. Vale para todos los tipos y se
@@ -102,8 +105,10 @@ export const useEntitiesStore = create<EntitiesSlice>((set) => ({
   addGroup(group) {
     set((state) => {
       const next = new Map(state.groupsByType);
-      const bucket = next.get(group.type) ?? [];
-      next.set(group.type, [...bucket, group]);
+      // Guarda provisional (F0): el árbol sigue indexado por `EntityType`; F7 la reemplaza.
+      const type = toBaseEntityType(group.type);
+      const bucket = next.get(type) ?? [];
+      next.set(type, [...bucket, group]);
       return { groupsByType: next };
     });
   },
@@ -124,9 +129,10 @@ export const useEntitiesStore = create<EntitiesSlice>((set) => ({
         );
       }
 
-      const targetBucket = next.get(group.type) ?? [];
+      const targetType = toBaseEntityType(group.type);
+      const targetBucket = next.get(targetType) ?? [];
       next.set(
-        group.type,
+        targetType,
         targetBucket.some((g) => g.id === group.id)
           ? targetBucket.map((existing) => (existing.id === group.id ? group : existing))
           : [...targetBucket, group],

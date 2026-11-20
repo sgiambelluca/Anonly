@@ -24,6 +24,7 @@ import type { EntityGroup, EntityType } from "@anonly/anonymization-core";
 import { ArrowRightIcon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
+import { toBaseEntityType } from "../../baseEntityType.js";
 import { actions } from "../../core-adapter/actions.js";
 import { Button } from "../common/Button.js";
 import { Dialog } from "../common/Dialog.js";
@@ -42,11 +43,13 @@ export interface ChangeTypeDialogProps {
 export function ChangeTypeDialog({ group, open, onClose }: ChangeTypeDialogProps) {
   // Arranca en el tipo vigente, que el picker muestra como "Actual" y no deja
   // elegir: sin elección todavía no hay nada que previsualizar.
-  const [nextType, setNextType] = useState<EntityType>(group.type);
+  // Guarda provisional (F0): el picker solo ofrece tipos base; F7 la reemplaza.
+  const currentType = toBaseEntityType(group.type);
+  const [nextType, setNextType] = useState<EntityType>(currentType);
 
   useEffect(() => {
-    if (open) setNextType(group.type);
-  }, [open, group.type]);
+    if (open) setNextType(currentType);
+  }, [open, currentType]);
 
   const preview = useMemo(() => {
     if (!open) return null;
@@ -101,7 +104,7 @@ export function ChangeTypeDialog({ group, open, onClose }: ChangeTypeDialogProps
           <EntityTypePicker
             value={nextType}
             onChange={setNextType}
-            current={group.type}
+            current={currentType}
             columns={3}
             aria-labelledby="change-type-pick"
           />

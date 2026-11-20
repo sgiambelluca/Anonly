@@ -32,6 +32,7 @@ import { EntityType, type TextMatch, type Word } from "@anonly/anonymization-cor
 import { CheckIcon, PlusIcon, SearchIcon, XIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { toBaseEntityType } from "../../baseEntityType.js";
 import { actions } from "../../core-adapter/actions.js";
 import { useEntitiesStore } from "../../store/entities.store.js";
 import { useViewerStore } from "../../store/viewer.store.js";
@@ -335,7 +336,7 @@ function ResultItem({
               <span
                 aria-hidden
                 className="h-2 w-2 rounded-full"
-                style={{ background: ENTITY_TYPE_COLOR[status.type] }}
+                style={{ background: ENTITY_TYPE_COLOR[toBaseEntityType(status.type)] }}
               />
               Oculto como {describeEntityNumber(status.type, status.indexInType)}
             </span>

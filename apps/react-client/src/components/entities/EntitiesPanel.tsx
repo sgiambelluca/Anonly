@@ -36,7 +36,7 @@
  *    acá, cancelaba la activación nativa del botón y cambiaba otra fila.
  */
 
-import type { EntityGroup, EntityType } from "@anonly/anonymization-core";
+import type { EntityGroup, EntityType, EntityTypeId } from "@anonly/anonymization-core";
 import {
   ChevronsDownUpIcon,
   ChevronsUpDownIcon,
@@ -77,7 +77,7 @@ export function EntitiesPanel() {
     state.dismissedHints.includes("panel-footer-hint"),
   );
   const [query, setQuery] = useState("");
-  const [collapsedTypes, setCollapsedTypes] = useState<ReadonlySet<EntityType>>(new Set());
+  const [collapsedTypes, setCollapsedTypes] = useState<ReadonlySet<EntityTypeId>>(new Set());
   const [addEntityOpen, setAddEntityOpen] = useState(false);
   const [activeId, setActiveId] = useState<string | null>(null);
   const treeRef = useRef<HTMLDivElement>(null);

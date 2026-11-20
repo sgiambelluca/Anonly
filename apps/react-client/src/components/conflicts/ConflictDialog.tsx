@@ -23,6 +23,7 @@ import { ConflictReason, type EntityType } from "@anonly/anonymization-core";
 import { CheckIcon, InfoIcon } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 
+import { toBaseEntityType } from "../../baseEntityType.js";
 import { useEntitiesStore } from "../../store/entities.store.js";
 import { Button } from "../common/Button.js";
 import { Dialog } from "../common/Dialog.js";
@@ -91,13 +92,15 @@ export function ConflictDialog({
       .getState()
       .conflicts.find((candidate) => candidate.id === conflictId);
     if (current === undefined) return;
-    setSelectedType(defaultCandidate(current).entityType);
+    // Guarda provisional (F0): el selector sigue siendo de tipos base; F7 la reemplaza.
+    const defaultType = toBaseEntityType(defaultCandidate(current).entityType);
+    setSelectedType(defaultType);
     // ADR-106: preselecciona la escritura vigente, para que aplicar sin tocar
     // nada no cambie el valor canónico.
     setSelectedSpelling(
       useEntitiesStore
         .getState()
-        .groupsByType.get(defaultCandidate(current).entityType)
+        .groupsByType.get(defaultType)
         ?.find((group) => group.id === current.groupId)?.canonicalValue ??
         spellingChoices(current)[0] ??
         null,
@@ -239,7 +242,10 @@ export function ConflictDialog({
           <p className="flex items-center gap-1.5 text-success">
             <CheckIcon className="h-4 w-4 shrink-0" aria-hidden />
             Ya revisado
-            {conflict.resolvedType ? ` (${ENTITY_TYPE_SINGULAR[conflict.resolvedType]})` : ""}.
+            {conflict.resolvedType
+              ? ` (${ENTITY_TYPE_SINGULAR[toBaseEntityType(conflict.resolvedType)]})`
+              : ""}
+            .
           </p>
         ) : null}
       </div>

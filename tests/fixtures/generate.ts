@@ -205,12 +205,14 @@ function buildTextEntityParagraph(
     groupId: `${documentId}-person-${entityIndex}`,
     seed,
     indexInType: entityIndex,
+    country: "AR",
   });
   const dni = synthesize({
     type: EntityType.DNI,
     groupId: `${documentId}-dni-${entityIndex}`,
     seed,
     indexInType: entityIndex,
+    country: "AR",
   });
   return (
     `Página ${pageNumber} de ${pageCount}. Se deja constancia de que ${name}, DNI ${dni}, ` +
@@ -375,18 +377,21 @@ export function buildText50pDenseParagraph(documentId: string, index: number, pa
     groupId: `${documentId}-person-${index}`,
     seed: TEXT_50P_DENSE_SEED,
     indexInType: index,
+    country: "AR",
   });
   const dni = synthesize({
     type: EntityType.DNI,
     groupId: `${documentId}-dni-${index}`,
     seed: TEXT_50P_DENSE_SEED,
     indexInType: index,
+    country: "AR",
   });
   const cuit = synthesize({
     type: EntityType.CUIT,
     groupId: `${documentId}-cuit-${index}`,
     seed: TEXT_50P_DENSE_SEED,
     indexInType: index,
+    country: "AR",
   });
   const phone = syntheticMobilePhone(`${documentId}-dense`, index);
   const email = synthesize({
@@ -394,6 +399,7 @@ export function buildText50pDenseParagraph(documentId: string, index: number, pa
     groupId: `${documentId}-email-${index}`,
     seed: TEXT_50P_DENSE_SEED,
     indexInType: index,
+    country: "AR",
   });
   return (
     `Página ${pageNumber} de 50. Se deja constancia de que ${name}, DNI ${dni}, CUIT ${cuit}, ` +
@@ -847,6 +853,7 @@ function synth(documentId: string, type: EntityType, indexInType: number): strin
     groupId: `${documentId}-${type}-${indexInType}`,
     seed: REFERENCE_DATASET_SEED,
     indexInType,
+    country: "AR",
   });
 }
 

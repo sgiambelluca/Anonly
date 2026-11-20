@@ -8,6 +8,7 @@ import {
   EventChannel,
   type EngineContext,
   type EntityFound,
+  type EntityTypeId,
   type NerFinished,
   type NerStarted,
   type Unsubscribe,
@@ -190,7 +191,7 @@ describe("NerEngine — contract tests", () => {
     const entityTypes = busEmitSpy.mock.calls
       .filter(([, event]) => event === EngineEvents.ENTITY_FOUND)
       .map((call) => (call[2] as EntityFound).occurrence.entityType);
-    const allowed = new Set([
+    const allowed = new Set<EntityTypeId>([
       EntityType.Person,
       EntityType.Organization,
       EntityType.Address,

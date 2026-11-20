@@ -41,6 +41,8 @@ import {
   type OccurrenceRef,
 } from "@anonly/shared";
 
+import { toBaseEntityType } from "./base-entity-type.js";
+
 /**
  * Los tres labels de un `EntityType` (más, desde ADR-060, las dos variantes
  * de género de `Person`) que alimentan la escalera de abreviaturas. Tipo
@@ -135,7 +137,7 @@ export function resolveLabelSet(group: LabelSetInput): PlaceholderLabelSet {
   if (group.type === EntityType.Person && group.personGender !== undefined) {
     return GENDERED_PERSON_LABELS[group.personGender];
   }
-  return LADDER_LABELS[group.type];
+  return LADDER_LABELS[toBaseEntityType(group.type)];
 }
 
 /** Nivel 0/1: `[<LABEL> <NN>]`; nivel 2: colapsa el separador a guion (`[<CORTO>-<NN>]`). */

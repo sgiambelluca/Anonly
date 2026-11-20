@@ -11,13 +11,16 @@
  */
 
 import {
-  EntityType,
-  ReplacementMode,
   type EditPreview,
   type EditPreviewGroup,
   type EditPreviewRequest,
   type EntityGroup,
+  EntityType,
+  type EntityTypeId,
+  ReplacementMode,
 } from "@anonly/anonymization-core";
+
+import { toBaseEntityType } from "../../baseEntityType.js";
 
 import {
   describeEntityNumber,
@@ -32,7 +35,7 @@ function appearances(count: number): string {
 
 /** "Persona N.º 03 · 2 apariciones": la línea que identifica a una entidad en los diálogos. */
 export function describeEntityLine(group: {
-  readonly type: EntityType;
+  readonly type: EntityTypeId;
   readonly indexInType: number;
   readonly memberCount: number;
 }): string {
@@ -132,7 +135,7 @@ export function summarizeSplit(
     moveLabel:
       created !== undefined
         ? describeEntityNumber(created.type, created.indexInType)
-        : `${ENTITY_TYPE_SINGULAR[group.type]} nueva`,
+        : `${ENTITY_TYPE_SINGULAR[toBaseEntityType(group.type)]} nueva`,
     moveCount: selectedCount,
   };
 }
@@ -199,7 +202,7 @@ export function summarizeTypeChange(
   return {
     before: displayReplacement(group),
     after: displayReplacement(next),
-    note: `Pasa a ${ENTITY_TYPE_LABEL[next.type]} con el N.º ${formatIndexInType(
+    note: `Pasa a ${ENTITY_TYPE_LABEL[toBaseEntityType(next.type)]} con el N.º ${formatIndexInType(
       next.indexInType,
     )}, el próximo libre.`,
     dropsGender: group.type === EntityType.Person && next.type !== EntityType.Person,

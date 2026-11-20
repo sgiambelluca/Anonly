@@ -34,6 +34,7 @@ import {
   EventChannel,
   InvalidInputError,
   isEngineErrorCode,
+  isUserEntityType,
   MAX_EDIT_CHECKPOINTS,
   PipelineStage,
   type CancelRequested,
@@ -50,6 +51,8 @@ import {
   type EntityGroupCreated,
   type EntityGroupRemoved,
   type EntityGroupUpdated,
+  type EntityType,
+  type EntityTypeId,
   type ExportFailed,
   type ExportFinished,
   type ExportOptions,
@@ -101,6 +104,22 @@ import type {
   ManualEntityResult,
 } from "./types.js";
 import { WorkerPoolManager, type ManagedPoolKey } from "./worker-pool.js";
+
+/**
+ * Guarda provisional de la 1.1 (F0, Plan_1.1 §7): `regex.findLiteral` todavía
+ * recibe un `EntityType`. Un tipo propio no puede llegar hasta que F4 valide el
+ * tipo del agregado manual; ahí se reemplaza esta guarda por esa validación.
+ * Privada del módulo.
+ */
+function toBaseEntityType(type: EntityTypeId): EntityType {
+  if (isUserEntityType(type)) {
+    throw new InvalidInputError(
+      "addManualEntity: un tipo propio todavía no se puede agregar a mano (llega con F4)",
+      { entityType: type },
+    );
+  }
+  return type;
+}
 
 const OCR_WORDS_PREFIX = "ocr-words:";
 
@@ -524,6 +543,9 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
       });
     }
 
+    // Guarda provisional (F0): falla antes de retener el literal o tocar el stage.
+    const literalEntityType = toBaseEntityType(request.entityType);
+
     // Retenido ANTES de buscar: la durabilidad (ADR-061 §5) no depende de
     // que la búsqueda encuentre algo hoy — un reanalyze posterior puede
     // hacer aparecer el valor en una página recién re-OCR-eada.
@@ -566,7 +588,7 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     let result;
     try {
       result = await this.engines.regex.findLiteral(
-        { document, value: request.value, entityType: request.entityType },
+        { document, value: request.value, entityType: literalEntityType },
         ctx,
       );
     } finally {
@@ -957,7 +979,7 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     this.engines.grouping.reopenSession(documentId, { expectRegex: false, expectNer: false });
     for (const literal of literals) {
       await this.engines.regex.findLiteral(
-        { document, value: literal.value, entityType: literal.entityType },
+        { document, value: literal.value, entityType: toBaseEntityType(literal.entityType) },
         ctx,
       );
     }

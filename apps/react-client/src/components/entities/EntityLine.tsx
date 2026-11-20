@@ -4,8 +4,10 @@
  * apariciones" y, si viene, el token.
  */
 
-import type { EntityType } from "@anonly/anonymization-core";
+import type { EntityTypeId } from "@anonly/anonymization-core";
 import type { ReactNode } from "react";
+
+import { toBaseEntityType } from "../../baseEntityType.js";
 
 import { describeEntityLine } from "./editPreviews.js";
 import { ENTITY_TYPE_COLOR } from "./entityTypeColors.js";
@@ -17,7 +19,7 @@ export function EntityLine({
   aside,
 }: {
   readonly group: {
-    readonly type: EntityType;
+    readonly type: EntityTypeId;
     readonly canonicalValue: string;
     readonly indexInType: number;
     readonly memberCount: number;
@@ -31,7 +33,7 @@ export function EntityLine({
       <span
         aria-hidden
         className="h-2 w-2 shrink-0 rounded-full"
-        style={{ background: ENTITY_TYPE_COLOR[group.type] }}
+        style={{ background: ENTITY_TYPE_COLOR[toBaseEntityType(group.type)] }}
       />
       <b className="min-w-0 truncate font-semibold text-text-primary">{group.canonicalValue}</b>
       <span className="shrink-0 text-text-secondary">{describeEntityLine(group)}</span>

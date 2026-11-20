@@ -17,7 +17,6 @@
 
 import type {
   EngineEvents,
-  EntityType,
   PersonGenderChoice,
   PipelineStage,
   ReplacementMode,
@@ -29,6 +28,7 @@ import type {
   Conflict,
   DocumentSourceKind,
   EntityGroup,
+  EntityTypeId,
   ExportOptions,
   Occurrence,
   PreviewInteractionGeometry,
@@ -129,6 +129,16 @@ export interface RegexFinished {
   readonly documentId: string;
   readonly occurrenceCount: number;
   readonly durationMs: number;
+  /**
+   * ADR-220 §6: formatos que no se aplicaron en alguna página (un fallo del
+   * recorrido, o una definición inválida al init: figura con todas las
+   * páginas). Ausente ≡ ninguno, misma convención que `unreadableInk`
+   * (ADR-190 §4). Nunca lleva texto del documento.
+   */
+  readonly skippedFormats?: ReadonlyArray<{
+    readonly formatId: string;
+    readonly pageIndices: ReadonlyArray<number>;
+  }>;
 }
 export interface NerStarted {
   readonly documentId: string;
@@ -186,8 +196,8 @@ export interface ConflictDetected {
 export interface ConflictResolved {
   readonly documentId: string;
   readonly conflictId: string;
-  /** ADR-083 §3: el tipo con el que quedó clasificado el grupo. Antes: `mode: ReplacementMode`. */
-  readonly entityType: EntityType;
+  /** ADR-083 §3: el tipo con el que quedó clasificado el grupo. Antes: `mode: ReplacementMode`. EntityTypeId por ADR-219 §1. */
+  readonly entityType: EntityTypeId;
 }
 export interface GroupingFinished {
   readonly documentId: string;
@@ -370,7 +380,7 @@ export interface ConflictResolveRequested {
    * el motor ya tomó al crear el conflicto: resolver sin elegir es confirmar,
    * y no cambia ningún dato.
    */
-  readonly entityType?: EntityType;
+  readonly entityType?: EntityTypeId;
   /**
    * ADR-174 §3: solo en conflictos con `heldManual`. `"manual"` agrupa la
    * ocurrencia manual retenida (por el mismo camino que si hubiera ganado);
