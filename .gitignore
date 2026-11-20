@@ -90,3 +90,6 @@ release/
 # modelos y el wasm. `build/` es salida de node-gyp.
 apps/desktop-shell/native/vendor/
 apps/desktop-shell/native/build/
+
+# Salida de pnpm gates (se pisa en cada corrida)
+.gates-logs/
