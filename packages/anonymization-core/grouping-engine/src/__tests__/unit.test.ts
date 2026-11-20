@@ -1,33 +1,49 @@
 import {
+  ConflictReason,
   DetectionSource,
   EngineEvents,
   EntityType,
   EventChannel,
   GENDER_LEXICON,
   ReplacementMode,
+  USER_TYPE_NAME_MAX,
+  USER_TYPE_SHORT_LABEL_MAX,
+  type BoundingBox,
   type ConflictDetected,
   type EngineContext,
   type EntityGroupCreated,
   type EntityGroupRemoved,
   type EntityGroupUpdated,
+  type EntityGroup,
+  type EntityTypeId,
   type GenderLexicon,
+  type Occurrence,
+  type UserEntityTypeDefinition,
 } from "@anonly/shared";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 import { inferPersonGender } from "../gender.js";
 import { GroupingEngine, passesNecessaryTrigramCondition } from "../grouping.engine.js";
+import { GroupingInvalidPatchError } from "../grouping.errors.js";
 import { buildPlaceholderValue } from "../labels.js";
 import {
   levenshtein,
   levenshteinNormalized,
   levenshteinNormalizedAtLeast,
 } from "../levenshtein.js";
+import { userTypeLabel } from "../user-type-label.js";
+import { validateUserEntityType } from "../user-types.js";
 
 import {
+  AR_LABEL_CONTEXT,
+  CBU_TYPE,
+  CLINICAL_TYPE,
   createEngineContext,
+  createMockConfig,
   makeBBox,
   makeEntityGroup,
   makeOccurrence,
+  makeRule,
 } from "./fixtures/test-helpers.js";
 
 describe("GroupingEngine — unit tests", () => {
@@ -1204,7 +1220,7 @@ describe("inferPersonGender (ADR-060 §4)", () => {
       // Token neutro: un grupo sin personGender resuelto sigue usando
       // PERSONA/PERS/PRS, exactamente como antes de ADR-060.
       const group = makeEntityGroup({ canonicalValue: "Andrea Fernandez", indexInType: 3 });
-      expect(buildPlaceholderValue(group)).toBe("[PERSONA 03]");
+      expect(buildPlaceholderValue(group, AR_LABEL_CONTEXT)).toBe("[PERSONA 03]");
     },
   );
 
@@ -2577,5 +2593,708 @@ describe("GroupingEngine — un choque pendiente bloquea el export (ADR-176)", (
         channel === EventChannel.Grouping && event === EngineEvents.ENTITY_GROUP_UPDATED,
     );
     expect(updateCalls.length).toBeGreaterThan(0);
+  });
+});
+
+describe("GroupingEngine — tipos propios, país y formato del grupo (ADR-219 a ADR-225)", () => {
+  let engine: GroupingEngine;
+  let ctx: EngineContext;
+
+  const wide = (y: number): BoundingBox => makeBBox(10, y, 600, 12);
+
+  /** Ocurrencia de Regex de un tipo propio, con una caja ancha para que entre el nivel 0. */
+  function occ(type: EntityTypeId, value: string, y: number, extra?: Partial<Occurrence>) {
+    return makeOccurrence({
+      entityType: type,
+      value,
+      normalizedValue: value.toLowerCase(),
+      bbox: wide(y),
+      ...extra,
+    });
+  }
+
+  function found(occurrence: Occurrence, channel: EventChannel = EventChannel.Regex): void {
+    ctx.bus.emit(channel, EngineEvents.ENTITY_FOUND, { documentId: "doc-1", occurrence });
+  }
+
+  function groups(): ReadonlyArray<EntityGroup> {
+    return engine.getSnapshot("doc-1").groups;
+  }
+
+  function groupOf(occurrence: Occurrence): EntityGroup {
+    const group = groups().find((g) => g.members.some((m) => m.occurrenceId === occurrence.id));
+    if (!group) throw new Error(`sin grupo para ${occurrence.id}`);
+    return group;
+  }
+
+  async function startEngine(userTypes: ReadonlyArray<UserEntityTypeDefinition> = []) {
+    engine = new GroupingEngine();
+    ctx = createEngineContext({
+      config: createMockConfig({ detection: { ...createMockConfig().detection, userTypes } }),
+    });
+    await engine.init(ctx);
+    engine.startSession("doc-1");
+  }
+
+  beforeEach(async () => {
+    await startEngine();
+  });
+
+  afterEach(async () => {
+    if (!engine["disposed"]) {
+      await engine.dispose();
+    }
+  });
+
+  // Caso 78.
+  it("two user types number independently", async () => {
+    engine.defineSessionType("doc-1", CBU_TYPE);
+    engine.defineSessionType("doc-1", CLINICAL_TYPE);
+    const late = occ(CBU_TYPE.id, "2222", 90);
+    const early = occ(CBU_TYPE.id, "1111", 10);
+    const clinical = occ(CLINICAL_TYPE.id, "hc-77", 50);
+    for (const o of [late, early, clinical]) found(o);
+
+    expect(groupOf(late).replacementValue).toBe("[CBU 01]");
+    expect(groupOf(early).replacementValue).toBe("[CBU 02]");
+    expect(groupOf(clinical).replacementValue).toBe("[HISTORIA CLINICA 01]");
+
+    // La renumeración canónica (ADR-028) corre por tipo propio igual que por tipo base.
+    await engine.finishSession("doc-1");
+    expect(groupOf(early).replacementValue).toBe("[CBU 01]");
+    expect(groupOf(late).replacementValue).toBe("[CBU 02]");
+    expect(groupOf(clinical).replacementValue).toBe("[HISTORIA CLINICA 01]");
+  });
+
+  // Caso 79.
+  it("user type placeholder ladder uses short labels or the automatic ones", async () => {
+    await engine.dispose();
+    const withShort: UserEntityTypeDefinition = {
+      ...CLINICAL_TYPE,
+      shortLabels: { level1: "hc" },
+    };
+    await startEngine([withShort]);
+    engine.defineSessionType("doc-1", CBU_TYPE);
+    const clinical = occ(CLINICAL_TYPE.id, "hc-1", 10);
+    const cbu = occ(CBU_TYPE.id, "0001", 40);
+    found(clinical);
+    found(cbu);
+
+    // Con versión corta escrita a mano: nivel 1 «HC», nivel 2 automático.
+    expect(groupOf(clinical).replacementPreviews.placeholderLadder).toEqual([
+      "[HISTORIA CLINICA 01]",
+      "[HC 01]",
+      "[HIS-01]",
+    ]);
+    // Nombre de tres letras: los tres niveles son «CBU» y se saltean los repetidos.
+    expect(groupOf(cbu).replacementPreviews.placeholderLadder).toEqual(["[CBU 01]", "[CBU-01]"]);
+
+    // Sin versiones cortas: niveles automáticos de 4 y 3 letras.
+    const affiliate: UserEntityTypeDefinition = {
+      id: "user:00000000-0000-4000-8000-0000000000c3",
+      name: "Número de afiliado",
+    };
+    engine.defineSessionType("doc-1", affiliate);
+    const afiliado = occ(affiliate.id, "af-1", 70);
+    found(afiliado);
+    expect(groupOf(afiliado).replacementPreviews.placeholderLadder).toEqual([
+      "[NUMERO DE AFILIADO 01]",
+      "[NUME 01]",
+      "[NUM-01]",
+    ]);
+  });
+
+  // Caso 80.
+  it("user type mask keeps separators and follows the canonical value", async () => {
+    engine.defineSessionType("doc-1", CBU_TYPE);
+    const a = occ(CBU_TYPE.id, "0170-0994 11", 10, { maskFormat: "ZZ ZZ" });
+    found(a);
+    const groupA = groupOf(a);
+    await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: groupA.id,
+      patch: { replacementMode: ReplacementMode.Mask },
+    });
+    // No mira `maskFormat`: cada letra o dígito pasa a X y el resto queda.
+    expect(groupOf(a).replacementValue).toBe("XXXX-XXXX XX");
+    expect(groupOf(a).replacementPreviews.mask).toBe("XXXX-XXXX XX");
+
+    // Una fusión que trae un alias más frecuente cambia el valor canónico y la máscara.
+    const b1 = occ(CBU_TYPE.id, "99-99", 40);
+    const b2 = occ(CBU_TYPE.id, "99-99", 70);
+    found(b1);
+    found(b2);
+    await engine.applyGroupMerge({
+      documentId: "doc-1",
+      sourceGroupId: groupOf(b1).id,
+      targetGroupId: groupA.id,
+    });
+    const merged = groupOf(a);
+    expect(merged.canonicalValue).toBe("99-99");
+    expect(merged.replacementValue).toBe("XX-XX");
+  });
+
+  // Caso 81.
+  it("synthetic never reaches a user type", async () => {
+    engine.defineSessionType("doc-1", CBU_TYPE);
+    const base = makeOccurrence({
+      value: "11111111",
+      normalizedValue: "11111111",
+      bbox: wide(10),
+    });
+    const own = occ(CBU_TYPE.id, "0001", 40);
+    found(base);
+    found(own);
+    await engine.applyRuleCreated({
+      documentId: "doc-1",
+      rule: makeRule("global", ReplacementMode.Synthetic),
+    });
+    // Una regla global en synthetic: el tipo base sintetiza, el propio queda en placeholder.
+    expect(groupOf(base).replacementMode).toBe(ReplacementMode.Synthetic);
+    expect(groupOf(own).replacementMode).toBe(ReplacementMode.Placeholder);
+    expect(groupOf(own).replacementValue).toBe("[CBU 01]");
+    expect(groupOf(own).replacementPreviews.synthetic).toBe("");
+
+    // Reclasificar a un tipo propio un grupo en synthetic lo deja en placeholder.
+    await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: groupOf(base).id,
+      patch: { type: CBU_TYPE.id },
+    });
+    expect(groupOf(base).replacementMode).toBe(ReplacementMode.Placeholder);
+    expect(groupOf(base).replacementPreviews.synthetic).toBe("");
+  });
+
+  // Caso 82.
+  it("user type groups by alphanumeric key, never fuzzy", () => {
+    engine.defineSessionType("doc-1", CBU_TYPE);
+    const fromFormat = occ(CBU_TYPE.id, "0170-0994", 10);
+    const manual = occ(CBU_TYPE.id, "01700994", 40, { source: DetectionSource.Manual });
+    const other = occ(CBU_TYPE.id, "0170-0995", 70);
+    found(fromFormat);
+    found(manual);
+    found(other);
+
+    expect(groups()).toHaveLength(2);
+    expect(groupOf(fromFormat).id).toBe(groupOf(manual).id);
+    expect(groupOf(fromFormat).members).toHaveLength(2);
+    expect(groupOf(other).id).not.toBe(groupOf(fromFormat).id);
+  });
+
+  // Caso 83.
+  it("document types live in the session and survive reopen", async () => {
+    const emitSpy = vi.spyOn(ctx.bus, "emit");
+    expect(engine.getSessionTypes("doc-1")).toEqual([]);
+    engine.defineSessionType("doc-1", CBU_TYPE);
+    engine.defineSessionType("doc-1", CLINICAL_TYPE);
+
+    expect(engine.getSessionTypes("doc-1")).toEqual([CBU_TYPE, CLINICAL_TYPE]);
+    expect(emitSpy).not.toHaveBeenCalled();
+
+    engine.reopenSession("doc-1", { expectRegex: true, expectNer: false });
+    expect(engine.getSessionTypes("doc-1")).toEqual([CBU_TYPE, CLINICAL_TYPE]);
+
+    await engine.closeSession("doc-1");
+    expect(engine.getSessionTypes("doc-1")).toEqual([]);
+    engine.startSession("doc-1");
+    expect(engine.getSessionTypes("doc-1")).toEqual([]);
+  });
+
+  // Caso 84.
+  it("reclassify and resolve conflicts to a user type", async () => {
+    await engine.dispose();
+    await startEngine([CLINICAL_TYPE]);
+    engine.defineSessionType("doc-1", CBU_TYPE);
+
+    // patch.type hacia un tipo propio del documento y hacia uno guardado.
+    const a = makeOccurrence({ value: "11111111", normalizedValue: "11111111", bbox: wide(10) });
+    const b = makeOccurrence({ value: "22222222", normalizedValue: "22222222", bbox: wide(40) });
+    found(a);
+    found(b);
+    await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: groupOf(a).id,
+      patch: { type: CBU_TYPE.id },
+    });
+    await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: groupOf(b).id,
+      patch: { type: CLINICAL_TYPE.id },
+    });
+    expect(groupOf(a).type).toBe(CBU_TYPE.id);
+    expect(groupOf(a).replacementValue).toBe("[CBU 01]");
+    expect(groupOf(b).type).toBe(CLINICAL_TYPE.id);
+
+    // Hacia un tipo propio desconocido se rechaza.
+    await expect(
+      engine.applyGroupUpdate({
+        documentId: "doc-1",
+        groupId: groupOf(a).id,
+        patch: { type: "user:00000000-0000-4000-8000-00000000ffff" },
+      }),
+    ).rejects.toBeInstanceOf(GroupingInvalidPatchError);
+    expect(groupOf(a).type).toBe(CBU_TYPE.id);
+
+    // Un conflicto se resuelve a un tipo propio que está entre los candidatos.
+    const dni = makeOccurrence({
+      value: "33333333",
+      normalizedValue: "33333333",
+      bbox: wide(100),
+    });
+    const own = occ(CBU_TYPE.id, "33333333", 100);
+    found(dni);
+    found(own);
+    const dniGroupId = groupOf(dni).id;
+    const conflict = engine.getSnapshot("doc-1").conflicts.find((c) => c.groupId === dniGroupId);
+    if (!conflict) throw new Error("se esperaba un conflicto");
+    await engine.applyConflictResolve({
+      documentId: "doc-1",
+      conflictId: conflict.id,
+      entityType: CBU_TYPE.id,
+    });
+    expect(groupOf(dni).type).toBe(CBU_TYPE.id);
+  });
+
+  // Caso 85.
+  it("a user format beats a base format in a regex-regex conflict", () => {
+    engine.defineSessionType("doc-1", CBU_TYPE);
+    // Llega primero el base, después el propio sobre el mismo tramo: gana el propio.
+    const base = makeOccurrence({
+      value: "12345678",
+      normalizedValue: "12345678",
+      bbox: wide(10),
+      formatId: "fmt:base:dni-ar",
+      formatOrigin: "base",
+    });
+    const own = occ(CBU_TYPE.id, "12345678", 10, { formatId: "fmt:own", formatOrigin: "user" });
+    found(base);
+    found(own);
+
+    const [conflict] = engine.getSnapshot("doc-1").conflicts;
+    expect(conflict?.reason).toBe(ConflictReason.Overlap);
+    expect(conflict?.resolved).toBe(true);
+    expect(conflict?.heldManual).toBeUndefined();
+    expect(conflict?.resolvedType).toBe(CBU_TYPE.id);
+    expect(conflict?.candidates.map((c) => c.formatId)).toEqual(["fmt:base:dni-ar", "fmt:own"]);
+    expect(groups()).toHaveLength(2);
+
+    // Al revés: la registrada es la propia y la que llega es la base; sigue ganando la propia.
+    const own2 = occ(CBU_TYPE.id, "87654321", 50, { formatId: "fmt:own", formatOrigin: "user" });
+    const base2 = makeOccurrence({
+      value: "87654321",
+      normalizedValue: "87654321",
+      bbox: wide(50),
+      formatId: "fmt:base:dni-ar",
+      formatOrigin: "base",
+    });
+    found(own2);
+    found(base2);
+    const second = engine.getSnapshot("doc-1").conflicts[1];
+    expect(second?.resolvedType).toBe(CBU_TYPE.id);
+    expect(second?.candidates.map((c) => c.formatId)).toEqual(["fmt:own", "fmt:base:dni-ar"]);
+    // La base perdedora queda contenida entera en la ganadora y no crea grupo.
+    expect(groups()).toHaveLength(3);
+  });
+
+  it("regex-regex conflict falls back to the longer value and then the registered one", () => {
+    // Mismo origen, la que llega es más larga: gana la que llega.
+    const short = makeOccurrence({
+      entityType: EntityType.DNI,
+      value: "123",
+      normalizedValue: "123",
+      bbox: wide(10),
+      formatId: "fmt:a",
+      formatOrigin: "base",
+    });
+    const long = makeOccurrence({
+      entityType: EntityType.Phone,
+      value: "1234",
+      normalizedValue: "1234",
+      bbox: wide(10),
+      formatId: "fmt:b",
+      formatOrigin: "base",
+    });
+    found(short);
+    found(long);
+    expect(engine.getSnapshot("doc-1").conflicts[0]?.resolvedType).toBe(EntityType.Phone);
+
+    // Mismo origen y largo: gana la que ya estaba registrada.
+    const first = makeOccurrence({
+      entityType: EntityType.DNI,
+      value: "9999",
+      normalizedValue: "9999",
+      bbox: wide(60),
+      formatId: "fmt:a",
+      formatOrigin: "base",
+    });
+    const second = makeOccurrence({
+      entityType: EntityType.Phone,
+      value: "8888",
+      normalizedValue: "8888",
+      bbox: wide(60),
+      formatId: "fmt:b",
+      formatOrigin: "base",
+    });
+    found(first);
+    found(second);
+    expect(engine.getSnapshot("doc-1").conflicts[1]?.resolvedType).toBe(EntityType.DNI);
+    expect(engine.getSnapshot("doc-1").conflicts[1]?.resolved).toBe(true);
+  });
+
+  // Caso 86.
+  it("formatId follows the first member of the group's own type", async () => {
+    engine.defineSessionType("doc-1", CBU_TYPE);
+    const later = occ(CBU_TYPE.id, "0170-0994", 300, { formatId: "fmt:2", formatOrigin: "user" });
+    const earlier = occ(CBU_TYPE.id, "01700994", 100, { formatId: "fmt:1", formatOrigin: "user" });
+    found(later);
+    expect(groupOf(later).formatId).toBe("fmt:2");
+    const emitSpy = vi.spyOn(ctx.bus, "emit");
+    found(earlier);
+    // Un grupo con miembros de dos formatos toma el del primero en orden documental.
+    expect(groupOf(later).formatId).toBe("fmt:1");
+    expect(groupOf(later).members.map((m) => m.formatId)).toEqual(["fmt:2", "fmt:1"]);
+    const updated = emitSpy.mock.calls
+      .filter(([, event]) => event === EngineEvents.ENTITY_GROUP_UPDATED)
+      .map(([, , payload]) => payload as EntityGroupUpdated);
+    expect(updated.at(-1)?.changes).toContain("formatId");
+
+    // Ausente en un grupo del modelo y en uno agregado a mano.
+    const model = makeOccurrence({
+      entityType: EntityType.Person,
+      value: "Ana Gómez",
+      normalizedValue: "ana gomez",
+      source: DetectionSource.NER,
+      bbox: wide(400),
+    });
+    const manual = occ(CBU_TYPE.id, "5555", 450, { source: DetectionSource.Manual });
+    found(model, EventChannel.Ner);
+    found(manual);
+    expect(groupOf(model).formatId).toBeUndefined();
+    expect(groupOf(manual).formatId).toBeUndefined();
+
+    // La división lo recalcula en las dos mitades.
+    const groupId = groupOf(later).id;
+    const { merged, created } = await engine.applyGroupSplit({
+      documentId: "doc-1",
+      groupId,
+      occurrenceIds: [earlier.id],
+    });
+    expect(merged.formatId).toBe("fmt:2");
+    expect(created.formatId).toBe("fmt:1");
+
+    // La fusión también.
+    const survivor = await engine.applyGroupMerge({
+      documentId: "doc-1",
+      sourceGroupId: created.id,
+      targetGroupId: groupId,
+    });
+    expect(survivor.formatId).toBe("fmt:1");
+
+    // Un grupo reclasificado a otro tipo pierde el subnivel, y lo recupera si vuelve a su tipo.
+    await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId,
+      patch: { type: EntityType.Custom },
+    });
+    expect(groupOf(later).formatId).toBeUndefined();
+    await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId,
+      patch: { type: CBU_TYPE.id },
+    });
+    expect(groupOf(later).formatId).toBe("fmt:1");
+  });
+
+  it("formatId is recalculated when dropOccurrences removes the first member", () => {
+    engine.defineSessionType("doc-1", CBU_TYPE);
+    const a = occ(CBU_TYPE.id, "0170-0994", 100, {
+      pageIndex: 0,
+      formatId: "fmt:1",
+      formatOrigin: "user",
+    });
+    const b = occ(CBU_TYPE.id, "01700994", 100, {
+      pageIndex: 1,
+      formatId: "fmt:2",
+      formatOrigin: "user",
+    });
+    found(a);
+    found(b);
+    expect(groupOf(a).formatId).toBe("fmt:1");
+    engine.dropOccurrences("doc-1", { pageIndices: [0] });
+    expect(groupOf(b).formatId).toBe("fmt:2");
+  });
+
+  it("userTypeLabel strips accents and uppercases", () => {
+    expect(userTypeLabel("Historia clínica")).toBe("HISTORIA CLINICA");
+    expect(userTypeLabel("  año   nuevo ")).toBe("ANO NUEVO");
+    expect(userTypeLabel("Ñandú de cuenta-2")).toBe("NANDU DE CUENTA-2");
+  });
+
+  it("validateUserEntityType reports each issue code", () => {
+    const codes = (
+      definition: UserEntityTypeDefinition,
+      existing: ReadonlyArray<UserEntityTypeDefinition> = [],
+    ): ReadonlyArray<string> =>
+      validateUserEntityType(definition, { country: "AR", existing }).issues.map((i) => i.code);
+    const base: UserEntityTypeDefinition = { id: CBU_TYPE.id, name: "Número de cuenta" };
+
+    expect(validateUserEntityType(base, { country: "AR", existing: [] })).toEqual({
+      ok: true,
+      issues: [],
+    });
+    expect(codes({ ...base, name: "   " })).toEqual(["name_empty"]);
+    expect(codes({ ...base, name: "A".repeat(USER_TYPE_NAME_MAX + 1) })).toContain("name_too_long");
+    expect(codes({ ...base, name: "Cuenta/1" })).toEqual(["name_invalid_chars"]);
+    expect(codes({ ...base, name: "123 45" })).toEqual(["name_without_letter"]);
+    expect(codes({ ...base, shortLabels: { level1: "" } })).toEqual(["short_label_invalid"]);
+    expect(
+      codes({ ...base, shortLabels: { level2: "A".repeat(USER_TYPE_SHORT_LABEL_MAX + 1) } }),
+    ).toEqual(["short_label_invalid"]);
+    expect(codes({ ...base, shortLabels: { level1: "A B" } })).toEqual(["short_label_invalid"]);
+    // Etiqueta de un tipo base del país, y de otro tipo de `existing`.
+    expect(codes({ ...base, name: "Teléfono" })).toEqual(["label_taken"]);
+    expect(codes({ ...base, name: "cbu" }, [{ id: CLINICAL_TYPE.id, name: "CBU" }])).toEqual([
+      "label_taken",
+    ]);
+    expect(codes({ ...base, id: "user:no-es-uuid" })).toEqual(["id_invalid"]);
+    // Un UUID v1 no es v4.
+    expect(codes({ ...base, id: "user:00000000-0000-1000-8000-0000000000c1" })).toEqual([
+      "id_invalid",
+    ]);
+    expect(codes(base, [{ id: base.id, name: "Otro nombre" }])).toEqual(["id_taken"]);
+  });
+
+  // Caso 89.
+  it("updateSessionType relabels the groups of the type and keeps id, index and mode", async () => {
+    const affiliate: UserEntityTypeDefinition = {
+      id: "user:00000000-0000-4000-8000-0000000000a1",
+      name: "Número de afiliado",
+    };
+    engine.defineSessionType("doc-1", affiliate);
+    const placeholder = occ(affiliate.id, "af-1", 10);
+    const masked = occ(affiliate.id, "af-2", 40);
+    const redacted = occ(affiliate.id, "af-3", 70);
+    for (const o of [placeholder, masked, redacted]) found(o);
+    await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: groupOf(masked).id,
+      patch: { replacementMode: ReplacementMode.Mask },
+    });
+    await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: groupOf(redacted).id,
+      patch: { replacementMode: ReplacementMode.Redact },
+    });
+    const before = [placeholder, masked, redacted].map((o) => groupOf(o));
+    expect(before[0]?.replacementValue).toBe("[NUMERO DE AFILIADO 01]");
+
+    const emitSpy = vi.spyOn(ctx.bus, "emit");
+    await engine.updateSessionType("doc-1", { id: affiliate.id, name: "Afiliado" });
+
+    const after = [placeholder, masked, redacted].map((o) => groupOf(o));
+    expect(after[0]?.replacementValue).toBe("[AFILIADO 01]");
+    for (const [i, group] of after.entries()) {
+      expect(group.id).toBe(before[i]?.id);
+      expect(group.indexInType).toBe(before[i]?.indexInType);
+      expect(group.replacementMode).toBe(before[i]?.replacementMode);
+      expect(group.replacementPreviews.placeholder).toBe(
+        `[AFILIADO ${String(group.indexInType).padStart(2, "0")}]`,
+      );
+    }
+    // Un grupo en mask o en redact no cambia su valor.
+    expect(after[1]?.replacementValue).toBe(before[1]?.replacementValue);
+    expect(after[2]?.replacementValue).toBe("");
+
+    const events = emitSpy.mock.calls.map(([, event]) => event);
+    expect(events.filter((e) => e === EngineEvents.ENTITY_GROUP_UPDATED)).toHaveLength(3);
+    expect(events.filter((e) => e === EngineEvents.GROUP_REPLACEMENT_CHANGED)).toHaveLength(1);
+    const updated = emitSpy.mock.calls
+      .filter(([, event]) => event === EngineEvents.ENTITY_GROUP_UPDATED)
+      .map(([, , payload]) => payload as EntityGroupUpdated);
+    expect(updated.every((u) => u.changes.includes("replacementPreviews"))).toBe(true);
+
+    // Cambiar solo las versiones cortas cambia los niveles 1 y 2 de la escalera.
+    await engine.updateSessionType("doc-1", {
+      id: affiliate.id,
+      name: "Afiliado",
+      shortLabels: { level1: "AFI", level2: "AF" },
+    });
+    expect(groupOf(placeholder).replacementPreviews.placeholderLadder).toEqual([
+      "[AFILIADO 01]",
+      "[AFI 01]",
+      "[AF-01]",
+    ]);
+    expect(engine.getSessionTypes("doc-1")).toEqual([
+      { id: affiliate.id, name: "Afiliado", shortLabels: { level1: "AFI", level2: "AF" } },
+    ]);
+
+    // La misma etiqueta que ya tenía no es una repetición.
+    await expect(
+      engine.updateSessionType("doc-1", { id: affiliate.id, name: "afiliado" }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("updateSessionType keeps a replacement value written by the user", async () => {
+    engine.defineSessionType("doc-1", CBU_TYPE);
+    const a = occ(CBU_TYPE.id, "0001", 10);
+    found(a);
+    await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: groupOf(a).id,
+      patch: { replacementValue: "[MI CUENTA]" },
+    });
+
+    await engine.updateSessionType("doc-1", { id: CBU_TYPE.id, name: "Cuenta bancaria" });
+
+    expect(groupOf(a).replacementValue).toBe("[MI CUENTA]");
+    expect(groupOf(a).replacementValueUserSet).toBe(true);
+    expect(groupOf(a).replacementPreviews.placeholder).toBe("[CUENTA BANCARIA 01]");
+  });
+
+  // Caso 90.
+  it("removeSessionType removes every group of the type and suppresses its values", async () => {
+    engine.defineSessionType("doc-1", CBU_TYPE);
+    engine.defineSessionType("doc-1", CLINICAL_TYPE);
+    const a = occ(CBU_TYPE.id, "1234", 10);
+    const b = occ(CBU_TYPE.id, "5678", 40);
+    const other = occ(CLINICAL_TYPE.id, "hc-1", 70);
+    for (const o of [a, b, other]) found(o);
+    // Un conflicto sobre el grupo de `a` (otro tipo sobre el mismo tramo).
+    found(makeOccurrence({ value: "1234", normalizedValue: "1234", bbox: wide(10) }));
+    const ids = [groupOf(a).id, groupOf(b).id];
+    const emitSpy = vi.spyOn(ctx.bus, "emit");
+
+    await engine.removeSessionType("doc-1", CBU_TYPE.id);
+
+    const events = emitSpy.mock.calls.map(([, event, payload]) => ({ event, payload }));
+    const removed = events
+      .filter((e) => e.event === EngineEvents.ENTITY_GROUP_REMOVED)
+      .map((e) => (e.payload as EntityGroupRemoved).groupId);
+    expect(new Set(removed)).toEqual(new Set(ids));
+    expect(events.some((e) => e.event === EngineEvents.CONFLICT_RESOLVED)).toBe(true);
+    expect(engine.getSessionTypes("doc-1")).toEqual([CLINICAL_TYPE]);
+    expect(groups().some((g) => g.type === CBU_TYPE.id)).toBe(false);
+    expect(groupOf(other).type).toBe(CLINICAL_TYPE.id);
+
+    // Una ocurrencia posterior de uno de esos valores se descarta, venga de donde venga.
+    const again = makeOccurrence({
+      entityType: EntityType.Person,
+      source: DetectionSource.NER,
+      value: "1234",
+      normalizedValue: "1234",
+      bbox: wide(200),
+    });
+    found(again, EventChannel.Ner);
+    expect(groups().some((g) => g.members.some((m) => m.occurrenceId === again.id))).toBe(false);
+    // liftRemoval la vuelve a admitir.
+    engine.liftRemoval("doc-1", "1234");
+    const admitted = makeOccurrence({ ...again, id: "again-2", bbox: wide(230) });
+    found(admitted, EventChannel.Ner);
+    expect(groups().some((g) => g.members.some((m) => m.occurrenceId === "again-2"))).toBe(true);
+
+    // Un tipo sin grupos se borra sin emitir eventos.
+    engine.defineSessionType("doc-1", CBU_TYPE);
+    emitSpy.mockClear();
+    await engine.removeSessionType("doc-1", CBU_TYPE.id);
+    expect(emitSpy).not.toHaveBeenCalled();
+  });
+
+  it("removeSessionType resolves a pending held manual occurrence of the type as detected", async () => {
+    engine.defineSessionType("doc-1", CBU_TYPE);
+    const detected = makeOccurrence({
+      value: "12345678",
+      normalizedValue: "12345678",
+      bbox: wide(10),
+    });
+    found(detected);
+    found(occ(CBU_TYPE.id, "12345678", 10, { source: DetectionSource.Manual }));
+    const held = engine.getSnapshot("doc-1").conflicts.find((c) => c.heldManual === true);
+    if (!held) throw new Error("se esperaba un conflicto retenido");
+    const detectedBefore = groupOf(detected);
+    const emitSpy = vi.spyOn(ctx.bus, "emit");
+
+    await engine.removeSessionType("doc-1", CBU_TYPE.id);
+
+    expect(
+      emitSpy.mock.calls.some(
+        ([, event, payload]) =>
+          event === EngineEvents.CONFLICT_RESOLVED &&
+          (payload as { conflictId: string }).conflictId === held.id,
+      ),
+    ).toBe(true);
+    const resolved = engine.getSnapshot("doc-1").conflicts.find((c) => c.id === held.id);
+    expect(resolved?.resolved).toBe(true);
+    expect(resolved?.heldManual).toBeUndefined();
+    expect(groupOf(detected)).toEqual(detectedBefore);
+
+    // Elegir después la retenida ya no aplica: se rechaza y no crea un grupo del tipo borrado.
+    await expect(
+      engine.applyConflictResolve({
+        documentId: "doc-1",
+        conflictId: held.id,
+        winner: "manual",
+      }),
+    ).rejects.toBeInstanceOf(GroupingInvalidPatchError);
+    expect(groups().some((g) => g.type === CBU_TYPE.id)).toBe(false);
+    expect(groups()).toHaveLength(1);
+    expect(engine.getSessionTypes("doc-1")).toEqual([]);
+  });
+
+  it("removeSessionType drops type corrections and rules that target the type", async () => {
+    engine.defineSessionType("doc-1", CBU_TYPE);
+    const a = makeOccurrence({ value: "11111111", normalizedValue: "11111111", bbox: wide(10) });
+    found(a);
+    await engine.applyGroupUpdate({
+      documentId: "doc-1",
+      groupId: groupOf(a).id,
+      patch: { type: CBU_TYPE.id },
+    });
+    const ownRule = makeRule("type", ReplacementMode.Mask, { entityType: CBU_TYPE.id });
+    const otherRule = makeRule("type", ReplacementMode.Redact, { entityType: EntityType.DNI });
+    await engine.applyRuleCreated({ documentId: "doc-1", rule: ownRule });
+    await engine.applyRuleCreated({ documentId: "doc-1", rule: otherRule });
+    expect(engine["sessions"].get("doc-1")?.typeCorrections.size).toBe(1);
+
+    await engine.removeSessionType("doc-1", CBU_TYPE.id);
+
+    expect(engine["sessions"].get("doc-1")?.typeCorrections.size).toBe(0);
+    expect(engine.getSnapshot("doc-1").rules.map((r) => r.id)).toEqual([otherRule.id]);
+  });
+
+  // Caso 91.
+  it("restoreCheckpoint restores session types exactly", async () => {
+    // Un punto tomado antes de defineSessionType deja la sesión sin ese tipo.
+    const beforeDefine = engine.createCheckpoint("doc-1");
+    engine.defineSessionType("doc-1", CBU_TYPE);
+    const a = occ(CBU_TYPE.id, "0001", 10);
+    found(a);
+    const withType = engine.createCheckpoint("doc-1");
+    const original = groupOf(a);
+
+    // Uno tomado antes de updateSessionType devuelve la definición y el valor anteriores.
+    await engine.updateSessionType("doc-1", { id: CBU_TYPE.id, name: "Cuenta bancaria" });
+    expect(groupOf(a).replacementValue).toBe("[CUENTA BANCARIA 01]");
+    await engine.restoreCheckpoint("doc-1", withType);
+    expect(engine.getSessionTypes("doc-1")).toEqual([CBU_TYPE]);
+    expect(groupOf(a).replacementValue).toBe("[CBU 01]");
+
+    // Uno tomado antes de removeSessionType devuelve el tipo y sus grupos.
+    await engine.removeSessionType("doc-1", CBU_TYPE.id);
+    expect(groups()).toHaveLength(0);
+    expect(engine["sessions"].get("doc-1")?.removedValues.has("0001")).toBe(true);
+    await engine.restoreCheckpoint("doc-1", withType);
+    expect(engine.getSessionTypes("doc-1")).toEqual([CBU_TYPE]);
+    const restored = groupOf(a);
+    expect(restored.id).toBe(original.id);
+    expect(restored.indexInType).toBe(original.indexInType);
+    expect(restored.replacementValue).toBe(original.replacementValue);
+    expect(engine["sessions"].get("doc-1")?.removedValues.has("0001")).toBe(false);
+
+    // restoreCheckpoint no emite nada por las definiciones: solo la diferencia de grupos.
+    const emitSpy = vi.spyOn(ctx.bus, "emit");
+    await engine.restoreCheckpoint("doc-1", beforeDefine);
+    expect(engine.getSessionTypes("doc-1")).toEqual([]);
+    const events = emitSpy.mock.calls.map(([, event]) => event);
+    expect(events).toEqual([EngineEvents.ENTITY_GROUP_REMOVED]);
   });
 });

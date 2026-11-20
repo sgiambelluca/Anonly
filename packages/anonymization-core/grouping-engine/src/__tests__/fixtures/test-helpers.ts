@@ -14,9 +14,11 @@
  * (spyOn no reemplaza la implementación por default) — mismo criterio que
  * regex-engine/ner-engine usan sobre su bus mockeado.
  */
-import { DetectionSource, EntityType, ReplacementMode, type BoundingBox, type EntityGroup, type Occurrence, type Rule, type RuleScope } from "@anonly/shared";
+import { DetectionSource, EntityType, ReplacementMode, type BoundingBox, type EntityGroup, type Occurrence, type Rule, type RuleScope, type EntityTypeId, type UserEntityTypeDefinition } from "@anonly/shared";
 import type { EngineConfig, EngineContext } from "@anonly/shared";
 import { createEngineContextWithRealBus as sharedCreateEngineContextWithRealBus, createMockConfig as sharedCreateMockConfig } from "@anonly/test-utils";
+
+import type { LabelContext } from "../../labels.js";
 
 /*
  * ADR-129: los dobles genéricos viven en `@anonly/test-utils`. Se re-exportan
@@ -122,7 +124,7 @@ export function makeRule(
   mode: ReplacementMode,
   options?: {
     readonly groupId?: string;
-    readonly entityType?: EntityType;
+    readonly entityType?: EntityTypeId;
     readonly priority?: number;
     readonly enabled?: boolean;
   },
@@ -175,3 +177,16 @@ export function createMockConfig(overrides?: Partial<EngineConfig>): EngineConfi
 export function createEngineContext(overrides?: Partial<EngineContext>): EngineContext {
   return sharedCreateEngineContextWithRealBus({ config: createMockConfig(), ...overrides });
 }
+
+/** Contexto de etiquetas con la tabla argentina y sin tipos propios (para las funciones puras de `labels.ts`). */
+export const AR_LABEL_CONTEXT: LabelContext = { country: "AR", findUserType: () => undefined };
+
+/** Tipos propios estables para los tests (`user:` + UUID). */
+export const CBU_TYPE: UserEntityTypeDefinition = {
+  id: "user:00000000-0000-4000-8000-0000000000c1",
+  name: "CBU",
+};
+export const CLINICAL_TYPE: UserEntityTypeDefinition = {
+  id: "user:00000000-0000-4000-8000-0000000000c2",
+  name: "Historia clínica",
+};
