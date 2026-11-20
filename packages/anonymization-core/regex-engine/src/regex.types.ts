@@ -10,7 +10,7 @@
  * usan el prefijo del motor. Se sigue el precedente + la tabla de naming.
  */
 
-import type { Document, EntityType } from "@anonly/shared";
+import type { CatalogFormatInfo, Document, EntityType, EntityTypeId } from "@anonly/shared";
 
 /**
  * ADR-061 §1: búsqueda de un valor literal que el usuario escribió o señaló
@@ -19,7 +19,8 @@ import type { Document, EntityType } from "@anonly/shared";
 export interface FindLiteralInput {
   readonly document: Document;
   readonly value: string;
-  readonly entityType: EntityType;
+  /** ADR-219 §1: también un tipo propio o del documento. */
+  readonly entityType: EntityTypeId;
 }
 
 /**
@@ -42,9 +43,14 @@ export interface RegexPattern {
   readonly maskFormat: string; // "XX.XXX.XXX" — referenciado por Render/Export.
 }
 
-export interface RegexEngineConfig {
-  readonly patterns: ReadonlyArray<RegexPattern>;
-  readonly customPatterns: ReadonlyArray<RegexPattern>; // del usuario
+/**
+ * ADR-221 §2 y ADR-220 §4: un formato del catálogo. Su vista pública es
+ * `CatalogFormatInfo` (Contracts.md §5.2); el `RegexPattern` es lo que corre
+ * mientras el usuario no lo edita.
+ */
+export interface CatalogFormat {
+  readonly info: CatalogFormatInfo;
+  readonly pattern: RegexPattern;
 }
 
 export interface RegexEngineInput {

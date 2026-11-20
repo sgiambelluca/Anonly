@@ -15,6 +15,7 @@ import {
 } from "@anonly/shared";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
+import * as publicApi from "../index.js";
 import { RegexEngine } from "../regex.engine.js";
 
 import {
@@ -170,35 +171,21 @@ describe("RegexEngine — contract tests", () => {
     expect(payload.durationMs).toBe(output.durationMs);
   });
 
-  it("addPattern adds a custom pattern that process() picks up", async () => {
-    await engine.init(ctx);
-    engine.addPattern({
-      id: "custom-code",
-      entityType: EntityType.Custom,
-      pattern: /\bCODE-\d{4}\b/g,
-      normalizer: (v: string) => v.toUpperCase(),
-      maskFormat: "CODE-XXXX",
-    });
-
-    const document = makeSinglePageDocument("doc-custom", ["Referencia", "CODE-1234"]);
-    const output = await engine.process({ document }, ctx);
-    expect(output.occurrenceCount).toBe(1);
-  });
-
-  it("removePattern stops applying a previously added custom pattern", async () => {
-    await engine.init(ctx);
-    engine.addPattern({
-      id: "custom-code",
-      entityType: EntityType.Custom,
-      pattern: /\bCODE-\d{4}\b/g,
-      normalizer: (v: string) => v.toUpperCase(),
-      maskFormat: "CODE-XXXX",
-    });
-    engine.removePattern("custom-code");
-
-    const document = makeSinglePageDocument("doc-custom-removed", ["CODE-1234"]);
-    const output = await engine.process({ document }, ctx);
-    expect(output.occurrenceCount).toBe(0);
+  it("index exports only the public API of §6 and the custom-pattern API is retired", () => {
+    expect(Object.keys(publicApi).sort()).toEqual([
+      "BASE_CATALOG",
+      "DEFAULT_PATTERNS_AR",
+      "RegexEngine",
+      "RegexInvalidPatternError",
+      "compareFormat",
+      "getCatalog",
+      "testFormat",
+      "validateFormat",
+    ]);
+    // ADR-220 §7: los patrones del usuario con `RegExp` ya no existen.
+    for (const retired of ["addPattern", "removePattern"]) {
+      expect(retired in engine).toBe(false);
+    }
   });
 
   it("dispose() clears state", async () => {
@@ -325,11 +312,10 @@ describe("RegexEngine — contract tests", () => {
         ([, event]) => event === EngineEvents.REGEX_FINISHED,
       );
       expect(finishedCalls).toHaveLength(0);
-      // Misma referencia: recompileActivePatterns() (que reasigna un array
-      // nuevo) nunca se llamó. addPattern/removePattern son la única vía de
-      // mutar el registro (§1: findLiteral no la usa).
+      // Misma referencia: findLiteral no reasigna la lista que corre ni los
+      // formatos que init compiló (§1: no es una corrida de detección).
       expect(engine["activePatterns"]).toBe(activePatternsBefore);
-      expect(engine["customPatterns"]).toEqual([]);
+      expect(engine["userFormats"]).toEqual([]);
     });
 
     it("findLiteral before init() throws EngineNotInitializedError", async () => {
@@ -376,10 +362,10 @@ describe("RegexEngine — contract tests", () => {
       const second = engine.searchText({ document, query: "María López" });
 
       expect(second).toEqual(first);
-      // Misma referencia: recompileActivePatterns() (que reasigna un array
-      // nuevo) nunca se llamó — searchText no toca el registro de patrones.
+      // Misma referencia: searchText no reasigna la lista que corre ni los
+      // formatos que init compiló.
       expect(engine["activePatterns"]).toBe(activePatternsBefore);
-      expect(engine["customPatterns"]).toEqual([]);
+      expect(engine["userFormats"]).toEqual([]);
     });
   });
   // Caso 35 (ADR-211): la segunda búsqueda no toca los emails con `@`.
