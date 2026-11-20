@@ -33,6 +33,7 @@ import {
   digits,
   fixedText,
   formatIdOf,
+  LEGAJO_TYPE,
   letters,
   makeDocument,
   makeFormat,
@@ -1883,16 +1884,16 @@ describe("RegexEngine — unit tests", () => {
       expect(await values(withOptional, "1234/2024")).toEqual(["1234/2024"]);
       expect(await values(withOptional, "1234")).toEqual(["1234"]);
 
-      // Separadores: el opcional con dos caracteres. Los nueve dígitos no
-      // chocan con ningún formato base (un celular tiene diez).
+      // Separadores: el opcional con dos caracteres. Con el origen en el orden, el
+      // formato propio emite junto a `phone-mobile-ar` (tipos distintos, caso 46).
       const separators = makeFormat(4, CBU_TYPE.id, [
         digits(2),
         separator([" ", "-"], true),
-        digits(7),
+        digits(8),
       ]);
-      expect(await values(separators, "20 1234567")).toEqual(["20 1234567"]);
-      expect(await values(separators, "20-1234567")).toEqual(["20-1234567"]);
-      expect(await values(separators, "201234567")).toEqual(["201234567"]);
+      expect(await values(separators, "20 12345678")).toEqual(["20 12345678"]);
+      expect(await values(separators, "20-12345678")).toEqual(["20-12345678"]);
+      expect(await values(separators, "2012345678")).toEqual(["2012345678"]);
 
       // Variantes: cualquiera de las dos emite.
       const variants = makeFormat(5, CBU_TYPE.id, [digits(5), separator(["/"]), letters(2)], {
@@ -1986,6 +1987,225 @@ describe("RegexEngine — unit tests", () => {
           text.replace(/[\p{L}\p{N}]/gu, "X"),
         );
       }
+    });
+  });
+
+  describe("Catálogo y colisiones (ADR-221 §2, ADR-222, ADR-223 §2)", () => {
+    // Corre `process` sobre una página (el texto se parte por espacios, como
+    // `Page.text`) con la configuración dada y devuelve las ocurrencias.
+    const run = async (
+      detection: Parameters<typeof createDetectionContext>[0],
+      text: string,
+    ): Promise<ReadonlyArray<EntityFound["occurrence"]>> => {
+      const runEngine = new RegexEngine();
+      const runCtx = createDetectionContext(detection);
+      await runEngine.init(runCtx);
+      const occurrences = await processPage(runEngine, runCtx, makePage(0, text.split(" ")));
+      await runEngine.dispose();
+      return occurrences;
+    };
+    const summary = (occurrences: ReadonlyArray<EntityFound["occurrence"]>) =>
+      occurrences.map((o) => [o.value, o.entityType, o.formatId, o.formatOrigin]);
+
+    // Caso 38.
+    it("a disabled base format does not run", async () => {
+      const text = "0221-4567890 DNI 34.567.891";
+      const all = await run({}, text);
+      expect(all.filter((o) => o.entityType === EntityType.Phone)).toHaveLength(1);
+
+      const withoutLandline = await run(
+        { baseFormats: [{ formatId: "phone-landline-ar", enabled: false }] },
+        text,
+      );
+      expect(withoutLandline.filter((o) => o.entityType === EntityType.Phone)).toEqual([]);
+      // El resto del catálogo sigue igual: lo que emitía otro formato sigue ahí.
+      // (Sin el fijo, "4567890" deja de quedar tapado y sale como DNI.)
+      for (const kept of summary(all.filter((o) => o.formatId !== "phone-landline-ar"))) {
+        expect(summary(withoutLandline)).toContainEqual(kept);
+      }
+      expect(withoutLandline.map((o) => o.formatId)).toContain("dni-ar");
+
+      // Un formato con `enabled: true` explícito corre como uno sin entrada.
+      const explicit = await run(
+        { baseFormats: [{ formatId: "phone-landline-ar", enabled: true }] },
+        text,
+      );
+      expect(summary(explicit)).toEqual(summary(all));
+    });
+
+    // Caso 39.
+    it("an enabled edited copy replaces its base format", async () => {
+      const dniCopy = (enabled: boolean) =>
+        makeFormat(
+          1,
+          EntityType.DNI,
+          [digits(1, 2), separator(["."], true), digits(3), separator(["."], true), digits(3)],
+          { basedOn: "dni-ar", enabled },
+        );
+      const dniOccurrences = async (enabled: boolean) =>
+        (await run({ userFormats: [dniCopy(enabled)] }, "DNI 34.567.891")).filter(
+          (o) => o.entityType === EntityType.DNI,
+        );
+
+      // Prendida: corre la copia y no el original, aunque `baseFormats` no lo apague.
+      const replaced = await dniOccurrences(true);
+      expect(replaced).toHaveLength(1);
+      expect(replaced[0]?.value).toBe("34.567.891");
+      expect(replaced[0]?.formatId).toBe(formatIdOf(1));
+      expect(replaced[0]?.formatOrigin).toBe("user");
+
+      // Apagada: vuelve a correr el original.
+      const original = await dniOccurrences(false);
+      expect(original).toHaveLength(1);
+      expect(original[0]?.formatId).toBe("dni-ar");
+      expect(original[0]?.formatOrigin).toBe("base");
+      expect(original[0]?.normalizedValue).toBe(replaced[0]?.normalizedValue);
+    });
+
+    // Caso 46.
+    it("a user format and a base format of different types on the same span are both emitted", async () => {
+      const cbu = makeFormat(1, CBU_TYPE.id, [digits(8)]);
+      const occurrences = await run({ userTypes: [CBU_TYPE], userFormats: [cbu] }, "34567891");
+      expect(summary(occurrences)).toEqual([
+        ["34567891", CBU_TYPE.id, cbu.id, "user"],
+        ["34567891", EntityType.DNI, "dni-ar", "base"],
+      ]);
+    });
+
+    it("a user format that contains a base match wins without conflict", async () => {
+      const legajo = makeFormat(1, LEGAJO_TYPE.id, [digits(4), separator(["/"]), digits(8)]);
+      const occurrences = await run(
+        { userTypes: [LEGAJO_TYPE], userFormats: [legajo] },
+        "2024/34567891",
+      );
+      expect(summary(occurrences)).toEqual([["2024/34567891", LEGAJO_TYPE.id, legajo.id, "user"]]);
+    });
+
+    it("same type and same length: the user format wins", async () => {
+      const own = makeFormat(1, EntityType.Phone, [
+        fixedText("0"),
+        digits(3),
+        separator(["-"]),
+        digits(7),
+      ]);
+      const occurrences = await run({ userFormats: [own] }, "0221-4567890");
+      expect(summary(occurrences)).toEqual([["0221-4567890", EntityType.Phone, own.id, "user"]]);
+    });
+
+    it("two crossing base formats resolve as before", async () => {
+      // `phone-mobile-ar` matchea "+54 20-34567891" y `cuit-ar` "20-34567891-4":
+      // se cruzan, ninguno contiene al otro y los dos son base. Gana el más
+      // largo (caso 10); sin un formato propio, `emitirAmbos` es falso.
+      const occurrences = await run({}, "+54 20-34567891-4");
+      expect(summary(occurrences)).toEqual([
+        ["+54 20-34567891", EntityType.Phone, "phone-mobile-ar", "base"],
+      ]);
+    });
+  });
+
+  // Caso 50: las definiciones `structure` dan los mismos tramos que su `RegExp`.
+  describe("Equivalencia de los formatos structure (ADR-220 §4)", () => {
+    const structureFormats = BASE_CATALOG.filter(({ info }) => info.kind === "structure");
+    const allBaseIds = BASE_CATALOG.map(({ info }) => info.id);
+
+    // Lo que emite `process` con el formato base solo, y con su copia sola: los
+    // dos lados pasan por la guarda de corrida y el recorte.
+    const emit = async (
+      formatId: string,
+      side: "base" | "copy",
+      text: string,
+    ): Promise<ReadonlyArray<ReadonlyArray<unknown>>> => {
+      const info = structureFormats.find((entry) => entry.info.id === formatId)?.info;
+      if (info?.definition === undefined) throw new Error(`sin definición: ${formatId}`);
+      const runEngine = new RegexEngine();
+      const runCtx = createDetectionContext(
+        side === "base"
+          ? {
+              baseFormats: allBaseIds
+                .filter((id) => id !== formatId)
+                .map((id) => ({ formatId: id, enabled: false })),
+            }
+          : {
+              baseFormats: allBaseIds.map((id) => ({ formatId: id, enabled: false })),
+              userFormats: [
+                { ...info.definition, id: formatIdOf(1), basedOn: formatId, enabled: true },
+              ],
+            },
+      );
+      await runEngine.init(runCtx);
+      const occurrences = await processPage(runEngine, runCtx, makePage(0, text.split(" ")));
+      await runEngine.dispose();
+      // Los tramos: valor, tipo y palabras (la máscara de un base es fija; la de la copia, por caracteres).
+      return occurrences.map((o) => [o.value, o.entityType, o.wordSpan, o.bbox]);
+    };
+
+    // Los textos de §13 y los de los casos de los formatos base.
+    const corpus: ReadonlyArray<string> = [
+      "DNI 34.567.891",
+      "34.567.891",
+      "34567891",
+      "1.234.567",
+      "12.345.678,",
+      "X12345678",
+      "12345678Y",
+      "123456789",
+      "(12345678)",
+      "12345678.",
+      "CUIT 20-12345678-9",
+      "20-34567891-4",
+      "0221-4567890",
+      "011 4567-8902",
+      "0221 456 7890",
+      "02965 123 4567",
+      "011-4567-8902",
+      "0221-4567890.",
+      "+54 11 1234-5678",
+      "ABC 123",
+      "ABC-123",
+      "ABC123",
+      "abc 123",
+      "AB 123 CD",
+      "AB-123-CD",
+      "AB123CD",
+      "A 123 BCD",
+      "A123BCD",
+      "patente ABC 123, vence 15/03/2030.",
+      "Matrícula profesional MP-12345-6",
+      "ley 24.240 art. 5",
+      "PP-13-00-000000-24/00",
+      "CBU 0170099220000067797370",
+      "34-567-891",
+      "2024/34567891",
+      "34567891 0221-4567890 ABC 123",
+    ];
+
+    it("structure definitions match their RegExp on the regex corpus", async () => {
+      expect(structureFormats.map(({ info }) => info.id)).toEqual([
+        "dni-ar",
+        "phone-landline-ar",
+        "plate-vieja-ar",
+        "plate-mercosur-ar",
+        "plate-mercosur-moto-ar",
+      ]);
+      let compared = 0;
+      for (const { info } of structureFormats) {
+        for (const text of corpus) {
+          const fromBase = await emit(info.id, "base", text);
+          const fromCopy = await emit(info.id, "copy", text);
+          expect(fromCopy, `${info.id}: ${text}`).toEqual(fromBase);
+          compared += fromBase.length;
+        }
+      }
+      // El corpus ejercita de verdad a los cinco formatos.
+      expect(compared).toBeGreaterThan(10);
+
+      // Las diferencias de borde que quedan fuera del corpus («Definiciones
+      // equivalentes»): un dato pegado a `_`, y uno con letras pegado a una
+      // letra no ASCII.
+      expect(await emit("dni-ar", "copy", "_12345678")).toHaveLength(1);
+      expect(await emit("dni-ar", "base", "_12345678")).toHaveLength(0);
+      expect(await emit("plate-vieja-ar", "base", "ÑABC 123")).toHaveLength(1);
+      expect(await emit("plate-vieja-ar", "copy", "ÑABC 123")).toHaveLength(0);
     });
   });
 
