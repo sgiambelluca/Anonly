@@ -776,7 +776,7 @@ Fixtures: `tests/fixtures/text-10p.pdf` (con DNIs, CUITs, emails, teléfonos con
     - `init` arma la lista entera que corre (§6): base sin los apagados ni los reemplazados por una copia, después las referencias y después los formatos.
     - Casos 37 a 39, 50 y 51.
     - Si `snapshot.test.ts` cambia por algo más que `formatId` y `formatOrigin`, se para y se reporta.
-- [ ] 27. (1.1, frente F2 — **ADR-222**) **Colisiones.** `formatId` y `formatOrigin` en cada `Occurrence` de los formatos base y de las referencias (los del generador los llevan desde el ítem 25), y la resolución de solapamientos de §6 (origen en el orden y `emitirAmbos`). Casos 46 y 52.
+- [ ] 27. (1.1, frente F2 — **ADR-222**) **Colisiones.** `formatId` y `formatOrigin` en cada `Occurrence` de los formatos base y de las referencias (los del generador los llevan desde el ítem 25), y la resolución de solapamientos de §6 (origen en el orden y `emitirAmbos`). Casos 46 y 52. Con el origen en el orden, el test del caso 40 vuelve a los literales del spec: en F1 usa otros largos, porque `"20 12345678"` empata con `phone-mobile-ar` y `digit 8..8` con `dni-ar`, y con la resolución de siempre gana el base.
 - [ ] 28. (1.1, frente F2 — **ADR-220 §6**) **Fallos.** Fallo por página y por definición: saltear el formato, `warn` sin texto y `REGEX_FINISHED.skippedFormats` (ausente si no hay). El caso 47 completo, con su `skippedFormats`, y el 48.
 
 > **Estado Hito 4**: items 1–18 implementados, incluyendo el comportamiento funcional de cancelación
