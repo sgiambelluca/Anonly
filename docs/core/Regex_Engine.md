@@ -5,8 +5,22 @@
 > Detecta patrones determinísticos (DNI, CUIT, teléfono, email, IBAN, tarjeta, fecha, matrícula, patente) y los formatos que arma el usuario con el generador (ADR-220) en el texto de cada página. Emite `Occurrence[]` con `source: "regex"` y `confidence: 1.0`. Es determinista: mismo input → mismo output.
 
 **EngineId**: `regex`
-**Versión del spec**: 2.0.0
-**Última actualización**: 2026-10-08
+**Versión del spec**: 2.0.1
+**Última actualización**: 2026-11-20
+
+> **Nota (v2.0.1, 2026-11-20 — auditoría antes de F1)**: precisiones y un reparto nuevo entre F1 y F2. No cambia ningún contrato público. Las decidió el mantenedor el 2026-11-20.
+>
+> 1. **F1 ya detecta.** El ítem 25 suma el cableado mínimo:
+>    - `init` compila los formatos prendidos de `detection.userFormats` y descarta los inválidos;
+>    - `process` los corre después de los base, con la resolución de siempre (caso 10);
+>    - `BASE_CATALOG` y `getCatalog` pasan de F2 a F1, porque `compareFormat` compara contra el catálogo.
+>
+>    Lo demás de la lista que corre, el origen en la resolución, el `formatId` de los base y `skippedFormats` quedan en F2 (ítems 26 a 28).
+> 2. **`testFormat`** devuelve `[]` solo ante un problema de la forma del formato. El nombre, el tipo y el id no frenan la prueba (§6, `Contracts.md` §5.2).
+> 3. **`compareFormat`** compara contra todos los formatos propios y las referencias, prendidos o apagados, y contra los base que corren. Un formato idéntico va solo en `identicalTo`, y el ejemplo de solapamiento es determinista (§6).
+> 4. **`id_invalid`** tiene regla. Las definiciones del catálogo, con id `fmt:base:…`, son la excepción, porque nunca se validan («Definiciones equivalentes», `Contracts.md` §5.2).
+> 5. **`init` valida con `existingFormats: []`**: un nombre repetido no descarta un formato al analizar (§6).
+> 6. En **§10**, `formatId` y `formatOrigin` figuran como opcionales, igual que en el tipo. En **§15** se corrigen los ítems 6 y 17, que seguían hablando de patrones custom y de los exports de antes.
 
 > **Nota (v2.0.0, ADR-219 a ADR-223, 2026-10-19 — catálogo, formatos del generador y colisiones)**: versión mayor porque **retira contrato público**: `RegexEngineConfig.customPatterns`, `addPattern`, `removePattern` y el presupuesto de 1000 ms por patrón custom (ADR-220 §7). Ningún código de producto los usaba. En su lugar:
 >
@@ -225,7 +239,7 @@ export const BASE_CATALOG: ReadonlyArray<CatalogFormat>;          // los mismos,
    - los que `detection.baseFormats` tiene en `enabled: false`;
    - los que tienen una **copia editada prendida**: un `FormatDefinition` de `userFormats` con `basedOn` igual a su id y `enabled: true` (ADR-220 §4). La regla vale aunque `baseFormats` no lo apague: así nunca corren el original y su copia a la vez.
 2. **Las referencias a otros catálogos** (`detection.catalogRefs` con `enabled: true`), en el orden de la configuración. Corren con su `RegexPattern` de origen, control incluido (ADR-221 §5). Una referencia a un id que no existe en otro catálogo, o que apunta al catálogo del país activo, se descarta con `warn` y figura en `skippedFormats` con todas las páginas. **En la 1.1 no hay otro catálogo** (ADR-221 §7), así que toda referencia cae en este caso (§13 caso 51).
-3. **Los formatos del generador** (`detection.userFormats` con `enabled: true`), en el orden de la configuración, compilados como dice la sección siguiente. Uno que no pasa `validateFormat` contra `detection.userTypes` se descarta con `REGEX_INVALID_PATTERN` y `warn`, y figura en `skippedFormats` con todas las páginas (ADR-220 §6).
+3. **Los formatos del generador** (`detection.userFormats` con `enabled: true`), en el orden de la configuración, compilados como dice la sección siguiente. Uno que no pasa `validateFormat` contra `{ userTypes: detection.userTypes, existingFormats: [] }` se descarta con `REGEX_INVALID_PATTERN` y `warn`, y figura en `skippedFormats` con todas las páginas (ADR-220 §6). `existingFormats` va vacío porque el nombre es para la interfaz: dos formatos con el mismo nombre corren los dos.
 
 `BASE_CATALOG` vive en `patterns/catalog.ts`. Envuelve cada `RegexPattern` de `DEFAULT_PATTERNS_AR` con su `CatalogFormatInfo`: país (`"AR"` o `"universal"`), nombre para la interfaz, tipo, clase y, si es `structure`, su definición equivalente. Las tablas están en «Catálogo». `DEFAULT_PATTERNS_AR` se sigue exportando igual que hoy. `getCatalog(country)` devuelve las `info` de los formatos de ese país y de los universales, en el mismo orden.
 
@@ -306,6 +320,9 @@ No reciben `EngineContext`, no emiten eventos y no loguean. El façade las reexp
 
 **`testFormat`** usa **el mismo** recorrido que `process` (bordes, contexto, recorte y guarda de corrida) sobre `sampleText`, sin `mapSpanToWords`: devuelve índices sobre el texto. Un test aserta que da los mismos tramos que `process` sobre un documento con ese texto (caso 49).
 
+- **Cuándo devuelve `[]` por inválido** (`Contracts.md` §5.2): cuando `validateFormat` daría algún código de la forma del formato. No cuentan `name_empty`, `name_too_long`, `name_taken`, `type_unknown`, `type_not_admitted` ni `id_invalid`, porque no cambian qué se reconoce y `testFormat` no recibe el contexto para revisarlos.
+- **`sampleText` se recorre tal como llega**, sin normalizar, y los índices son sobre ese texto. `Page.text` ya llega en NFC, así que un texto de muestra en otra forma puede dar tramos distintos.
+
 **`compareFormat`** responde dos preguntas.
 
 **¿Es idéntico?** Dos formatos son idénticos si tienen la misma forma canónica. La forma canónica de una definición:
@@ -320,12 +337,20 @@ No entran `id`, `name`, `entityType`, `basedOn` ni `enabled`. Dos formatos con l
 **¿Comparten textos?** Depende del formato contra el que se compara:
 
 - **Contra otro formato con autómata** (uno propio, o un `structure` del catálogo): se recorre en anchura el producto de los dos autómatas. El `example` es el texto más corto que los dos reconocen, sin bordes ni contexto.
+  - Cada paso usa el carácter de un `text` cuando lo hay, y si no, el representante de la clase que comparten: `1` para `digit`, `A` para `letter`, `upper` y `alnum`, y `a` para `lower`. Un `separator` usa el menor carácter que comparten.
+  - Entre los textos más cortos, gana el menor en orden de code units. Así el ejemplo es determinista: `digit 8..8` contra `dni-ar` da `"11111111"`.
 - **Contra un formato `control`**: se generan ejemplos del formato nuevo y se pasa cada uno, solo, por el `RegExp` del formato con su checksum y su guarda. Si alguno lo reconoce **entero**, hay solapamiento, y ese es el ejemplo.
   - Para cada variante se generan el ejemplo más corto y el más largo, con y sin cada `optional`.
   - `digit` se llena con `1`, `letter` y `alnum` con `A` (o `a` si es `lower`), y cada `separator` con su primer carácter.
   - Puede pasar por alto un caso. Lo que se escape lo atrapa el conflicto al analizar (ADR-222).
 
-**Contra qué se compara:** los formatos base prendidos de `others.country`, los propios y las referencias de `others`. Nunca contra sí mismo, porque `others` lo excluye.
+**Contra qué se compara** (`Contracts.md` §5.2):
+
+- **Los formatos base de `others.country` que corren**: los que no están apagados en `baseFormats` y no tienen una copia editada prendida en `userFormats` (§6, «Qué corre»). Si tienen esa copia, se compara contra la copia, que es un formato propio.
+- **Todos los formatos de `userFormats` y todas las referencias de `catalogRefs`**, prendidos o apagados. Uno apagado también bloquea crear uno idéntico.
+- **Nunca contra sí mismo**, porque `others` lo excluye.
+
+Un formato idéntico figura solo en `identicalTo`, no también en `overlaps`.
 
 
 ---
@@ -387,8 +412,8 @@ Las `Occurrence` individuales no se retornan; se emiten vía `ENTITY_FOUND`. Cad
   confidence: 1.0;
   entityType: EntityTypeId;    // según el patrón o el formato que matcheó (ADR-219 §1)
   maskFormat?: string;         // RegexPattern.maskFormat del patrón que matcheó (ADR-029); de un formato del generador, ver §6
-  formatId: string;            // ADR-222 §2: id del patrón, del formato (fmt:…) o de la referencia (ref:…)
-  formatOrigin: "base" | "user"; // ADR-222 §2: "base" solo para el catálogo del país activo
+  formatId?: string;           // ADR-222 §2: id del patrón, del formato (fmt:…) o de la referencia (ref:…). Presente en toda Occurrence de process; ausente en las de findLiteral (caso 52)
+  formatOrigin?: "base" | "user"; // ADR-222 §2: "base" solo para el catálogo del país activo. Presente y ausente junto con formatId
   wordSpan?: WordSpan;         // referencia a Page.words[startIndex, endIndexExclusive)
 }
 ```
@@ -710,7 +735,7 @@ Fixtures: `tests/fixtures/text-10p.pdf` (con DNIs, CUITs, emails, teléfonos con
 - [ ] 3. Definir `errors.ts` con `RegexInvalidPatternError`.
 - [ ] 4. Implementar `DEFAULT_PATTERNS_AR` en `patterns/default-ar.ts` con todos los patrones y sus `checksum`/`normalizer`/`maskFormat`.
 - [ ] 5. Implementar `regex.engine.ts` respetando `IEngine` y la firma pública de §6.
-- [ ] 6. Implementar `init` (compilar todas las regex al cargar, incluyendo custom).
+- [ ] 6. Implementar `init` (compilar al cargar los patrones del catálogo y los formatos de `ctx.config.detection`, §6).
 - [ ] 7. Implementar `process` recorriendo páginas, aplicando patrones, mapeando matches a `bbox` vía `Word` positions, emitiendo `ENTITY_FOUND` por match, `REGEX_FINISHED` al final.
 - [ ] 8. Implementar priorización de match más largo en overlap (caso 10).
 - [x] 9. ~~Implementar timeout por patrón custom (1000 ms).~~ Retirado en la v2.0.0 (ADR-220 §7, ítem 25).
@@ -724,7 +749,7 @@ Fixtures: `tests/fixtures/text-10p.pdf` (con DNIs, CUITs, emails, teléfonos con
 - [ ] 14. Escribir `edge.test.ts` con todos los casos límite.
 - [ ] 15. Escribir `snapshot.test.ts` con occurrences de `text-10p.pdf`.
 - [ ] 16. Ejecutar `pnpm lint && pnpm typecheck && pnpm test` verde.
-- [ ] 17. Verificar `index.ts` exporta solo `RegexEngine`, tipos, `DEFAULT_PATTERNS_AR`, errores.
+- [ ] 17. Verificar que `index.ts` exporta solo lo de §6: `RegexEngine`, sus tipos, `DEFAULT_PATTERNS_AR`, `BASE_CATALOG`, `getCatalog`, `validateFormat`, `testFormat`, `compareFormat` y los errores.
 - [ ] 18. Verificar imports sin dependencias prohibidas.
 - [x] 19. (Hito 10.8 — ADR-066 §6) `mapSpanToWords`: propagar `bbox.rotation` a la `Occurrence`, solo si **todas** las palabras del match coinciden en el ángulo; si discrepan, el campo queda ausente (§10). **No** tocar la geometría de la unión (`x`/`y`/`width`/`height`) ni el `wordSpan`. Cuatro filas nuevas en §14.
 - [x] 20. (Hito 10.9, PR 5 — ADR-074 §2/§3) `mapSpanToWords`: partir las `Word` del match en corridas de la misma línea con `sharesVerticalBand` de `@anonly/shared` (§4, `Contracts.md` §6 — **importada, no reimplementada**, mismo criterio que la errata de ADR-061 §2) y emitir un rectángulo por corrida en `Occurrence.fragments`. Con una sola corrida, **no emitir el campo**. Con `rotation` presente en alguna palabra, tampoco. **No** tocar `bbox` (sigue siendo la envolvente), ni `wordSpan`, ni la propagación de `rotation` del item 19. El PR de `shared` que declara el campo (Hito 10.9 PR 4) es precondición. Caso 26 de §13, cinco filas de §14.
@@ -733,22 +758,26 @@ Fixtures: `tests/fixtures/text-10p.pdf` (con DNIs, CUITs, emails, teléfonos con
 - [x] 23. (1.0.x, Confianza — **ADR-211**) Segunda búsqueda del email default para la forma con `Q` del caso 35: solo sobre palabras de OCR, forma estricta en minúsculas, hasta dos tramos «nombre. », descarte ante un email con `@` superpuesto, `value` como se leyó y `normalizedValue` restituido, costo lineal anclado en cada `Q`, y sin tocar la búsqueda de ADR-181 ni los patrones custom. Los ocho tests de §14 con sus nombres exactos (el de peores casos vive en `tests/perf` y va en su propio commit). Cobertura del módulo ≥ 85 %.
 - [ ] 24. (1.0.x, cierre de Confianza — **ADR-217**) Patrón `address-keyword-ar` del caso 36 en la tabla de defaults: palabra clave de vía dentro del match o de domicilio en lookbehind, nombre perezoso de una a seis palabras con la regla de mayúscula inicial, altura con la forma del caso 34 de `NER_Engine.md`, `normalizeEntityValue` de `@anonly/shared` como normalizador y `maskFormat` de ADR-012. Sin tocar los demás patrones, la guarda de corrida ni la prioridad del match más largo. Los trece tests de §14 con sus nombres exactos (el de peores casos vive en `tests/perf` y va en su propio commit). Si `snapshot.test.ts` cambia, se reporta qué ocurrencias entran antes de actualizarlo. Cobertura del módulo ≥ 85 %.
 
-- [ ] 25. (1.1, frente F1 — **ADR-220**) **Generador.**
+- [ ] 25. (1.1, frente F1 — **ADR-220**, ADR-221 §2) **Generador.**
     - Compilar `FormatDefinition` a autómata (Thompson), con `FORMAT_MAX_STATES`.
     - Recorrido más a la izquierda y más largo, con bordes y contexto integrados.
     - `validateFormat`, `testFormat` y `compareFormat`: forma canónica, producto de autómatas y ejemplos contra los `control`.
+    - `BASE_CATALOG` en `patterns/catalog.ts`, con la `CatalogFormatInfo` de cada patrón de «Catálogo», en el orden de `DEFAULT_PATTERNS_AR` (que no cambia), y las definiciones `structure` de «Definiciones equivalentes». Es solo dato: lo que corre de base no cambia. Y `getCatalog`.
+    - **Cableado mínimo de los formatos del generador:**
+      - `init` compila los de `ctx.config.detection.userFormats` con `enabled: true` y descarta con `REGEX_INVALID_PATTERN` y `warn` los que no pasan `validateFormat` (§6, «Qué corre», paso 3, sin `skippedFormats`).
+      - `process` los corre después de los patrones base, que siguen siendo los de `DEFAULT_PATTERNS_AR`, todos y en su orden. Usa la resolución de solapamientos de siempre (caso 10: largo, `startIndex` y orden de la lista, sin el criterio de origen).
+      - Su `Occurrence` lleva `entityType`, `normalizedValue`, `maskFormat`, `formatId` y `formatOrigin: "user"`, como dice §6.
     - Retirar `RegexEngineConfig`, `addPattern`, `removePattern`, `runCustomPatternWithBudget` y `CUSTOM_PATTERN_BUDGET_MS`, con sus tests (filas retiradas de §14).
     - Sin librerías nuevas (R-12).
-    - Casos 40 a 45, 47 y 49. Los arneses opt-in del caso 43 y de 10/50/200 formatos van en su propio commit.
+    - Casos 40 a 45, 47 sin `skippedFormats`, y 49. El test de `getCatalog`.
+    - Los arneses opt-in del caso 43 y de 10/50/200 formatos van en su propio commit.
     - Cobertura del módulo ≥ 85 %.
 - [ ] 26. (1.1, frente F2 — **ADR-221**, ADR-223 §2) **Catálogo.**
-    - `BASE_CATALOG` en `patterns/catalog.ts`, con la `CatalogFormatInfo` de cada patrón de «Catálogo», en el orden de `DEFAULT_PATTERNS_AR` (que no cambia), y las definiciones `structure` de «Definiciones equivalentes».
-    - `getCatalog`.
-    - `init` lee `ctx.config.detection` y arma la lista que corre (§6): base sin los apagados ni los reemplazados por una copia, después las referencias y después los formatos.
+    - `init` arma la lista entera que corre (§6): base sin los apagados ni los reemplazados por una copia, después las referencias y después los formatos.
     - Casos 37 a 39, 50 y 51.
     - Si `snapshot.test.ts` cambia por algo más que `formatId` y `formatOrigin`, se para y se reporta.
-- [ ] 27. (1.1, frente F2 — **ADR-222**) **Colisiones.** `formatId` y `formatOrigin` en cada `Occurrence` de `process`, y la resolución de solapamientos de §6 (origen en el orden y `emitirAmbos`). Casos 46 y 52.
-- [ ] 28. (1.1, frente F2 — **ADR-220 §6**) **Fallos.** Fallo por página y por definición: saltear el formato, `warn` sin texto y `REGEX_FINISHED.skippedFormats` (ausente si no hay). Casos 47 y 48.
+- [ ] 27. (1.1, frente F2 — **ADR-222**) **Colisiones.** `formatId` y `formatOrigin` en cada `Occurrence` de los formatos base y de las referencias (los del generador los llevan desde el ítem 25), y la resolución de solapamientos de §6 (origen en el orden y `emitirAmbos`). Casos 46 y 52.
+- [ ] 28. (1.1, frente F2 — **ADR-220 §6**) **Fallos.** Fallo por página y por definición: saltear el formato, `warn` sin texto y `REGEX_FINISHED.skippedFormats` (ausente si no hay). El caso 47 completo, con su `skippedFormats`, y el 48.
 
 > **Estado Hito 4**: items 1–18 implementados, incluyendo el comportamiento funcional de cancelación
 > cooperativa (chequeo de `abortSignal` entre páginas) y de timeout por patrón custom (1000 ms).

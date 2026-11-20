@@ -4,7 +4,7 @@
 
 > **T-5 / ADR-164, revisión 2026-09-15**: orientación separada en `ocr-orient` y factory `ocr-orientation`; ver §7.2. La evolución añade un consumidor de preparación con dos LSTM (§6), sin nuevos tipos ni campos públicos. **Aceptado, implementado y validado** (T-5 cerrada el 2026-09-15, ADR-164). ADR-190 (2026-09-27) agrega `OcrOrientationResult.inkRatio` y `OcrPagePayload.upscale` (§7.1/§7.2); su enmienda de 2026-09-28 agrega `OcrOrientationResult.osdHadVerdict` (implementada en la ronda B).
 
-> **1.1 / ADR-219 a ADR-224, aceptados el 2026-10-19**: tipos propios, formatos del generador y catálogos por país. §3.1 gana `EngineConfig.detection`; §3.5 gana `defineDocumentEntityType`/`getDocumentEntityTypes`, las funciones puras de formatos y la declaración de `ManualEntityRequest`; §5.2 declara los tipos nuevos y los campos nuevos sobre tipos existentes; §6 gana los límites `FORMAT_*`/`USER_TYPE_*`; §8 gana `RegexFinished.skippedFormats` y pasa a `EntityTypeId` los payloads de conflicto. **Contrato escrito, implementación pendiente** (frente F0 de `roadmap/Plan_1.1.md`).
+> **1.1 / ADR-219 a ADR-224, aceptados el 2026-10-19**: tipos propios, formatos del generador y catálogos por país. §3.1 gana `EngineConfig.detection`; §3.5 gana `defineDocumentEntityType`/`getDocumentEntityTypes`, las funciones puras de formatos y la declaración de `ManualEntityRequest`; §5.2 declara los tipos nuevos y los campos nuevos sobre tipos existentes; §6 gana los límites `FORMAT_*`/`USER_TYPE_*`; §8 gana `RegexFinished.skippedFormats` y pasa a `EntityTypeId` los payloads de conflicto. **Contrato escrito, implementación pendiente** (frente F0 de `roadmap/Plan_1.1.md`; la hoja paginada, frente F4b).
 
 > **1.1 / ADR-225, aceptado el 2026-11-16**: un tipo del documento se edita y se borra, y entra a los puntos de restauración. §3.5 gana `updateDocumentEntityType` y `removeDocumentEntityType`, y la nota de `createEditCheckpoint` suma las definiciones de tipo. Sin tipos, eventos ni códigos de error nuevos. **Contrato escrito, implementación pendiente** (frentes F3 y F4 de `roadmap/Plan_1.1.md`).
 
@@ -868,9 +868,9 @@ El mapa pertenece al mismo resultado que el blob, no se combina con otro.
 ### 5.2 Tipos propios, formatos y catálogos por país (1.1)
 
 ADR-219 a ADR-224, aceptados el 2026-10-19. Viven en `shared/src/types.ts`
-y se reexportan desde `shared` y el façade. Todo es dato serializable a
-JSON: lo guarda la aplicación (ADR-223 §3) y viaja en el archivo de
-formatos (ADR-223 §5).
+(las constantes, en `constants.ts`) y se reexportan desde `shared` y el
+façade. Todo es dato serializable a JSON: lo guarda la aplicación (ADR-223
+§3) y viaja en el archivo de formatos (ADR-223 §5).
 
 ```ts
 // ─── País (ADR-221 §1) ───
@@ -903,7 +903,7 @@ export type FormatPiece =
   | { readonly kind: "optional"; readonly pieces: ReadonlyArray<FormatPiece> };   // sin optional adentro
 
 export interface FormatDefinition {
-  readonly id: string;                                   // "fmt:" + UUID v4
+  readonly id: string;                                   // "fmt:" + UUID v4; las del catálogo, "fmt:base:<id>" (ver validateFormat)
   readonly name: string;
   readonly entityType: EntityTypeId;                     // tipo propio o uno de FORMAT_ADMITTING_BASE_TYPES
   readonly variants: ReadonlyArray<ReadonlyArray<FormatPiece>>;
@@ -1006,8 +1006,8 @@ export interface FormatTestMatch {
 export interface FormatComparisonInput {
   readonly country: CountryCode;                         // los formatos base salen del catálogo de ese país
   readonly baseFormats: ReadonlyArray<BaseFormatSetting>; // los apagados no se comparan
-  readonly userFormats: ReadonlyArray<FormatDefinition>;  // excluye el que se edita
-  readonly catalogRefs: ReadonlyArray<CatalogFormatRef>;
+  readonly userFormats: ReadonlyArray<FormatDefinition>;  // excluye el que se edita; los apagados también se comparan
+  readonly catalogRefs: ReadonlyArray<CatalogFormatRef>;  // las apagadas también se comparan
 }
 
 export interface FormatComparison {
@@ -1055,13 +1055,24 @@ export type FormatsFileValidation =
   repetir contra `existingFormats` (sin distinguir mayúsculas ni tildes), el
   tipo propio presente en `userTypes` o el tipo base dentro de
   `FORMAT_ADMITTING_BASE_TYPES`, y el autómata compilado dentro de
-  `FORMAT_MAX_STATES`.
+  `FORMAT_MAX_STATES`. `id_invalid` cuando el `id` no es `fmt:` + UUID v4.
+  Las definiciones `structure` del catálogo (`CatalogFormatInfo.definition`,
+  con id `fmt:base:<id del patrón>`) son la excepción: nunca pasan por
+  `validateFormat` ni entran en `userFormats`, porque al editarlas la
+  aplicación crea una copia con un id nuevo (`Regex_Engine.md`,
+  «Definiciones equivalentes»).
 - **`testFormat`**: el mismo recorrido que `process` (ADR-220 §2), con
-  bordes, contexto y guarda de corrida, sobre el texto de muestra. No
-  aplica `enabled`. Un formato inválido devuelve `[]`; la interfaz valida
-  antes.
-- **`compareFormat`**: compara contra los formatos base prendidos de
-  `country`, los propios y las referencias.
+  bordes, contexto y guarda de corrida, sobre el texto de muestra tal como
+  llega. No aplica `enabled`. Devuelve `[]` si el formato tiene un problema
+  de forma: algún código de `validateFormat` salvo `name_empty`,
+  `name_too_long`, `name_taken`, `type_unknown`, `type_not_admitted` e
+  `id_invalid`. Esos no cambian qué se reconoce, y `testFormat` no recibe el
+  contexto para revisarlos. La interfaz valida antes de guardar.
+- **`compareFormat`**: compara contra los formatos base de `country` que
+  corren (prendidos y sin una copia editada prendida), y contra **todos** los
+  propios y las referencias, prendidos o apagados: uno apagado también
+  bloquea crear uno idéntico. Un formato idéntico va solo en `identicalTo`, y
+  no también en `overlaps`.
 - **`getCatalog(country)`**: los formatos base de ese país más los
   universales, en el orden en que corren.
 - **`validateFormatsFile(text, country)`**: parsea el JSON y valida el archivo
