@@ -70,6 +70,10 @@ Antes de publicar un ADR, buscar con grep cada tipo, evento y error code que cit
 pnpm lint && pnpm typecheck && pnpm test && pnpm test:contract && pnpm format:check
 ```
 
+- **`pnpm gates`** corre esa misma cadena e imprime una línea por gate, con el detalle solo de lo que falla. La salida completa queda en `.gates-logs/`.
+  - Corta en la primera falla, como `&&`. Con `--keep-going` los corre todos.
+  - `pnpm gates --module <ruta>` es la versión acotada a un paquete: eslint, typecheck, vitest y prettier.
+  - Es lo que corren los agentes, para no cargar la salida entera en su contexto.
 - La **tabla canónica completa** de gates está en `docs/architecture/07_Performance_Strategy.md` §11.4, y es la única fuente de verdad (ADR-149).
 - La cobertura se aplica por paquete, con thresholds en `vitest.config.ts`. Al implementar un motor o un módulo puro nuevo, agregar su glob en el mismo PR.
 - Los tests globales de `tests/` resuelven motores con `resolve.alias` en `vitest.config.ts` y `paths` espejo en `tests/tsconfig.json`. Los scripts `test:<dir>` usan filtro posicional, nunca `--dir` (ADR-033).
@@ -97,8 +101,14 @@ El modelo de trabajo es planificador, implementador y revisor (`ai/AI_Developmen
 Cómo se coordinan:
 
 - **Un solo sub-agente activo a la vez.** El ciclo es revisor, después implementador, de nuevo revisor, y así hasta APPROVED.
+- **Todo `Agent` lleva `model` explícito**: `sonnet` para implementar y para las tareas de apoyo, `opus` solo para el revisor.
+  - Los integrados Explore y Plan no toman el modelo por defecto de los subagentes: también llevan `model`.
 - **Se retoma el mismo agente** con `SendMessage` entre rondas y tras un corte (límite de uso, fin de sesión), en vez de lanzar uno nuevo.
   - Al retomar, lo primero es `git status` y `git diff` para no rehacer trabajo.
+  - Excepción: la caché de los subagentes dura 5 minutos (la del implementador, 1 hora). Retomarlo después de que venció reescribe todo su contexto. Después de una espera larga y con un contexto grande, un agente nuevo con un brief del delta puede salir igual o más barato.
+- **El planificador cuida su contexto.**
+  - Las lecturas grandes que no va a editar (barridos de docs, un spec completo para ubicar una sección) se delegan a un subagente que devuelve citas `archivo:línea`.
+  - Compacta o traspasa a una sesión nueva en un corte natural, como el cierre de una ronda o un APPROVED. Todavía no hay un umbral fijo.
 - **El revisor se lanza por lote**: cuando todas las tareas de la ronda están listas, no después de cada tanda del implementador.
 - **El planificador mantiene su turno abierto durante la coordinación.** Espera el aviso de finalización del sub-agente y retoma al siguiente agente según el informe, sin depender de que el humano avise. No cierra el turno solo por haber delegado; lo cierra cuando termina la ronda o hace falta una decisión humana.
   - Cada sub-agente entrega su resultado al planificador al terminar. La espera usa avisos de finalización, sin consultar repetidamente el estado ni el avance de comandos largos.
