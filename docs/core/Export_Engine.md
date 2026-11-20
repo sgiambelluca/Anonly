@@ -5,8 +5,10 @@
 > Construye el PDF final reconstruido desde cero, adjuntando las imágenes renderizadas (lado anonimizado) como páginas con pdf-lib. Garantiza no-recuperabilidad y metadata mínima.
 
 **EngineId**: `export`
-**Versión del spec**: 1.4.0
-**Última actualización**: 2026-08-06
+**Versión del spec**: 1.4.1
+**Última actualización**: 2026-11-20
+
+> **Nota (v1.4.1, ADR-219 §6, 2026-11-20 — precisiones de la auditoría de F4b)**: §9 lista `userTypes` entre las entradas, como ya hacía §6. El caso 22 fija el orden de las filas de tipos propios (`localeCompare(…, "es")` y después `id`), y §9 rechaza con `InvalidInputError` un tipo propio de la leyenda sin definición en `userTypes`, que con el Orchestrator no ocurre. Dos filas nuevas de §14. El ítem 27 de §15 aclara que desde la 1.1 el Orchestrator delega en `renderLegendPages` (ítem 28b).
 
 > **Nota (v1.4.0, ADR-219, 2026-10-19 — tipos propios en la hoja de referencia)**: `ExportEngineInput` gana `userTypes`, las definiciones de los tipos propios guardados y del documento, para nombrar sus filas. `RenderPageProvider.renderLegend` devuelve **una o más** imágenes, porque con tipos propios la hoja ya no entra siempre en una página (ADR-219 §6), y `ExportSavePayload.legendImage` pasa a `legendImages`. El PDF tiene `pageCount + N` páginas, con N ≥ 1 si hay leyenda. Ver §6, casos 21, 22 y 24, §14 y §15.
 
@@ -184,6 +186,7 @@ ExportEngineInput {
   rules: ReadonlyArray<Rule>;
   options: ExportOptions;
   renderPageProvider: RenderPageProvider;
+  userTypes: ReadonlyArray<UserEntityTypeDefinition>;  // ADR-219 §6: guardados y del documento
 }
 
 ExportOptions {
@@ -205,6 +208,7 @@ ExportOptions {
 - `options.includeOriginalMetadata` debe ser literalmente `false` (garantía de tipo).
 - `options.coveredPages` (ADR-190 §5), si está, tiene índices enteros en `[0, document.pageCount)`. Un índice fuera de rango o no entero lanza `InvalidInputError`, y los duplicados se ignoran.
 - `renderPageProvider` debe estar poblado.
+- Con `options.includeMarkerLegend`, cada tipo propio de un grupo `enabled` en modo `placeholder` tiene su definición en `userTypes` (ADR-219 §6). Si falta, lanza `InvalidInputError` antes de rasterizar ninguna página. Con el Orchestrator no ocurre: pasa los tipos guardados y los del documento, y borrar un tipo del documento borra sus grupos (ADR-225 §4). Sin la leyenda, `userTypes` no se consulta.
 
 ---
 
@@ -281,7 +285,7 @@ Garantías del PDF final:
 19. **`append-page` con un `documentId` distinto del retenido (ADR-047 §4)**: el worker descarta el `PDFDocument` parcial y arranca uno nuevo. Cubre un export abandonado por fallo o cancelación seguido de otro, sin mensaje de control nuevo.
 20. **Fallback in-process (sin factory de worker, ADR-035)**: el ensamblado corre en el mismo módulo, en el host. Eventos, orden, bytes de salida y garantías de §10 idénticos; los tests del motor corren por este camino.
 21. **Leyenda de marcadores activa (ADR-059 §5/§6)**: con `options.includeMarkerLegend === true`, el PDF final tiene `document.pageCount + N` páginas, con N ≥ 1 las páginas de leyenda que devuelve `renderLegend` (ADR-219 §6; hasta la v1.4.0, N era siempre 1). La imagen se pide por `RenderPageProvider.renderLegend` —el mismo puerto mediado por el Orchestrator que ya se usa para `renderFull`— y se embebe dentro del `save`, **antes** de aplicar la metadata y serializar, con las mismas cuatro llamadas de pdf-lib que usa `appendPage`. **No pasa por `appendPage`** aunque el dibujo sea idéntico: esa función es idempotente por `pageIndex` y la leyenda no tiene uno — no es una página del documento (caso 18). Con el flag apagado (default), `renderLegend` **no se invoca** y el export es bit a bit el mismo que antes de ADR-059.
-22. **Qué puede y qué no puede contener la leyenda (ADR-059 §2/§3)**: una fila por tipo presente, base o propio. Las filas de los tipos base van primero, en el orden de siempre; las de los tipos propios van después, ordenadas por nombre, con el `name` de su definición en `ExportEngineInput.userTypes` como nombre del tipo (ADR-219 §6). Cada fila va con los **prefijos efectivamente usados** —pueden ser varios, porque ADR-057 elige el nivel por grupo y dos grupos del mismo tipo pueden quedar en niveles distintos— y el conteo de marcadores. **Nunca un valor original.** La imposibilidad está garantizada **por tipo**: `MarkerLegendEntry` (`03_Data_Model.md` §18) no tiene ningún campo capaz de transportar contenido del documento, así que filtrar un dato no requiere disciplina del implementador sino cambiar el contrato. Mismo mecanismo que `includeOriginalMetadata: false` de ADR-009. Solo participan grupos `enabled` en modo `placeholder`: el `mask` de todos los DNI del documento es el mismo, listarlo no dice nada; `synthetic` produce valores que se leen como reales; `redact` no produce marcador. Los prefijos de género de ADR-060 (`MUJER`/`MUJ`/`HOMBRE`/`HOM`) caen bajo la fila `Person` sin cambio alguno en `buildMarkerLegend`.
+22. **Qué puede y qué no puede contener la leyenda (ADR-059 §2/§3)**: una fila por tipo presente, base o propio. Las filas de los tipos base van primero, en el orden de siempre; las de los tipos propios van después, ordenadas por nombre, con el `name` de su definición en `ExportEngineInput.userTypes` como nombre del tipo (ADR-219 §6). El orden es `name` con `localeCompare(…, "es")`, el mismo del orden A–Z de la lista (`UX_Guidelines.md`), y a igual nombre decide el `id`. Un tipo propio sin definición en `userTypes` no tiene nombre que mostrar: lo rechaza la validación de §9. Cada fila va con los **prefijos efectivamente usados** —pueden ser varios, porque ADR-057 elige el nivel por grupo y dos grupos del mismo tipo pueden quedar en niveles distintos— y el conteo de marcadores. **Nunca un valor original.** La imposibilidad está garantizada **por tipo**: `MarkerLegendEntry` (`03_Data_Model.md` §18) no tiene ningún campo capaz de transportar contenido del documento, así que filtrar un dato no requiere disciplina del implementador sino cambiar el contrato. Mismo mecanismo que `includeOriginalMetadata: false` de ADR-009. Solo participan grupos `enabled` en modo `placeholder`: el `mask` de todos los DNI del documento es el mismo, listarlo no dice nada; `synthetic` produce valores que se leen como reales; `redact` no produce marcador. Los prefijos de género de ADR-060 (`MUJER`/`MUJ`/`HOMBRE`/`HOM`) caen bajo la fila `Person` sin cambio alguno en `buildMarkerLegend`.
 23. **Flag activo sin ningún grupo `placeholder` (ADR-059 §2)**: **no se agrega página** y se loguea `warn`. Nunca una página en blanco.
 24. **La leyenda puede ocupar varias páginas (ADR-219 §6, reemplaza la cota de ADR-059 §2)**: con tipos propios, el número de filas ya no está acotado por la cardinalidad de `EntityType`. `renderLegend` devuelve las páginas que hagan falta, y `savePdf` las agrega todas, en orden, al final. Con solo tipos base sigue siendo **una sola página**, idéntica a la de antes.
 25. **Fallo al renderizar la leyenda (ADR-059 §8)**: se trata como un fallo de página —retry y, si persiste, `EXPORT_FAILED`—, nunca dejando el PDF a medio ensamblar ni emitiendo `EXPORT_FINISHED` con un documento incompleto. Una leyenda que no se pudo dibujar **no** degrada a "export sin leyenda" en silencio: el usuario la pidió explícitamente.
@@ -326,6 +330,8 @@ Garantías del PDF final:
 | `includeMarkerLegend: true yields pageCount + 1 pages` | `contract.test.ts` | contract | caso 21: con solo tipos base, una página de leyenda |
 | **`a legend that spans several pages adds all of them, in order`** | `contract.test.ts` | contract | caso 24 (ADR-219 §6) |
 | `user types appear in the legend by their name, after the base types` | `unit.test.ts` | unit | caso 22 (ADR-219 §6) |
+| `user type rows sort by name in Spanish order, then by id` | `unit.test.ts` | unit | caso 22 (ADR-219 §6) |
+| `a legend user type missing from userTypes rejects the export before rendering any page` | `edge.test.ts` | edge | caso 22 y §9 |
 | `legend groups by type and lists the distinct prefixes used, including mixed levels` | `unit.test.ts` | unit | caso 22 (ADR-059 §2) |
 | `mask/synthetic/redact groups and disabled groups produce no legend rows` | `unit.test.ts` | unit | caso 22 |
 | `rows reaching renderLegend are composed strings, never EntityType or EntityGroup` | `unit.test.ts` | unit | ADR-059 §5 |
@@ -380,8 +386,8 @@ Fixtures: `tests/fixtures/text-10p.pdf`, `text-50p.pdf`, `huge-1000p.pdf`.
 ### Hito 10.5, PR 8 — Leyenda de marcadores (ADR-059)
 
 - [ ] 26. Proyección host-side `EntityGroup[] → MarkerLegendEntry[]`, en el mismo lugar donde ya se proyectan los grupos para el export: solo `enabled` en modo `placeholder`, agrupados por `type`, con los prefijos distintos usados y el conteo (§13 caso 22). **La proyección es el único punto donde se ve un `EntityGroup`**; de ahí en adelante solo viajan tipo/prefijos/conteo, y después solo strings.
-- [ ] 27. `buildMarkerLegend(entries) → MarkerLegendRow[]` (strings ya compuestos) y `RenderPageProvider.renderLegend` en el puerto (§6), con su implementación en el Orchestrator delegando a `RenderEngine.renderLegendPage` (ADR-059 §5). **Toca motor y façade en el mismo diff** — excepción acotada a R-1 justificada en ADR-059 §7: un método nuevo en un puerto no admite estado intermedio verde.
-- [ ] 28b. (1.1 — **ADR-219 §6**) `ExportEngineInput.userTypes`; filas de tipos propios con su nombre, después de las de base, ordenadas por nombre; `renderLegend` devuelve varias imágenes y `savePdf` embebe todas en orden (`ExportSavePayload.legendImages`). Casos 21, 22 y 24, y sus filas de §14.
+- [ ] 27. `buildMarkerLegend(entries) → MarkerLegendRow[]` (strings ya compuestos) y `RenderPageProvider.renderLegend` en el puerto (§6), con su implementación en el Orchestrator delegando a `RenderEngine.renderLegendPage` (ADR-059 §5; desde la 1.1, `renderLegendPages`, ítem 28b). **Toca motor y façade en el mismo diff** — excepción acotada a R-1 justificada en ADR-059 §7: un método nuevo en un puerto no admite estado intermedio verde.
+- [ ] 28b. (1.1 — **ADR-219 §6**) `ExportEngineInput.userTypes`; filas de tipos propios con su nombre, después de las de base, ordenadas por nombre; la validación de §9 para un tipo propio sin definición; reemplazar la guarda provisional de F0 (`toBaseEntityType`); `renderLegend` devuelve varias imágenes y `savePdf` embebe todas en orden (`ExportSavePayload.legendImages`). Casos 21, 22 y 24, y sus filas de §14.
 - [ ] 28. Embebido en `savePdf` con `embedPng`/`embedJpg` + `addPage` + `drawImage`, antes de aplicar la metadata y serializar. **No** por `appendPage` (§13 caso 21). Sin filas → no se invoca `renderLegend`, no se agrega página, `warn` (caso 23). Un fallo de `renderLegend` sigue el camino de fallo de página (caso 25).
 - [ ] 29. La imagen de la leyenda en `ExportSavePayload`; `includeMarkerLegend` en la validación de `options` (§9).
 - [ ] 30. Tests de §14, **incluidos los dos de `tests/security/`**. Verificación manual: abrir el PDF exportado e **intentar seleccionar texto en cualquier página, incluida la leyenda — no debe seleccionarse nada**. Es la verificación de un segundo que motivó rasterizarla (ADR-059 §4).

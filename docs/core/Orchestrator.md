@@ -6,8 +6,17 @@
 
 **Componente**: Orchestrator + façade `@anonly/anonymization-core` (no es un motor: **no tiene `EngineId`** y no implementa `IEngine`; este spec adapta la plantilla de 15 secciones de `ai/Module_Specification_Template.md` a un componente host)
 **Ubicación**: `packages/anonymization-core/src/`
-**Versión del spec**: 1.17.0
-**Última actualización**: 2026-11-19
+**Versión del spec**: 1.17.1
+**Última actualización**: 2026-11-20
+
+> **Nota (v1.17.1, 2026-11-20 — precisiones de F4b, de la auditoría de F4 y del mantenedor)**:
+> - El ítem 37 de §15 aclara que la delegación de `renderLegend` en `renderLegendPages` y un `userTypes: []` provisional llegan con el commit de contrato de F4b (`Plan_1.1.md` §7). F4 llena `userTypes`.
+> - `getDocumentEntityTypes` sin sesión devuelve `[]`, como `getSessionTypes` (`Grouping_Engine.md` §6). Antes decía que lanzaba, y es delegación pura.
+> - El re-render de `updateDocumentEntityType` sale de `ENTITY_GROUP_UPDATED`. Antes decía `GROUP_REPLACEMENT_CHANGED`, que el Orchestrator no escucha (§8).
+> - El caso 53 nombra el `CONFLICT_RESOLVED` del agregado a mano que esperaba en un choque (ADR-225 §4, `Grouping_Engine.md` v1.19.1 caso 90).
+> - Tres filas nuevas de §14: el caso positivo de 49, ese choque del 53 y el tercer punto del 54.
+> - Las funciones puras se reexportan también de `shared` (`isUserEntityType`).
+> - Caso 52: una referencia a un país que esta versión no conoce da `version_newer` (ADR-223 §6, precisión del mantenedor). Quedan escritos tres detalles que el spec no fijaba: una raíz que no es objeto da `wrong_kind`, un formato sin su tipo da solo `format_type_missing`, y el `path` de cada issue. Una fila nueva de §14.
 
 > **Nota (v1.17.0, ADR-231, 2026-11-05 — el pool de NER se da de baja al empezar la etapa de OCR)**: `runOcrStage` invoca `this.engines.ner.releaseIdleWorkers()` (`NER_Engine.md` §6, v1.13.0) **antes de despachar la primera página de OCR**. En caliente, el modelo de NER del documento anterior seguía residente 15 s (ADR-167) y el OCR del documento nuevo corría encima: el pico era OCR + NER, cuando en frío es el mayor de los dos. Con la baja, la recarga del modelo cae en `runDetectionStage`, cuando el pool de OCR ya se dio de baja (ADR-157), igual que en frío. Solo actúa cuando hay etapa de OCR: un documento sin páginas OCR ni regiones no llama a `runOcrStage` y no paga ninguna recarga, que es el caso que hizo retirar ADR-166. `reanalyze` hereda la regla al reutilizar `runOcrStage`. La guarda vive en el motor: con trabajo de NER en curso es un no-op. Sin estado, eventos, errores ni configuración nuevos. Ver §13 caso 55, §14, §15 ítem 40. Se escribió como v1.16.0, con el caso 53, el ítem 39 y otro número de ADR, en la branch `perf/pico-memoria`, y se renumeró el 2026-11-19 al integrarse después de la v1.16.0 de la 1.1.
 
@@ -104,7 +113,7 @@ Coordinar el ciclo de vida completo de un documento (etapas 0–11 de `06_Pipeli
 - Mantener `PipelineState` por documento, consultable vía `getState`.
 - **Repartir la configuración de detección** (ADR-223 §2): `createCore` mergea `EngineConfig.detection` con `DEFAULT_DETECTION_CONFIG` y descarta con `warn` los tipos propios inválidos antes de repartirla. Regex y Grouping la leen de `ctx.config`. Con un documento abierto no cambia: no entra en `ReanalyzeConfigPatch`.
 - **Tipos del documento** (ADR-219 §5, ADR-225): `defineDocumentEntityType`, `getDocumentEntityTypes`, `updateDocumentEntityType` y `removeDocumentEntityType` delegan en Grouping.
-- **Exponer las funciones puras de tipos y formatos** (`Contracts.md` §3.5), reexportadas de `grouping-engine` y `regex-engine`, e implementar `validateFormatsFile` (ADR-223 §6), que combina las dos.
+- **Exponer las funciones puras de tipos y formatos** (`Contracts.md` §3.5), reexportadas de `shared`, `grouping-engine` y `regex-engine`, e implementar `validateFormatsFile` (ADR-223 §6), que combina las dos.
 
 ---
 
@@ -220,13 +229,14 @@ Notas:
 - `addManualEntity` y los choques (ADR-174 §2, ADR-175 §3, **ADR-176 §3**): mientras dura `findLiteral`, junta el `id` de cada ocurrencia `source: Manual` que emite `ENTITY_FOUND` para ese documento (suscripción en `try/finally`). Después de `finishSession`, `grouping.manualOutcome(documentId, ids)` y su resultado va tal cual a `heldConflictIds` y `groupIds`. **El façade no compara valores ni tipos**: el criterio por `normalizedValue` y tipo de ADR-175 §3 y su errata quedan reemplazados. El invariante `occurrenceCount > 0` ⇒ alguna lista no vacía se cumple por construcción.
 - **`runExport` con conflictos sin resolver** (ADR-176 §1): antes de cambiar de etapa, si `snapshot.conflicts` tiene alguno sin resolver, no llama a `export()`, no cambia de etapa (sigue `Ready`), no emite nada y loguea `warn` con `code: EXPORT_UNRESOLVED_CONFLICTS` y la cantidad en la metadata (sin valores). Mismo patrón que `EXPORT_NO_ENABLED_GROUPS` (ADR-032 §3).
 - **`config.detection`** (ADR-223 §2): sin override, `DEFAULT_DETECTION_CONFIG`. `createCore` pasa cada tipo de `userTypes`, en orden, por `validateUserEntityType` contra el país y los tipos ya aceptados. Uno inválido o con la etiqueta repetida se descarta con `warn`, que lleva el `id` y el código pero no el nombre. Los formatos los valida `regex-engine` al `init` (`Regex_Engine.md` §6): un formato de un tipo descartado queda inválido y se informa en `skippedFormats`.
-- **`defineDocumentEntityType` / `getDocumentEntityTypes`** (ADR-219 §5): delegación pura en `grouping.defineSessionType` / `getSessionTypes`. Sin sesión, `InvalidInputError`, que lanza el motor. Desde la v1.16.0 los tipos del documento **entran** en los puntos de restauración (ADR-225 §6): los copia y los restaura Grouping, dentro de su sesión, así que el Orchestrator no guarda nada aparte. `closeDocument` los descarta.
+- **`defineDocumentEntityType` / `getDocumentEntityTypes`** (ADR-219 §5): delegación pura en `grouping.defineSessionType` / `getSessionTypes`. Sin sesión, `defineDocumentEntityType` lanza el `InvalidInputError` del motor y `getDocumentEntityTypes` devuelve `[]`, como `getSessionTypes`. Desde la v1.16.0 los tipos del documento **entran** en los puntos de restauración (ADR-225 §6): los copia y los restaura Grouping, dentro de su sesión, así que el Orchestrator no guarda nada aparte. `closeDocument` los descarta.
 - **`updateDocumentEntityType` / `removeDocumentEntityType`** (ADR-225 §3 y §4):
   - **Precondición**, que chequea el Orchestrator porque es quien conoce la etapa: documento con sesión y `stage ∉ {Importing, Extracting, OCRing, Detecting, Grouping}`. Si no, `InvalidInputError`. Es la misma de `createEditCheckpoint`.
-  - `updateDocumentEntityType` delega en `grouping.updateSessionType` y nada más. El re-render de las páginas afectadas sale de `GROUP_REPLACEMENT_CHANGED`, por el camino de siempre (ADR-044).
+  - `updateDocumentEntityType` delega en `grouping.updateSessionType` y nada más. El re-render de las páginas afectadas sale de `ENTITY_GROUP_UPDATED`, por el camino de siempre (ADR-044, caso 27). El `GROUP_REPLACEMENT_CHANGED` que Grouping emite junto con él no lo escucha el Orchestrator (§8).
   - `removeDocumentEntityType` delega en `grouping.removeSessionType` y, si no lanzó, **descarta los literales manuales retenidos cuyo `entityType` es ese tipo** (ADR-061 §5). Sin eso, el próximo `reanalyze` volvería a emitir ocurrencias de un tipo que ya no existe. El re-render sale de `ENTITY_GROUP_REMOVED` (caso 27).
+  - Un agregado a mano de ese tipo que esperaba en un choque lo resuelve Grouping como `detected`, con su `CONFLICT_RESOLVED` (`Grouping_Engine.md` caso 90). Su literal retenido es del tipo borrado, así que el descarte de arriba también lo saca. El choque deja de frenar el export (caso 46).
   - Los errores de validación los lanza el motor; el Orchestrator no los envuelve.
-- **`addManualEntity` con un tipo propio** (ADR-219 §1): antes de `reopenSession`, `request.entityType` tiene que ser un `EntityType` o un tipo propio de `config.detection.userTypes` o de `getDocumentEntityTypes`. Si no, `InvalidInputError`, sin tocar la sesión.
+- **`addManualEntity` con un tipo propio** (ADR-219 §1): antes de `reopenSession`, `request.entityType` tiene que ser un `EntityType` o un tipo propio de `config.detection.userTypes` o de `getDocumentEntityTypes(documentId)`. Un tipo de otro documento, o uno que se borró o que una restauración se llevó, no está ahí. Si no, `InvalidInputError`, sin tocar la sesión.
 - **Export y tipos propios** (ADR-219 §6): `ExportEngineInput.userTypes` lleva los tipos guardados y los del documento. `RenderPageProvider.renderLegend` delega en `RenderEngine.renderLegendPages` y devuelve sus imágenes.
 - **`validateFormatsFile(text, country)`** (ADR-223 §6) vive en `src/formats-file.ts`: parsea el JSON y valida `kind`, `version`, la forma, cada tipo con `validateUserEntityType` contra `country` y los demás tipos del archivo, y cada formato con `validateFormat` contra los tipos del archivo. No lanza: devuelve `FormatsFileValidation`.
 - **Tope de las copias de literales** (hallazgo N-4 del revisor, ADR-172 §1): cuando Grouping desaloja el punto más viejo al pasar `MAX_EDIT_CHECKPOINTS`, el Orchestrator descarta también la copia de literales retenidos de ese id. Nunca guarda más copias que puntos vivos tiene Grouping.
@@ -361,7 +371,7 @@ El Orchestrator **no define códigos de error nuevos**: propaga `SerializedEngin
 46. **El export no sale con un choque pendiente (ADR-176 §1)**: con un conflicto `heldManual` sin resolver, `EXPORT_REQUESTED` → `export()` no se llama, la etapa sigue `Ready`, no hay `EXPORT_STARTED` ni `PIPELINE_FAILED`, y hay un `warn` con `EXPORT_UNRESOLVED_CONFLICTS`. Resuelto el conflicto, el mismo pedido exporta.
 
 47. **`createCore` con `detection`** (ADR-223 §2): sin override, Regex y Grouping reciben `DEFAULT_DETECTION_CONFIG`. Con tipos propios, uno inválido o con la etiqueta repetida se descarta con `warn` y el resto llega. Un `reanalyze` no lo cambia.
-48. **Tipos del documento** (ADR-219 §5): `defineDocumentEntityType` delega en `grouping.defineSessionType` y `getDocumentEntityTypes` en `getSessionTypes`. Sin sesión, `InvalidInputError`. `closeDocument` los descarta. Frente a `restoreEditCheckpoint` vale el caso 54 (ADR-225 §6, que cambia lo que este caso decía en la v1.15.0).
+48. **Tipos del documento** (ADR-219 §5): `defineDocumentEntityType` delega en `grouping.defineSessionType` y `getDocumentEntityTypes` en `getSessionTypes`. Sin sesión, el primero lanza `InvalidInputError` y el segundo devuelve `[]`. `closeDocument` los descarta. Frente a `restoreEditCheckpoint` vale el caso 54 (ADR-225 §6, que cambia lo que este caso decía en la v1.15.0).
 49. **Agregado manual con tipo propio** (ADR-219 §1): `addManualEntity` con un tipo propio guardado o del documento funciona como con un tipo base. Con uno desconocido lanza `InvalidInputError` sin tocar la sesión.
 50. **Export con tipos propios** (ADR-219 §6): `ExportEngineInput.userTypes` lleva los guardados y los del documento, y `renderLegend` devuelve las páginas de `renderLegendPages`.
 51. **Funciones puras reexportadas** (ADR-220 §3): el façade exporta `isUserEntityType`, `userTypeLabel`, `validateUserEntityType`, `getCatalog`, `validateFormat`, `testFormat`, `compareFormat` y `validateFormatsFile`, y se pueden llamar sin `createCore`.
@@ -369,12 +379,17 @@ El Orchestrator **no define códigos de error nuevos**: propaga `SerializedEngin
     - un texto que no es JSON da `not_json`; un `kind` distinto, `wrong_kind`; `version: 2`, `version_newer`;
     - un formato cuyo tipo propio no viene en el archivo da `format_type_missing`;
     - un formato inválido entre varios válidos da `ok: false` para el archivo entero;
+    - una raíz que no es un objeto también da `wrong_kind`;
+    - una referencia de `catalogRefs` a un país que esta versión no conoce da `version_newer` (ADR-223 §6, precisión del 2026-11-20);
+    - un formato cuyo tipo falta da solo `format_type_missing`, sin sumar `format_invalid` por la misma causa;
+    - cada issue lleva en `path` el elemento que falla, como `types[0]` o `formats[1]`;
     - un archivo válido da `ok: true` con el contenido.
 53. **Editar y borrar un tipo del documento** (ADR-225 §3 y §4):
     - `updateDocumentEntityType` delega en `grouping.updateSessionType`, y las páginas de los grupos que cambiaron de reemplazo se vuelven a renderizar;
     - `removeDocumentEntityType` delega en `grouping.removeSessionType` y descarta los literales retenidos de ese tipo: un `reanalyze` posterior no vuelve a emitir sus valores;
     - con una pasada de detección en curso, o sin sesión, los dos lanzan `InvalidInputError` sin llamar al motor;
-    - un `id` de un tipo guardado lanza el `InvalidInputError` del motor, y los literales retenidos no se tocan.
+    - un `id` de un tipo guardado lanza el `InvalidInputError` del motor, y los literales retenidos no se tocan;
+    - con un agregado a mano de ese tipo esperando en un choque, el choque sale resuelto como `detected` con su `CONFLICT_RESOLVED` (`Grouping_Engine.md` caso 90), el literal se descarta y el export ya no queda frenado (caso 46).
 54. **Deshacer con tipos del documento** (ADR-225 §6):
     - `createEditCheckpoint` → `defineDocumentEntityType` → `restoreEditCheckpoint`: `getDocumentEntityTypes` vuelve a no devolverlo;
     - `createEditCheckpoint` → `removeDocumentEntityType` de un tipo con un agregado manual → `restoreEditCheckpoint`: vuelven el tipo, sus grupos y el literal retenido, y un `reanalyze` posterior conserva la entidad;
@@ -426,12 +441,16 @@ la nueva clave. Fakes remotos resuelven el sobre real, no ejecutan run().
 | **`updating and removing a document type delegate to grouping and guard the stage`** | `unit.test.ts` | unit | caso 53 (ADR-225 §3 y §4) |
 | `removing a document type drops its retained manual literals` | `unit.test.ts` | unit | caso 53: un `reanalyze` posterior no los vuelve a emitir |
 | `removing a saved type id leaves retained literals untouched` | `edge.test.ts` | edge | caso 53 |
+| `removing a document type resolves its held manual conflict and drops its literal` | `unit.test.ts` | unit | caso 53 (ADR-225 §4; `Grouping_Engine.md` caso 90) |
 | **`undo restores document types together with their groups and literals`** | `unit.test.ts` | unit | caso 54 (ADR-225 §6) |
+| `addManualEntity accepts a saved or a document user type like a base type` | `unit.test.ts` | unit | caso 49 (ADR-219 §1) |
 | `addManualEntity rejects an unknown user type` | `edge.test.ts` | edge | caso 49 |
+| `addManualEntity rejects a document type that a restore took away` | `edge.test.ts` | edge | caso 54 |
 | `export receives saved and document user types` | `unit.test.ts` | unit | caso 50 (ADR-219 §6) |
 | **`format and user type functions are exported and work without a core`** | `contract.test.ts` | contract | caso 51 |
 | `validateFormatsFile rejects the whole file on any invalid item` | `unit.test.ts` | unit | caso 52 (ADR-223 §6) |
 | `validateFormatsFile reports each file issue code` | `edge.test.ts` | edge | caso 52 |
+| `validateFormatsFile rejects a reference to an unknown country as a newer version` | `edge.test.ts` | edge | caso 52 (ADR-223 §6, precisión del 2026-11-20) |
 | `renderLegend is not invoked when includeMarkerLegend is false` | `unit.test.ts` | unit | ADR-059 §5. En el façade, con `ExportEngine` mockeado, afirma las dos mitades que le tocan: `export` recibe `options.includeMarkerLegend === false` y el Orchestrator no invoca la leyenda por su cuenta. Que Export no la pida lo cubre `export-engine` |
 | `addManualEntity produces a new group visible in the grouping snapshot` | `contract.test.ts` | contract | ADR-061 §6 |
 | `adding an already-detected value merges instead of duplicating` | `contract.test.ts` | contract | ADR-061 §6 (dedup ADR-038 §3) |
@@ -566,7 +585,7 @@ Los tests de contract/unit/edge mockean los motores (interfaces de `Contracts.md
 - [x] 34. (ADR-145 §1, §3) `LruCache`: la expulsión se detiene antes de la entrada recién insertada; `set` rechaza `bytes` no finito o negativo con `InvalidInputError`; test que fuerza el guard de `handleOcrPageFinished` con una caché mínima.
 
 - [ ] 36. (1.1, frente F4 — **ADR-223 §2**) `detection` en `createCore`: default, filtro de tipos propios inválidos con `warn` y reparto por `ctx.config`; fuera de `ReanalyzeConfigPatch`. Caso 47.
-- [ ] 37. (1.1, F4 — **ADR-219 §5 y §6**) `defineDocumentEntityType` y `getDocumentEntityTypes`; validación del tipo en `addManualEntity`; `userTypes` en `ExportEngineInput`; `renderLegend` sobre `renderLegendPages`. Casos 48 a 50.
+- [ ] 37. (1.1, F4 — **ADR-219 §5 y §6**) `defineDocumentEntityType` y `getDocumentEntityTypes`; validación del tipo en `addManualEntity`; `userTypes` en `ExportEngineInput`; `renderLegend` sobre `renderLegendPages`. Casos 48 a 50. La delegación en `renderLegendPages` y un `userTypes: []` provisional llegan antes, como adaptación mecánica del commit de contrato de F4b (`Plan_1.1.md` §7); F4 llena `userTypes` con los guardados y los del documento.
 - [ ] 38. (1.1, F4 — **ADR-220 §3, ADR-223 §6**) Reexportar las funciones puras e implementar `validateFormatsFile` en `src/formats-file.ts`. Casos 51 y 52.
 - [ ] 39. (1.1, F4 — **ADR-225**) `updateDocumentEntityType` y `removeDocumentEntityType`: precondición de etapa, delegación en Grouping y descarte de los literales retenidos del tipo borrado. Casos 53 y 54.
 

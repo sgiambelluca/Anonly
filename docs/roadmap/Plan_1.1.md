@@ -268,7 +268,7 @@ un hito, y cada commit toca un solo módulo (R-1).
 | F1 | Generador: compilar, recorrido lineal, `validateFormat`, `testFormat` y `compareFormat`; retiro de `addPattern`. Desde el 2026-11-20 también lleva el catálogo argentino como dato (`BASE_CATALOG` y `getCatalog`, con celular y matrícula como `control`) y el cableado mínimo: los formatos propios prendidos corren después de los base (`Regex_Engine.md` v2.0.1, §15 ítem 25) | `regex-engine` | F0 |
 | F2 | Qué formatos base corren (`detection.baseFormats` y copias editadas), `detection.country`, ajustes de formatos base, referencias, `formatId` de los base, emitir los dos matches de ADR-222 y `skippedFormats` (§15 ítems 26 a 28) | `regex-engine` | F1 |
 | F3 | Tipos propios (etiquetas, modos, máscara, clave), tipos del documento con su edición, su borrado y su lugar en los puntos de restauración (ADR-225), etiquetas por país, desempate del conflicto y `formatId` del grupo | `grouping-engine` | F0 |
-| F4 | `DetectionConfig` en `createCore`, `defineDocumentEntityType`, `updateDocumentEntityType` y `removeDocumentEntityType` (ADR-225), validar el tipo del agregado manual, reexportar las funciones puras y `validateFormatsFile` | façade | F1, F3, F4b |
+| F4 | `DetectionConfig` en `createCore`, `defineDocumentEntityType`, `getDocumentEntityTypes`, `updateDocumentEntityType` y `removeDocumentEntityType` (ADR-225), validar el tipo del agregado manual, `userTypes` del export, reexportar las funciones puras y `validateFormatsFile` | façade | F1, F3, F4b |
 | F4b | Hoja de referencia paginada: los tipos (`RenderLegendPayload.startRow`, `RenderLegendPageResult`, `ExportSavePayload.legendImages`), `renderLegendPages` en Render y varias páginas de leyenda en Export (ADR-219 §6) | `shared` (contrato), `render-engine`, `export-engine` (un commit cada uno) | F0 |
 | F5 | Sintetizador por país, con Argentina idéntica | `shared` | F0 |
 | F6 (1.1.1) | Chile y Uruguay: investigación, corpus sintético, medición, tablas aprobadas, y después filas de catálogo, etiquetas y generadores. Muestra el selector de país y «agregar desde otro país» | `regex-engine`, `grouping-engine`, `shared`, `react-client` | F2, F3, F5; la investigación, de nada |
@@ -303,6 +303,23 @@ F7.
 - **Los tipos de la hoja paginada pasan a F4b.** Sus dos consumidores son
   render y export, y adaptarlos es justo la paginación.
 
+**Cómo se parte F4b** (planificador, 2026-11-20, por ADR-124 §1). Son tres
+commits, `shared`, `render-engine` y `export-engine`, y cada uno deja los
+gates en verde.
+
+- **El de contrato** lleva todos los cambios de firma de ADR-219 §6 y la
+  adaptación mecánica de sus consumidores, sin conducta nueva:
+  - en `shared`, `startRow`, `RenderLegendPageResult` y `legendImages`;
+  - en Render, `renderLegendPages`, que todavía dibuja una sola página;
+  - en Export, `renderLegend` con varias imágenes, `ExportEngineInput.userTypes`
+    y el embebido en orden de las imágenes que reciba;
+  - en el façade, `renderLegend` delega en `renderLegendPages` y pasa
+    `userTypes: []` hasta F4;
+  - en `tests/`, los dobles del puerto.
+- **El de render-engine** pagina: caso 40 y sus filas de §14.
+- **El de export-engine** arma las filas de los tipos propios y reemplaza la
+  guarda de F0: casos 21, 22 y 24.
+
 **Sin tope de formatos propios** (decisión del mantenedor, 2026-11-20). F1
 midió el costo con 10, 50 y 200 formatos prendidos: crece lineal, unos 11 ms
 por formato cada 100 000 caracteres. Proyectado a un documento como R1, 200
@@ -313,6 +330,12 @@ formatos suman 1,5 s. Los números están en
 **Ante una copia rota corre el original** (decisión del mantenedor,
 2026-11-20). Una copia editada que no pasa `validateFormat` no reemplaza al
 formato base: se descarta y el original corre (`Regex_Engine.md` §6). Es F2.
+
+**Un país que la versión no conoce rechaza el archivo** (decisión del
+mantenedor, 2026-11-20). Un archivo de formatos de la 1.1.1 con referencias
+a Chile o Uruguay, importado en la 1.1, se rechaza entero como de una versión
+más nueva (`version_newer`, ADR-223 §6). El usuario actualiza y lo vuelve a
+importar. Es F4.
 
 **Cómo se revisa** (decisión del mantenedor, 2026-11-20). Hay un revisor por
 bloque de frentes que comparten spec, no uno por frente. El costo fijo de una

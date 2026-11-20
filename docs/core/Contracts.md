@@ -10,6 +10,8 @@
 
 > **1.1 / precisiones del mantenedor del 2026-11-20** (ADR-219 §2 y ADR-225 §4), sin tipos, eventos ni códigos nuevos: la etiqueta de un tipo propio tampoco puede repetir `MUJER` ni `HOMBRE` (§5.2, `validateUserEntityType`), y `removeDocumentEntityType` descarta también el agregado a mano de ese tipo retenido en un choque (§3.5).
 
+> **1.1 / precisiones de la auditoría de F4, 2026-11-20**, sin tipos, eventos ni códigos nuevos, todas en §3.5: `addManualEntity` declara el `InvalidInputError` de un tipo propio desconocido (ADR-219 §1); `getDocumentEntityTypes` sin sesión devuelve `[]`, como el motor; `updateDocumentEntityType` nombra el `GROUP_REPLACEMENT_CHANGED` que Grouping emite junto con `ENTITY_GROUP_UPDATED`; y la precondición de `reanalyze` suma `Done`, como decidió ADR-040. Además, por decisión del mantenedor (ADR-223 §6), `validateFormatsFile` rechaza como `version_newer` una referencia a un país que esta versión no conoce.
+
 > Define **todos** los tipos, interfaces, enums, error codes y contratos compartidos entre motores. Es el único paquete del que un motor puede importar tipos. Un implementador debe leer este archivo **completo** antes de tocar cualquier motor.
 
 **Paquete**: `@anonly/shared`
@@ -286,7 +288,7 @@ export interface IPipelineOrchestrator {
   retryWithPassword(documentId: string, password: string): Promise<void>;
   // Re-corre detección (Regex/NER) y/o re-OCR sobre un documento ya cargado sin
   // perder las ediciones manuales del usuario (grupos, reglas, conflictos
-  // resueltos). Ver ADR-038 §1. Precondición: stage ∈ {Ready, Failed}.
+  // resueltos). Ver ADR-038 §1. Precondición: stage ∈ {Ready, Done, Failed} (ADR-040).
   reanalyze(documentId: string, patch: ReanalyzeConfigPatch): Promise<void>;
   /**
    * ADR-061 §6: agrega a mano una entidad que el detector no encontró.
@@ -299,6 +301,9 @@ export interface IPipelineOrchestrator {
    * ADR-171 §4: antes de reopenSession llama a grouping.liftRemoval(value): un
    * agregado manual NUEVO revierte la eliminación de ese valor. La re-aplicación
    * automática de literales tras un re-análisis (ADR-061 §5) NO la llama.
+   * ADR-219 §1: request.entityType es un EntityType o un tipo propio guardado
+   * (EngineConfig.detection.userTypes) o de este documento
+   * (getDocumentEntityTypes). Si no -> InvalidInputError, sin tocar la sesión.
    */
   addManualEntity(documentId: string, request: ManualEntityRequest): Promise<ManualEntityResult>;
   /** ADR-061 §8: misma búsqueda literal, salida para el buscador del visor. */
@@ -312,13 +317,14 @@ export interface IPipelineOrchestrator {
    * a reanalyze y se descarta con DOCUMENT_CLOSED. No emite eventos.
    */
   defineDocumentEntityType(documentId: string, definition: UserEntityTypeDefinition): void;
-  /** ADR-219 §5: los tipos del documento definidos hasta ahora, en orden de creación. */
+  /** ADR-219 §5: los tipos del documento definidos hasta ahora, en orden de creación; sin sesión, []. */
   getDocumentEntityTypes(documentId: string): ReadonlyArray<UserEntityTypeDefinition>;
   /**
    * ADR-225 §3: reemplaza la definición de un tipo DEL DOCUMENTO; el id no
    * cambia. Misma validación que defineDocumentEntityType, sin compararse
    * contra sí mismo. Recalcula el valor de reemplazo y las vistas previas de
-   * los grupos del tipo y emite ENTITY_GROUP_UPDATED por cada uno que cambió.
+   * los grupos del tipo y emite ENTITY_GROUP_UPDATED por cada uno que cambió,
+   * con el GROUP_REPLACEMENT_CHANGED de siempre de Grouping.
    * No cambia id del grupo, indexInType ni modo, y no pisa un reemplazo
    * escrito por el usuario (replacementValueUserSet, ADR-076).
    * Definición inválida, etiqueta repetida, id que no es de un tipo del
@@ -1085,7 +1091,8 @@ export type FormatsFileValidation =
   universales, en el orden en que corren.
 - **`validateFormatsFile(text, country)`**: parsea el JSON y valida el archivo
   **entero** antes de que la aplicación toque nada. Revisa la forma, `kind`
-  y `version` (`version > 1` → `version_newer`), cada tipo con
+  y `version` (`version > 1` → `version_newer`; también una referencia de
+  `catalogRefs` a un país que esta versión no conoce, ADR-223 §6), cada tipo con
   `validateUserEntityType` (contra `country` y los otros tipos del archivo) y cada
   formato con `validateFormat`, cuyos tipos propios tienen que venir en el
   mismo archivo (`format_type_missing`). Una sola falla y el resultado es

@@ -11,6 +11,8 @@
 - **Alcance**: contrato (`EngineConfig`, `Contracts.md` §3 y §6),
   Orchestrator, `react-client` y `08_Security_Model.md` §10.2. Sin cambios
   en el contenedor Electron y sin dependencias nuevas.
+- **Precisión del 2026-11-20** (mantenedor): en §6, una referencia a un país
+  que esta versión no conoce rechaza el archivo como `version_newer`.
 - **Relacionado con**:
   - ADR-125: la configuración se toca antes del primer documento y recrea
     el Core;
@@ -177,6 +179,14 @@ función pura del Core y usa las mismas validaciones que la creación:
 Un archivo inválido se rechaza entero, con el motivo, y no se importa nada.
 Un archivo de una versión más nueva se rechaza con «creado con una versión
 más nueva de Anonly».
+
+Una referencia a un país que esta versión no conoce cuenta igual, como
+archivo de una versión más nueva (`version_newer`). Pasa con un archivo de
+la 1.1.1, que ya tiene Chile y Uruguay, importado en la 1.1. Se rechaza el
+archivo entero: el usuario actualiza Anonly y lo vuelve a importar
+(precisión del mantenedor, 2026-11-20). La fila de abajo sobre una
+referencia que no existe en los catálogos vale para un país que esta versión
+sí conoce.
 
 **Después se procesa cada elemento:**
 
