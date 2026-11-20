@@ -1806,9 +1806,9 @@ export async function kernelRasterizePage(
 const LEGEND_DOCUMENT_LABEL = "(legend)";
 const LEGEND_PAGE_LABEL = -1;
 
-// Layout (ADR-059 §5, Render_Engine.md §6/§13 caso 29): tabla de hasta 13
-// filas (cota de `EntityType`, ADR-059 §2) a `y` incremental con columnas a
-// `x` fijas, **con salto de línea dentro de cada celda** y sin paginación. El
+// Layout (ADR-059 §5, Render_Engine.md §6/§13 casos 29 y 40): tabla a `y`
+// incremental con columnas a `x` fijas, **con salto de línea dentro de cada
+// celda**, paginada por job desde `startRow` (ADR-219 §6). El
 // espaciado/tipografía exactos no están en el spec ("decisión de estilo
 // visual, sin spec pixel-perfect"): título en negrita, tres columnas fijas en
 // el mismo orden que el ejemplo de ADR-059 §2 (prefixes, tipo, conteo),
@@ -1957,9 +1957,13 @@ function paintLegendTable(
     const rowLines = Math.max(...cells.map((cell) => cell.lines.length));
     const rowHeightPt = Math.max(LEGEND_ROW_HEIGHT_PT, rowLines * LEGEND_LINE_HEIGHT_PT);
 
-    // Sin paginación todavía (ADR-219 §6, fase de contrato): si la tabla no
-    // entra, se corta acá en vez de dibujar fuera de la página.
-    if (y + rowHeightPt > bottomLimitPt) break;
+    // Paginación (ADR-219 §6): la fila que no entra entera abre la página
+    // siguiente, así que se corta acá y el host sigue desde `startRow +
+    // rowsDrawn`. Una página dibuja siempre al menos una fila: una más alta
+    // que la página entera va sola y se recorta contra el borde del canvas, y
+    // la que sigue arranca la página siguiente. Sin esta excepción el host no
+    // avanzaría nunca.
+    if (rowsDrawn > 0 && y + rowHeightPt > bottomLimitPt) break;
 
     for (const cell of cells) {
       let lineY = y;

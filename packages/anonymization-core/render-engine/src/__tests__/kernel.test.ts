@@ -845,6 +845,35 @@ describe("kernelRenderLegendPage — página de leyenda del export (ADR-059 §5)
     expect(row1Prefixes!.args[0]).toBe("MATR, MAT");
   });
 
+  it("draws one page from startRow and reports how many rows it drew (ADR-219 §6)", async () => {
+    const rows = [0, 1, 2, 3, 4].map((i) =>
+      makeMarkerLegendRow({ prefixes: `PRE${i}`, typeName: `T${i}`, countLabel: "1 marcador" }),
+    );
+
+    // Página de 150 pt: entran dos filas bajo el título.
+    const first = await kernelRenderLegendPage(
+      { rows, startRow: 0, pageWidthPt: 595, pageHeightPt: 150 },
+      legendOpts,
+    );
+    const second = await kernelRenderLegendPage(
+      { rows, startRow: first.rowsDrawn, pageWidthPt: 595, pageHeightPt: 150 },
+      legendOpts,
+    );
+
+    expect(first.rowsDrawn).toBe(2);
+    expect(second.rowsDrawn).toBe(2);
+    const [, secondCanvas] = getCreatedCanvases().filter((canvas) =>
+      canvas.calls.some((call) => call.op === "fillText"),
+    );
+    const secondTexts = secondCanvas!.calls
+      .filter((c) => c.op === "fillText")
+      .map((c) => c.args[0]);
+    expect(secondTexts).toContain("PRE2");
+    expect(secondTexts).toContain("PRE3");
+    expect(secondTexts).not.toContain("PRE1");
+    expect(secondTexts).not.toContain("PRE4");
+  });
+
   it("throws RenderPageFailedError (not the page-scoped constructor) when OffscreenCanvas is unavailable", async () => {
     Reflect.deleteProperty(globalThis, "OffscreenCanvas");
 
