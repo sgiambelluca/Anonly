@@ -907,7 +907,7 @@ export interface FormatDefinition {
   readonly name: string;
   readonly entityType: EntityTypeId;                     // tipo propio o uno de FORMAT_ADMITTING_BASE_TYPES
   readonly variants: ReadonlyArray<ReadonlyArray<FormatPiece>>;
-  readonly contextBefore?: ReadonlyArray<string>;        // ausente = sin contexto
+  readonly contextBefore?: ReadonlyArray<string>;        // ausente = sin contexto; [] o una palabra en blanco = context_empty
   readonly basedOn?: string;                             // ADR-220 §4: id del formato base editado
   readonly enabled: boolean;
 }
@@ -984,7 +984,7 @@ export type FormatIssueCode =
 export interface FormatIssue {
   readonly code: FormatIssueCode;
   readonly variantIndex?: number;          // ausente = el problema es del formato entero
-  readonly pieceIndex?: number;            // índice dentro de la variante, contando las piezas de un optional en orden
+  readonly pieceIndex?: number;            // índice en preorden dentro de la variante: un optional cuenta, y después sus piezas
 }
 
 export interface FormatValidationContext {
@@ -1218,7 +1218,7 @@ export interface ExportConfig {
 | `MAX_EDIT_CHECKPOINTS` | `50` | Puntos de restauración de edición por documento; al pasarse se descarta el más viejo (ADR-172 §1) |
 | `DEGRADED_FONT_RATIO` | `0.5` | Umbral del aviso de degradación: se marca cuando **`anchoDisponible / anchoNatural`** cae por debajo, donde `anchoNatural` es lo que el texto mediría a `boxHeight × REPLACEMENT_FONT_HEIGHT_RATIO` (ADR-058 §7, **criterio y valor reemplazados por ADR-086**) |
 | `FORMAT_MAX_VARIANTS` | `8` | Variantes de un `FormatDefinition` (ADR-220 §1) |
-| `FORMAT_MAX_PIECES` | `16` | Piezas por variante, contando las de adentro de un `optional` (ADR-220 §1) |
+| `FORMAT_MAX_PIECES` | `16` | Piezas por variante, contadas como `pieceIndex`: el `optional` y las de adentro (ADR-220 §1) |
 | `FORMAT_MAX_REPEAT` | `64` | `max` de una pieza `chars` (ADR-220 §1) |
 | `FORMAT_MAX_TEXT` | `40` | Caracteres de un texto fijo, de una palabra de contexto y del nombre de un formato (ADR-220 §1) |
 | `FORMAT_MAX_CONTEXT` | `5` | Palabras de contexto de un formato (ADR-220 §1) |

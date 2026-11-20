@@ -289,6 +289,18 @@ prendidos. Cada uno suma un recorrido lineal por página, así que F1 mide el
 costo con 10, 50 y 200 formatos sobre un documento largo. Si hace falta un
 tope, lleva su ADR.
 
+**Cómo se revisa** (decisión del mantenedor, 2026-11-20). Hay un revisor por
+bloque de frentes que comparten spec, no uno por frente. El costo fijo de una
+revisión es leer los specs completos y correr el monorepo, así que se paga
+una vez por bloque.
+
+- **Bloques:** F1 con F2, F3 con F5, F4b con F4, F7, y F8 al cierre.
+  F0 se revisó solo, porque los demás frentes se apoyan en su contrato.
+- **Modelo:** Sonnet en los bloques sin cambio de contrato. Opus en los
+  cambios de contrato y en la pasada final antes de la versión.
+- Un frente se commitea con sus gates en verde, y su bloque se revisa antes
+  del PR.
+
 ## 8. Fuera de la 1.1
 
 - Escribir una regex a mano, en el generador o en el buscador.
