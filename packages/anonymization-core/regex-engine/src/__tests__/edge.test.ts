@@ -1,22 +1,35 @@
 import {
   CancelledError,
   EngineDisposedError,
+  EngineErrorCode,
   EngineEvents,
   EntityType,
   InvalidInputError,
   type EngineContext,
   type EntityFound,
   type EntityTypeId,
+  type FormatDefinition,
 } from "@anonly/shared";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
+import { compileFormat, scanFormat } from "../formats/format-automaton.js";
+import { testFormat } from "../formats/format-validation.js";
 import { RegexEngine } from "../regex.engine.js";
 import { RegexInvalidPatternError } from "../regex.errors.js";
 
 import {
   addressValuesOf,
+  CBU_TYPE,
+  createDetectionContext,
   createEngineContext,
+  digits,
+  fixedText,
+  LEGAJO_TYPE,
+  letters,
   makeDocument,
+  makeFormat,
+  separator,
+  userFormatOccurrences,
   makeEmptyPage,
   makeOcrWord,
   makePage,
@@ -111,52 +124,6 @@ describe("RegexEngine — edge case tests", () => {
     });
   });
 
-  describe("ADR-181: los patrones custom no se especializan por id", () => {
-    it("custom pattern named email uses custom path", async () => {
-      engine.addPattern({
-        id: "email",
-        entityType: EntityType.Custom,
-        pattern: /\bCUSTOM-[A-Z]+\b/g,
-        normalizer: (value: string) => value.toLowerCase(),
-        maskFormat: "CUSTOM-XXXX",
-      });
-      const busEmitSpy = vi.spyOn(ctx.bus, "emit");
-      const document = makeSinglePageDocument("doc-custom-email-id", [
-        "CUSTOM-ALPHA",
-        "user@example.com",
-      ]);
-
-      const output = await engine.process({ document }, ctx);
-      const occurrences = busEmitSpy.mock.calls
-        .filter(([, event]) => event === EngineEvents.ENTITY_FOUND)
-        .map(([, , payload]) => (payload as EntityFound).occurrence);
-
-      expect(output.occurrenceCount).toBe(2);
-      expect(occurrences).toHaveLength(2);
-      expect(
-        occurrences.map(({ value, normalizedValue, entityType, maskFormat }) => ({
-          value,
-          normalizedValue,
-          entityType,
-          maskFormat,
-        })),
-      ).toEqual([
-        {
-          value: "CUSTOM-ALPHA",
-          normalizedValue: "custom-alpha",
-          entityType: EntityType.Custom,
-          maskFormat: "CUSTOM-XXXX",
-        },
-        {
-          value: "user@example.com",
-          normalizedValue: "user@example.com",
-          entityType: EntityType.Email,
-          maskFormat: "xxxx@xxxx.xx",
-        },
-      ]);
-    });
-  });
-
   // Caso 7 (§13): patente vieja vs Mercosur.
   describe("Caso 7: patente AR vieja vs Mercosur", () => {
     it("AR plate vieja and Mercosur both match as Plate", async () => {
@@ -174,71 +141,6 @@ describe("RegexEngine — edge case tests", () => {
       // ADR-029 §2: cada variante lleva su propio maskFormat, fiel a su forma
       // real (no el fallback único que compartían antes de este PR).
       expect(occurrences.map((o) => o.maskFormat)).toEqual(["XXX XXX", "XX XXX XX"]);
-    });
-  });
-
-  // Caso 8 (§13): patrón custom con regex inválida.
-  describe("Caso 8: patrón custom inválido", () => {
-    it("custom invalid regex throws and is discarded", async () => {
-      // RegExp instances no pueden ser sintácticamente inválidas en JS (ya se
-      // compilaron al construirse); se simula un patrón que lanza al
-      // ejecutarse — el escenario real detrás de "regex inválida" para un
-      // objeto RegExp ya construido (ver nota en regex.engine.ts).
-      const throwingPattern = /placeholder/g;
-      throwingPattern.exec = () => {
-        throw new Error("boom");
-      };
-
-      expect(() =>
-        engine.addPattern({
-          id: "bad-pattern",
-          entityType: EntityType.Custom,
-          pattern: throwingPattern,
-          normalizer: (v: string) => v,
-          maskFormat: "X",
-        }),
-      ).toThrow(RegexInvalidPatternError);
-
-      const document = makeSinglePageDocument("doc-bad-pattern", ["algo", "cualquiera"]);
-      const output = await engine.process({ document }, ctx);
-      expect(output.occurrenceCount).toBe(0);
-    });
-  });
-
-  // Caso 9 (§13): patrón custom con catastrophic backtracking.
-  describe("Caso 9: patrón custom con timeout", () => {
-    it("custom catastrophic regex times out and is discarded", async () => {
-      engine.addPattern({
-        id: "slow-pattern",
-        entityType: EntityType.Custom,
-        pattern: /a+/g,
-        normalizer: (v: string) => v,
-        maskFormat: "X",
-      });
-
-      // Simula tiempo transcurrido > 1000ms sin bloquear el test de verdad:
-      // cada llamada a Date.now() avanza 2000ms respecto de la anterior, así
-      // que el par (inicio, fin) que mide runCustomPatternWithBudget siempre
-      // reporta un elapsed > CUSTOM_PATTERN_BUDGET_MS, sin depender del
-      // número exacto de llamadas que haga process() alrededor.
-      let counter = 0;
-      const dateSpy = vi.spyOn(Date, "now").mockImplementation(() => {
-        const value = counter * 2000;
-        counter++;
-        return value;
-      });
-
-      const warnSpy = vi.spyOn(ctx.logger, "warn");
-      const document = makeSinglePageDocument("doc-slow-pattern", ["aaaa"]);
-      const output = await engine.process({ document }, ctx);
-
-      expect(output.occurrenceCount).toBe(0);
-      expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining("excedió el presupuesto"),
-        expect.objectContaining({ patternId: "slow-pattern" }),
-      );
-
-      dateSpy.mockRestore();
     });
   });
 
@@ -339,31 +241,6 @@ describe("RegexEngine — edge case tests", () => {
       await engine.init(ctxWithAbort);
       await expect(engine.process({ document }, ctxWithAbort)).rejects.toThrow(CancelledError);
       expect(busEmitSpy).toHaveBeenCalled();
-    });
-  });
-
-  // No numerado en §13 (patrón custom cuyo checksum descarta el match, no
-  // distinto de un patrón default — ejercita la rama checksumPassed=false
-  // para patrones custom específicamente).
-  describe("Custom pattern with failing checksum", () => {
-    it("custom pattern match discarded when its checksum returns false", async () => {
-      // "TICKET-12345" no colisiona con ningún patrón default (License y
-      // Plate exigen 1-3 letras, no 6; los patrones numéricos exigen más
-      // dígitos de los que "12345" aporta), así que el único candidato en
-      // juego es el patrón custom, y su descarte por checksum debe dejar
-      // occurrenceCount en 0 sin ningún "ganador" alternativo.
-      engine.addPattern({
-        id: "always-invalid",
-        entityType: EntityType.Custom,
-        pattern: /\bTICKET-\d{5}\b/g,
-        checksum: () => false,
-        normalizer: (v: string) => v,
-        maskFormat: "TICKET-00000",
-      });
-
-      const document = makeSinglePageDocument("doc-custom-checksum-fail", ["TICKET-12345"]);
-      const output = await engine.process({ document }, ctx);
-      expect(output.occurrenceCount).toBe(0);
     });
   });
 
@@ -533,27 +410,35 @@ describe("RegexEngine — edge case tests", () => {
     });
   });
 
-  // Caso 28 (§13, ADR-075 §2/§4/§5): la guarda de corrida también alcanza a
-  // los patrones custom, y el residuo aceptado queda asertado como tal.
-  describe("Caso 28: guarda de corrida — patrón custom y residuo aceptado", () => {
-    it("a custom pattern is subject to the run guard too", async () => {
-      engine.addPattern({
-        id: "custom-numeric",
-        entityType: EntityType.Custom,
-        pattern: /\d{2,}/g,
-        normalizer: (v: string) => v,
-        maskFormat: "XX",
+  // Caso 28 y 44 (§13, ADR-075 §2/§4/§5, ADR-220 §2): la guarda de corrida
+  // también alcanza a los formatos del generador, y el residuo aceptado queda
+  // asertado como tal.
+  describe("Caso 28: guarda de corrida — formato del generador y residuo aceptado", () => {
+    it("a user format is subject to the run guard too", async () => {
+      const formatCtx = createDetectionContext({
+        userTypes: [CBU_TYPE],
+        userFormats: [
+          makeFormat(1, CBU_TYPE.id, [digits(2), separator(["-"]), digits(6)]),
+          makeFormat(2, CBU_TYPE.id, [digits(5)]),
+        ],
       });
+      await engine.init(formatCtx);
 
-      const document = makeSinglePageDocument("doc-guard-custom", ["EXP-12345"]);
-      const busEmitSpy = vi.spyOn(ctx.bus, "emit");
-      await engine.process({ document }, ctx);
+      // Caso 44: un tramo de un número de expediente no se emite.
+      const expediente = await processPage(
+        engine,
+        formatCtx,
+        makePage(0, ["PP-13-00-000000-24/00"]),
+      );
+      expect(expediente.filter((o) => o.entityType === CBU_TYPE.id)).toHaveLength(0);
 
-      const customOccurrences = busEmitSpy.mock.calls
-        .filter(([, event]) => event === EngineEvents.ENTITY_FOUND)
-        .map(([, , payload]) => (payload as EntityFound).occurrence)
-        .filter((o) => o.entityType === EntityType.Custom);
-      expect(customOccurrences).toHaveLength(0);
+      // El tramo numérico de un identificador con letras tampoco.
+      const identifier = await processPage(engine, formatCtx, makePage(0, ["EXP-12345"]));
+      expect(identifier.filter((o) => o.entityType === CBU_TYPE.id)).toHaveLength(0);
+
+      // Con la corrida sin letras sí se emite (la guarda no es una fuga).
+      const clean = await processPage(engine, formatCtx, makePage(0, ["Ref", "12345."]));
+      expect(clean.map((o) => o.value)).toEqual(["12345"]);
     });
 
     // Ver la nota de unit.test.ts junto al test de guarda equivalente:
@@ -693,48 +578,6 @@ describe("RegexEngine — edge case tests", () => {
         ["juanQexample.com", "juan@example.com"],
         ["ana@example.com", "ana@example.com"],
       ]);
-    });
-
-    it("custom pattern named email does not get the Q search", async () => {
-      engine.addPattern({
-        id: "email",
-        entityType: EntityType.Custom,
-        pattern: /\bjuanQexample\.com\b/g,
-        normalizer: (value: string) => value.toLowerCase(),
-        maskFormat: "CUSTOM-XXXX",
-      });
-
-      // Sobre palabras de PDF la forma con `Q` no se busca: lo único que
-      // emite es el patrón custom, con su propio normalizador (sin restituir
-      // la `@`) y su propio tipo.
-      const onPdf = await processPage(
-        engine,
-        ctx,
-        makeSourcedPage(0, [{ text: "juanQexample.com", source: "pdf" }]),
-      );
-      expect(
-        onPdf.map(({ value, normalizedValue, entityType, maskFormat }) => ({
-          value,
-          normalizedValue,
-          entityType,
-          maskFormat,
-        })),
-      ).toEqual([
-        {
-          value: "juanQexample.com",
-          normalizedValue: "juanqexample.com",
-          entityType: EntityType.Custom,
-          maskFormat: "CUSTOM-XXXX",
-        },
-      ]);
-
-      // Sobre OCR, el que restituye la `@` es el email default y con su tipo y
-      // su máscara: el custom no se vuelve un email ni gana la búsqueda.
-      const onOcr = await processPage(engine, ctx, makeSourcedPage(0, ["juanQexample.com"]));
-      expect(onOcr).toHaveLength(1);
-      expect(onOcr[0]?.entityType).toBe(EntityType.Email);
-      expect(onOcr[0]?.maskFormat).toBe("xxxx@xxxx.xx");
-      expect(onOcr[0]?.normalizedValue).toBe("juan@example.com");
     });
   });
 
@@ -887,6 +730,165 @@ describe("RegexEngine — edge case tests", () => {
       // Sin la palabra clave la patente se emite como siempre.
       const outside = await processPage(engine, ctx, makePage(0, "EL DOMINIO MAR 450".split(" ")));
       expect(outside.map((o) => [o.entityType, o.value])).toEqual([[EntityType.Plate, "MAR 450"]]);
+    });
+  });
+
+  // ─── 1.1, F1: el generador de formatos (ADR-220) ───
+
+  describe("Formatos del generador — bordes, linealidad y descarte", () => {
+    const values = async (format: FormatDefinition, text: string): Promise<ReadonlyArray<string>> =>
+      (await userFormatOccurrences([format], text)).map((occurrence) => occurrence.value);
+
+    it("user format matches only at alphanumeric boundaries", async () => {
+      // Con cinco dígitos, para que ningún formato base coincida con el mismo tramo.
+      const format = makeFormat(1, CBU_TYPE.id, [digits(5)]);
+
+      for (const text of ["X12345", "12345Y", "123456", "é12345", "12345ñ", "7_12345"]) {
+        // Los dos primeros y los acentuados no tienen borde; "7_12345" sí lo
+        // tiene (el guion bajo no es letra ni dígito) y se emite.
+        const expected = text === "7_12345" ? ["12345"] : [];
+        expect(await values(format, text), text).toEqual(expected);
+      }
+      expect(await values(format, "(12345)")).toEqual(["12345"]);
+      expect(await values(format, "12345.")).toEqual(["12345"]);
+      expect(await values(format, "12345")).toEqual(["12345"]);
+
+      // El borde es parte del recorrido, no un filtro posterior: "12345678A"
+      // con ocho dígitos no da "12345678".
+      const eight = makeFormat(2, CBU_TYPE.id, [digits(8)]);
+      expect(testFormat(eight, "12345678A")).toEqual([]);
+      expect(testFormat(eight, "(12345678)")).toEqual([{ start: 1, end: 9 }]);
+      expect(testFormat(eight, "12345678.")).toEqual([{ start: 0, end: 8 }]);
+    });
+
+    it("user format with adjacent variable pieces runs in linear time", () => {
+      // Ocho piezas `digit 1..8` pegadas: con `RegExp` dispararía retroceso
+      // catastrófico. Se cuentan los pasos del autómata, no el reloj.
+      const compiled = compileFormat(
+        makeFormat(
+          1,
+          CBU_TYPE.id,
+          Array.from({ length: 8 }, () => digits(1, 8)),
+        ),
+      );
+
+      const stepsOver = (text: string): number => {
+        const stats = { steps: 0 };
+        scanFormat(compiled, text, stats);
+        return stats.steps;
+      };
+
+      // Una página de puros dígitos: ningún borde, ningún match.
+      const run = stepsOver("1".repeat(100_000));
+      expect(run).toBeLessThanOrEqual(100_000 * compiled.stateCount);
+
+      // Palabras de ocho dígitos: duplicar el texto no cuadruplica el trabajo.
+      const words = (count: number): string => "12345678 ".repeat(count);
+      const small = stepsOver(words(5_000));
+      const large = stepsOver(words(10_000));
+      expect(small).toBeGreaterThan(0);
+      expect(large / small).toBeLessThanOrEqual(2.2);
+      expect(large).toBeLessThanOrEqual(words(10_000).length * compiled.stateCount);
+
+      // Un texto que casi matchea en cada posición (la entrada adversaria de
+      // un backtracking): corridas de 65 dígitos, que ninguna variante cubre.
+      const nearMiss = (count: number): string => `${"1".repeat(65)} `.repeat(count);
+      expect(stepsOver(nearMiss(400)) / stepsOver(nearMiss(200))).toBeLessThanOrEqual(2.2);
+    });
+
+    it("an invalid user format at init is skipped and reported", async () => {
+      const valid = makeFormat(3, CBU_TYPE.id, [digits(5)]);
+      const withoutChars = makeFormat(1, CBU_TYPE.id, [fixedText("ABC")]);
+      const unknownType = makeFormat(2, "user:00000000-0000-4000-8000-00000000ffff", [digits(5)]);
+      const formatCtx = createDetectionContext({
+        userTypes: [CBU_TYPE],
+        userFormats: [withoutChars, unknownType, valid],
+      });
+      const warnSpy = vi.spyOn(formatCtx.logger, "warn");
+      const failing = new RegexEngine();
+
+      // No lanza hacia el caller: se descartan y siguen los demás.
+      await expect(failing.init(formatCtx)).resolves.toBeUndefined();
+      expect(warnSpy).toHaveBeenCalledTimes(2);
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          code: EngineErrorCode.REGEX_INVALID_PATTERN,
+          formatId: withoutChars.id,
+          issues: ["variant_without_chars"],
+        }),
+      );
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          code: EngineErrorCode.REGEX_INVALID_PATTERN,
+          formatId: unknownType.id,
+          issues: ["type_unknown"],
+        }),
+      );
+
+      const occurrences = await processPage(failing, formatCtx, makePage(0, ["ABC", "12345"]));
+      expect(occurrences.map((o) => [o.value, o.formatId])).toEqual([["12345", valid.id]]);
+
+      // El error que se reporta es el de ADR-220 §6.
+      const error = new RegexInvalidPatternError(withoutChars.id, "variant_without_chars");
+      expect(error.code).toBe(EngineErrorCode.REGEX_INVALID_PATTERN);
+      expect(error.retryable).toBe(false);
+      await failing.dispose();
+    });
+
+    it("two user formats with the same name both run", async () => {
+      // `existingFormats` va vacío al init: el nombre es para la interfaz.
+      const first = makeFormat(1, CBU_TYPE.id, [digits(5)], { name: "Igual" });
+      const second = makeFormat(2, LEGAJO_TYPE.id, [letters(4)], { name: "igual" });
+      const occurrences = await userFormatOccurrences([first, second], "12345 abcd");
+      expect(occurrences.map((o) => [o.value, o.formatId])).toEqual([
+        ["12345", first.id],
+        ["abcd", second.id],
+      ]);
+    });
+
+    it("user format character classes, Unicode folding and line-crossing separators", async () => {
+      const classes = (charClass: "letter" | "upper" | "lower" | "alnum", text: string) =>
+        values(makeFormat(1, CBU_TYPE.id, [{ kind: "chars", charClass, min: 3, max: 3 }]), text);
+      expect(await classes("upper", "ÁBC abc Abc")).toEqual(["ÁBC"]);
+      expect(await classes("lower", "ÁBC abc Abc ñoñ")).toEqual(["abc", "ñoñ"]);
+      expect(await classes("letter", "ÁBC 123 ab1")).toEqual(["ÁBC"]);
+      expect(await classes("alnum", "a1ñ 12 ab_")).toEqual(["a1ñ"]);
+      // Un dígito que no es ASCII no es `digit`.
+      expect(await values(makeFormat(1, CBU_TYPE.id, [digits(3)]), "١٢٣ 123")).toEqual(["123"]);
+      // Un carácter fuera del plano básico cuenta como una letra.
+      expect(await classes("letter", "𝐀𝐁𝐂 x")).toEqual(["𝐀𝐁𝐂"]);
+
+      // El texto fijo pliega mayúsculas y tildes, en los dos lados.
+      const folded = makeFormat(2, CBU_TYPE.id, [fixedText("Expedición "), digits(3)]);
+      const fold = await userFormatOccurrences([folded], "EXPEDICION 123");
+      expect(fold.map((o) => o.value)).toEqual(["EXPEDICION 123"]);
+
+      // Un espacio del generador cruza un salto de línea (ADR-074).
+      const crossing = makeFormat(3, CBU_TYPE.id, [digits(4), separator([" "]), digits(4)]);
+      const page = makePage(0, ["1234\n5678"]);
+      const engine2 = new RegexEngine();
+      const crossCtx = createDetectionContext({
+        userTypes: [CBU_TYPE],
+        userFormats: [crossing],
+      });
+      await engine2.init(crossCtx);
+      const crossed = await processPage(engine2, crossCtx, page);
+      expect(crossed.map((o) => o.value)).toEqual(["1234\n5678"]);
+      await engine2.dispose();
+
+      // Contexto con dos puntos, con espacios y con varias palabras; una palabra
+      // que no empieza en un borde no cuenta.
+      const contextual = makeFormat(4, CBU_TYPE.id, [digits(5)], {
+        contextBefore: ["Cuenta", "N° de cuenta"],
+      });
+      expect(await values(contextual, "cuenta : 12345")).toEqual(["12345"]);
+      expect(await values(contextual, "N° de cuenta:12345")).toEqual(["12345"]);
+      expect(await values(contextual, "Cuenta: 12345")).toEqual(["12345"]);
+      expect(await values(contextual, "Micuenta: 12345")).toEqual([]);
+      expect(await values(contextual, "Cuenta; 12345")).toEqual([]);
+      expect(await values(contextual, "12345")).toEqual([]);
     });
   });
 });

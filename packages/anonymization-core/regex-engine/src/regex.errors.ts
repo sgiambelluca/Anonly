@@ -9,9 +9,10 @@
 import { EngineError, EngineErrorCode, EngineId } from "@anonly/shared";
 
 /**
- * Patrón custom del usuario con regex inválida (p. ej. lanza al ejecutarla).
- * No recuperable: el patrón se descarta, el resto sigue funcionando
- * (Regex_Engine.md §11, §13 caso 8).
+ * Un `FormatDefinition` de `detection.userFormats` que no pasa `validateFormat`
+ * al `init` (ADR-220 §6). No recuperable: el formato se descarta con `warn` y
+ * el resto sigue funcionando; el motor no la lanza hacia el caller
+ * (Regex_Engine.md §11, §13 caso 47). `patternId` es el id del formato.
  */
 export class RegexInvalidPatternError extends EngineError {
   readonly code = EngineErrorCode.REGEX_INVALID_PATTERN;
