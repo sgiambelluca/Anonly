@@ -168,6 +168,7 @@ import {
   normalizeForComparison,
   EngineDisposedError,
   EngineEvents,
+  type EntityTypeId,
   EngineId,
   EngineNotInitializedError,
   EntityType,
@@ -206,6 +207,7 @@ import {
   type Unsubscribe,
 } from "@anonly/shared";
 
+import { toBaseEntityType } from "./base-entity-type.js";
 import { inferPersonGender } from "./gender.js";
 import { GroupingGroupNotFoundError, GroupingInvalidPatchError } from "./grouping.errors.js";
 import type {
@@ -250,7 +252,7 @@ const MIN_SUGGESTION_CONFIDENCE = 0.5;
 const SUPPRESSED_GROUP_ID = "";
 
 /** ADR-073 §1: los tres tipos cuyo valor es texto libre. */
-const FUZZY_MATCHING_TYPES: ReadonlySet<EntityType> = new Set([
+const FUZZY_MATCHING_TYPES: ReadonlySet<EntityTypeId> = new Set([
   EntityType.Person,
   EntityType.Organization,
   EntityType.Address,
@@ -283,7 +285,7 @@ const PATCH_ALLOWED_KEYS: ReadonlySet<string> = new Set([
 /** Info de "quién detectó primero" un alias — para poblar `ConflictCandidate`. */
 interface AliasSourceInfo {
   readonly source: DetectionSource;
-  readonly entityType: EntityType;
+  readonly entityType: EntityTypeId;
   readonly confidence: number;
 }
 
@@ -294,7 +296,7 @@ interface AliasSourceInfo {
  */
 interface InternalGroup {
   id: string;
-  type: EntityType;
+  type: EntityTypeId;
   canonicalValue: string;
   members: OccurrenceRef[];
   replacementMode: ReplacementMode;
@@ -330,7 +332,7 @@ interface InternalGroup {
    * `normalizedValues`/`aliasFrequency`. No guarda ningún valor del documento:
    * solo tipos.
    */
-  readonly absorbedTypes: Set<EntityType>;
+  readonly absorbedTypes: Set<EntityTypeId>;
   /**
    * ADR-076 §1: el `replacementValue` lo escribió el usuario. Ningún
    * recálculo automático lo pisa (§3) — el corte es si el `replacementMode`
@@ -350,7 +352,7 @@ interface SessionOccurrenceRecord {
    * reclasificación del usuario no lo toca: este campo se compara contra lo
    * que el detector vuelve a emitir en un `reanalyze`.
    */
-  readonly entityType: EntityType;
+  readonly entityType: EntityTypeId;
   readonly source: DetectionSource;
   readonly confidence: number;
   readonly value: string;
@@ -381,8 +383,8 @@ interface SessionOccurrenceRecord {
  * simétrico, y sin este campo no lo era.
  */
 interface TypeCorrection {
-  readonly correctedType: EntityType;
-  readonly detectorType: EntityType;
+  readonly correctedType: EntityTypeId;
+  readonly detectorType: EntityTypeId;
 }
 
 /**
@@ -401,7 +403,7 @@ interface Session {
   readonly groups: Map<string, InternalGroup>;
   /** ADR-184: derived candidate index; omitted from snapshots and checkpoints. */
   candidateIndex: GroupCandidateIndex | undefined;
-  readonly nextIndexByType: Map<EntityType, number>;
+  readonly nextIndexByType: Map<EntityTypeId, number>;
   rules: Rule[];
   readonly conflicts: Map<string, Conflict>;
   readonly recordedOccurrences: SessionOccurrenceRecord[];
@@ -776,10 +778,13 @@ function computeReplacementPreviews(
     placeholder: buildPlaceholderValue(group),
     mask: maskFormat,
     synthetic: synthesize({
-      type: group.type,
+      type: toBaseEntityType(group.type),
       groupId: group.id,
       seed,
       indexInType: group.indexInType,
+      // Provisional: el país sale de `ctx.config.detection.country` cuando F3 y
+      // F5 lo cableen (Plan_1.1 §7); hasta entonces el sintetizador es el argentino.
+      country: "AR",
       ...(group.personGender !== undefined ? { personGender: group.personGender } : {}),
     }),
     placeholderLadder: buildPlaceholderLadder(group),
@@ -1068,10 +1073,10 @@ type RecordWithMaskFormat = SessionOccurrenceRecord & { readonly maskFormat: str
  */
 function resolveMaskFormatFromRecords(
   records: ReadonlyArray<SessionOccurrenceRecord>,
-  type: EntityType,
+  type: EntityTypeId,
 ): string {
   const withFormat = records.filter((r): r is RecordWithMaskFormat => r.maskFormat !== undefined);
-  if (withFormat.length === 0) return MASK_FORMAT_BY_TYPE[type];
+  if (withFormat.length === 0) return MASK_FORMAT_BY_TYPE[toBaseEntityType(type)];
 
   const counts = new Map<string, number>();
   for (const rec of withFormat) {
@@ -1145,10 +1150,12 @@ function computeReplacementValue(
       // permite `personGender: undefined` explícito, mismo patrón que la
       // línea 295 de este archivo).
       return synthesize({
-        type: group.type,
+        type: toBaseEntityType(group.type),
         groupId: group.id,
         seed,
         indexInType: group.indexInType,
+        // Provisional: ver `computeReplacementPreviews` (F3 y F5).
+        country: "AR",
         ...(group.personGender !== undefined ? { personGender: group.personGender } : {}),
       });
     case ReplacementMode.Placeholder:
@@ -1193,7 +1200,7 @@ function setPersonGender(group: InternalGroup, value: PersonGender | undefined):
  * coincide con la resolución automática. O sea: resolver sin elegir confirma
  * lo que el motor decidió, y no cambia ningún dato.
  */
-function defaultCandidateType(conflict: Conflict): EntityType | undefined {
+function defaultCandidateType(conflict: Conflict): EntityTypeId | undefined {
   let best: ConflictCandidate | undefined;
   for (const candidate of conflict.candidates) {
     if (best === undefined || candidate.confidence > best.confidence) {
@@ -1506,7 +1513,7 @@ export class GroupingEngine implements IEngine {
     // para los conflictos que queden huérfanos. Desde ADR-083 §3 lo que
     // registra un conflicto resuelto es el TIPO con el que quedó clasificado
     // el grupo, no el modo de reemplazo.
-    const typeBeforeRemoval = new Map<string, EntityType>();
+    const typeBeforeRemoval = new Map<string, EntityTypeId>();
     for (const groupId of affectedGroupIds) {
       const group = session.groups.get(groupId);
       if (group) typeBeforeRemoval.set(groupId, group.type);
@@ -1681,7 +1688,7 @@ export class GroupingEngine implements IEngine {
     session: Session,
     filter: DropOccurrencesFilter,
     emptiedGroupIds: ReadonlySet<string>,
-    typeBeforeRemoval: ReadonlyMap<string, EntityType>,
+    typeBeforeRemoval: ReadonlyMap<string, EntityTypeId>,
   ): Set<string> {
     const handled = new Set<string>();
     for (const [conflictId, heldOccurrence] of session.heldManualOccurrences) {
@@ -1764,7 +1771,7 @@ export class GroupingEngine implements IEngine {
    * aparición documental de cada grupo dentro de su `entityType`.
    */
   private renumberGroupsCanonically(session: Session): void {
-    const groupsByType = new Map<EntityType, InternalGroup[]>();
+    const groupsByType = new Map<EntityTypeId, InternalGroup[]>();
     for (const group of session.groups.values()) {
       const list = groupsByType.get(group.type);
       if (list) list.push(group);
@@ -1800,7 +1807,7 @@ export class GroupingEngine implements IEngine {
             group,
             session.seed,
             // maskFormat no aplica: esta rama solo corre en modo placeholder.
-            MASK_FORMAT_BY_TYPE[group.type],
+            MASK_FORMAT_BY_TYPE[toBaseEntityType(group.type)],
           );
         }
         group.updatedAt = Date.now();
@@ -2705,7 +2712,7 @@ export class GroupingEngine implements IEngine {
     const heldOccurrence = session.heldManualOccurrences.get(conflict.id);
     session.heldManualOccurrences.delete(conflict.id);
 
-    let resolvedType: EntityType | undefined;
+    let resolvedType: EntityTypeId | undefined;
     if (winner === "manual" && heldOccurrence) {
       const group = this.groupOccurrence(session, heldOccurrence);
       resolvedType = group.type;
@@ -3357,7 +3364,7 @@ export class GroupingEngine implements IEngine {
     occurrence: Occurrence,
   ): ManualOutcomeAnnotation | null {
     const sameIdentity = (rec: {
-      readonly entityType: EntityType;
+      readonly entityType: EntityTypeId;
       readonly pageIndex: number;
       readonly normalizedValue: string;
       readonly bbox: BoundingBox;
@@ -3588,7 +3595,7 @@ export class GroupingEngine implements IEngine {
    * clasificó. Mismo criterio, misma constante y mismo umbral que el pase
    * difuso de `findMatchingGroup`.
    */
-  private correctedTypeFor(session: Session, occurrence: Occurrence): EntityType | undefined {
+  private correctedTypeFor(session: Session, occurrence: Occurrence): EntityTypeId | undefined {
     if (session.typeCorrections.size === 0) return undefined;
 
     const exact = session.typeCorrections.get(occurrence.normalizedValue);
@@ -3662,7 +3669,7 @@ export class GroupingEngine implements IEngine {
       session.seed,
       // Única ocurrencia en el grupo recién creado: no hace falta pasar por
       // session.recordedOccurrences (recordOccurrence() corre después).
-      occurrence.maskFormat ?? MASK_FORMAT_BY_TYPE[occurrence.entityType],
+      occurrence.maskFormat ?? MASK_FORMAT_BY_TYPE[toBaseEntityType(occurrence.entityType)],
     );
     session.groups.set(group.id, group);
     session.candidateIndex?.addGroup(group);
@@ -3738,7 +3745,7 @@ export class GroupingEngine implements IEngine {
   private changeGroupType(
     session: Session,
     group: InternalGroup,
-    nextType: EntityType,
+    nextType: EntityTypeId,
   ): ReadonlyArray<keyof EntityGroup> {
     const previousMode = group.replacementMode;
     const previousType = group.type;
@@ -3810,7 +3817,7 @@ export class GroupingEngine implements IEngine {
     return changed;
   }
 
-  private nextIndex(session: Session, type: EntityType): number {
+  private nextIndex(session: Session, type: EntityTypeId): number {
     const current = session.nextIndexByType.get(type) ?? 0;
     const next = current + 1;
     session.nextIndexByType.set(type, next);
@@ -3984,7 +3991,7 @@ export class GroupingEngine implements IEngine {
     resolved: boolean,
     // ADR-083 §3: un conflicto resuelto registra el TIPO con el que quedó
     // clasificado el grupo, no el modo de reemplazo.
-    resolvedType: EntityType | undefined,
+    resolvedType: EntityTypeId | undefined,
   ): Conflict {
     const conflict: Conflict =
       resolved && resolvedType !== undefined

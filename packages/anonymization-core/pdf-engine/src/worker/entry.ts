@@ -43,6 +43,7 @@
  * de `EVENT`/`LOG` que se arma una vez y no pertenece a ningún job.
  */
 import {
+  DEFAULT_DETECTION_CONFIG,
   postWorkerMessage,
   startWorkerEntry,
   type EngineConfig,
@@ -128,6 +129,7 @@ function buildLocalDefaultConfig(): EngineConfig {
     grouping: { similarityThreshold: 0.88, minAliasFrequency: 1 },
     render: { previewScale: 1, fullScale: 2.08, jpegQuality: 0.85, cachePages: 16 },
     export: { defaultDpi: 150, defaultImageFormat: "jpeg", defaultJpegQuality: 0.85 },
+    detection: DEFAULT_DETECTION_CONFIG,
   };
 }
 

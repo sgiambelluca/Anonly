@@ -15,7 +15,24 @@ export {
   AVG_GLYPH_ADVANCE_RATIO,
   DEGRADED_FONT_RATIO,
   MAX_EDIT_CHECKPOINTS,
+  FORMAT_MAX_VARIANTS,
+  FORMAT_MAX_PIECES,
+  FORMAT_MAX_REPEAT,
+  FORMAT_MAX_TEXT,
+  FORMAT_MAX_CONTEXT,
+  FORMAT_MAX_STATES,
+  USER_TYPE_NAME_MAX,
+  USER_TYPE_SHORT_LABEL_MAX,
+  FORMAT_ADMITTING_BASE_TYPES,
+  DEFAULT_DETECTION_CONFIG,
 } from "./constants.js";
+
+// ADR-219 §1: estrecha un EntityTypeId a un tipo propio.
+export { isUserEntityType } from "./user-entity-type.js";
+
+// ADR-219 §3-§4 / ADR-220 §5: clave y máscara de un valor bajo un tipo propio.
+export { alphanumericKey } from "./alphanumeric-key.js";
+export { maskByCharacters } from "./mask-by-characters.js";
 
 // Estimación de ancho de token de la escalera de abreviaturas (ADR-057 §5)
 export { estimateTokenWidth } from "./estimate-token-width.js";
@@ -116,6 +133,33 @@ export type {
   ExportMetadata,
   WorkerCapabilities,
   EncodedPageImage,
+  // Tipos propios, formatos y catálogos por país (Contracts.md §5.2)
+  CountryCode,
+  UserEntityTypeId,
+  EntityTypeId,
+  UserEntityTypeDefinition,
+  FormatCharClass,
+  FormatSeparator,
+  FormatPiece,
+  FormatDefinition,
+  CatalogFormatKind,
+  CatalogFormatInfo,
+  CatalogFormatRef,
+  BaseFormatSetting,
+  DetectionConfig,
+  UserEntityTypeIssueCode,
+  UserEntityTypeValidationContext,
+  UserEntityTypeValidation,
+  FormatIssueCode,
+  FormatIssue,
+  FormatValidationContext,
+  FormatValidation,
+  FormatTestMatch,
+  FormatComparisonInput,
+  FormatComparison,
+  FormatsFileContent,
+  FormatsFileIssueCode,
+  FormatsFileValidation,
 } from "./types.js";
 
 // Interfaces base (Contracts.md §3)

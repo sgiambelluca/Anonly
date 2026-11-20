@@ -10,7 +10,7 @@ import type { EngineId, EngineEvents, EventChannel, WorkerJobType } from "./enum
 import type { SerializedEngineError } from "./errors.js";
 import type { EventPayloadMap } from "./events.js";
 import type { Transferable } from "./transferable.js";
-import type { WorkerCapabilities } from "./types.js";
+import type { DetectionConfig, WorkerCapabilities } from "./types.js";
 
 export type Unsubscribe = () => void;
 
@@ -40,6 +40,8 @@ export interface EngineConfig {
   readonly grouping: GroupingConfig;
   readonly render: RenderConfig;
   readonly export: ExportConfig;
+  /** ADR-223 §2: país, formatos y tipos del usuario (Contracts.md §5.2). */
+  readonly detection: DetectionConfig;
 }
 
 // Overrides parciales de dos niveles (ADR-039): cada sección de EngineConfig

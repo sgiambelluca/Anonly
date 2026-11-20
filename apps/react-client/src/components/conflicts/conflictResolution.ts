@@ -19,6 +19,8 @@
 import { DetectionSource } from "@anonly/anonymization-core";
 import type { Conflict, ConflictCandidate, EntityType } from "@anonly/anonymization-core";
 
+import { toBaseEntityType } from "../../baseEntityType.js";
+
 /**
  * El candidato que gana por default (ADR-083 §4). Espejo de
  * `defaultCandidateType` del motor: mayor `confidence`, empate a `regex`.
@@ -65,9 +67,11 @@ export function candidateTypes(conflict: Conflict): ReadonlyArray<EntityType> {
   const seen = new Set<EntityType>();
   const types: EntityType[] = [];
   for (const candidate of ordered) {
-    if (seen.has(candidate.entityType)) continue;
-    seen.add(candidate.entityType);
-    types.push(candidate.entityType);
+    // Guarda provisional (F0): los candidatos siguen siendo de tipos base; F7 la reemplaza.
+    const type = toBaseEntityType(candidate.entityType);
+    if (seen.has(type)) continue;
+    seen.add(type);
+    types.push(type);
   }
   return types;
 }

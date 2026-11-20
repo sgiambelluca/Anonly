@@ -38,6 +38,7 @@
 import { createCore, type IAnonymizationCore } from "@anonly/anonymization-core";
 import { buildPageReplacements } from "@anonly/export-engine";
 import {
+  DEFAULT_DETECTION_CONFIG,
   EngineEvents,
   EventChannel,
   PipelineStage,
@@ -275,6 +276,7 @@ describe("integración B-5 (ADR-140 §2) — hoja escaneada con /Rotate 90, de l
           grouping: { similarityThreshold: 0.88, minAliasFrequency: 1 },
           render: { previewScale: 1, fullScale, jpegQuality: 0.85, cachePages: 16 },
           export: { defaultDpi: 150, defaultImageFormat: "jpeg", defaultJpegQuality: 0.85 },
+          detection: DEFAULT_DETECTION_CONFIG,
         },
       };
 

@@ -11,6 +11,7 @@
  */
 
 import type { EngineConfig, EngineConfigOverrides, WorkerJobType } from "@anonly/shared";
+import { DEFAULT_DETECTION_CONFIG } from "@anonly/shared";
 
 const DEFAULT_TIMEOUTS: Readonly<Record<WorkerJobType, number>> = {
   "pdf-parse": 30_000,
@@ -111,6 +112,7 @@ export function buildDefaultEngineConfig(hints?: DeviceHints): EngineConfig {
     grouping: { similarityThreshold: 0.88, minAliasFrequency: 1 },
     render: { previewScale: 1, fullScale: 2.08, jpegQuality: 0.85, cachePages: 16 },
     export: { defaultDpi: 150, defaultImageFormat: "jpeg", defaultJpegQuality: 0.85 },
+    detection: DEFAULT_DETECTION_CONFIG,
   };
 }
 
@@ -136,5 +138,8 @@ export function mergeEngineConfig(
     grouping: { ...base.grouping, ...overrides.grouping },
     render: { ...base.render, ...overrides.render },
     export: { ...base.export, ...overrides.export },
+    // Merge por sección, igual que las demás (ADR-039). Validar el override de
+    // `detection` es de F4 (Plan_1.1 §7).
+    detection: { ...base.detection, ...overrides.detection },
   };
 }

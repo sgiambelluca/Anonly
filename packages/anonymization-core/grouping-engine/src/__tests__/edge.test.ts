@@ -1776,7 +1776,7 @@ describe("GroupingEngine — edge cases", () => {
     expect(updated.replacementValue).not.toBe(previousValue);
     const seed = engine["sessions"].get("doc-1")!.seed as string;
     expect(updated.replacementValue).toBe(
-      synthesize({ type: EntityType.DNI, groupId: group!.id, seed, indexInType: 1 }),
+      synthesize({ type: EntityType.DNI, groupId: group!.id, seed, indexInType: 1, country: "AR" }),
     );
 
     const replacementChangedCall = busEmitSpy.mock.calls.find(
@@ -3636,6 +3636,7 @@ describe("GroupingEngine — edge cases", () => {
         groupId: synthGroup.id,
         seed,
         indexInType: synthGroup.indexInType,
+        country: "AR",
         ...(synthGroup.personGender !== undefined ? { personGender: synthGroup.personGender } : {}),
       }),
     );
@@ -4341,6 +4342,7 @@ describe("GroupingEngine — edge cases", () => {
         groupId: created.id,
         seed,
         indexInType: created.indexInType,
+        country: "AR",
       }),
     );
   });
@@ -4386,6 +4388,7 @@ describe("GroupingEngine — edge cases", () => {
         groupId: created.id,
         seed,
         indexInType: created.indexInType,
+        country: "AR",
       }),
     );
   });
@@ -4486,6 +4489,7 @@ describe("GroupingEngine — edge cases", () => {
         groupId: created!.id,
         seed,
         indexInType: gendered.indexInType,
+        country: "AR",
         personGender: targetGender,
       }),
     );
@@ -4554,6 +4558,7 @@ describe("GroupingEngine — edge cases", () => {
         groupId: final.id,
         seed,
         indexInType: final.indexInType,
+        country: "AR",
         personGender: "f",
       }),
     );
@@ -4564,6 +4569,7 @@ describe("GroupingEngine — edge cases", () => {
         groupId: final.id,
         seed,
         indexInType: beforeGender.indexInType,
+        country: "AR",
       }),
     );
   });
@@ -4591,6 +4597,7 @@ describe("GroupingEngine — edge cases", () => {
         groupId: group!.id,
         seed,
         indexInType: group!.indexInType,
+        country: "AR",
       }),
     );
   });
@@ -4644,6 +4651,7 @@ describe("GroupingEngine — edge cases", () => {
         groupId: group!.id,
         seed,
         indexInType: group!.indexInType,
+        country: "AR",
         personGender: "f",
       }),
     );

@@ -21,6 +21,7 @@ import { DetectionSource } from "@anonly/anonymization-core";
 import { ArrowRightIcon, InfoIcon, TriangleAlertIcon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
+import { toBaseEntityType } from "../../baseEntityType.js";
 import { actions } from "../../core-adapter/actions.js";
 import { useEntitiesStore } from "../../store/entities.store.js";
 import { Button } from "../common/Button.js";
@@ -74,7 +75,7 @@ export function SplitDialog({ groupId, open, onClose }: SplitDialogProps) {
   const validation = validateSplit(group, selectedIds);
   const summary = summarizeSplit(group, selectedIds.length, preview);
   const slot = splitSlotMessage(group, selectedIds.length);
-  const color = ENTITY_TYPE_COLOR[group.type];
+  const color = ENTITY_TYPE_COLOR[toBaseEntityType(group.type)];
 
   function toggleMember(occurrenceId: string, checked: boolean): void {
     setSelected((previous) => {

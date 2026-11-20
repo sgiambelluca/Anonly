@@ -30,6 +30,7 @@
 import { ReplacementMode, type EntityGroup } from "@anonly/anonymization-core";
 import { memo, useEffect, useRef, useState } from "react";
 
+import { toBaseEntityType } from "../../baseEntityType.js";
 import { useEntitiesStore } from "../../store/entities.store.js";
 import { usePipelineStore } from "../../store/pipeline.store.js";
 import { useViewerStore } from "../../store/viewer.store.js";
@@ -120,7 +121,7 @@ function EntityGroupItemImpl({ group, nodeId, activeNodeId }: EntityGroupItemPro
         className={`text-sm tabular-nums text-text-secondary ${dim}`}
         title={
           showIndex
-            ? `${ENTITY_TYPE_SINGULAR[group.type]} N.º ${formatIndexInType(group.indexInType)}`
+            ? `${ENTITY_TYPE_SINGULAR[toBaseEntityType(group.type)]} N.º ${formatIndexInType(group.indexInType)}`
             : undefined
         }
       >
