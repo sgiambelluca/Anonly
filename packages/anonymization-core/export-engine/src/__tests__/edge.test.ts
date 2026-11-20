@@ -8,6 +8,7 @@ import {
   InvalidInputError,
   ReplacementMode,
   type EngineContext,
+  type UserEntityTypeId,
 } from "@anonly/shared";
 import { PDFDocument } from "pdf-lib";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -235,6 +236,84 @@ describe("ExportEngine — edge cases", () => {
         expect.stringContaining("leyenda"),
         expect.objectContaining({ documentId: expect.any(String) }),
       );
+    });
+
+    // ADR-219 §6, §9, caso 22: sin definición no hay nombre que mostrar.
+    const MISSING_USER_TYPE_ID: UserEntityTypeId = "user:00000000-0000-4000-8000-0000000000ff";
+
+    it("a legend user type missing from userTypes rejects the export before rendering any page", async () => {
+      const mockDoc = createMockPdfLibDocument();
+      vi.mocked(PDFDocument.create).mockResolvedValue(asPdfDocument(mockDoc));
+      await engine.init(ctx);
+      const provider = createMockRenderPageProvider();
+      const emitSpy = vi.spyOn(ctx.bus, "emit");
+
+      await expect(
+        engine.export(
+          createExportEngineInput({
+            groups: [
+              createEntityGroup({
+                id: "g-user",
+                type: MISSING_USER_TYPE_ID,
+                replacementValue: "[CBU 01]",
+              }),
+            ],
+            options: createExportOptions({ includeMarkerLegend: true }),
+            renderPageProvider: provider,
+            userTypes: [],
+          }),
+          ctx,
+        ),
+      ).rejects.toThrow(InvalidInputError);
+
+      // Antes de rasterizar ninguna página, ni la del documento ni la leyenda.
+      expect(provider.renderFull).not.toHaveBeenCalled();
+      expect(provider.renderLegend).not.toHaveBeenCalled();
+      expect(mockDoc["addPage"]).not.toHaveBeenCalled();
+      expect(emitSpy.mock.calls.some(([, event]) => event === EngineEvents.EXPORT_STARTED)).toBe(
+        false,
+      );
+    });
+
+    it("userTypes is not consulted when the legend is off, and a disabled or non-placeholder user group is not validated", async () => {
+      const mockDoc = createMockPdfLibDocument();
+      vi.mocked(PDFDocument.create).mockResolvedValue(asPdfDocument(mockDoc));
+      await engine.init(ctx);
+
+      // Sin leyenda: el tipo propio sin definición no importa.
+      await expect(
+        engine.export(
+          createExportEngineInput({
+            groups: [createEntityGroup({ id: "g-user", type: MISSING_USER_TYPE_ID })],
+            options: createExportOptions({ includeMarkerLegend: false }),
+            userTypes: [],
+          }),
+          ctx,
+        ),
+      ).resolves.toBeDefined();
+
+      // Con leyenda, un grupo del tipo propio que no entra a la leyenda
+      // (máscara, o apagado) tampoco necesita definición.
+      const provider = createMockRenderPageProvider();
+      await expect(
+        engine.export(
+          createExportEngineInput({
+            groups: [
+              createEntityGroup({
+                id: "g-user-mask",
+                type: MISSING_USER_TYPE_ID,
+                replacementMode: ReplacementMode.Mask,
+              }),
+              createEntityGroup({ id: "g-user-off", type: MISSING_USER_TYPE_ID, enabled: false }),
+            ],
+            options: createExportOptions({ includeMarkerLegend: true }),
+            renderPageProvider: provider,
+            userTypes: [],
+          }),
+          ctx,
+        ),
+      ).resolves.toBeDefined();
+      expect(provider.renderLegend).not.toHaveBeenCalled();
     });
 
     it("all 13 entity types still fit in a single legend page", async () => {
