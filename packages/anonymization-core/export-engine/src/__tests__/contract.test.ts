@@ -3,6 +3,7 @@ import {
   EngineId,
   EngineNotInitializedError,
   EventChannel,
+  type EncodedPageImage,
   type EngineContext,
 } from "@anonly/shared";
 import { PDFDocument } from "pdf-lib";
@@ -269,6 +270,80 @@ describe("ExportEngine — contract tests", () => {
 
     expect(mockDoc["addPage"]).toHaveBeenCalledTimes(4);
     expect(provider.renderLegend).toHaveBeenCalledTimes(1);
+  });
+
+  // ADR-219 §6, caso 24: la leyenda puede ocupar varias páginas.
+  it("a legend that spans several pages adds all of them, in order", async () => {
+    const mockDoc = createMockPdfLibDocument();
+    vi.mocked(PDFDocument.create).mockResolvedValue(asPdfDocument(mockDoc));
+    await engine.init(ctx);
+    const legendPage = (marker: number): EncodedPageImage => ({
+      bytes: new Uint8Array([marker, marker, marker, marker]).buffer,
+      format: "png",
+      widthPx: 50,
+      heightPx: 50,
+    });
+    const provider = createMockRenderPageProvider({
+      legendImages: [legendPage(7), legendPage(8), legendPage(9)],
+    });
+
+    await engine.export(
+      createExportEngineInput({
+        document: createDocumentWithPageCount(2),
+        groups: [createEntityGroup()],
+        options: createExportOptions({ includeMarkerLegend: true }),
+        renderPageProvider: provider,
+      }),
+      ctx,
+    );
+
+    // 2 páginas del documento + 3 de leyenda, con una sola llamada a renderLegend.
+    expect(provider.renderLegend).toHaveBeenCalledTimes(1);
+    expect(mockDoc["addPage"]).toHaveBeenCalledTimes(5);
+    // Las de leyenda son PNG (las del documento son JPEG): se embeben las
+    // tres, en el orden recibido.
+    const embedPng = mockDoc["embedPng"];
+    if (!vi.isMockFunction(embedPng)) throw new Error("embedPng debería ser un mock");
+    const embeddedMarkers = embedPng.mock.calls.map((call: ReadonlyArray<unknown>) => {
+      const bytes = call[0];
+      return bytes instanceof ArrayBuffer ? new Uint8Array(bytes)[0] : undefined;
+    });
+    expect(embeddedMarkers).toEqual([7, 8, 9]);
+  });
+
+  it("the save payload carries every legend image received, in order, with the first page size", async () => {
+    vi.mocked(PDFDocument.create).mockResolvedValue(asPdfDocument(createMockPdfLibDocument()));
+    const pool = createTrackingExportPool();
+    const pooledEngine = new ExportEngine(pool);
+    await pooledEngine.init(ctx);
+    const legendImages: ReadonlyArray<EncodedPageImage> = [1, 2].map((marker) => ({
+      bytes: new Uint8Array([marker]).buffer,
+      format: "png",
+      widthPx: 50,
+      heightPx: 50,
+    }));
+
+    await pooledEngine.export(
+      createExportEngineInput({
+        document: createDocumentWithPageCount(1, { width: 300, height: 400 }),
+        groups: [createEntityGroup()],
+        options: createExportOptions({ includeMarkerLegend: true }),
+        renderPageProvider: createMockRenderPageProvider({ legendImages }),
+      }),
+      ctx,
+    );
+
+    // 1 append-page + 1 save; el save lleva las dos imágenes.
+    expect(pool.calls).toHaveLength(2);
+    expect(pool.calls[1]?.payload).toEqual(
+      expect.objectContaining({
+        legendImages,
+        legendPageWidthPt: 300,
+        legendPageHeightPt: 400,
+      }),
+    );
+
+    await pooledEngine.dispose();
   });
 
   // ADR-190 §5, Export_Engine.md §13 caso 26.
