@@ -985,6 +985,54 @@ describe("RenderEngine — edge cases", () => {
     expect(engine["documents"].size).toBe(0);
   });
 
+  // ─── ADR-219 §6, caso 40: una fila más alta que la página va sola ───
+
+  it("a legend row taller than the page goes alone on its page and the next row starts a new page", async () => {
+    await engine.init(ctx);
+    const pageHeightPt = 200;
+    const tallRow = makeMarkerLegendRow({
+      // Muchas palabras: la celda de prefijos se envuelve en más líneas de las
+      // que entran bajo el título en una página de 200 pt.
+      prefixes: Array.from({ length: 40 }, (_, i) => `PREFIJO${i}`).join(", "),
+      typeName: "Alta",
+      countLabel: "40 marcadores",
+    });
+    const rows = [
+      makeMarkerLegendRow({ prefixes: "ANTES", typeName: "Antes", countLabel: "1 marcador" }),
+      tallRow,
+      makeMarkerLegendRow({ prefixes: "DESPUES", typeName: "Despues", countLabel: "1 marcador" }),
+    ];
+
+    const pages = await engine.renderLegendPages(rows, 595, pageHeightPt, ctx);
+
+    // La fila previa entra sola; la alta no entra entera, así que abre su
+    // página (siempre dibuja una fila) y ocupa toda la página; la que sigue
+    // arranca otra. Sin la excepción de "al menos una fila", el host no
+    // avanzaría nunca sobre la alta.
+    expect(pages).toHaveLength(3);
+    // Cada página crea un canvas de dibujo y otro de codificación: solo el primero lleva texto.
+    const canvases = getCreatedCanvases().filter((canvas) =>
+      canvas.calls.some((call) => call.op === "fillText"),
+    );
+    const textsOf = (index: number): ReadonlyArray<[string, number, number]> =>
+      canvases[index]!.calls.filter((c) => c.op === "fillText").map(
+        (c) => c.args as [string, number, number],
+      );
+
+    expect(textsOf(0).map(([text]) => text)).toContain("ANTES");
+    expect(textsOf(0).map(([text]) => text)).not.toContain("Alta");
+
+    const tallTexts = textsOf(1);
+    expect(tallTexts.map(([text]) => text)).toContain("Alta");
+    expect(tallTexts.map(([text]) => text)).not.toContain("ANTES");
+    expect(tallTexts.map(([text]) => text)).not.toContain("DESPUES");
+    // Se recorta contra el borde del canvas: hay texto dibujado más allá de él.
+    expect(Math.max(...tallTexts.map(([, , y]) => y))).toBeGreaterThanOrEqual(pageHeightPt);
+
+    expect(textsOf(2).map(([text]) => text)).toContain("DESPUES");
+    expect(textsOf(2).map(([text]) => text)).not.toContain("Alta");
+  });
+
   // ─── ADR-037 §2/§4 (Hito 10): guard de scale + supersede por página ───
 
   it("scale out of range warns and no-ops via event, throws InvalidInputError via direct call", async () => {
@@ -1599,7 +1647,21 @@ describe("RenderEngine — edge cases", () => {
     });
 
     it("renderLegendPages throws RenderPageFailedError for each garbage dispatch result (never a silent default, ADR-059 §5)", async () => {
-      const garbageValues: ReadonlyArray<unknown> = [{}, null, "not-a-recognized-shape"];
+      const validImage = {
+        bytes: new Uint8Array([1, 2, 3]).buffer,
+        format: "png",
+        widthPx: 400,
+        heightPx: 300,
+      };
+      const garbageValues: ReadonlyArray<unknown> = [
+        {},
+        null,
+        "not-a-recognized-shape",
+        // ADR-219 §6: con rowsDrawn < 1 el host no avanzaría nunca.
+        { image: validImage, rowsDrawn: 0 },
+        { image: validImage, rowsDrawn: 1.5 },
+        { image: validImage },
+      ];
 
       for (const garbage of garbageValues) {
         const pool = createResolvedRenderDispatchPool(garbage);

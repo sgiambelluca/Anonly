@@ -623,7 +623,8 @@ function isRenderLegendPageResult(value: unknown): value is RenderLegendPageResu
     isEncodedPageImage(value.image) &&
     typeof value.rowsDrawn === "number" &&
     Number.isInteger(value.rowsDrawn) &&
-    value.rowsDrawn >= 0
+    // ≥ 1 (ADR-219 §6): con 0 el host no avanzaría nunca.
+    value.rowsDrawn >= 1
   );
 }
 
@@ -1618,28 +1619,44 @@ export class RenderEngine implements IEngine {
       throw new CancelledError();
     }
 
-    // ADR-219 §6, fase de contrato: un solo job desde la fila 0; la
-    // paginación (repetir con `startRow + rowsDrawn`) llega con su commit.
-    const payload: RenderLegendPayload = { rows, startRow: 0, pageWidthPt, pageHeightPt };
+    // Sin filas no hay nada que dibujar: ninguna página, nunca una en blanco
+    // (§6; Export ya no invoca este método en ese caso, caso 23).
+    if (rows.length === 0) return [];
 
-    // Prioridad 1000 (05_Worker_Architecture.md §6.2: "aplica al camino
-    // completo del export"): renderLegendPages solo se invoca desde
-    // RenderPageProvider.renderLegend durante un export (ADR-059 §5), mismo
-    // nivel que los render-page en mode "full" de ese mismo camino.
-    const dispatchResult = await this.pool.dispatch({
-      run: () =>
-        kernelRenderLegendPage(payload, {
-          jpegQuality: ctx.config.render.jpegQuality,
-          onWarn: (message, meta) => ctx.logger.warn(message, meta),
-        }),
-      signal: ctx.abortSignal,
-      priority: 1000,
-      payload,
-      maxRetriesOverride: 0,
-    });
-    // ADR-055 §2: decodeRenderLegendResult antes de devolver la imagen al
-    // caller (nunca un cast a ciegas).
-    return [decodeRenderLegendResult(dispatchResult).image];
+    // ADR-219 §6: el kernel dibuja UNA página por job, desde `startRow`, con
+    // las filas que entran enteras (siempre al menos una), y dice cuántas
+    // dibujó. El host repite con `startRow + rowsDrawn` hasta dibujarlas todas.
+    const pages: EncodedPageImage[] = [];
+    let startRow = 0;
+    while (startRow < rows.length) {
+      if (ctx.abortSignal.aborted) {
+        throw new CancelledError();
+      }
+      const payload: RenderLegendPayload = { rows, startRow, pageWidthPt, pageHeightPt };
+
+      // Prioridad 1000 (05_Worker_Architecture.md §6.2: "aplica al camino
+      // completo del export"): renderLegendPages solo se invoca desde
+      // RenderPageProvider.renderLegend durante un export (ADR-059 §5), mismo
+      // nivel que los render-page en mode "full" de ese mismo camino.
+      const dispatchResult = await this.pool.dispatch({
+        run: () =>
+          kernelRenderLegendPage(payload, {
+            jpegQuality: ctx.config.render.jpegQuality,
+            onWarn: (message, meta) => ctx.logger.warn(message, meta),
+          }),
+        signal: ctx.abortSignal,
+        priority: 1000,
+        payload,
+        maxRetriesOverride: 0,
+      });
+      // ADR-055 §2: decodeRenderLegendResult antes de usar el resultado
+      // (nunca un cast a ciegas). Garantiza rowsDrawn ≥ 1, así que el bucle
+      // avanza siempre.
+      const pageResult = decodeRenderLegendResult(dispatchResult);
+      pages.push(pageResult.image);
+      startRow += pageResult.rowsDrawn;
+    }
+    return pages;
   }
 
   /**
