@@ -5,7 +5,9 @@
 - **Estado**: Aceptado por el mantenedor el 2026-10-19, con los detalles
   técnicos del planificador (`Plan_1.1.md` §4). **Modificado por ADR-225**
   (§5: un tipo del documento se edita, se borra y se puede guardar; sin
-  grupos igual se ve; y el deshacer sí lo alcanza).
+  grupos igual se ve; y el deshacer sí lo alcanza). **Precisado por el
+  mantenedor el 2026-11-20** (§2: la etiqueta tampoco puede repetir `MUJER`
+  ni `HOMBRE`, y cada falla de validación tiene un texto para el usuario).
 - **Fecha**: 2026-10-19.
 - **Decidido por**: el mantenedor (2026-10-13 y 2026-10-19), a propuesta del
   planificador en lo técnico.
@@ -143,6 +145,13 @@ Core al recibir:
   activo (ADR-221 §3) ni la de otro tipo propio. Dos nombres que solo
   difieren en tildes o mayúsculas dan la misma etiqueta y son el mismo
   tipo.
+  - **Precisión del mantenedor (2026-11-20):** tampoco puede repetir `MUJER`
+    ni `HOMBRE`, las etiquetas de `Person` según el género (ADR-060 §3). Un
+    tipo propio «Mujer» se reemplazaría como `[MUJER 01]`, igual que una
+    persona de género femenino, y en el documento no se distinguirían.
+  - **Cada falla tiene un texto para el usuario** que dice por qué no se
+    puede y qué hacer (`UX_Guidelines.md` §11b.16). Para una etiqueta
+    repetida, el texto nombra la etiqueta con la que choca.
 
 ### 3. Los modos de un tipo propio
 

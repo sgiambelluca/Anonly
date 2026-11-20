@@ -8,6 +8,8 @@
 
 > **1.1 / ADR-225, aceptado el 2026-11-16**: un tipo del documento se edita y se borra, y entra a los puntos de restauración. §3.5 gana `updateDocumentEntityType` y `removeDocumentEntityType`, y la nota de `createEditCheckpoint` suma las definiciones de tipo. Sin tipos, eventos ni códigos de error nuevos. **Contrato escrito, implementación pendiente** (frentes F3 y F4 de `roadmap/Plan_1.1.md`).
 
+> **1.1 / precisiones del mantenedor del 2026-11-20** (ADR-219 §2 y ADR-225 §4), sin tipos, eventos ni códigos nuevos: la etiqueta de un tipo propio tampoco puede repetir `MUJER` ni `HOMBRE` (§5.2, `validateUserEntityType`), y `removeDocumentEntityType` descarta también el agregado a mano de ese tipo retenido en un choque (§3.5).
+
 > Define **todos** los tipos, interfaces, enums, error codes y contratos compartidos entre motores. Es el único paquete del que un motor puede importar tipos. Un implementador debe leer este archivo **completo** antes de tocar cualquier motor.
 
 **Paquete**: `@anonly/shared`
@@ -331,6 +333,9 @@ export interface IPipelineOrchestrator {
    * trae de vuelta. Después se descartan la definición, las correcciones de
    * tipo recordadas hacia ese tipo (ADR-085), las reglas que lo tienen de
    * objetivo y los literales manuales retenidos con ese tipo (ADR-061 §5).
+   * Un agregado a mano de ese tipo retenido en un choque sin resolver
+   * (ADR-174) se descarta: el choque se resuelve con lo detectado y emite
+   * CONFLICT_RESOLVED (ADR-225 §4, precisión del 2026-11-20).
    * Mismas condiciones de error que updateDocumentEntityType.
    */
   removeDocumentEntityType(documentId: string, typeId: UserEntityTypeId): Promise<void>;
@@ -1048,8 +1053,11 @@ export type FormatsFileValidation =
   guiones. Cada versión corta escrita a mano, de 1 a
   `USER_TYPE_SHORT_LABEL_MAX` letras o dígitos. El `id` con forma
   `user:<uuid>` y sin repetir. La etiqueta no puede ser la de un tipo base en
-  `country` (nivel 0 de la tabla de etiquetas de ese país) ni la de otro
-  tipo de `existing`.
+  `country` (nivel 0 de la tabla de etiquetas de ese país, **incluidas
+  `MUJER` y `HOMBRE`**, las de `Person` según el género; precisión de
+  ADR-219 §2 del 2026-11-20) ni la de otro tipo de `existing`. Cada código
+  de `UserEntityTypeIssueCode` tiene su texto para el usuario en
+  `UX_Guidelines.md` §11b.16.
 - **`validateFormat`**: los límites de §6 (`FORMAT_*`), cada variante con al
   menos una pieza `chars`, `1 ≤ min ≤ max ≤ FORMAT_MAX_REPEAT`, el nombre sin
   repetir contra `existingFormats` (sin distinguir mayúsculas ni tildes), el

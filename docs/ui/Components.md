@@ -1421,7 +1421,8 @@ apps/react-client/src/components/
     de la escalera, y las dos versiones cortas, opcionales (hasta `USER_TYPE_SHORT_LABEL_MAX`),
     con la automática de marcador de posición.
   - Validación en vivo con `validateUserEntityType`, en una **ranura de alto fijo**. Con error, el
-    botón principal se apaga.
+    botón principal se apaga, y la ranura muestra el texto del código, que dice por qué y qué hacer
+    (`UX_Guidelines.md` §11b.16).
   - Nota al pie del cuerpo: para `saved`, que se guarda en el equipo y aplica a los próximos
     documentos; para `document`, que es solo de este documento.
   - Botón: «Crear tipo» o «Guardar».
@@ -1485,6 +1486,9 @@ apps/react-client/src/components/
 - **`RemoveDocumentTypeDialog`**: `alertdialog`. Con entidades, las lista y muestra el aviso «Sus
   entidades quedan libres y descubiertas»; botón «Borrar tipo y entidad(es)». Vacío, sin lista ni
   aviso.
+  - **Con choques sin resolver** de entidades del tipo, suma antes de la lista el aviso de
+    `UX_Guidelines.md` §11b.10. Recomienda resolverlos y no bloquea el botón (ADR-225 §4, precisión
+    del 2026-11-20).
 - **Después de guardar un tipo del documento**: la banda dice «guardado» y pierde el ⋯. El aviso
   tiene «Deshacer», sin la pista `Ctrl+Z`.
 - **`FormatSubgroup`**: subnivel con el nombre del formato, **solo para formatos del usuario** y

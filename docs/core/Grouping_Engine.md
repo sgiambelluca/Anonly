@@ -4,8 +4,15 @@
 > Agrupa las `Occurrence` emitidas por Regex y NER en `EntityGroup` por tipo y valor canónico. Detecta conflictos. Expone grupos a la UI (la unidad de operación). Resuelve reemplazos según `ReplacementMode` y `Rule`.
 
 **EngineId**: `grouping`
-**Versión del spec**: 1.19.0
-**Última actualización**: 2026-11-16
+**Versión del spec**: 1.19.1
+**Última actualización**: 2026-11-20
+
+> **Nota (v1.19.1, precisiones del mantenedor del 2026-11-20 sobre ADR-219 §2 y ADR-225 §4)**:
+>
+> 1. **La etiqueta de un tipo propio tampoco puede repetir `MUJER` ni `HOMBRE`**, las de `Person` según el género. `validateUserEntityType` da `label_taken`.
+> 2. **`removeSessionType` descarta también el agregado a mano de ese tipo retenido en un choque sin resolver**: lo resuelve como `winner: "detected"` y emite `CONFLICT_RESOLVED`. Lo encontró el revisor del bloque F3+F5.
+>
+> Ver §6, los casos 83 y 90 de §13, §14 y el ítem 15aj de §15.
 
 > **Nota (v1.19.0, ADR-225, 2026-11-16 — un tipo del documento se edita, se borra y entra a los puntos de restauración)**:
 >
@@ -248,7 +255,9 @@ export class GroupingEngine implements IEngine {
   // ADR-225 §4: borra un tipo de la sesión. Cada grupo del tipo pasa por
   // applyGroupRemove (ENTITY_GROUP_REMOVED, CONFLICT_RESOLVED, removedValues).
   // Después descarta la definición, las entradas de typeCorrections que apuntan
-  // a ese tipo y las reglas que lo tienen de objetivo. Id que no es de un tipo
+  // a ese tipo y las reglas que lo tienen de objetivo. Cada conflicto heldManual
+  // sin resolver cuya ocurrencia manual retenida es de ese tipo se resuelve como
+  // winner "detected" (CONFLICT_RESOLVED; v1.19.1). Id que no es de un tipo
   // de la sesión, o sin sesión -> InvalidInputError, sin mutar nada.
   removeSessionType(documentId: string, typeId: UserEntityTypeId): Promise<void>;
   closeSession(documentId: string): Promise<void>;
@@ -257,7 +266,7 @@ export class GroupingEngine implements IEngine {
 
 // ADR-219 §2: funciones puras, dueñas de las etiquetas. El façade las reexporta
 // (Contracts.md §3.5). La validación compara contra el nivel 0 de la tabla del
-// país de context.country.
+// país de context.country, incluidas MUJER y HOMBRE (v1.19.1).
 export function userTypeLabel(name: string): string;
 export function validateUserEntityType(
   definition: UserEntityTypeDefinition,
@@ -493,7 +502,7 @@ Casos de tipos propios, país, desempate entre formatos y formato del grupo (v1.
 82. **Agrupación de un tipo propio** (ADR-219 §4). `"0170-0994"`, que vino de un formato, y `"01700994"`, agregado a mano, caen en un mismo grupo. `"0170-0994"` y `"0170-0995"` quedan en dos. El pase difuso nunca corre.
 83. **Tipo del documento** (ADR-219 §5):
     - `defineSessionType` lo registra y `getSessionTypes` lo devuelve;
-    - una etiqueta repetida lanza `InvalidInputError`, sea contra un tipo base («Teléfono» da `TELEFONO`), contra uno guardado o contra otro del documento;
+    - una etiqueta repetida lanza `InvalidInputError`, sea contra un tipo base («Teléfono» da `TELEFONO`; «Mujer» y «Hombre» chocan con las etiquetas de `Person` según el género), contra uno guardado o contra otro del documento;
     - sobrevive a `reopenSession` y muere en `closeSession`. Frente a `restoreCheckpoint` vale el caso 91 (ADR-225 §6, que cambia lo que este caso decía en la v1.18.0).
 84. **Reclasificar y resolver conflictos con tipos propios**:
     - `patch.type` hacia un tipo propio guardado o del documento funciona como con un tipo base (ADR-082);
@@ -522,7 +531,8 @@ Casos de tipos propios, país, desempate entre formatos y formato del grupo (v1.
     - `getSessionTypes` deja de devolverlo;
     - una ocurrencia posterior de uno de esos valores se descarta, venga de la fuente que venga, y `liftRemoval` la vuelve a admitir;
     - las entradas de `typeCorrections` hacia ese tipo y las reglas que lo tienen de objetivo se descartan;
-    - un tipo sin grupos se borra sin emitir eventos;
+    - un agregado a mano de ese tipo retenido en un conflicto `heldManual` sin resolver se descarta: el conflicto se resuelve como `winner: "detected"`, emite `CONFLICT_RESOLVED` y el grupo detectado queda como estaba. Elegir después ese agregado ya no es posible (v1.19.1);
+    - un tipo sin grupos se borra sin emitir eventos, salvo el `CONFLICT_RESOLVED` del punto anterior;
     - el `id` de un tipo guardado, o uno desconocido, lanza `InvalidInputError`.
 91. **Los tipos de la sesión en los puntos de restauración** (ADR-225 §6):
     - un punto tomado antes de `defineSessionType`, al restaurarse, deja la sesión sin ese tipo;
@@ -723,7 +733,7 @@ Casos de tipos propios, país, desempate entre formatos y formato del grupo (v1.
 | `synthetic for a user type is rejected by patch and by type rule` | `edge.test.ts` | edge | caso 81 |
 | `user type groups by alphanumeric key, never fuzzy` | `unit.test.ts` | unit | caso 82 |
 | `document types live in the session and survive reopen` | `unit.test.ts` | unit | caso 83. Renombrado en la v1.19.0: antes terminaba en `and restore` |
-| `defineSessionType rejects a label already taken` | `edge.test.ts` | edge | caso 83: contra un base, un guardado y otro del documento |
+| `defineSessionType rejects a label already taken` | `edge.test.ts` | edge | caso 83: contra un base, `MUJER`, `HOMBRE`, un guardado y otro del documento |
 | `reclassify and resolve conflicts to a user type` | `unit.test.ts` | unit | caso 84 |
 | **`a user format beats a base format in a regex-regex conflict`** | `unit.test.ts` | unit | caso 85 (ADR-222 §3) |
 | `regex-regex conflict falls back to the longer value and then the registered one` | `unit.test.ts` | unit | caso 85 |
@@ -738,6 +748,7 @@ Casos de tipos propios, país, desempate entre formatos y formato del grupo (v1.
 | **`removeSessionType removes every group of the type and suppresses its values`** | `unit.test.ts` | unit | caso 90 (ADR-225 §4) |
 | `removeSessionType drops type corrections and rules that target the type` | `unit.test.ts` | unit | caso 90 |
 | `removeSessionType rejects an id that is not a session type` | `edge.test.ts` | edge | caso 90: uno guardado y uno desconocido |
+| `removeSessionType resolves a pending held manual occurrence of the type as detected` | `unit.test.ts` | unit | caso 90 (v1.19.1): `CONFLICT_RESOLVED`, el grupo detectado intacto, y `winner: "manual"` sobre ese conflicto ya no aplica |
 | **`restoreCheckpoint restores session types exactly`** | `unit.test.ts` | unit | caso 91 (ADR-225 §6): tras definir, tras editar y tras borrar |
 | `updateSessionType and removeSessionType emit only existing grouping events` | `contract.test.ts` | contract | casos 89 y 90: no hay evento nuevo en el canal |
 
@@ -797,7 +808,7 @@ Fixtures: `tests/fixtures/text-10p.pdf` con entidades conocidas que generan grup
 - [x] 15ac. (Hito 11, ADR-184) Implementar en `grouping-engine` el índice interno por sesión para exactos y candidatos difusos, con cota de trigramas, recorrido completo cuando la poda no es segura, orden de primera coincidencia y mantenimiento/invalidez en todas las mutaciones del caso 73. Añadir las cuatro filas de §14; ejecutar gates scoped y medir antes/después en el banco opt-in y R1/R2. Informar paridad, memoria, tiempo y bloqueo residual antes de conservar el cambio. Evidencia macOS en `roadmap/mediciones/grouping/Agrupacion_Difusa_Medicion.md`; Windows nativo pendiente.
 - [x] 15ad. (Hito 11, ADR-191) Recalcular `replacementValue` en `addOccurrenceToGroup` para `placeholder` sin valor manual, emitiendo por `emitReplacementChangeIfNeeded`; `id` reservado por sesión para el grupo nuevo de un split, copiado por el simulacro y por los checkpoints; diferencia de conflictos de `restoreCheckpoint` por `groupId`, `candidates`, `resolved`, `resolvedType` y `heldManual`. Casos 74-76.
 - [x] 15ae. (1.0.x, Confianza — **ADR-214**) En la rama de conflicto de `processOccurrence`, una perdedora que no es manual se descarta solo si `fragmentsContain(ganadora, perdedora)`; si no, sigue a `groupOccurrence` después de emitir el conflicto. Sin cambios en `findOverlapConflict`, en `conflictWinnerIsNew`, en la retención de manuales ni en el evento. Caso 77 y los cinco tests de §14 con sus nombres exactos. Cobertura del módulo ≥ 85 %.
-- [ ] 15af. (1.1, frente F3 — **ADR-219**) **Tipos propios.**
+- [x] 15af. (1.1, frente F3 — **ADR-219**) **Tipos propios.**
     - `resolveLabelSet` con la escalera de la definición.
     - `maskByCharacters` para `mask`.
     - `synthetic` resuelto como `placeholder` en `resolveMode`, y rechazado por patch o por regla de tipo.
@@ -805,12 +816,13 @@ Fixtures: `tests/fixtures/text-10p.pdf` con entidades conocidas que generan grup
     - `defineSessionType`/`getSessionTypes`. Los tipos de la sesión van dentro de los puntos de restauración (ítem 15aj; la v1.18.0 decía «fuera»).
     - `userTypeLabel` y `validateUserEntityType` exportadas.
     - Casos 78 a 84 y 88.
-- [ ] 15ag. (1.1, F3 — **ADR-221** §3 y §4) **País.** Tabla de etiquetas elegida por `detection.country` (solo `AR` en la 1.1) y `country` en cada `SyntheticRequest`. Caso 87.
-- [ ] 15ah. (1.1, F3 — **ADR-222** §3) **Desempate.** Dos ocurrencias de Regex en `conflictWinnerIsNew`, y `formatId` en los candidatos. Caso 85.
-- [ ] 15ai. (1.1, F3 — **ADR-224** §2) **Formato del grupo.** `formatId` del grupo, recalculado en cada cambio de miembros o de tipo; `toOccurrenceRef` propaga `formatId`. Caso 86.
-- [ ] 15aj. (1.1, frente F3 — **ADR-225**) **Editar y borrar un tipo de la sesión.**
+- [x] 15ag. (1.1, F3 — **ADR-221** §3 y §4) **País.** Tabla de etiquetas elegida por `detection.country` (solo `AR` en la 1.1) y `country` en cada `SyntheticRequest`. Caso 87.
+- [x] 15ah. (1.1, F3 — **ADR-222** §3) **Desempate.** Dos ocurrencias de Regex en `conflictWinnerIsNew`, y `formatId` en los candidatos. Caso 85.
+- [x] 15ai. (1.1, F3 — **ADR-224** §2) **Formato del grupo.** `formatId` del grupo, recalculado en cada cambio de miembros o de tipo; `toOccurrenceRef` propaga `formatId`. Caso 86.
+- [x] 15aj. (1.1, frente F3 — **ADR-225**) **Editar y borrar un tipo de la sesión.**
     - `updateSessionType`: validar sin compararse contra sí mismo, recalcular `replacementPreviews` y, si corresponde, `replacementValue`, y emitir por `emitReplacementChangeIfNeeded`.
-    - `removeSessionType`: `applyGroupRemove` por cada grupo del tipo, y después descartar la definición, sus `typeCorrections` y sus reglas.
+    - `removeSessionType`: `applyGroupRemove` por cada grupo del tipo, resolver como `winner: "detected"` cada conflicto `heldManual` sin resolver cuya retenida es de ese tipo, y después descartar la definición, sus `typeCorrections` y sus reglas (v1.19.1).
+    - `validateUserEntityType`: `MUJER` y `HOMBRE` cuentan como etiquetas de tipo base (v1.19.1).
     - Las definiciones de la sesión dentro de la copia de `createCheckpoint` y de la restauración de `restoreCheckpoint`.
     - Casos 89 a 91.
 - [ ] 16. Escribir `contract.test.ts` con todos los tests contractuales.
