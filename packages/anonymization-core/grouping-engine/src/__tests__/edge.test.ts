@@ -19,6 +19,9 @@ import {
   type GroupingFinished,
   type GroupReplacementChanged,
   type GroupUpdateRequested,
+  type BoundingBox,
+  type Occurrence,
+  type UserEntityTypeDefinition,
 } from "@anonly/shared";
 import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from "vitest";
 
@@ -27,7 +30,11 @@ import { GroupingGroupNotFoundError, GroupingInvalidPatchError } from "../groupi
 import { buildPlaceholderValue, MASK_FORMAT_BY_TYPE } from "../labels.js";
 
 import {
+  AR_LABEL_CONTEXT,
+  CBU_TYPE,
+  CLINICAL_TYPE,
   createEngineContext,
+  createMockConfig,
   makeBBox,
   makeEntityGroup,
   makeOccurrence,
@@ -4065,8 +4072,8 @@ describe("GroupingEngine — edge cases", () => {
     // invariante para no romper el token.
     const withGender = makeEntityGroup({ type: EntityType.DNI, indexInType: 1, personGender: "f" });
 
-    expect(buildPlaceholderValue(neutral)).toBe("[DNI 01]");
-    expect(buildPlaceholderValue(withGender)).toBe("[DNI 01]");
+    expect(buildPlaceholderValue(neutral, AR_LABEL_CONTEXT)).toBe("[DNI 01]");
+    expect(buildPlaceholderValue(withGender, AR_LABEL_CONTEXT)).toBe("[DNI 01]");
   });
 
   // Caso 35 (§13, ADR-060 §7): los grupos Person comparten una sola
@@ -4079,8 +4086,8 @@ describe("GroupingEngine — edge cases", () => {
     const femaleGroup = makeEntityGroup({ personGender: "f", indexInType: 3 });
     const maleGroup = makeEntityGroup({ personGender: "m", indexInType: 4 });
 
-    expect(buildPlaceholderValue(femaleGroup)).toBe("[MUJER 03]");
-    expect(buildPlaceholderValue(maleGroup)).toBe("[HOMBRE 04]");
+    expect(buildPlaceholderValue(femaleGroup, AR_LABEL_CONTEXT)).toBe("[MUJER 03]");
+    expect(buildPlaceholderValue(maleGroup, AR_LABEL_CONTEXT)).toBe("[HOMBRE 04]");
   });
 
   // ADR-060 §3: las variantes de género usan la MISMA escalera de tres
@@ -4103,7 +4110,7 @@ describe("GroupingEngine — edge cases", () => {
         },
       ],
     });
-    expect(buildPlaceholderValue(wideFemale)).toBe("[MUJER 03]");
+    expect(buildPlaceholderValue(wideFemale, AR_LABEL_CONTEXT)).toBe("[MUJER 03]");
 
     const narrowFemale = makeEntityGroup({
       personGender: "f",
@@ -4120,7 +4127,7 @@ describe("GroupingEngine — edge cases", () => {
     });
     // Ni "[MUJER 03]" (nivel 0) ni "[MUJER 03]" (nivel 1, idéntico) entran
     // en un bbox de 40 de ancho: cae a nivel 2, "[MUJ-03]".
-    expect(buildPlaceholderValue(narrowFemale)).toBe("[MUJ-03]");
+    expect(buildPlaceholderValue(narrowFemale, AR_LABEL_CONTEXT)).toBe("[MUJ-03]");
 
     const wideMale = makeEntityGroup({
       personGender: "m",
@@ -4135,7 +4142,7 @@ describe("GroupingEngine — edge cases", () => {
         },
       ],
     });
-    expect(buildPlaceholderValue(wideMale)).toBe("[HOMBRE 04]");
+    expect(buildPlaceholderValue(wideMale, AR_LABEL_CONTEXT)).toBe("[HOMBRE 04]");
   });
 
   // ─── Caso 38 (§13, ADR-072 §1): el valor sintético identifica al grupo ───
@@ -5741,5 +5748,196 @@ describe("GroupingEngine — edge cases", () => {
         `${EntityType.Plate}:MAR 450:1`,
       ]);
     });
+  });
+});
+
+describe("GroupingEngine — tipos propios (ADR-219, ADR-225)", () => {
+  let engine: GroupingEngine;
+  let ctx: EngineContext;
+
+  const wide = (y: number): BoundingBox => makeBBox(10, y, 600, 12);
+
+  function found(occurrence: Occurrence, channel: EventChannel = EventChannel.Regex): void {
+    ctx.bus.emit(channel, EngineEvents.ENTITY_FOUND, { documentId: "doc-1", occurrence });
+  }
+
+  beforeEach(async () => {
+    engine = new GroupingEngine();
+    ctx = createEngineContext({
+      config: createMockConfig({
+        detection: { ...createMockConfig().detection, userTypes: [CLINICAL_TYPE] },
+      }),
+    });
+    await engine.init(ctx);
+    engine.startSession("doc-1");
+  });
+
+  afterEach(async () => {
+    if (!engine["disposed"]) {
+      await engine.dispose();
+    }
+  });
+
+  // Caso 81.
+  it("synthetic for a user type is rejected by patch and by type rule", async () => {
+    engine.defineSessionType("doc-1", CBU_TYPE);
+    const own = makeOccurrence({
+      entityType: CBU_TYPE.id,
+      value: "0001",
+      normalizedValue: "0001",
+      bbox: wide(10),
+    });
+    const base = makeOccurrence({ value: "11111111", normalizedValue: "11111111", bbox: wide(40) });
+    found(own);
+    found(base);
+    const [ownGroup, baseGroup] = engine.getSnapshot("doc-1").groups;
+    if (!ownGroup || !baseGroup) throw new Error("se esperaban dos grupos");
+    const valid = makeRule("type", ReplacementMode.Mask, { entityType: CBU_TYPE.id });
+    await engine.applyRuleCreated({ documentId: "doc-1", rule: valid });
+    const before = engine.getSnapshot("doc-1");
+
+    // Por patch sobre un tipo propio.
+    await expect(
+      engine.applyGroupUpdate({
+        documentId: "doc-1",
+        groupId: ownGroup.id,
+        patch: { replacementMode: ReplacementMode.Synthetic },
+      }),
+    ).rejects.toBeInstanceOf(GroupingInvalidPatchError);
+    // Por patch que además reclasifica a un tipo propio.
+    await expect(
+      engine.applyGroupUpdate({
+        documentId: "doc-1",
+        groupId: baseGroup.id,
+        patch: { type: CBU_TYPE.id, replacementMode: ReplacementMode.Synthetic },
+      }),
+    ).rejects.toBeInstanceOf(GroupingInvalidPatchError);
+    // Por regla de scope `type`, al crearla y al actualizarla.
+    await expect(
+      engine.applyRuleCreated({
+        documentId: "doc-1",
+        rule: makeRule("type", ReplacementMode.Synthetic, { entityType: CBU_TYPE.id }),
+      }),
+    ).rejects.toBeInstanceOf(GroupingInvalidPatchError);
+    await expect(
+      engine.applyRuleUpdated({
+        documentId: "doc-1",
+        ruleId: valid.id,
+        patch: { mode: ReplacementMode.Synthetic },
+      }),
+    ).rejects.toBeInstanceOf(GroupingInvalidPatchError);
+
+    // Sin mutar nada: los grupos quedan como estaban y la única regla es la válida.
+    const after = engine.getSnapshot("doc-1");
+    expect(after.groups.map((g) => g.replacementMode)).toEqual(
+      before.groups.map((g) => g.replacementMode),
+    );
+    expect(after.groups.find((g) => g.id === baseGroup.id)?.type).toBe(EntityType.DNI);
+    expect(after.rules.map((r) => [r.id, r.mode])).toEqual([[valid.id, ReplacementMode.Mask]]);
+  });
+
+  // Caso 83.
+  it("defineSessionType rejects a label already taken", () => {
+    engine.defineSessionType("doc-1", CBU_TYPE);
+
+    // Contra un tipo base («Teléfono» da TELEFONO), contra uno guardado y contra uno del documento.
+    for (const name of ["Teléfono", "Mujer", "Hombre", "historia CLINICA", "cbu"]) {
+      expect(() =>
+        engine.defineSessionType("doc-1", {
+          id: "user:00000000-0000-4000-8000-0000000000d1",
+          name,
+        }),
+      ).toThrow(InvalidInputError);
+    }
+    // Un id repetido y un nombre inválido también.
+    expect(() =>
+      engine.defineSessionType("doc-1", { id: CBU_TYPE.id, name: "Otro nombre" }),
+    ).toThrow(InvalidInputError);
+    expect(() =>
+      engine.defineSessionType("doc-1", {
+        id: "user:00000000-0000-4000-8000-0000000000d1",
+        name: "***",
+      }),
+    ).toThrow(InvalidInputError);
+    // Sin sesión.
+    expect(() => engine.defineSessionType("sin-sesion", CBU_TYPE)).toThrow(InvalidInputError);
+    // Sin mutar nada.
+    expect(engine.getSessionTypes("doc-1")).toEqual([CBU_TYPE]);
+  });
+
+  // Caso 88.
+  it("an occurrence of an unknown user type is discarded", () => {
+    found(
+      makeOccurrence({
+        entityType: "user:00000000-0000-4000-8000-00000000ffff",
+        value: "0001",
+        normalizedValue: "0001",
+      }),
+    );
+
+    expect(engine.getSnapshot("doc-1").groups).toHaveLength(0);
+    expect(ctx.logger.warn).toHaveBeenCalled();
+  });
+
+  // Caso 89.
+  it("updateSessionType rejects a taken label and an id that is not a session type", async () => {
+    engine.defineSessionType("doc-1", CBU_TYPE);
+    const other: UserEntityTypeDefinition = {
+      id: "user:00000000-0000-4000-8000-0000000000d2",
+      name: "Número de afiliado",
+    };
+    engine.defineSessionType("doc-1", other);
+    const emitSpy = vi.spyOn(ctx.bus, "emit");
+
+    // Una etiqueta que repite la de un tipo base, un guardado o uno de la sesión.
+    for (const name of ["Teléfono", "Historia clínica", "cbu"]) {
+      await expect(
+        engine.updateSessionType("doc-1", { id: other.id, name }),
+      ).rejects.toBeInstanceOf(InvalidInputError);
+    }
+    // El id de un tipo guardado, uno desconocido y un documento sin sesión.
+    await expect(
+      engine.updateSessionType("doc-1", { id: CLINICAL_TYPE.id, name: "Otro" }),
+    ).rejects.toBeInstanceOf(InvalidInputError);
+    await expect(
+      engine.updateSessionType("doc-1", {
+        id: "user:00000000-0000-4000-8000-00000000ffff",
+        name: "Otro",
+      }),
+    ).rejects.toBeInstanceOf(InvalidInputError);
+    await expect(engine.updateSessionType("sin-sesion", other)).rejects.toBeInstanceOf(
+      InvalidInputError,
+    );
+
+    expect(engine.getSessionTypes("doc-1")).toEqual([CBU_TYPE, other]);
+    expect(emitSpy).not.toHaveBeenCalled();
+  });
+
+  // Caso 90.
+  it("removeSessionType rejects an id that is not a session type", async () => {
+    engine.defineSessionType("doc-1", CBU_TYPE);
+    const saved = makeOccurrence({
+      entityType: CLINICAL_TYPE.id,
+      value: "hc-1",
+      normalizedValue: "hc-1",
+      bbox: wide(10),
+    });
+    found(saved);
+    const emitSpy = vi.spyOn(ctx.bus, "emit");
+
+    await expect(engine.removeSessionType("doc-1", CLINICAL_TYPE.id)).rejects.toBeInstanceOf(
+      InvalidInputError,
+    );
+    await expect(
+      engine.removeSessionType("doc-1", "user:00000000-0000-4000-8000-00000000ffff"),
+    ).rejects.toBeInstanceOf(InvalidInputError);
+    await expect(engine.removeSessionType("sin-sesion", CBU_TYPE.id)).rejects.toBeInstanceOf(
+      InvalidInputError,
+    );
+
+    // Sin mutar nada: el grupo del tipo guardado sigue ahí y no se emitió nada.
+    expect(engine.getSnapshot("doc-1").groups).toHaveLength(1);
+    expect(engine.getSessionTypes("doc-1")).toEqual([CBU_TYPE]);
+    expect(emitSpy).not.toHaveBeenCalled();
   });
 });
