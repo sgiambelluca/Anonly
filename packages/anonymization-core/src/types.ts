@@ -21,6 +21,8 @@ import type {
   PipelineState,
   ReanalyzeConfigPatch,
   TextMatch,
+  UserEntityTypeDefinition,
+  UserEntityTypeId,
   Word,
 } from "@anonly/shared";
 
@@ -88,6 +90,9 @@ export interface IPipelineOrchestrator {
    * occurrenceCount 0. Es el único modo en que el caller lo distingue de un
    * agregado exitoso (ADR-061 §6 errata) -- 0 NO lanza.
    * Precondición: stage in {Ready, Failed} (si no, InvalidInputError).
+   * ADR-219 §1: `request.entityType` es un `EntityType` o un tipo propio guardado
+   * (`EngineConfig.detection.userTypes`) o de este documento
+   * (`getDocumentEntityTypes`). Si no -> InvalidInputError, sin tocar la sesión.
    */
   addManualEntity(documentId: string, request: ManualEntityRequest): Promise<ManualEntityResult>;
   /**
@@ -97,6 +102,33 @@ export interface IPipelineOrchestrator {
    * emitir nada: buscar no es agregar.
    */
   findText(documentId: string, query: string): ReadonlyArray<TextMatch>;
+  /**
+   * ADR-219 §5: tipo propio que vive solo en este documento. Sincrónica.
+   * Delegación pura en `grouping.defineSessionType`: valida con
+   * `validateUserEntityType` contra los tipos base del país activo, los guardados
+   * y los del documento; etiqueta repetida, id repetido o documento sin sesión ->
+   * InvalidInputError. Sobrevive a `reanalyze` y se descarta con DOCUMENT_CLOSED.
+   * No emite eventos.
+   */
+  defineDocumentEntityType(documentId: string, definition: UserEntityTypeDefinition): void;
+  /** ADR-219 §5: los tipos del documento definidos hasta ahora, en orden de creación; sin sesión, `[]`. */
+  getDocumentEntityTypes(documentId: string): ReadonlyArray<UserEntityTypeDefinition>;
+  /**
+   * ADR-225 §3: reemplaza la definición de un tipo DEL DOCUMENTO; el id no
+   * cambia. Delega en `grouping.updateSessionType` (recalcula el reemplazo y las
+   * vistas previas de sus grupos y emite ENTITY_GROUP_UPDATED por cada uno que
+   * cambió). Definición inválida, etiqueta repetida, id que no es de un tipo del
+   * documento, documento sin sesión o stage en {Importing, Extracting, OCRing,
+   * Detecting, Grouping} -> InvalidInputError.
+   */
+  updateDocumentEntityType(documentId: string, definition: UserEntityTypeDefinition): Promise<void>;
+  /**
+   * ADR-225 §4: borra un tipo DEL DOCUMENTO. Delega en
+   * `grouping.removeSessionType` y descarta los literales manuales retenidos con
+   * ese tipo (ADR-061 §5). Mismas condiciones de error que
+   * `updateDocumentEntityType`.
+   */
+  removeDocumentEntityType(documentId: string, typeId: UserEntityTypeId): Promise<void>;
   /**
    * ADR-170 §2: delegación pura en `GroupingEngine.previewEdit`, sin estado
    * propio, sin emitir y sin pasar por `reopenSession`. Sincrónico, como

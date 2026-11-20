@@ -24,7 +24,7 @@ vi.mock("@huggingface/transformers", () => ({
 
 import { exportBlobKey, previewBlobKey } from "../blob-tracker.js";
 import { LruCache } from "../cache.js";
-import { createCore } from "../index.js";
+import { createCore, validateFormatsFile } from "../index.js";
 import { selectLineWords } from "../line-words.js";
 import { PipelineOrchestrator } from "../orchestrator.js";
 import { WorkerPool } from "../worker-pool.js";
@@ -45,7 +45,9 @@ import {
   createRealBus,
   createRenderPageOutput,
   createReplacement,
+  createUserTypeDefinition,
   createWord,
+  makeOrchestratorWithRealDetection,
   recordNerModelEvents,
   runMessagesOf,
   runNerPage,
@@ -2285,5 +2287,198 @@ describe("selectLineWords — origen de las palabras (ADR-058 §5)", () => {
     const result = selectLineWords([pdfWord, ocrWord], [replacement]);
 
     expect(result).toEqual([pdfWord, ocrWord]);
+  });
+});
+
+// ─── 1.1, frente F4: tipos propios y archivo de formatos, casos límite ───
+
+const OCR_NAME_DOCUMENT = createDocument({
+  pageCount: 1,
+  pages: [
+    createPage({
+      index: 0,
+      text: "Jose Perez",
+      requiresOCR: true,
+      words: [
+        createWord({ text: "Jose", bbox: { x: 0, y: 0, width: 30, height: 12 } }),
+        createWord({ text: "Perez", bbox: { x: 35, y: 0, width: 35, height: 12 } }),
+      ],
+    }),
+  ],
+});
+
+describe("Orchestrator — 1.1 F4 (casos límite)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  // Caso 53: el motor rechaza un id guardado y los literales no se tocan.
+  it("removing a saved type id leaves retained literals untouched", async () => {
+    const saved = createUserTypeDefinition("CBU", 1);
+    const documentType = createUserTypeDefinition("Afiliado", 2);
+    const { orchestrator, engines } = await makeOrchestratorWithRealDetection(
+      createPdfEngineOutput({ document: OCR_NAME_DOCUMENT, textlessPages: [0] }),
+      { userTypes: [saved] },
+    );
+    await orchestrator.importDocument(createImportInput());
+    orchestrator.defineDocumentEntityType("doc-1", documentType);
+    await orchestrator.addManualEntity("doc-1", {
+      value: "Jose Perez",
+      entityType: documentType.id,
+    });
+
+    await expect(orchestrator.removeDocumentEntityType("doc-1", saved.id)).rejects.toBeInstanceOf(
+      InvalidInputError,
+    );
+    // Tampoco se borró nada del documento.
+    expect(orchestrator.getDocumentEntityTypes("doc-1")).toEqual([documentType]);
+
+    // El literal sigue retenido: un reanalyze lo vuelve a buscar con su tipo.
+    const findLiteralSpy = vi.spyOn(engines.regex, "findLiteral");
+    await orchestrator.reanalyze("doc-1", { ocr: { languages: ["eng"] } });
+    expect(findLiteralSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ value: "Jose Perez", entityType: documentType.id }),
+      expect.anything(),
+    );
+  });
+
+  // Caso 49: un tipo propio desconocido se rechaza antes de tocar la sesión.
+  it("addManualEntity rejects an unknown user type", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    wireHappyPathSpies(engines, bus);
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+    await orchestrator.importDocument(createImportInput());
+    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+
+    await expect(
+      orchestrator.addManualEntity("doc-1", {
+        value: "Jose Perez",
+        entityType: createUserTypeDefinition("Desconocido", 9).id,
+      }),
+    ).rejects.toBeInstanceOf(InvalidInputError);
+
+    expect(engines.grouping.liftRemoval).not.toHaveBeenCalled();
+    expect(engines.grouping.reopenSession).not.toHaveBeenCalled();
+    expect(engines.regex.findLiteral).not.toHaveBeenCalled();
+    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+  });
+
+  // Caso 54: un tipo del documento que una restauración se llevó es desconocido.
+  it("addManualEntity rejects a document type that a restore took away", async () => {
+    const documentType = createUserTypeDefinition("Afiliado", 1);
+    const { orchestrator, engines } = await makeOrchestratorWithRealDetection(
+      createPdfEngineOutput({ document: OCR_NAME_DOCUMENT, textlessPages: [0] }),
+    );
+    await orchestrator.importDocument(createImportInput());
+    const checkpointId = orchestrator.createEditCheckpoint("doc-1");
+    orchestrator.defineDocumentEntityType("doc-1", documentType);
+    await orchestrator.restoreEditCheckpoint("doc-1", checkpointId);
+
+    const reopenSpy = vi.spyOn(engines.grouping, "reopenSession");
+    await expect(
+      orchestrator.addManualEntity("doc-1", { value: "Jose Perez", entityType: documentType.id }),
+    ).rejects.toBeInstanceOf(InvalidInputError);
+    expect(reopenSpy).not.toHaveBeenCalled();
+    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+  });
+
+  // Caso 52 (ADR-223 §6, precisión del 2026-11-20): un archivo de la 1.1.1 con Chile.
+  it("validateFormatsFile rejects a reference to an unknown country as a newer version", () => {
+    const text = (catalogRefs: ReadonlyArray<unknown>): string =>
+      JSON.stringify({ kind: "anonly-formats", version: 1, types: [], formats: [], catalogRefs });
+    const ref = { id: "ref:x", catalogFormatId: "cl:rut", enabled: true };
+
+    expect(validateFormatsFile(text([{ ...ref, country: "CL" }]), "AR")).toEqual({
+      ok: false,
+      issues: [{ code: "version_newer", path: "catalogRefs[0]" }],
+    });
+    // Una forma rota sigue siendo schema_invalid.
+    expect(validateFormatsFile(text([{ id: "ref:x", country: "CL" }]), "AR")).toEqual({
+      ok: false,
+      issues: [{ code: "schema_invalid", path: "catalogRefs[0]" }],
+    });
+    // Un país conocido pasa.
+    expect(validateFormatsFile(text([{ ...ref, country: "AR" }]), "AR").ok).toBe(true);
+  });
+
+  // Caso 52 (ADR-223 §6): cada código del archivo.
+  it("validateFormatsFile reports each file issue code", () => {
+    const type = createUserTypeDefinition("Afiliado", 1);
+    const format = {
+      id: "fmt:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      name: "Numero de afiliado",
+      entityType: type.id,
+      variants: [[{ kind: "chars", charClass: "digit", min: 3, max: 3 }]],
+      enabled: true,
+    };
+    const file = (overrides: Record<string, unknown>): string =>
+      JSON.stringify({
+        kind: "anonly-formats",
+        version: 1,
+        types: [type],
+        formats: [format],
+        catalogRefs: [],
+        ...overrides,
+      });
+    const codesOf = (text: string): string[] => {
+      const result = validateFormatsFile(text, "AR");
+      return result.ok ? [] : result.issues.map((issue) => issue.code);
+    };
+
+    expect(validateFormatsFile(file({}), "AR").ok).toBe(true);
+    expect(codesOf("esto no es json")).toEqual(["not_json"]);
+    expect(codesOf("")).toEqual(["not_json"]);
+    expect(codesOf(file({ kind: "otro" }))).toEqual(["wrong_kind"]);
+    expect(codesOf("[]")).toEqual(["wrong_kind"]);
+    expect(codesOf(file({ version: "1" }))).toEqual(["version_invalid"]);
+    expect(codesOf(file({ version: 0 }))).toEqual(["version_invalid"]);
+    expect(codesOf(file({ version: 2 }))).toEqual(["version_newer"]);
+
+    // schema_invalid: una sección que no es un array, o un item sin la forma.
+    expect(codesOf(file({ types: "x" }))).toEqual(["schema_invalid"]);
+    expect(codesOf(file({ formats: [{ id: "fmt:x" }] }))).toEqual(["schema_invalid"]);
+    expect(codesOf(file({ catalogRefs: [{ id: "ref:x" }] }))).toEqual(["schema_invalid"]);
+    expect(codesOf(file({ types: [{ id: type.id }] }))).toEqual(["schema_invalid"]);
+    expect(
+      codesOf(file({ formats: [{ ...format, variants: [[{ kind: "chars", charClass: "x" }]] }] })),
+    ).toEqual(["schema_invalid"]);
+
+    // type_invalid: la etiqueta de un tipo base (incluida MUJER) o un nombre vacío.
+    expect(codesOf(file({ types: [{ ...type, name: "Mujer" }] }))).toEqual(["type_invalid"]);
+    expect(codesOf(file({ types: [{ ...type, name: " " }], formats: [] }))).toEqual([
+      "type_invalid",
+    ]);
+    // Dos tipos con la misma etiqueta: los dos fallan.
+    const twin = createUserTypeDefinition("afiliado", 2);
+    expect(codesOf(file({ types: [type, twin] }))).toEqual(["type_invalid", "type_invalid"]);
+
+    // format_invalid: un formato que no pasa validateFormat.
+    expect(codesOf(file({ formats: [{ ...format, variants: [] }] }))).toEqual(["format_invalid"]);
+
+    // format_type_missing: el tipo propio del formato no viene en el archivo.
+    expect(codesOf(file({ types: [] }))).toEqual(["format_type_missing"]);
+
+    // El issue lleva el path del item.
+    const broken = {
+      ...format,
+      id: "fmt:bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      name: "Otro formato",
+      variants: [],
+    };
+    expect(validateFormatsFile(file({ formats: [format, broken] }), "AR")).toEqual({
+      ok: false,
+      issues: [{ code: "format_invalid", path: "formats[1]" }],
+    });
+
+    // Dos formatos con el mismo nombre dentro del archivo se aceptan: el nombre es para la interfaz.
+    const sameName = file({ formats: [format, { ...format, id: broken.id }] });
+    expect(validateFormatsFile(sameName, "AR").ok).toBe(true);
   });
 });

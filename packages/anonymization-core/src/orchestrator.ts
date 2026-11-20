@@ -51,7 +51,6 @@ import {
   type EntityGroupCreated,
   type EntityGroupRemoved,
   type EntityGroupUpdated,
-  type EntityType,
   type EntityTypeId,
   type ExportFailed,
   type ExportFinished,
@@ -79,6 +78,8 @@ import {
   type Replacement,
   type TextMatch,
   type Unsubscribe,
+  type UserEntityTypeDefinition,
+  type UserEntityTypeId,
   type WorkerFactory,
   type Word,
   type WorkerJobTimeout,
@@ -104,22 +105,6 @@ import type {
   ManualEntityResult,
 } from "./types.js";
 import { WorkerPoolManager, type ManagedPoolKey } from "./worker-pool.js";
-
-/**
- * Guarda provisional de la 1.1 (F0, Plan_1.1 §7): `regex.findLiteral` todavía
- * recibe un `EntityType`. Un tipo propio no puede llegar hasta que F4 valide el
- * tipo del agregado manual; ahí se reemplaza esta guarda por esa validación.
- * Privada del módulo.
- */
-function toBaseEntityType(type: EntityTypeId): EntityType {
-  if (isUserEntityType(type)) {
-    throw new InvalidInputError(
-      "addManualEntity: un tipo propio todavía no se puede agregar a mano (llega con F4)",
-      { entityType: type },
-    );
-  }
-  return type;
-}
 
 const OCR_WORDS_PREFIX = "ocr-words:";
 
@@ -543,8 +528,9 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
       });
     }
 
-    // Guarda provisional (F0): falla antes de retener el literal o tocar el stage.
-    const literalEntityType = toBaseEntityType(request.entityType);
+    // ADR-219 §1: falla antes de retener el literal, de tocar el stage o de
+    // reabrir la sesión.
+    this.assertKnownEntityType(documentId, request.entityType);
 
     // Retenido ANTES de buscar: la durabilidad (ADR-061 §5) no depende de
     // que la búsqueda encuentre algo hoy — un reanalyze posterior puede
@@ -588,7 +574,7 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     let result;
     try {
       result = await this.engines.regex.findLiteral(
-        { document, value: request.value, entityType: literalEntityType },
+        { document, value: request.value, entityType: request.entityType },
         ctx,
       );
     } finally {
@@ -632,6 +618,80 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
   previewEdit(documentId: string, request: EditPreviewRequest): EditPreview {
     this.assertNotDisposed();
     return this.engines.grouping.previewEdit(documentId, request);
+  }
+
+  /**
+   * ADR-219 §5: delegación pura en `grouping.defineSessionType`, que valida
+   * con `validateUserEntityType` contra los tipos base, los guardados y los del
+   * documento. Sincrónica, sin eventos. Sin sesión lanza el `InvalidInputError`
+   * del motor.
+   */
+  defineDocumentEntityType(documentId: string, definition: UserEntityTypeDefinition): void {
+    this.assertNotDisposed();
+    this.engines.grouping.defineSessionType(documentId, definition);
+  }
+
+  /** ADR-219 §5: delegación pura en `grouping.getSessionTypes`; sin sesión, `[]`. */
+  getDocumentEntityTypes(documentId: string): ReadonlyArray<UserEntityTypeDefinition> {
+    this.assertNotDisposed();
+    return this.engines.grouping.getSessionTypes(documentId);
+  }
+
+  /**
+   * ADR-225 §3: delega en `grouping.updateSessionType` y nada más. El
+   * re-render de las páginas de los grupos que cambiaron sale de
+   * `ENTITY_GROUP_UPDATED` por el camino de siempre (ADR-044, caso 27); el
+   * `GROUP_REPLACEMENT_CHANGED` que Grouping emite junto con él no lo escucha
+   * este componente (§8). La validación de la definición y del `id` la hace el
+   * motor.
+   */
+  async updateDocumentEntityType(
+    documentId: string,
+    definition: UserEntityTypeDefinition,
+  ): Promise<void> {
+    this.assertNotDisposed();
+    this.assertCheckpointableStage(documentId, "updateDocumentEntityType");
+    await this.engines.grouping.updateSessionType(documentId, definition);
+  }
+
+  /**
+   * ADR-225 §4: delega en `grouping.removeSessionType` (que elimina los grupos
+   * del tipo, resuelve como `detected` el choque con un agregado a mano de ese
+   * tipo y descarta la definición, las correcciones y las reglas) y, si no
+   * lanzó, descarta los literales manuales retenidos con ese tipo (ADR-061
+   * §5): sin eso el próximo `reanalyze` volvería a emitir ocurrencias de un
+   * tipo que ya no existe. Si el motor lanza, los literales no se tocan. Las
+   * copias de literales de los puntos de restauración tampoco: restaurar un
+   * punto anterior devuelve el tipo y su literal juntos (ADR-225 §6, caso 54).
+   */
+  async removeDocumentEntityType(documentId: string, typeId: UserEntityTypeId): Promise<void> {
+    this.assertNotDisposed();
+    this.assertCheckpointableStage(documentId, "removeDocumentEntityType");
+    await this.engines.grouping.removeSessionType(documentId, typeId);
+    const literals = this.manualLiteralsByDocument.get(documentId);
+    if (literals !== undefined) {
+      this.manualLiteralsByDocument.set(
+        documentId,
+        literals.filter((literal) => literal.entityType !== typeId),
+      );
+    }
+  }
+
+  /**
+   * ADR-219 §1: `entityType` tiene que ser un `EntityType` o un tipo propio de
+   * `detection.userTypes` (guardado) o de `getDocumentEntityTypes(documentId)`.
+   * Un tipo de otro documento, o uno que se borró o que una restauración se
+   * llevó, no está ahí. Si no, `InvalidInputError`, sin tocar la sesión.
+   */
+  private assertKnownEntityType(documentId: string, entityType: EntityTypeId): void {
+    if (!isUserEntityType(entityType)) return;
+    const saved = this.effectiveConfigFor(documentId).detection.userTypes;
+    if (saved.some((definition) => definition.id === entityType)) return;
+    if (this.engines.grouping.getSessionTypes(documentId).some((d) => d.id === entityType)) return;
+    throw new InvalidInputError("addManualEntity: el tipo propio no existe para este documento.", {
+      documentId,
+      entityType,
+    });
   }
 
   /**
@@ -979,7 +1039,7 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     this.engines.grouping.reopenSession(documentId, { expectRegex: false, expectNer: false });
     for (const literal of literals) {
       await this.engines.regex.findLiteral(
-        { document, value: literal.value, entityType: toBaseEntityType(literal.entityType) },
+        { document, value: literal.value, entityType: literal.entityType },
         ctx,
       );
     }
@@ -1531,9 +1591,12 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
         rules: snapshot.rules,
         options,
         renderPageProvider: provider,
-        // Provisional hasta F4 (Plan_1.1.md §7): F4 llena los tipos guardados
-        // y los del documento. Hoy nada produce un tipo propio.
-        userTypes: [],
+        // ADR-219 §6: los guardados y los del documento, en ese orden, para
+        // nombrar sus filas de la hoja de referencia.
+        userTypes: [
+          ...this.effectiveConfigFor(documentId).detection.userTypes,
+          ...this.engines.grouping.getSessionTypes(documentId),
+        ],
       };
 
       this.setStage(documentId, PipelineStage.Exporting);

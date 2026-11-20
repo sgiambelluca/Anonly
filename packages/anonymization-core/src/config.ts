@@ -10,7 +10,14 @@
  * runtime Node de los tests; se lee de forma defensiva.
  */
 
-import type { EngineConfig, EngineConfigOverrides, WorkerJobType } from "@anonly/shared";
+import { validateUserEntityType } from "@anonly/grouping-engine";
+import type {
+  EngineConfig,
+  EngineConfigOverrides,
+  ILogger,
+  UserEntityTypeDefinition,
+  WorkerJobType,
+} from "@anonly/shared";
 import { DEFAULT_DETECTION_CONFIG } from "@anonly/shared";
 
 const DEFAULT_TIMEOUTS: Readonly<Record<WorkerJobType, number>> = {
@@ -138,8 +145,39 @@ export function mergeEngineConfig(
     grouping: { ...base.grouping, ...overrides.grouping },
     render: { ...base.render, ...overrides.render },
     export: { ...base.export, ...overrides.export },
-    // Merge por sección, igual que las demás (ADR-039). Validar el override de
-    // `detection` es de F4 (Plan_1.1 §7).
+    // Merge por sección, igual que las demás (ADR-039). Los tipos propios
+    // inválidos los descarta `sanitizeDetectionConfig` (ADR-223 §2), que
+    // `createCore` aplica después de este merge.
     detection: { ...base.detection, ...overrides.detection },
   };
+}
+
+/**
+ * ADR-223 §2, Orchestrator.md §6 y caso 47: pasa cada tipo de
+ * `detection.userTypes`, en orden, por `validateUserEntityType` contra el país
+ * y los tipos ya aceptados. Uno inválido o con la etiqueta repetida se descarta
+ * con `warn`, que lleva el `id` y los códigos pero nunca el nombre. Los
+ * formatos de un tipo descartado los informa `regex-engine` en `skippedFormats`.
+ * Devuelve la misma `config` si no se descartó nada.
+ */
+export function sanitizeDetectionConfig(config: EngineConfig, logger: ILogger): EngineConfig {
+  const accepted: UserEntityTypeDefinition[] = [];
+  for (const definition of config.detection.userTypes) {
+    const validation = validateUserEntityType(definition, {
+      country: config.detection.country,
+      existing: accepted,
+    });
+    if (validation.ok) {
+      accepted.push(definition);
+      continue;
+    }
+    const codes = validation.issues.map((issue) => issue.code);
+    logger.warn("Tipo propio inválido descartado de la configuración de detección.", {
+      id: definition.id,
+      code: codes[0],
+      codes,
+    });
+  }
+  if (accepted.length === config.detection.userTypes.length) return config;
+  return { ...config, detection: { ...config.detection, userTypes: accepted } };
 }

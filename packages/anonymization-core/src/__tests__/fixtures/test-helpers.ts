@@ -28,6 +28,7 @@ import { RegexEngine } from "@anonly/regex-engine";
 import { RenderEngine } from "@anonly/render-engine";
 import type { RenderPageOutput } from "@anonly/render-engine";
 import {
+  DEFAULT_DETECTION_CONFIG,
   EngineEvents,
   EntityType,
   EventChannel,
@@ -43,6 +44,7 @@ import {
   type Page,
   type Replacement,
   type Rule,
+  type UserEntityTypeDefinition,
   type WorkerLike,
   type WorkerOutbound,
   type Word,
@@ -241,6 +243,15 @@ export function createEntityGroup(overrides?: Partial<EntityGroup>): EntityGroup
   };
 }
 
+/**
+ * Tipo propio de fixture (ADR-219 §2): `user:` + un UUID v4 válido derivado de
+ * `n` (1 a 9), para que `validateUserEntityType` acepte el id.
+ */
+export function createUserTypeDefinition(name: string, n = 1): UserEntityTypeDefinition {
+  const digit = String(n);
+  return { id: `user:${digit.repeat(8)}-${digit.repeat(4)}-4${digit.repeat(3)}-8${digit.repeat(3)}-${digit.repeat(12)}`, name };
+}
+
 export function createRule(overrides?: Partial<Rule>): Rule {
   return {
     id: "rule-1",
@@ -374,6 +385,13 @@ export function wireHappyPathSpies(
   vi.spyOn(engines.grouping, "createCheckpoint").mockImplementation(() => "mock-checkpoint-id");
   vi.spyOn(engines.grouping, "restoreCheckpoint").mockResolvedValue(undefined);
   vi.spyOn(engines.grouping, "discardCheckpoints").mockImplementation(() => undefined);
+  // ADR-219 §5 / ADR-225: los tipos del documento. `getSessionTypes` lo llama
+  // `runExport` (ADR-219 §6) y `addManualEntity` con un tipo propio; sin sesión
+  // real, [] por defecto. Los tests de F4 sobreescriben estos spies.
+  vi.spyOn(engines.grouping, "getSessionTypes").mockImplementation(() => []);
+  vi.spyOn(engines.grouping, "defineSessionType").mockImplementation(() => undefined);
+  vi.spyOn(engines.grouping, "updateSessionType").mockResolvedValue(undefined);
+  vi.spyOn(engines.grouping, "removeSessionType").mockResolvedValue(undefined);
   vi.spyOn(engines.grouping, "dispose").mockResolvedValue(undefined);
 
   vi.spyOn(engines.render, "loadDocument").mockResolvedValue(undefined);
@@ -418,7 +436,10 @@ export function wireHappyPathSpies(
  * alcance acá. NER queda desactivado para simplificar la cascada de
  * auto-finish de la sesión de Grouping (ADR-034 §2).
  */
-export async function makeOrchestratorWithRealDetection(pdfOutput?: PdfEngineOutput): Promise<{
+export async function makeOrchestratorWithRealDetection(
+  pdfOutput?: PdfEngineOutput,
+  options?: { readonly userTypes?: ReadonlyArray<UserEntityTypeDefinition> },
+): Promise<{
   readonly bus: EventBus;
   readonly engines: AnonymizationCoreEngines;
   readonly orchestrator: PipelineOrchestrator;
@@ -434,6 +455,10 @@ export async function makeOrchestratorWithRealDetection(pdfOutput?: PdfEngineOut
       batchSize: 1,
       enabled: false,
     },
+    // ADR-223 §2: tipos propios guardados (F4); el resto de `detection` es el default.
+    ...(options?.userTypes !== undefined
+      ? { detection: { ...DEFAULT_DETECTION_CONFIG, userTypes: options.userTypes } }
+      : {}),
   });
   const engines = createMockEngines();
   const output = pdfOutput ?? createPdfEngineOutput();

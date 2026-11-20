@@ -27,3 +27,13 @@ export type {
 
 // Composition root (Hito 9).
 export { createCore } from "./create-core.js";
+
+// Funciones puras de tipos propios y formatos (1.1, Contracts.md §3.5), sin
+// Core ni documento (ADR-223 §1). `isUserEntityType` ya sale de `@anonly/shared`
+// por el `export *` de arriba.
+// Dueño de las etiquetas (ADR-219 §2):
+export { userTypeLabel, validateUserEntityType } from "@anonly/grouping-engine";
+// Dueño del generador y del catálogo (ADR-220 §3, ADR-221 §2):
+export { compareFormat, getCatalog, testFormat, validateFormat } from "@anonly/regex-engine";
+// Del façade, porque combina las dos anteriores (ADR-223 §6):
+export { validateFormatsFile } from "./formats-file.js";
