@@ -29,6 +29,7 @@
 
 import type { ManualEntityRequest } from "@anonly/anonymization-core";
 
+import { toBaseEntityType } from "../../baseEntityType.js";
 import { actions } from "../../core-adapter/actions.js";
 import { useEntitiesStore } from "../../store/entities.store.js";
 import { showToast } from "../common/toast.js";
@@ -63,11 +64,11 @@ export async function addManualEntityWithFeedback(
     const group = resolveAddedGroup(
       useEntitiesStore.getState().groupsByType,
       result.groupIds,
-      request.entityType,
+      toBaseEntityType(request.entityType),
     );
     const text = describeManualAdd({
       value: request.value,
-      entityType: request.entityType,
+      entityType: toBaseEntityType(request.entityType),
       occurrenceCount: result.occurrenceCount,
       group,
     });

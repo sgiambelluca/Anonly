@@ -10,6 +10,7 @@
  * de este paquete).
  */
 import {
+  DEFAULT_DETECTION_CONFIG,
   EngineErrorCode,
   EngineEvents,
   EventChannel,
@@ -269,6 +270,7 @@ describe("PdfWorker entry-point (ADR-036 §3, ADR-041 §4)", () => {
       grouping: { similarityThreshold: 0.88, minAliasFrequency: 1 },
       render: { previewScale: 1, fullScale: 2, jpegQuality: 0.85, cachePages: 16 },
       export: { defaultDpi: 150, defaultImageFormat: "jpeg" as const, defaultJpegQuality: 0.85 },
+      detection: DEFAULT_DETECTION_CONFIG,
     };
 
     fakeSelf.emitMessage({ type: "INIT", config: customConfig });

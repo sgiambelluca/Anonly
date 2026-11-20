@@ -22,6 +22,9 @@
  * ver `estimate-token-width.ts`).
  */
 
+import { EntityType } from "./enums.js";
+import type { DetectionConfig } from "./types.js";
+
 /**
  * Rango válido de `RenderRequested.scale` / `RenderPageInput.scale`:
  * `0 < scale <= MAX_RENDER_SCALE` (ADR-037 §2). Margen sobre el zoom máximo
@@ -101,3 +104,55 @@ export const DEGRADED_FONT_RATIO = 0.5;
  * límite fijo, como los demás de esta tabla.
  */
 export const MAX_EDIT_CHECKPOINTS = 50;
+
+// ─── Formatos propios y tipos propios (1.1, Contracts.md §6) ───
+
+/** Variantes de un `FormatDefinition` (ADR-220 §1). */
+export const FORMAT_MAX_VARIANTS = 8;
+
+/** Piezas por variante, contando las de adentro de un `optional` (ADR-220 §1). */
+export const FORMAT_MAX_PIECES = 16;
+
+/** `max` de una pieza `chars` (ADR-220 §1). */
+export const FORMAT_MAX_REPEAT = 64;
+
+/** Caracteres de un texto fijo, de una palabra de contexto y del nombre de un formato (ADR-220 §1). */
+export const FORMAT_MAX_TEXT = 40;
+
+/** Palabras de contexto de un formato (ADR-220 §1). */
+export const FORMAT_MAX_CONTEXT = 5;
+
+/** Estados del autómata compilado de un formato (ADR-220 §2). */
+export const FORMAT_MAX_STATES = 1024;
+
+/** Caracteres del nombre de un tipo propio (ADR-219 §2). */
+export const USER_TYPE_NAME_MAX = 40;
+
+/** Letras o dígitos de una versión corta escrita a mano (ADR-219 §2). */
+export const USER_TYPE_SHORT_LABEL_MAX = 8;
+
+/**
+ * ADR-220 §5: los únicos tipos base que admiten formatos propios
+ * (Contracts.md §5.2). Vive acá y no en `types.ts` porque es un valor y
+ * `types.ts` es solo de tipos.
+ */
+export const FORMAT_ADMITTING_BASE_TYPES: ReadonlySet<EntityType> = new Set<EntityType>([
+  EntityType.DNI,
+  EntityType.CUIT,
+  EntityType.Phone,
+  EntityType.License,
+  EntityType.Plate,
+]);
+
+/**
+ * ADR-223 §2: Argentina, todos los formatos base prendidos y nada propio. Es
+ * exactamente la detección de la 1.0.2, y lo que recibe un `createCore` sin
+ * override de `detection`.
+ */
+export const DEFAULT_DETECTION_CONFIG: DetectionConfig = {
+  country: "AR",
+  baseFormats: [],
+  userTypes: [],
+  userFormats: [],
+  catalogRefs: [],
+};

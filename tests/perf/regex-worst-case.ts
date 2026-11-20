@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { createEventBus } from "@anonly/event-system";
 import { RegexEngine, DEFAULT_PATTERNS_AR } from "@anonly/regex-engine";
 import {
+  DEFAULT_DETECTION_CONFIG,
   EntityType,
   EngineEvents,
   EventChannel,
@@ -163,6 +164,7 @@ function buildConfig(): EngineContext["config"] {
     grouping: { similarityThreshold: 0.88, minAliasFrequency: 1 },
     render: { previewScale: 0.5, fullScale: 2, jpegQuality: 80, cachePages: 16 },
     export: { defaultDpi: 300, defaultImageFormat: "png", defaultJpegQuality: 80 },
+    detection: DEFAULT_DETECTION_CONFIG,
   };
 }
 

@@ -6,6 +6,7 @@ import {
   InvalidInputError,
   type EngineContext,
   type EntityFound,
+  type EntityTypeId,
 } from "@anonly/shared";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
@@ -583,7 +584,7 @@ describe("RegexEngine — edge case tests", () => {
       { nombre: "Decreto 1023/2001", tokens: ["Decreto", "1023/2001"] },
     ];
 
-    const watchedTypes = new Set([
+    const watchedTypes = new Set<EntityTypeId>([
       EntityType.License,
       EntityType.Plate,
       EntityType.IBAN,

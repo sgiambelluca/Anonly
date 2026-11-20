@@ -23,6 +23,7 @@ import type { EntityGroup } from "@anonly/anonymization-core";
 import { SearchIcon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
+import { toBaseEntityType } from "../../baseEntityType.js";
 import { actions } from "../../core-adapter/actions.js";
 import { useEntitiesStore } from "../../store/entities.store.js";
 import { Button } from "../common/Button.js";
@@ -66,9 +67,12 @@ export function MergeDialog({ sourceGroupId, open, onClose }: MergeDialogProps) 
     () =>
       sourceGroup === undefined
         ? []
-        : [...mergeTargetOptions(sourceGroup, groupsByType.get(sourceGroup.type) ?? [])].sort(
-            (a, b) => a.indexInType - b.indexInType,
-          ),
+        : [
+            ...mergeTargetOptions(
+              sourceGroup,
+              groupsByType.get(toBaseEntityType(sourceGroup.type)) ?? [],
+            ),
+          ].sort((a, b) => a.indexInType - b.indexInType),
     [sourceGroup, groupsByType],
   );
   const selected = candidates.filter((group) => selectedIds.has(group.id));
@@ -93,7 +97,7 @@ export function MergeDialog({ sourceGroupId, open, onClose }: MergeDialogProps) 
 
   const validation = validateMultiMerge(sourceGroup, selected);
   // "personas", pero "DNI" y "CUIT" quedan en mayúsculas.
-  const plural = ENTITY_TYPE_LABEL[sourceGroup.type];
+  const plural = ENTITY_TYPE_LABEL[toBaseEntityType(sourceGroup.type)];
   const typeLabel = plural === plural.toUpperCase() ? plural : plural.toLowerCase();
 
   function toggle(groupId: string, checked: boolean): void {
@@ -182,7 +186,8 @@ export function MergeDialog({ sourceGroupId, open, onClose }: MergeDialogProps) 
           >
             {candidates.length === 0 ? (
               <p className="p-2 text-text-secondary">
-                No hay otras entidades de tipo {ENTITY_TYPE_LABEL[sourceGroup.type]} para fusionar.
+                No hay otras entidades de tipo{" "}
+                {ENTITY_TYPE_LABEL[toBaseEntityType(sourceGroup.type)]} para fusionar.
               </p>
             ) : visible.length === 0 ? (
               <p className="p-2 text-text-secondary">Ninguna coincide con el filtro.</p>

@@ -172,7 +172,8 @@ export interface Occurrence {
   readonly pageIndex: number;
   readonly source: DetectionSource;
   readonly confidence: number;
-  readonly entityType: EntityType;
+  /** ADR-219 §1: un tipo base o uno propio. */
+  readonly entityType: EntityTypeId;
   /** Formato de máscara del patrón que matcheó (Regex lo copia de `RegexPattern.maskFormat`; ausente en NER). ADR-029. */
   readonly maskFormat?: string;
   readonly wordSpan?: WordSpan;
@@ -198,6 +199,13 @@ export interface Occurrence {
    * una cadena vacía obligaría a distinguir "no hay" de "está vacío".
    */
   readonly context?: OccurrenceContext;
+  /**
+   * ADR-222 §2: el formato o patrón que matcheó. Solo en `source: Regex`; va
+   * junto con `formatOrigin` (los dos presentes o los dos ausentes).
+   */
+  readonly formatId?: string;
+  /** ADR-222 §2: `"user"` = formato propio, copia editada o referencia de otro país. */
+  readonly formatOrigin?: "base" | "user";
 }
 
 export interface OccurrenceRef {
@@ -219,6 +227,8 @@ export interface OccurrenceRef {
   readonly fragments?: ReadonlyArray<BoundingBox>;
   /** ADR-105: copiado tal cual de `Occurrence.context`. */
   readonly context?: OccurrenceContext;
+  /** ADR-222 §2: copiado tal cual de `Occurrence.formatId` por `toOccurrenceRef`, con propagación explícita como `fragments`. */
+  readonly formatId?: string;
 }
 
 /**
@@ -238,7 +248,8 @@ export interface ReplacementPreviews {
 
 export interface EntityGroup {
   readonly id: string;
-  readonly type: EntityType;
+  /** ADR-219 §1: un tipo base o uno propio. */
+  readonly type: EntityTypeId;
   readonly canonicalValue: string;
   readonly members: ReadonlyArray<OccurrenceRef>;
   readonly replacementMode: ReplacementMode;
@@ -289,6 +300,12 @@ export interface EntityGroup {
    * en "Editar reemplazo". No lo leen Render ni Export.
    */
   readonly replacementPreviews: ReplacementPreviews;
+  /**
+   * ADR-224 §2: el `formatId` del primer miembro, en orden documental, que salió
+   * de un formato del tipo actual del grupo. Ausente si ningún miembro cumple.
+   * Lo calcula Grouping.
+   */
+  readonly formatId?: string;
   readonly createdAt: number;
   readonly updatedAt: number;
 }
@@ -300,6 +317,7 @@ export interface EntityGroup {
  * en un documento.
  */
 export interface SyntheticRequest {
+  /** Sigue siendo `EntityType` y no `EntityTypeId`: un tipo propio no sintetiza (ADR-219 §3). */
   readonly type: EntityType;
   /**
    * ADR-072 §1: la SEMILLA del sorteo es la identidad del grupo
@@ -321,6 +339,12 @@ export interface SyntheticRequest {
    * valor que produciría sin el campo.
    */
   readonly personGender?: PersonGender;
+  /**
+   * ADR-221 §4: el país activo elige el generador de los tipos que dependen
+   * del país (DNI, CUIT, Phone, License, Plate). No entra a la semilla: con
+   * `"AR"`, el mismo (type, groupId, seed) da el mismo valor que antes del campo.
+   */
+  readonly country: CountryCode;
 }
 
 export interface Replacement {
@@ -338,7 +362,7 @@ export interface Replacement {
 // Entrada de IPipelineOrchestrator.addManualEntity (ADR-061 §3/§6).
 export interface ManualEntityRequest {
   readonly value: string;
-  readonly entityType: EntityType;
+  readonly entityType: EntityTypeId;
 }
 
 // Salida de IPipelineOrchestrator.findText — misma búsqueda literal que
@@ -355,7 +379,7 @@ export interface TextMatch {
 // (ui/React_Client.md ADR-169 §10). Los valores salen del mismo código que el
 // pedido real sobre una copia de la sesión; la UI no los reimplementa (U-3).
 export type EditPreviewRequest =
-  | { readonly kind: "type"; readonly groupId: string; readonly type: EntityType }
+  | { readonly kind: "type"; readonly groupId: string; readonly type: EntityTypeId }
   | {
       readonly kind: "merge";
       readonly sourceGroupId: string;
@@ -370,7 +394,7 @@ export type EditPreviewRequest =
 export interface EditPreviewGroup {
   /** `null` = el grupo que la operación crearía (la parte nueva de un split). */
   readonly groupId: string | null;
-  readonly type: EntityType;
+  readonly type: EntityTypeId;
   readonly indexInType: number;
   readonly canonicalValue: string;
   readonly memberCount: number;
@@ -387,7 +411,7 @@ export interface EditPreview {
 export interface RuleTarget {
   readonly kind: RuleScope;
   readonly groupId?: string;
-  readonly entityType?: EntityType;
+  readonly entityType?: EntityTypeId;
 }
 
 export interface Rule {
@@ -411,9 +435,11 @@ export interface Annotation {
 
 export interface ConflictCandidate {
   readonly source: DetectionSource;
-  readonly entityType: EntityType;
+  readonly entityType: EntityTypeId;
   readonly confidence: number;
   readonly value: string;
+  /** ADR-222 §2: el formato del candidato, para que el panel lo nombre. */
+  readonly formatId?: string;
 }
 
 export interface Conflict {
@@ -428,7 +454,7 @@ export interface Conflict {
    * tenía nada que ver con el desacuerdo (el conflicto es sobre QUÉ es la
    * entidad; el modo de reemplazo se elige en la fila del grupo).
    */
-  readonly resolvedType?: EntityType;
+  readonly resolvedType?: EntityTypeId;
   /**
    * ADR-174 §1: hay una ocurrencia manual retenida esperando que el usuario
    * decida quién gana (`ConflictResolveRequested.winner`).
@@ -666,7 +692,7 @@ export interface RenderLegendPayload {
 // implementador: requiere cambiar este tipo. Mismo mecanismo que
 // `includeOriginalMetadata: false` de ADR-009 (garantía por tipos, no por convención).
 export interface MarkerLegendEntry {
-  readonly type: EntityType;
+  readonly type: EntityTypeId;
   readonly prefixes: ReadonlyArray<string>; // p. ej. ["PERSONA", "PERS", "PRS"]
   readonly markerCount: number;
 }
@@ -747,3 +773,234 @@ export interface EncodedPageImage {
   readonly widthPx: number;
   readonly heightPx: number;
 }
+
+// ─── Tipos propios, formatos y catálogos por país (1.1, Contracts.md §5.2) ───
+// ADR-219 a ADR-224. Todo es dato serializable a JSON: lo guarda la aplicación
+// (ADR-223 §3) y viaja en el archivo de formatos (ADR-223 §5).
+
+// ─── País (ADR-221 §1) ───
+// La 1.1 sale con "AR" sola; "CL" y "UY" entran al tipo en la 1.1.1 junto con
+// sus catálogos (ADR-221 §7). Hasta entonces el tipo es "AR".
+export type CountryCode = "AR";
+
+// ─── Identidad de un tipo (ADR-219 §1) ───
+/** `"user:"` + UUID v4. */
+export type UserEntityTypeId = `user:${string}`;
+export type EntityTypeId = EntityType | UserEntityTypeId;
+
+/** ADR-219 §2. La etiqueta no se guarda: la deriva `userTypeLabel(name)`. */
+export interface UserEntityTypeDefinition {
+  readonly id: UserEntityTypeId;
+  /** Como lo escribió el usuario. */
+  readonly name: string;
+  readonly shortLabels?: {
+    /** Nivel 1 de ADR-057; ausente = automático. */
+    readonly level1?: string;
+    /** Nivel 2 de ADR-057; ausente = automático. */
+    readonly level2?: string;
+  };
+}
+
+// ─── Formato (ADR-220 §1) ───
+export type FormatCharClass = "digit" | "letter" | "upper" | "lower" | "alnum";
+export type FormatSeparator = " " | "-" | "." | "/";
+
+export type FormatPiece =
+  | {
+      readonly kind: "chars";
+      readonly charClass: FormatCharClass;
+      readonly min: number;
+      readonly max: number;
+    }
+  | { readonly kind: "text"; readonly value: string }
+  | {
+      readonly kind: "separator";
+      readonly chars: ReadonlyArray<FormatSeparator>;
+      readonly optional: boolean;
+    }
+  // Sin optional adentro.
+  | { readonly kind: "optional"; readonly pieces: ReadonlyArray<FormatPiece> };
+
+export interface FormatDefinition {
+  /** `"fmt:"` + UUID v4; las del catálogo, `"fmt:base:<id>"` (ver `validateFormat`). */
+  readonly id: string;
+  readonly name: string;
+  /** Tipo propio o uno de `FORMAT_ADMITTING_BASE_TYPES`. */
+  readonly entityType: EntityTypeId;
+  readonly variants: ReadonlyArray<ReadonlyArray<FormatPiece>>;
+  /** Ausente = sin contexto. */
+  readonly contextBefore?: ReadonlyArray<string>;
+  /** ADR-220 §4: id del formato base editado. */
+  readonly basedOn?: string;
+  readonly enabled: boolean;
+}
+
+// ─── Catálogo (ADR-221 §2, ADR-220 §4) ───
+export type CatalogFormatKind = "structure" | "control";
+
+export interface CatalogFormatInfo {
+  /** "dni-ar", "cuit-ar", …; "cl:…"/"uy:…" desde la 1.1.1. */
+  readonly id: string;
+  readonly country: CountryCode | "universal";
+  /** Nombre para la interfaz: "Celular". */
+  readonly name: string;
+  readonly entityType: EntityType;
+  readonly kind: CatalogFormatKind;
+  /** Solo "structure": la equivalente que se edita. */
+  readonly definition?: FormatDefinition;
+}
+
+/** ADR-221 §5: un formato de otro catálogo, agregado como propio. */
+export interface CatalogFormatRef {
+  /** `"ref:"` + UUID v4. */
+  readonly id: string;
+  readonly country: CountryCode;
+  readonly catalogFormatId: string;
+  readonly enabled: boolean;
+}
+
+// ─── Configuración (ADR-223 §2) ───
+export interface BaseFormatSetting {
+  /** Id del catálogo del país activo. */
+  readonly formatId: string;
+  /** Un formato base sin entrada está prendido. */
+  readonly enabled: boolean;
+}
+
+export interface DetectionConfig {
+  readonly country: CountryCode;
+  readonly baseFormats: ReadonlyArray<BaseFormatSetting>;
+  readonly userTypes: ReadonlyArray<UserEntityTypeDefinition>;
+  /** Incluye las copias editadas. */
+  readonly userFormats: ReadonlyArray<FormatDefinition>;
+  readonly catalogRefs: ReadonlyArray<CatalogFormatRef>;
+}
+
+// ─── Validar un tipo propio (ADR-219 §2) ───
+export type UserEntityTypeIssueCode =
+  | "name_empty"
+  | "name_too_long"
+  | "name_invalid_chars"
+  | "name_without_letter"
+  | "short_label_invalid"
+  | "label_taken"
+  | "id_invalid"
+  | "id_taken";
+
+export interface UserEntityTypeValidationContext {
+  readonly country: CountryCode;
+  /**
+   * Los tipos propios contra los que se compara la etiqueta. Quien edita un
+   * tipo existente lo excluye de la lista (se compara por id).
+   */
+  readonly existing: ReadonlyArray<UserEntityTypeDefinition>;
+}
+
+export interface UserEntityTypeValidation {
+  /** `ok === (issues.length === 0)`. */
+  readonly ok: boolean;
+  readonly issues: ReadonlyArray<{ readonly code: UserEntityTypeIssueCode }>;
+}
+
+// ─── Validar, probar y comparar un formato (ADR-220 §3) ───
+export type FormatIssueCode =
+  | "name_empty"
+  | "name_too_long"
+  | "name_taken"
+  | "no_variants"
+  | "too_many_variants"
+  | "variant_empty"
+  | "variant_without_chars"
+  | "too_many_pieces"
+  | "chars_range_invalid"
+  | "chars_repeat_too_large"
+  | "text_empty"
+  | "text_too_long"
+  | "separator_empty"
+  | "optional_empty"
+  | "optional_nested"
+  | "context_empty"
+  | "context_too_long"
+  | "too_many_context_words"
+  | "too_many_states"
+  | "type_unknown"
+  | "type_not_admitted"
+  | "id_invalid";
+
+export interface FormatIssue {
+  readonly code: FormatIssueCode;
+  /** Ausente = el problema es del formato entero. */
+  readonly variantIndex?: number;
+  /** Índice dentro de la variante, contando las piezas de un optional en orden. */
+  readonly pieceIndex?: number;
+}
+
+export interface FormatValidationContext {
+  /** Guardados; un formato no apunta a un tipo del documento. */
+  readonly userTypes: ReadonlyArray<UserEntityTypeDefinition>;
+  /** Excluye el que se edita. */
+  readonly existingFormats: ReadonlyArray<{ readonly id: string; readonly name: string }>;
+}
+
+export interface FormatValidation {
+  /** `ok === (issues.length === 0)`. */
+  readonly ok: boolean;
+  readonly issues: ReadonlyArray<FormatIssue>;
+}
+
+/** Un tramo de `sampleText` que se detectaría. Índices en code units, `end` exclusivo. */
+export interface FormatTestMatch {
+  readonly start: number;
+  readonly end: number;
+}
+
+export interface FormatComparisonInput {
+  /** Los formatos base salen del catálogo de ese país. */
+  readonly country: CountryCode;
+  /** Los apagados no se comparan. */
+  readonly baseFormats: ReadonlyArray<BaseFormatSetting>;
+  /** Excluye el que se edita; los apagados también se comparan. */
+  readonly userFormats: ReadonlyArray<FormatDefinition>;
+  /** Las apagadas también se comparan. */
+  readonly catalogRefs: ReadonlyArray<CatalogFormatRef>;
+}
+
+export interface FormatComparison {
+  /** Id del formato con la misma estructura canónica; bloquea crear. */
+  readonly identicalTo: string | null;
+  /**
+   * Formatos que comparten algún texto, con el texto más corto que ambos
+   * reconocen (exacto contra formatos del generador; por ejemplos contra los
+   * de control, ADR-220 §3). Avisa y deja crear.
+   */
+  readonly overlaps: ReadonlyArray<{ readonly formatId: string; readonly example: string }>;
+}
+
+// ─── Archivo de formatos (ADR-223 §5-§6) ───
+export interface FormatsFileContent {
+  readonly kind: "anonly-formats";
+  readonly version: 1;
+  readonly types: ReadonlyArray<UserEntityTypeDefinition>;
+  readonly formats: ReadonlyArray<FormatDefinition>;
+  readonly catalogRefs: ReadonlyArray<CatalogFormatRef>;
+}
+
+export type FormatsFileIssueCode =
+  | "not_json"
+  | "wrong_kind"
+  | "version_invalid"
+  | "version_newer"
+  | "schema_invalid"
+  | "type_invalid"
+  | "format_invalid"
+  | "format_type_missing";
+
+export type FormatsFileValidation =
+  | { readonly ok: true; readonly content: FormatsFileContent }
+  | {
+      readonly ok: false;
+      readonly issues: ReadonlyArray<{
+        readonly code: FormatsFileIssueCode;
+        readonly path?: string;
+      }>;
+    };

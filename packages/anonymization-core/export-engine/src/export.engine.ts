@@ -130,9 +130,11 @@ import {
   EntityType,
   EventChannel,
   InvalidInputError,
+  isUserEntityType,
   ReplacementMode,
   type EngineContext,
   type EntityGroup,
+  type EntityTypeId,
   type ExportMetadata,
   type ExportPagePayload,
   type ExportSavePayload,
@@ -409,6 +411,22 @@ export function buildPageReplacements(
 // de Person/DNI/License/Plate son los ejemplos literales de ADR-059 §2; los 9
 // restantes son presentacionales de bajo riesgo, mismo criterio que
 // labels.ts usó para sus 9 no ejemplificados por ADR-012.
+/**
+ * Guarda provisional de la 1.1 (F0, Plan_1.1 §7, ADR-219 §6): la tabla de
+ * abajo solo conoce los tipos base. La leyenda de un tipo propio, con su nombre
+ * en la fila, es de F4b; hasta entonces no puede llegar acá porque nada produce
+ * un tipo propio. Privada del módulo.
+ */
+function toBaseEntityType(type: EntityTypeId): EntityType {
+  if (isUserEntityType(type)) {
+    throw new InvalidInputError(
+      "export-engine: la leyenda de un tipo propio todavía no existe (llega con F4b)",
+      { type },
+    );
+  }
+  return type;
+}
+
 const MARKER_LEGEND_TYPE_NAME: Readonly<Record<EntityType, string>> = {
   [EntityType.Person]: "Persona",
   [EntityType.Organization]: "Organización",
@@ -451,8 +469,8 @@ function extractPlaceholderPrefix(replacementValue: string): string | undefined 
 export function buildMarkerLegendEntries(
   groups: ReadonlyArray<EntityGroup>,
 ): ReadonlyArray<MarkerLegendEntry> {
-  const prefixesByType = new Map<EntityType, Set<string>>();
-  const countByType = new Map<EntityType, number>();
+  const prefixesByType = new Map<EntityTypeId, Set<string>>();
+  const countByType = new Map<EntityTypeId, number>();
 
   for (const group of groups) {
     if (!group.enabled || group.replacementMode !== ReplacementMode.Placeholder) continue;
@@ -485,7 +503,7 @@ export function buildMarkerLegend(
 ): ReadonlyArray<MarkerLegendRow> {
   return entries.map((entry) => ({
     prefixes: entry.prefixes.join(", "),
-    typeName: MARKER_LEGEND_TYPE_NAME[entry.type],
+    typeName: MARKER_LEGEND_TYPE_NAME[toBaseEntityType(entry.type)],
     countLabel: `${entry.markerCount} marcador${entry.markerCount === 1 ? "" : "es"}`,
   }));
 }

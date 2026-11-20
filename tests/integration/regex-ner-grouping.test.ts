@@ -10,6 +10,7 @@ import { GroupingEngine } from "@anonly/grouping-engine";
 import { NerEngine } from "@anonly/ner-engine";
 import { RegexEngine } from "@anonly/regex-engine";
 import {
+  DEFAULT_DETECTION_CONFIG,
   DetectionSource,
   EntityType,
   type Document,
@@ -88,6 +89,7 @@ function createConfig(): EngineConfig {
     grouping: { similarityThreshold: 0.88, minAliasFrequency: 1 },
     render: { previewScale: 1, fullScale: 2.08, jpegQuality: 0.85, cachePages: 16 },
     export: { defaultDpi: 150, defaultImageFormat: "jpeg", defaultJpegQuality: 0.85 },
+    detection: DEFAULT_DETECTION_CONFIG,
   };
 }
 

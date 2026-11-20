@@ -6,8 +6,9 @@
  * i18n de UI, igual que `settings.store.language`, `ui/React_Client.md` §3.7).
  */
 
-import { EntityType } from "@anonly/anonymization-core";
+import { EntityType, type EntityTypeId } from "@anonly/anonymization-core";
 
+import { toBaseEntityType } from "../../baseEntityType.js";
 import type { SelectOption } from "../common/Select.js";
 
 export const ENTITY_TYPE_LABEL: Readonly<Record<EntityType, string>> = {
@@ -82,6 +83,7 @@ export function formatIndexInType(indexInType: number): string {
 }
 
 /** "Persona N.º 06": cómo se nombra una entidad concreta fuera de la fila. */
-export function describeEntityNumber(type: EntityType, indexInType: number): string {
-  return `${ENTITY_TYPE_SINGULAR[type]} N.º ${formatIndexInType(indexInType)}`;
+export function describeEntityNumber(type: EntityTypeId, indexInType: number): string {
+  // Guarda provisional (F0): la tabla es de tipos base; F7 la reemplaza.
+  return `${ENTITY_TYPE_SINGULAR[toBaseEntityType(type)]} N.º ${formatIndexInType(indexInType)}`;
 }
