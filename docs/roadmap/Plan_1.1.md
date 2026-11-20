@@ -16,6 +16,10 @@ contrato, los specs de Grouping y del Orchestrator y los tres documentos de
 `ui/` están escritos (§6). Ya no falta nada para que arranque F7 más que
 los frentes de los que depende.
 
+**Estado (2026-11-20):** F0, F1 y F2 están commiteados. F3 y F5 están
+implementados y revisados. El mantenedor sumó tres precisiones (§3.5 y
+§3.8), y una de ellas pide escribir los textos de falla antes de F7 (§6).
+
 Reemplaza a `Plan_Funcional_1.1.md`, el borrador del 2026-10-13, que no
 llegó a commitearse.
 
@@ -109,6 +113,8 @@ Se suman dos cosas que no estaban en el roadmap:
 | Versiones cortas automáticas, y el usuario puede escribirlas | 10-19 | 219 §2 |
 | La máscara conserva espacios y separadores | 10-19 | 219 §3 |
 | Numeración y modo, por tipo | 10-19 | 219, 224 |
+| La etiqueta de un tipo propio tampoco puede repetir `MUJER` ni `HOMBRE`, las de persona según el género | 11-20 | 219 §2 |
+| Borrar un tipo del documento borra también el agregado a mano de ese tipo que espera en un choque, y queda lo detectado | 11-20 | 225 §4 |
 
 ### 3.6 Fallos
 
@@ -145,6 +151,8 @@ final».
 | El selector de país de la 1.1.1 va en «Formatos de detección» | 11-15 | 227 §7 |
 | Generador de una columna: piezas que se arrastran, prueba en un panel flotante, estado en una caja al final y confirmación antes de perder algo | 11-15 y 11-16 | 228 |
 | Los cuatro selectores de tipo ofrecen «Nuevo tipo» en línea, pidiendo solo el nombre | 11-16 | 229 §2 |
+| Cada falla al crear o editar un tipo, un formato o al importar dice por qué no se puede y qué hacer, con un texto por código | 11-20 | 219 §2; `UX_Guidelines.md` §11b.16 |
+| Borrar un tipo con choques sin resolver suma un aviso que recomienda resolverlos antes; no bloquea | 11-20 | 225 §4 |
 
 ## 4. Propuestas del planificador sin objeción del mantenedor
 
@@ -234,9 +242,20 @@ para aceptar junto con los ADR**:
   - `08_Security_Model.md` §10.2.
 - Se escribieron los specs de interfaz: `Components.md` §13b, `UX_Guidelines.md` §11b y `React_Client.md` §3b.
 
+**Hecho el 2026-11-20:** tres precisiones del mantenedor, en ADR-219 §2,
+ADR-225 §4, `Contracts.md` §3.5 y §5.2, `Grouping_Engine.md` v1.19.1 y los
+specs de interfaz (`Components.md` §13b.3 y §13b.6, `UX_Guidelines.md`
+§11b.10 y §11b.16). Ver §3.5 y §3.8.
+
 **Falta:**
 
-1. **El frente F6** (Chile y Uruguay, para la 1.1.1) tiene su propia aprobación de tablas antes de escribir sus filas (ADR-221 §6). Su investigación no necesita código y puede arrancar en paralelo.
+1. **Los textos de falla, antes de F7** (decisión del mantenedor, 2026-11-20).
+   Cada código de `UserEntityTypeIssueCode`, `FormatIssueCode` y
+   `FormatsFileIssueCode` necesita un texto que diga por qué no se puede, con
+   el dato que choca, y qué hacer. Van en la tabla de `UX_Guidelines.md`
+   §11b.16. Los propone el planificador y los aprueba el mantenedor. Ya está
+   aprobado el de `label_taken`.
+2. **El frente F6** (Chile y Uruguay, para la 1.1.1) tiene su propia aprobación de tablas antes de escribir sus filas (ADR-221 §6). Su investigación no necesita código y puede arrancar en paralelo.
 
 ## 7. Frentes de implementación
 

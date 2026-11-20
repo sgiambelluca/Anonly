@@ -1088,6 +1088,17 @@ quedan libres y descubiertas. Dejan de tener tipo y de ocultarse: se van a ver t
 documento y en la copia que exportes.». Sugiere cambiarles el tipo antes (ADR-225 §4). Se deshace
 como cualquier edición.
 
+**Con choques sin resolver** (decisión del mantenedor, 2026-11-20). Si alguna entidad del tipo está
+en un choque sin resolver (un grupo del tipo con un conflicto, o un agregado a mano de ese tipo que
+espera que el usuario elija), la confirmación suma un aviso, antes de la lista:
+
+- «Hay N choque(s) sin resolver con entidades de este tipo. Si borrás el tipo, esas entidades
+  también se borran y sus choques se descartan: queda lo que se detectó. Conviene resolver los
+  choques antes de borrar.»
+- No bloquea: «Borrar tipo y entidad(es)» sigue disponible. Es una fricción, no una traba.
+- La interfaz cuenta los choques desde los conflictos sin resolver del snapshot: los de los grupos
+  del tipo, y los `heldManual` con un candidato de ese tipo. No hace falta un método nuevo.
+
 ### 11b.11 Deshacer en la 1.1
 
 - Crear, editar y borrar un tipo del documento son ediciones: entran a la pila de §3.3b y su aviso
@@ -1126,6 +1137,29 @@ atajos de la tabla de §9, que es la misma que los declara (ADR-224 §5, ADR-229
 | Tipo del documento sin entidades | La banda, con «Todavía no tiene entidades. Seleccioná el texto en el PDF o agregalo desde acá.» y «Agregar entidad» |
 | Filtros sin resultados | «Ninguna entidad cumple los filtros» y «Quitar filtros» |
 | Generador sin pieza elegida | «Elegí una pieza para ajustarla, o sumá una con «Pieza». Para cambiarles el orden, arrastralas.» |
+
+### 11b.16 Cada falla dice por qué y qué hacer
+
+Decisión del mantenedor (2026-11-20). Crear tipos y formatos es personalizar la detección, y el
+usuario tiene que entender por qué algo no se puede.
+
+- **Todo código de falla que llega a la interfaz tiene un texto.** Son los de
+  `UserEntityTypeIssueCode`, `FormatIssueCode` y `FormatsFileIssueCode` (`Contracts.md` §5.2).
+- **Cada texto dice dos cosas:** por qué no se puede, con el dato concreto que choca, y qué hacer.
+  Nunca muestra el código ni un mensaje técnico.
+- **Va donde ya está previsto:** en la ranura de alto fijo del formulario del tipo (`Components.md`
+  §13b.3) o en la caja de estado del generador (§11b.8), sin mover el layout.
+- **Los textos salen de una tabla de textos de la aplicación**, como los ejemplos de los formatos
+  con control (ADR-227 §6).
+
+Textos aprobados:
+
+| Código | Texto |
+|---|---|
+| `label_taken` | «Ya hay un tipo que se reemplaza como {ETIQUETA}, y en el documento no se distinguirían. Elegí otro nombre.» |
+
+**Pendiente antes de F7** (`Plan_1.1.md` §6): el texto de cada uno de los demás códigos, que
+aprueba el mantenedor.
 
 ---
 

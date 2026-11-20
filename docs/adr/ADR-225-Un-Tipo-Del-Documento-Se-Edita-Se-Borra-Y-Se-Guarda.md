@@ -5,7 +5,10 @@
 - **Estado**: Aceptado por el mantenedor el 2026-11-16. Las decisiones de producto son del
   mantenedor (2026-10-20, 2026-11-15 y 2026-11-16, sobre el lienzo «Anonly 1.1
   — UI final»). Los detalles técnicos de §3 a §6 son del planificador;
-  el mantenedor los aceptó ese día.
+  el mantenedor los aceptó ese día. **Precisado por el mantenedor el
+  2026-11-20** (§4: borrar un tipo descarta también el agregado a mano
+  retenido en un choque, y la confirmación avisa de los choques sin
+  resolver).
 - **Fecha**: 2026-11-16.
 - **Decidido por**: el mantenedor, a propuesta del planificador en lo técnico.
 - **Origen**: el diseño de la interfaz de la 1.1 (`Plan_1.1.md` §6, frente F7).
@@ -149,12 +152,32 @@ lo dice con estas palabras: «Sus entidades quedan libres y descubiertas».
   literales retenidos.
 - **Un agregado manual nuevo de un valor eliminado lo recupera**, como en
   ADR-171 §4. No hay regla nueva.
+- **Un choque pendiente de una entidad del tipo** (decisión del mantenedor,
+  2026-11-20). Un agregado a mano de ese tipo puede estar retenido en un
+  choque sin resolver (ADR-174): por ejemplo, «20123456» agregado como
+  «Afiliado» cuando ya estaba detectado como DNI.
+  - Al borrar el tipo, ese agregado también se borra: el choque se resuelve
+    como si el usuario hubiera elegido lo detectado (ADR-174 §3, `winner:
+    "detected"`) y emite `CONFLICT_RESOLVED`. Queda lo detectado.
+  - Sin esto, el choque seguía abierto con un agregado de un tipo que ya no
+    existe, y elegir el agregado dejaba la sesión inconsistente. Lo encontró
+    el revisor del bloque F3+F5.
+  - Los choques de los grupos del tipo ya se descartaban con
+    `applyGroupRemove`; no cambian.
 
 **La confirmación:**
 
 - lista las entidades que se van a eliminar, con sus apariciones;
 - avisa que dejan de ocultarse en el documento y en la copia exportada, y
   sugiere cambiarles el tipo antes si se quieren seguir ocultando;
+- **si alguna entidad del tipo está en un choque sin resolver**, sea uno de
+  sus grupos o un agregado a mano retenido, suma un aviso (decisión del
+  mantenedor, 2026-11-20):
+  - explica que borrar el tipo también borra esas entidades y descarta sus
+    choques;
+  - recomienda resolver los choques antes de borrar;
+  - no bloquea: el botón de borrar sigue disponible. La interfaz lo sabe por
+    los conflictos sin resolver del snapshot, sin método nuevo;
 - un auxiliar vacío se confirma igual, sin lista ni aviso.
 
 ### 5. Guardar: un auxiliar pasa a concreto
@@ -254,7 +277,12 @@ No hace falta un método nuevo del Core: guardar es de la aplicación.
     cada uno;
   - un re-análisis no trae de vuelta sus valores;
   - un agregado manual de uno de esos valores sí lo recupera;
-  - `getDocumentEntityTypes` ya no lo devuelve.
+  - `getDocumentEntityTypes` ya no lo devuelve;
+  - un agregado a mano del tipo retenido en un choque sin resolver se
+    descarta, el choque se resuelve con lo detectado y emite
+    `CONFLICT_RESOLVED`;
+  - la confirmación avisa de los choques sin resolver y recomienda
+    resolverlos antes.
 - **Deshacer:**
   - después de crear un auxiliar, lo borra;
   - después de editarlo, vuelve el nombre anterior y las etiquetas
