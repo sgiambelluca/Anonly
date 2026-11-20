@@ -509,7 +509,7 @@ export function buildMarkerLegend(
 }
 
 interface LegendPayloadFields {
-  readonly legendImage: EncodedPageImage;
+  readonly legendImages: ReadonlyArray<EncodedPageImage>;
   readonly legendPageWidthPt: number;
   readonly legendPageHeightPt: number;
 }
@@ -520,7 +520,7 @@ async function renderLegendWithTimeout(
   abortSignal: AbortSignal,
   documentId: string,
   timeoutMs: number,
-): Promise<EncodedPageImage> {
+): Promise<ReadonlyArray<EncodedPageImage>> {
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
   const timeoutPromise = new Promise<never>((_, reject) => {
     timeoutId = setTimeout(() => {
@@ -852,10 +852,10 @@ export class ExportEngine implements IEngine {
     }
 
     const rows = buildMarkerLegend(entries);
-    const legendImage = await this.renderLegendWithRetry(input, ctx, rows, timeoutMs);
+    const legendImages = await this.renderLegendWithRetry(input, ctx, rows, timeoutMs);
 
     return {
-      legendImage,
+      legendImages,
       legendPageWidthPt: firstPage.width,
       legendPageHeightPt: firstPage.height,
     };
@@ -871,7 +871,7 @@ export class ExportEngine implements IEngine {
     ctx: EngineContext,
     rows: ReadonlyArray<MarkerLegendRow>,
     timeoutMs: number,
-  ): Promise<EncodedPageImage> {
+  ): Promise<ReadonlyArray<EncodedPageImage>> {
     let lastError: unknown;
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       if (ctx.abortSignal.aborted) {
@@ -911,7 +911,7 @@ export class ExportEngine implements IEngine {
       metadata,
       ...(legend !== undefined
         ? {
-            legendImage: legend.legendImage,
+            legendImages: legend.legendImages,
             legendPageWidthPt: legend.legendPageWidthPt,
             legendPageHeightPt: legend.legendPageHeightPt,
           }

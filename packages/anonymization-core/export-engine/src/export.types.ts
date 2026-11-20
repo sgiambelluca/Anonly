@@ -33,6 +33,7 @@ import type {
   MarkerLegendRow,
   Replacement,
   Rule,
+  UserEntityTypeDefinition,
 } from "@anonly/shared";
 
 export type { EncodedPageImage };
@@ -48,10 +49,11 @@ export interface RenderPageProvider {
   // Implementado por el Orchestrator (único autorizado a hablarle a Export y
   // Render, P-1); solo se invoca con ExportOptions.includeMarkerLegend activo
   // y al menos una fila.
+  // ADR-219 §6: una o más páginas, en orden; las pagina Render.
   renderLegend(
     rows: ReadonlyArray<MarkerLegendRow>,
     abortSignal: AbortSignal,
-  ): Promise<EncodedPageImage>;
+  ): Promise<ReadonlyArray<EncodedPageImage>>;
 }
 
 export interface ExportEngineInput {
@@ -61,6 +63,9 @@ export interface ExportEngineInput {
   readonly rules: ReadonlyArray<Rule>;
   readonly options: ExportOptions;
   readonly renderPageProvider: RenderPageProvider;
+  // ADR-219 §6: tipos propios guardados y del documento, para nombrar sus filas
+  // en la hoja de referencia. Los pasa el Orchestrator.
+  readonly userTypes: ReadonlyArray<UserEntityTypeDefinition>;
 }
 
 export interface ExportEngineOutput {

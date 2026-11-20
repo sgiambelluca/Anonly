@@ -765,7 +765,7 @@ describe("kernelRenderLegendPage — página de leyenda del export (ADR-059 §5)
 
   it("no toca pdfjs-dist en absoluto — no requiere documento cargado", async () => {
     await kernelRenderLegendPage(
-      { rows: [makeMarkerLegendRow()], pageWidthPt: 300, pageHeightPt: 200 },
+      { rows: [makeMarkerLegendRow()], startRow: 0, pageWidthPt: 300, pageHeightPt: 200 },
       legendOpts,
     );
 
@@ -774,7 +774,7 @@ describe("kernelRenderLegendPage — página de leyenda del export (ADR-059 §5)
 
   it("defaults to png when imageFormat is absent from the payload", async () => {
     await kernelRenderLegendPage(
-      { rows: [makeMarkerLegendRow()], pageWidthPt: 300, pageHeightPt: 200 },
+      { rows: [makeMarkerLegendRow()], startRow: 0, pageWidthPt: 300, pageHeightPt: 200 },
       legendOpts,
     );
 
@@ -783,9 +783,10 @@ describe("kernelRenderLegendPage — página de leyenda del export (ADR-059 §5)
   });
 
   it("respects an explicit imageFormat and the effective jpegQuality", async () => {
-    const encoded = await kernelRenderLegendPage(
+    const { image: encoded } = await kernelRenderLegendPage(
       {
         rows: [makeMarkerLegendRow()],
+        startRow: 0,
         pageWidthPt: 300,
         pageHeightPt: 200,
         imageFormat: "jpeg",
@@ -812,8 +813,8 @@ describe("kernelRenderLegendPage — página de leyenda del export (ADR-059 §5)
     // A4 (595): ancho donde el título entra en una línea. Con 500 pt el
     // título se envuelve en dos, que es correcto pero rompe el conteo fijo
     // que este test usa para verificar la estructura de la tabla.
-    const encoded = await kernelRenderLegendPage(
-      { rows, pageWidthPt: 595, pageHeightPt: 400 },
+    const { image: encoded } = await kernelRenderLegendPage(
+      { rows, startRow: 0, pageWidthPt: 595, pageHeightPt: 400 },
       legendOpts,
     );
 
@@ -849,7 +850,7 @@ describe("kernelRenderLegendPage — página de leyenda del export (ADR-059 §5)
 
     await expect(
       kernelRenderLegendPage(
-        { rows: [makeMarkerLegendRow()], pageWidthPt: 300, pageHeightPt: 200 },
+        { rows: [makeMarkerLegendRow()], startRow: 0, pageWidthPt: 300, pageHeightPt: 200 },
         legendOpts,
       ),
     ).rejects.toThrow("OffscreenCanvas no disponible en este entorno.");

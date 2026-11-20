@@ -613,7 +613,9 @@ export interface ExportSavePayload {
   // ninguna fila tras el filtro de §2 (en ese caso no se agrega página).
   // Viaja en `save` y no en `append-page` porque se aplica una sola vez al final,
   // igual que la metadata (ADR-047 §3), y no tiene pageIndex del que ser idempotente.
-  readonly legendImage?: EncodedPageImage;
+  // ADR-219 §6: una o más páginas de leyenda, en orden. Antes era una sola
+  // (legendImage): con tipos propios las filas no tienen tope.
+  readonly legendImages?: ReadonlyArray<EncodedPageImage>;
   readonly legendPageWidthPt?: number;
   readonly legendPageHeightPt?: number;
 }
@@ -681,9 +683,18 @@ export interface RasterizePagePayload {
 // perfil que RasterizePagePayload (ADR-034 §1).
 export interface RenderLegendPayload {
   readonly rows: ReadonlyArray<MarkerLegendRow>;
+  readonly startRow: number; // ADR-219 §6: primera fila de esta página
   readonly pageWidthPt: number;
   readonly pageHeightPt: number;
   readonly imageFormat?: "png" | "jpeg";
+}
+
+// ADR-219 §6: el kernel dibuja una página por job, con las filas que entran
+// enteras desde startRow (siempre al menos una), y dice cuántas dibujó. El host
+// repite hasta dibujarlas todas.
+export interface RenderLegendPageResult {
+  readonly image: EncodedPageImage;
+  readonly rowsDrawn: number; // ≥ 1
 }
 
 // ADR-059 §3: la entrada de la leyenda NO tiene ningún campo capaz de transportar

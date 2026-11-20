@@ -171,13 +171,15 @@ function createRealRenderPageProvider(): RenderPageProvider {
     // ADR-059 §5: misma imagen mínima conocida — el objetivo de este archivo
     // es probar que ningún valor original sobrevive en el ARTEFACTO final,
     // no la rasterización de la leyenda (responsabilidad de render-engine).
-    renderLegend(_rows, _abortSignal): Promise<EncodedPageImage> {
-      return Promise.resolve({
-        bytes: base64ToArrayBuffer(MINIMAL_PNG_BASE64),
-        format: "png",
-        widthPx: 1,
-        heightPx: 1,
-      });
+    renderLegend(_rows, _abortSignal): Promise<ReadonlyArray<EncodedPageImage>> {
+      return Promise.resolve([
+        {
+          bytes: base64ToArrayBuffer(MINIMAL_PNG_BASE64),
+          format: "png",
+          widthPx: 1,
+          heightPx: 1,
+        },
+      ]);
     },
   };
 }
@@ -281,6 +283,7 @@ describe("export-engine — security", () => {
       rules: [],
       options,
       renderPageProvider: createRealRenderPageProvider(),
+      userTypes: [],
     };
 
     const result = await engine.export(input, ctx);
@@ -363,6 +366,7 @@ describe("export-engine — security (leyenda de marcadores, ADR-059)", () => {
       rules: [],
       options,
       renderPageProvider: createRealRenderPageProvider(),
+      userTypes: [],
     };
 
     const result = await engine.export(input, ctx);

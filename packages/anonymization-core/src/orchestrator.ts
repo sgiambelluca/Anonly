@@ -1531,6 +1531,9 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
         rules: snapshot.rules,
         options,
         renderPageProvider: provider,
+        // Provisional hasta F4 (Plan_1.1.md §7): F4 llena los tipos guardados
+        // y los del documento. Hoy nada produce un tipo propio.
+        userTypes: [],
       };
 
       this.setStage(documentId, PipelineStage.Exporting);
@@ -1588,11 +1591,12 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
       },
       // ADR-059 §5: mediación de la leyenda -- Export no puede importar
       // render-engine (P-1), así que este componente (que ya importa ambos)
-      // delega a RenderEngine.renderLegendPage. Dimensiones: el spec no fija
-      // un tamaño de página propio para la leyenda (no es una página del
-      // documento) -- se usa document.pages[0] como default razonable, el
-      // mismo criterio que export.engine.ts usa del otro lado del puerto para
-      // armar legendPageWidthPt/legendPageHeightPt de ExportSavePayload.
+      // delega a RenderEngine.renderLegendPages (ADR-219 §6), que devuelve
+      // una o más imágenes. Dimensiones: Render_Engine.md §6 fija que la
+      // leyenda usa el ancho de la primera página del documento -- se pasa
+      // document.pages[0], el mismo criterio que export.engine.ts usa del otro
+      // lado del puerto para armar legendPageWidthPt/legendPageHeightPt de
+      // ExportSavePayload.
       renderLegend: async (rows, abortSignal) => {
         const legendCtx: EngineContext = { ...ctx, abortSignal };
         const firstPage = this.documents.get(documentId)?.pages[0];
@@ -1604,7 +1608,7 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
             { documentId },
           );
         }
-        return this.engines.render.renderLegendPage(
+        return this.engines.render.renderLegendPages(
           rows,
           firstPage.width,
           firstPage.height,

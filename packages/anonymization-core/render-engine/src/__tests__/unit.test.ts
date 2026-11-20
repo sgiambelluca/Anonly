@@ -2697,7 +2697,7 @@ describe("RenderEngine — unit tests", () => {
   });
 
   // ─── ADR-059 §5 (Hito 10.5, PR 7): página de leyenda del export ───
-  describe("renderLegendPage — layout (ADR-059 §5)", () => {
+  describe("renderLegendPages — layout (ADR-059 §5)", () => {
     const LEGEND_TITLE_FOR_TEST = "Anonimizado con Anonly — Referencia de marcadores";
     function fillTextArgs(calls: ReadonlyArray<DrawCall>): ReadonlyArray<[string, number, number]> {
       return calls
@@ -2709,10 +2709,10 @@ describe("RenderEngine — unit tests", () => {
       const rows = makeMarkerLegendRows(13);
       await engine.init(ctx);
 
-      const encoded = await engine.renderLegendPage(rows, 595, 842, ctx);
+      const [encoded] = await engine.renderLegendPages(rows, 595, 842, ctx);
 
-      expect(encoded.widthPx).toBe(595);
-      expect(encoded.heightPx).toBe(842);
+      expect(encoded!.widthPx).toBe(595);
+      expect(encoded!.heightPx).toBe(842);
 
       const [canvas] = getCreatedCanvases();
       const textCalls = fillTextArgs(canvas!.calls);
@@ -2760,7 +2760,7 @@ describe("RenderEngine — unit tests", () => {
         countLabel: "7 marcadores",
       });
 
-      await engine.renderLegendPage([row], 595, 842, ctx);
+      await engine.renderLegendPages([row], 595, 842, ctx);
 
       const [canvas] = getCreatedCanvases();
       const textCalls = fillTextArgs(canvas!.calls);
@@ -2796,7 +2796,7 @@ describe("RenderEngine — unit tests", () => {
         }),
       ];
 
-      await engine.renderLegendPage(rows, 595, 842, ctx);
+      await engine.renderLegendPages(rows, 595, 842, ctx);
 
       const [canvas] = getCreatedCanvases();
       const rowCalls = fillTextArgs(canvas!.calls).slice(1);
@@ -2818,7 +2818,7 @@ describe("RenderEngine — unit tests", () => {
         countLabel: "3 marcadores",
       });
 
-      await engine.renderLegendPage([row], 595, 842, ctx);
+      await engine.renderLegendPages([row], 595, 842, ctx);
 
       const [canvas] = getCreatedCanvases();
       const textCalls = fillTextArgs(canvas!.calls);
@@ -2841,7 +2841,7 @@ describe("RenderEngine — unit tests", () => {
       });
 
       const narrowWidth = 400;
-      await engine.renderLegendPage([row], narrowWidth, 300, ctx);
+      await engine.renderLegendPages([row], narrowWidth, 300, ctx);
 
       const [canvas] = getCreatedCanvases();
       for (const [text, x, y] of fillTextArgs(canvas!.calls)) {
@@ -2860,9 +2860,9 @@ describe("RenderEngine — unit tests", () => {
       // A4: el título entra en una línea. En una página más angosta se
       // envuelve (ver el test de página angosta), así que fijar el conteo de
       // líneas del título solo tiene sentido con un ancho donde entra.
-      const encoded = await engine.renderLegendPage([], 595, 300, ctx);
+      const [encoded] = await engine.renderLegendPages([], 595, 300, ctx);
 
-      expect(encoded.widthPx).toBe(595);
+      expect(encoded!.widthPx).toBe(595);
       const [canvas] = getCreatedCanvases();
       expect(fillTextArgs(canvas!.calls)).toHaveLength(1); // solo el título
     });
@@ -2954,6 +2954,7 @@ describe("RenderEngine — unit tests", () => {
       // kernel de por medio.
       const legendPayload: RenderLegendPayload = {
         rows: [{ prefixes: "DNI", typeName: "DNI", countLabel: "3 marcadores" }],
+        startRow: 0,
         pageWidthPt: 200,
         pageHeightPt: 100,
       };
@@ -2965,12 +2966,16 @@ describe("RenderEngine — unit tests", () => {
         payload: legendPayload,
       });
       await vi.waitFor(() => expect(outboundOfType(fakeSelf, "COMPLETED")).toBeDefined());
-      const legendResult = outboundOfType(fakeSelf, "COMPLETED")?.result as {
-        readonly bytes: ArrayBuffer;
-        readonly format: string;
-        readonly widthPx: number;
-        readonly heightPx: number;
+      const legendPageResult = outboundOfType(fakeSelf, "COMPLETED")?.result as {
+        readonly image: {
+          readonly bytes: ArrayBuffer;
+          readonly format: string;
+          readonly widthPx: number;
+          readonly heightPx: number;
+        };
+        readonly rowsDrawn: number;
       };
+      const legendResult = legendPageResult.image;
       expect(legendResult.widthPx).toBe(200);
       expect(legendResult.heightPx).toBe(100);
       expect(legendResult.format).toBe("png");

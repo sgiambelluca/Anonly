@@ -171,7 +171,13 @@ startWorkerEntry({
   transferablesOf(result) {
     if (typeof result !== "object" || result === null) return [];
     const bytes = (result as { readonly bytes?: unknown }).bytes;
-    return bytes instanceof ArrayBuffer ? [bytes] : [];
+    if (bytes instanceof ArrayBuffer) return [bytes];
+    // ADR-219 §6: la página de leyenda devuelve `{ image, rowsDrawn }`; la
+    // imagen se transfiere igual que una página, porque el kernel no la retiene.
+    const image = (result as { readonly image?: unknown }).image;
+    if (typeof image !== "object" || image === null) return [];
+    const imageBytes = (image as { readonly bytes?: unknown }).bytes;
+    return imageBytes instanceof ArrayBuffer ? [imageBytes] : [];
   },
 
   dispose() {

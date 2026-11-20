@@ -160,7 +160,7 @@ describe("Orchestrator — unit tests", () => {
     const bus = createRealBus();
     const engines = createMockEngines();
     wireHappyPathSpies(engines, bus);
-    const legendSpy = vi.spyOn(engines.render, "renderLegendPage");
+    const legendSpy = vi.spyOn(engines.render, "renderLegendPages");
     const orchestrator = new PipelineOrchestrator({
       bus,
       logger: createMockLogger(),
