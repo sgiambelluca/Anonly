@@ -55,9 +55,9 @@ function eventFor(combo: ReadonlyArray<string>): ShortcutKeyEvent {
 }
 
 describe("la tabla de atajos", () => {
-  it("tiene los catorce atajos que ya existen, sin repetir id", () => {
-    expect(SHORTCUTS).toHaveLength(14);
-    expect(new Set(SHORTCUTS.map((shortcut) => shortcut.id)).size).toBe(14);
+  it("tiene los quince atajos que ya existen, sin repetir id", () => {
+    expect(SHORTCUTS).toHaveLength(15);
+    expect(new Set(SHORTCUTS.map((shortcut) => shortcut.id)).size).toBe(15);
   });
 
   it("cada combinación de la ayuda dispara su propio atajo (la ayuda no puede contradecirse)", () => {
@@ -77,9 +77,22 @@ describe("la tabla de atajos", () => {
         const fired = SHORTCUTS.filter((other) => other.matches(eventFor(combo))).map(
           (other) => other.id,
         );
-        expect(fired, `${shortcut.id}: ${combo.join("+")}`).toEqual([shortcut.id]);
+        // «Deshacer» y su fila de «Formatos de detección» comparten `Ctrl/⌘+Z` a propósito.
+        const expected =
+          shortcut.id === "undo" || shortcut.id === "undoFormatsDraft"
+            ? ["undo", "undoFormatsDraft"]
+            : [shortcut.id];
+        expect(fired, `${shortcut.id}: ${combo.join("+")}`).toEqual(expected);
       }
     }
+  });
+
+  it("la ayuda lista el deshacer del borrador de «Formatos de detección» (UX §11b.11)", () => {
+    const row = shortcutGroups("other")
+      .flatMap((group) => group.rows)
+      .find((candidate) => candidate.id === "undoFormatsDraft");
+    expect(row?.label).toBe("Deshacer el último cambio en «Formatos de detección»");
+    expect(row?.combos).toEqual([["Ctrl", "Z"]]);
   });
 
   it("acepta Cmd en lugar de Ctrl", () => {

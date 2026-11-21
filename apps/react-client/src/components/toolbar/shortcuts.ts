@@ -36,6 +36,7 @@ export type ShortcutId =
   | "cancel"
   | "toggleView"
   | "undo"
+  | "undoFormatsDraft"
   | "redo"
   | "search"
   | "navigate"
@@ -108,6 +109,16 @@ export const SHORTCUTS: ReadonlyArray<ShortcutDefinition> = [
     id: "undo",
     group: "edit",
     label: "Deshacer",
+    combos: [["Mod", "Z"]],
+    matches: (event) => isMod(event) && !event.altKey && keyIs(event, "z") && !event.shiftKey,
+  },
+  {
+    // `UX_Guidelines.md` §11b.11: en «Formatos de detección» el mismo `Ctrl/⌘+Z`
+    // deshace el último cambio del borrador. Es la misma combinación que
+    // «Deshacer»; el listener de `DetectionFormatsDialog` sigue siendo suyo.
+    id: "undoFormatsDraft",
+    group: "edit",
+    label: "Deshacer el último cambio en «Formatos de detección»",
     combos: [["Mod", "Z"]],
     matches: (event) => isMod(event) && !event.altKey && keyIs(event, "z") && !event.shiftKey,
   },

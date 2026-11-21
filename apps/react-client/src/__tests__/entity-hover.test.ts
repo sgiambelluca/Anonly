@@ -7,6 +7,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   boxContains,
+  clickSelectsGroup,
+  isClickGesture,
   displayToPagePoint,
   ENTITY_TOOLTIP_DELAY_MS,
   hitTestEntity,
@@ -14,6 +16,7 @@ import {
   OPEN_OVERLAY_SELECTOR,
   pointerStaysOn,
 } from "../components/viewer/entityHover.js";
+import { CLICK_TOLERANCE_PX } from "../components/viewer/wordSelectionRect.js";
 
 import { makeGroup, member } from "./helpers/groupFixtures.js";
 
@@ -263,5 +266,28 @@ describe("isTooltipSuppressed (ADR-226 §4)", () => {
     ["hay un menú o un diálogo abierto", { overlayOpen: true }],
   ])("no aparece cuando %s", (_name, patch) => {
     expect(isTooltipSuppressed({ ...free, ...patch })).toBe(true);
+  });
+});
+
+describe("el clic sobre una entidad (ADR-226 §4)", () => {
+  it("un gesto dentro de la tolerancia es un clic; más allá, un arrastre", () => {
+    expect(isClickGesture({ x: 10, y: 10 }, { x: 12, y: 11 }, 3)).toBe(true);
+    expect(isClickGesture({ x: 10, y: 10 }, { x: 13, y: 10 }, 3)).toBe(false);
+    expect(isClickGesture({ x: 10, y: 10 }, { x: 10, y: 20 }, 3)).toBe(false);
+  });
+
+  it("la tolerancia es la misma que la de la selección de texto", () => {
+    expect(CLICK_TOLERANCE_PX).toBe(3);
+  });
+
+  it("sobre una entidad activa la selecciona en la lista", () => {
+    const hit = { group: makeGroup({ id: "g9" }), boxes: [box(0, 0)], anchor: box(0, 0) };
+    expect(clickSelectsGroup(hit)).toBe("g9");
+  });
+
+  it("sobre una desactivada, o sobre nada, no selecciona", () => {
+    const off = { group: makeGroup({ enabled: false }), boxes: [box(0, 0)], anchor: box(0, 0) };
+    expect(clickSelectsGroup(off)).toBeNull();
+    expect(clickSelectsGroup(null)).toBeNull();
   });
 });

@@ -180,3 +180,21 @@ export function isTooltipSuppressed(state: {
 }): boolean {
   return state.dragging || state.hasSelection || state.inert || state.overlayOpen;
 }
+
+/**
+ * ADR-226 §4: un clic es un gesto sin arrastre. Usa la misma tolerancia que la
+ * selección de texto (`CLICK_TOLERANCE_PX`, px de pantalla), así un gesto no es
+ * a la vez clic y arrastre.
+ */
+export function isClickGesture(start: PagePoint, end: PagePoint, tolerancePx: number): boolean {
+  return Math.abs(end.x - start.x) < tolerancePx && Math.abs(end.y - start.y) < tolerancePx;
+}
+
+/**
+ * Qué hace un clic sobre lo que hay bajo el puntero (ADR-226 §4): sobre una
+ * entidad **activa** la selecciona en la lista; sobre una desactivada, o sobre
+ * nada, no selecciona (el tooltip se cierra de todos modos).
+ */
+export function clickSelectsGroup(hit: HoveredEntity | null): string | null {
+  return hit !== null && hit.group.enabled ? hit.group.id : null;
+}
