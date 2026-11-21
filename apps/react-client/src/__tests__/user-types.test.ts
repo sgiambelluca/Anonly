@@ -12,6 +12,7 @@ import {
   typeBandTint,
   typeColor,
   typeDotStyle,
+  userDotStyle,
   USER_TYPE_COLOR,
   ENTITY_TYPE_COLOR,
 } from "../components/entities/entityTypeColors.js";
@@ -126,8 +127,11 @@ describe("color y punto de un tipo", () => {
     expect(typeDotStyle(EntityType.Person)).toEqual({
       background: ENTITY_TYPE_COLOR[EntityType.Person],
     });
-    expect(typeDotStyle(historia.id)).toEqual({ border: `2px solid ${USER_TYPE_COLOR}` });
-    expect(typeDotStyle(historia.id, true)).toEqual({ border: `2px dotted ${USER_TYPE_COLOR}` });
+    expect(typeDotStyle(historia.id)).toEqual({ border: "2.2px solid rgb(var(--color-user))" });
+    expect(typeDotStyle(historia.id, true)).toEqual({
+      border: "2.2px dashed rgb(var(--color-user))",
+    });
+    expect(userDotStyle(true)).toEqual(typeDotStyle(historia.id, true));
   });
 
   it("el fondo de la franja usa el acento del tema para un tipo propio", () => {

@@ -198,3 +198,12 @@ export function isClickGesture(start: PagePoint, end: PagePoint, tolerancePx: nu
 export function clickSelectsGroup(hit: HoveredEntity | null): string | null {
   return hit !== null && hit.group.enabled ? hit.group.id : null;
 }
+
+/**
+ * Un clic sin arrastre que cayó sobre una entidad activa ya cumplió su función
+ * (seleccionarla en la lista): el flujo de selección de texto no sigue, así no
+ * se abre el globo «Agregar «…» como…». Sobre texto común el clic sigue como antes.
+ */
+export function clickConsumesSelection(isClick: boolean, hitActiveEntity: boolean): boolean {
+  return isClick && hitActiveEntity;
+}

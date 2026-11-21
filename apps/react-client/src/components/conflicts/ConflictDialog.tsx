@@ -21,15 +21,15 @@
 
 import { ConflictReason, type EntityTypeId } from "@anonly/anonymization-core";
 import { CheckIcon, InfoIcon } from "lucide-react";
-import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import { useDetectionStore } from "../../store/detection.store.js";
 import { useEntitiesStore } from "../../store/entities.store.js";
 import { Button } from "../common/Button.js";
 import { Dialog } from "../common/Dialog.js";
 import { applyConflictResolution } from "../entities/applyEdits.js";
-import { typeDotStyle } from "../entities/entityTypeColors.js";
 import { typeSingular } from "../entities/entityTypeLabels.js";
+import { TypeDot } from "../entities/TypeDot.js";
 import { useUserTypes } from "../entities/useUserTypes.js";
 import { ConflictSymbol } from "../entities/warningSymbols.js";
 
@@ -259,7 +259,7 @@ export function ConflictDialog({
                   value={type}
                   checked={selectedType === type}
                   isCurrent={group?.type === type}
-                  dotStyle={typeDotStyle(type)}
+                  dotType={type}
                   detail={
                     format !== null ? (
                       <>
@@ -338,7 +338,7 @@ function ChoiceOption({
   value,
   checked,
   isCurrent,
-  dotStyle,
+  dotType,
   detail,
   onSelect,
   children,
@@ -348,7 +348,7 @@ function ChoiceOption({
   readonly checked: boolean;
   /** La opción que ya está aplicada en el documento. */
   readonly isCurrent: boolean;
-  readonly dotStyle?: CSSProperties;
+  readonly dotType?: EntityTypeId;
   /** Segunda línea: el formato y su origen, en un conflicto entre formatos (ADR-229 §6). */
   readonly detail?: ReactNode;
   readonly onSelect: () => void;
@@ -370,9 +370,7 @@ function ChoiceOption({
         onChange={onSelect}
         className="sr-only"
       />
-      {dotStyle !== undefined ? (
-        <span aria-hidden className="h-2 w-2 shrink-0 rounded-full" style={dotStyle} />
-      ) : null}
+      {dotType !== undefined ? <TypeDot type={dotType} /> : null}
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="break-words">{children}</span>
         {detail !== undefined ? (

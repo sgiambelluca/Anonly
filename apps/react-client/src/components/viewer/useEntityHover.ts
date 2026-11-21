@@ -52,8 +52,11 @@ export interface UseEntityHover {
   readonly onPointerMove: (event: PointerEvent<HTMLDivElement>) => void;
   readonly onPointerLeave: () => void;
   readonly onPointerDown: () => void;
-  /** Un clic sin arrastre: selecciona en la lista la entidad activa bajo el puntero. */
-  readonly onClick: (displayPoint: PagePoint) => void;
+  /**
+   * Un clic sin arrastre: selecciona en la lista la entidad activa bajo el puntero.
+   * Devuelve `true` si había una entidad activa (el clic quedó consumido).
+   */
+  readonly onClick: (displayPoint: PagePoint) => boolean;
 }
 
 function isOverlayOpen(): boolean {
@@ -189,21 +192,21 @@ export function useEntityHover(input: UseEntityHoverInput): UseEntityHover {
   // Mismo mecanismo que «Ver en la lista» (`entities.store.flashGroupId`): el panel
   // expande el tipo, lleva la fila a la vista y la resalta.
   const onClick = useCallback(
-    (displayPoint: PagePoint): void => {
+    (displayPoint: PagePoint): boolean => {
       const pageSize = actions.getPageSize(pageIndex);
-      if (pageSize === null) return;
+      if (pageSize === null) return false;
       const point = displayToPagePoint(
         displayPoint,
         { width: displayWidth, height: displayHeight },
         pageSize,
       );
-      if (point === null) return;
+      if (point === null) return false;
       if (
         kind === "anonymized" &&
         (interactionGeometry === undefined ||
           interactionGeometry.revision !== actions.getPreviewInteractionRevision(pageIndex))
       ) {
-        return;
+        return false;
       }
       const groupId = clickSelectsGroup(
         hitTestEntity({
@@ -214,7 +217,9 @@ export function useEntityHover(input: UseEntityHoverInput): UseEntityHover {
           geometry: interactionGeometry,
         }),
       );
-      if (groupId !== null) useEntitiesStore.getState().setFlashGroupId(groupId);
+      if (groupId === null) return false;
+      useEntitiesStore.getState().setFlashGroupId(groupId);
+      return true;
     },
     [kind, pageIndex, displayWidth, displayHeight, interactionGeometry],
   );

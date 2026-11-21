@@ -37,8 +37,8 @@ import { useEntitiesStore } from "../../store/entities.store.js";
 import { Button } from "../common/Button.js";
 import { Dialog } from "../common/Dialog.js";
 import { applyManualOverlapResolution } from "../entities/applyEdits.js";
-import { typeDotStyle } from "../entities/entityTypeColors.js";
 import { typeSingular } from "../entities/entityTypeLabels.js";
+import { TypeDot } from "../entities/TypeDot.js";
 import { useUserTypes } from "../entities/useUserTypes.js";
 
 import { conflictsByIds, manualOverlapCandidates } from "./conflictResolution.js";
@@ -153,7 +153,7 @@ function CandidateCard({
       <p className="font-semibold text-text-secondary">{label}</p>
       <p className="break-words font-semibold text-text-primary">«{value}»</p>
       <p className="flex items-center gap-2 text-text-secondary">
-        <span aria-hidden className="h-2 w-2 shrink-0 rounded-full" style={typeDotStyle(type)} />
+        <TypeDot type={type} />
         {typeSingular(type, userTypes)}
       </p>
     </div>

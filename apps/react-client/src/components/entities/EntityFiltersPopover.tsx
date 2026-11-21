@@ -101,7 +101,7 @@ export function EntityFiltersPopover({ groups }: EntityFiltersPopoverProps) {
         <div
           role="group"
           aria-label="Filtros de la lista"
-          className="absolute right-0 top-full z-50 mt-1 flex max-h-[min(70vh,30rem)] w-[20rem] max-w-[calc(100vw-2rem)] flex-col rounded-xl border border-border bg-bg-primary text-sm shadow-md"
+          className="absolute left-0 top-full z-50 mt-1 flex max-h-[min(70vh,30rem)] w-[20rem] max-w-[calc(100vw-2rem)] flex-col rounded-xl border border-border bg-bg-primary text-sm shadow-md"
         >
           <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3">
             {formatOptions.length > 0 ? (

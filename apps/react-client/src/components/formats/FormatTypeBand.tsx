@@ -9,11 +9,10 @@
  * la banda.
  */
 
-import { isUserEntityType } from "@anonly/anonymization-core";
 import { ChevronDownIcon, ChevronRightIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
-import { ENTITY_TYPE_COLOR } from "../entities/entityTypeColors.js";
+import { TypeDot } from "../entities/TypeDot.js";
 
 import { ActionsMenu, type ActionsMenuItem } from "./ActionsMenu.js";
 import type { TypeBandModel } from "./formatsTree.js";
@@ -37,9 +36,6 @@ export function FormatTypeBand({
   menuItems,
   children,
 }: FormatTypeBandProps) {
-  const color = isUserEntityType(band.entityType)
-    ? "rgb(var(--color-accent))"
-    : ENTITY_TYPE_COLOR[band.entityType];
   return (
     <section
       aria-label={band.name}
@@ -59,11 +55,7 @@ export function FormatTypeBand({
             <ChevronDownIcon className="h-4 w-4 shrink-0 text-text-secondary" aria-hidden />
           )}
           {/* Punto hueco para un tipo propio (`Components.md` §9). */}
-          <span
-            aria-hidden
-            className="h-2.5 w-2.5 shrink-0 rounded-full"
-            style={band.isUser ? { border: `2px solid ${color}` } : { backgroundColor: color }}
-          />
+          <TypeDot type={band.entityType} />
           <span className="truncate text-sm font-semibold text-text-primary">{band.name}</span>
           <span className="shrink-0 text-sm text-text-secondary">{band.summary}</span>
         </button>

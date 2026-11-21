@@ -85,6 +85,16 @@ export function replacementLadder(fields: UserTypeFields): ReplacementLadder {
   };
 }
 
+/**
+ * Los tres reemplazos reales de la escalera de ADR-057 para el primer número
+ * (`[LEGAJO 01]`, `[LEGA 01]`, `[LEG-01]`). Sin nombre, un guion largo en cada uno.
+ */
+export function replacementTokens(ladder: ReplacementLadder): readonly [string, string, string] {
+  const token = (label: string, separator: string): string =>
+    label === "" ? "—" : `[${label}${separator}01]`;
+  return [token(ladder.level0, " "), token(ladder.level1, " "), token(ladder.level2, "-")];
+}
+
 /** Lo que muestra la ranura de alto fijo (`Components.md` §13b.3). */
 export type TypeFormSlot =
   | { readonly kind: "idle" }
@@ -136,9 +146,9 @@ export const TYPE_FORM_COPY = {
   shortLevel1Label: "Corta",
   shortLevel2Label: "Mínima",
   shortLabelsHint: "Si las dejás vacías, se arman solas con las primeras letras.",
+  ladderCaptions: ["Completa", "Si no entra", "Si entra menos"],
   replacementInfo:
     "Se puede etiquetar, ocultar parcialmente o tapar con negro. Los tipos propios no tienen dato falso.",
-  idleSlot: "Para un dato que el catálogo no conoce, como un legajo o una historia clínica.",
   noteSaved: "Se guarda en este equipo y se aplica a los próximos documentos que abras.",
   noteSavedEdit:
     "El cambio se aplica al próximo documento que abras. Lo que ya exportaste queda como estaba.",

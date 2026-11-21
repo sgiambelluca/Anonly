@@ -33,10 +33,11 @@ import {
 import { DocumentTypeMenu } from "./DocumentTypeMenu.js";
 import { EntityGroupItem } from "./EntityGroupItem.js";
 import { cascadeCheckboxState, type TypeLevels } from "./entityTree.js";
-import { typeBandTint, typeDotStyle } from "./entityTypeColors.js";
+import { typeBandTint } from "./entityTypeColors.js";
 import { typePlural } from "./entityTypeLabels.js";
 import { FormatSubgroup } from "./FormatSubgroup.js";
 import { groupNodeId } from "./treeNavigation.js";
+import { TypeDot } from "./TypeDot.js";
 import { TypeModeSelect } from "./TypeModeSelect.js";
 import { useUserTypes } from "./useUserTypes.js";
 
@@ -147,33 +148,38 @@ export function EntityTypeGroup({
           aria-label={`Habilitar todos los grupos de ${label}`}
         />
         {/* Punto hueco para un tipo propio; punteado si es solo de este documento (Components.md §9). */}
-        <span
-          aria-hidden
-          className="h-2 w-2 shrink-0 rounded-full"
-          style={typeDotStyle(type, ownType?.documentOnly === true)}
-        />
+        <TypeDot type={type} documentOnly={ownType?.documentOnly === true} />
         <button
           type="button"
           onClick={onToggleExpanded}
           // Mismo nombre accesible que antes del rediseño ("Personas (3)"):
           // lo localiza `scenario-5` de E2E.
           aria-label={`${label} (${groups.length})`}
-          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+          className={`flex min-w-0 flex-1 text-left ${
+            ownType?.caption != null ? "flex-col justify-center" : "items-center gap-2"
+          }`}
         >
+          {/* El nombre va primero y entero; la leyenda y el contador pasan a la segunda línea de la franja. */}
           <span className="truncate text-sm font-bold uppercase tracking-wide text-text-primary">
             {label}
           </span>
           {ownType?.caption != null ? (
-            <span
-              {...(ownType.caption === SAVED_CAPTION ? { title: SAVED_CAPTION_TOOLTIP } : {})}
-              className="min-w-0 shrink truncate text-sm font-normal normal-case tracking-normal text-text-secondary"
-            >
-              {ownType.caption}
+            <span className="flex min-w-0 items-center gap-1.5">
+              <span className="shrink-0 rounded-full border border-border bg-bg-primary px-1.5 text-xs font-semibold leading-4 text-text-primary">
+                {groups.length}
+              </span>
+              <span
+                title={ownType.caption === SAVED_CAPTION ? SAVED_CAPTION_TOOLTIP : ownType.caption}
+                className="min-w-0 truncate text-xs font-normal normal-case leading-4 tracking-normal text-text-secondary"
+              >
+                {ownType.caption}
+              </span>
             </span>
-          ) : null}
-          <span className="shrink-0 rounded-full border border-border bg-bg-primary px-2 text-sm font-semibold text-text-primary">
-            {groups.length}
-          </span>
+          ) : (
+            <span className="shrink-0 rounded-full border border-border bg-bg-primary px-2 text-sm font-semibold text-text-primary">
+              {groups.length}
+            </span>
+          )}
         </button>
         {/* Nivel tipo de los tres de `UX_Guidelines.md` §3.4 (ADR-087 §3). */}
         <TypeModeSelect type={type} groups={groups} onOpenChange={setMenuOpen} />

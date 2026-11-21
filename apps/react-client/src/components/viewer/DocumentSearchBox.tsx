@@ -37,9 +37,9 @@ import { useEntitiesStore } from "../../store/entities.store.js";
 import { useViewerStore } from "../../store/viewer.store.js";
 import { Button } from "../common/Button.js";
 import { addManualEntityWithFeedback } from "../entities/addManualEntity.js";
-import { typeDotStyle } from "../entities/entityTypeColors.js";
 import { describeEntityNumber } from "../entities/entityTypeLabels.js";
 import { EntityTypePicker } from "../entities/EntityTypePicker.js";
+import { TypeDot } from "../entities/TypeDot.js";
 import { useTypeChoice } from "../entities/useTypeChoice.js";
 import { useUserTypes } from "../entities/useUserTypes.js";
 
@@ -335,11 +335,7 @@ function ResultItem({
           <span className="flex-1" />
           {status.kind === "hidden" ? (
             <span className="inline-flex items-center gap-1.5 rounded-md bg-bg-tertiary px-2 py-0.5 text-sm font-medium text-text-primary">
-              <span
-                aria-hidden
-                className="h-2 w-2 rounded-full"
-                style={typeDotStyle(status.type)}
-              />
+              <TypeDot type={status.type} />
               Oculto como {describeEntityNumber(status.type, status.indexInType, userTypes)}
             </span>
           ) : (

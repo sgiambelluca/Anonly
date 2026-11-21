@@ -204,7 +204,7 @@ export function LoadScreen() {
         onSaved={() =>
           showToast({
             title: "Formatos guardados",
-            description: "Se aplican al próximo documento que abras",
+            description: "Se aplican al próximo documento que abras.",
             tone: "success",
           })
         }
