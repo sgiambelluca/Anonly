@@ -1152,14 +1152,76 @@ usuario tiene que entender por qué algo no se puede.
 - **Los textos salen de una tabla de textos de la aplicación**, como los ejemplos de los formatos
   con control (ADR-227 §6).
 
-Textos aprobados:
+Textos aprobados por el mantenedor (`label_taken` y los demás el 2026-11-20). `{…}` es un dato que
+completa la interfaz; los números son los límites de `Contracts.md` §6 y salen de sus constantes,
+no se escriben a mano.
+
+**Tipos propios** (`UserEntityTypeIssueCode`, ranura del formulario, `Components.md` §13b.3):
 
 | Código | Texto |
 |---|---|
+| `name_empty` | «El tipo necesita un nombre. Escribí cómo querés llamarlo, por ejemplo «Historia clínica».» |
+| `name_too_long` | «El nombre tiene {N} caracteres y el máximo es 40. Acortalo.» |
+| `name_invalid_chars` | «El nombre tiene «{CARÁCTER}», y solo se admiten letras, números, espacios y guiones. Sacalo o cambialo.» |
+| `name_without_letter` | «El nombre necesita al menos una letra: con solo números o guiones no se entiende en el documento. Sumá una palabra.» |
+| `short_label_invalid` | «La versión corta «{TEXTO}» tiene que tener de 1 a 8 letras o números, sin espacios ni signos. Corregila, o dejala vacía para usar la automática.» |
 | `label_taken` | «Ya hay un tipo que se reemplaza como {ETIQUETA}, y en el documento no se distinguirían. Elegí otro nombre.» |
+| `id_invalid` | «Este tipo quedó dañado y no se puede guardar. Crealo de nuevo.» |
+| `id_taken` | «Este tipo choca con otro guardado y no se puede guardar. Crealo de nuevo.» |
 
-**Pendiente antes de F7** (`Plan_1.1.md` §6): el texto de cada uno de los demás códigos, que
-aprueba el mantenedor.
+**Formatos** (`FormatIssueCode`, caja de estado del generador, §11b.8). {P} y {N} salen de
+`pieceIndex` y `variantIndex`, contados desde 1:
+
+| Código | Texto |
+|---|---|
+| `name_empty` | «El formato necesita un nombre. Escribí uno que te ayude a reconocerlo en la lista.» |
+| `name_too_long` | «El nombre tiene {N} caracteres y el máximo es 40. Acortalo.» |
+| `name_taken` | «Ya tenés un formato llamado «{NOMBRE}». Elegí otro nombre para distinguirlos en la lista.» |
+| `no_variants` | «El formato no tiene ninguna variante. Sumá una con «+ Variante».» |
+| `too_many_variants` | «Un formato admite hasta 8 variantes y este tiene {N}. Borrá alguna o creá otro formato.» |
+| `variant_empty` | «La variante {N} no tiene piezas. Sumá una con «+ Pieza» o borrá la variante.» |
+| `variant_without_chars` | «La variante {N} tiene solo textos fijos y separadores, y así no reconoce ningún dato. Sumale un bloque de letras o números.» |
+| `too_many_pieces` | «La variante {N} tiene {M} piezas y el máximo es 16, contando las de las partes opcionales. Juntá bloques o borrá alguna.» |
+| `chars_range_invalid` | «En la pieza {P} de la variante {N}, «Cuántos» va de {MIN} a {MAX}: el mínimo tiene que ser 1 o más y no pasar del máximo. Corregí los números.» |
+| `chars_repeat_too_large` | «En la pieza {P} de la variante {N}, el máximo es {MAX} y un bloque admite hasta 64. Bajalo o partí el dato en dos bloques.» |
+| `text_empty` | «El texto fijo de la pieza {P} (variante {N}) está vacío. Escribilo o borrá la pieza.» |
+| `text_too_long` | «El texto fijo de la pieza {P} (variante {N}) tiene {L} caracteres y el máximo es 40. Acortalo.» |
+| `separator_empty` | «El separador de la pieza {P} (variante {N}) no tiene ningún carácter elegido. Elegí al menos uno o borrá la pieza.» |
+| `optional_empty` | «Hay una parte opcional vacía en la variante {N}. Arrastrale una pieza o borrala.» |
+| `optional_nested` | «Una parte opcional no puede ir dentro de otra (variante {N}). Sacala afuera.» |
+| `context_empty` | «Hay una palabra de contexto vacía. Escribila o sacala.» |
+| `context_too_long` | «La palabra de contexto «{PALABRA}» tiene {L} caracteres y el máximo es 40. Acortala.» |
+| `too_many_context_words` | «Un formato admite hasta 5 palabras de contexto y este tiene {N}. Sacá alguna.» |
+| `too_many_states` | «El formato es demasiado complejo para revisarlo rápido en cada página. Achicá los rangos de «Cuántos», sacá partes opcionales o partilo en dos formatos.» |
+| `type_unknown` | «El tipo «{TIPO}» ya no existe. Elegí otro en «Es un…».» |
+| `type_not_admitted` | «A «{TIPO}» no se le pueden sumar formatos propios. En «Es un…» elegí {TIPOS ADMITIDOS} o uno de tus tipos.» |
+| `id_invalid` | «Este formato quedó dañado y no se puede guardar. Crealo de nuevo.» |
+
+**{TIPOS ADMITIDOS}** se arma de `FORMAT_ADMITTING_BASE_TYPES`, con el nombre que la interfaz ya
+muestra para cada tipo, para que la lista no quede vieja.
+
+**Importar un archivo** (`FormatsFileIssueCode`, diálogo «No se importó nada», `Components.md`
+§13b.4):
+
+| Código | Texto |
+|---|---|
+| `not_json` | «No se pudo leer el archivo: está dañado o no es un archivo de formatos. Elegí otro archivo.» |
+| `wrong_kind` | «El archivo no es de formatos de Anonly. Elegí uno exportado desde «Exportar formatos».» |
+| `version_invalid` | «El archivo no dice de qué versión es, así que no se puede leer con seguridad. Exportalo de nuevo desde Anonly.» |
+| `version_newer` | «El archivo es de una versión más nueva de Anonly o trae formatos de un país que esta versión no tiene. Actualizá Anonly y volvé a importarlo.» |
+| `schema_invalid` | «El archivo está incompleto o se modificó a mano: {UBICACIÓN} no tiene la forma esperada. Exportalo de nuevo desde Anonly.» |
+| `type_invalid` | «El tipo «{NOMBRE}» del archivo no se puede crear: {MOTIVO}. Corregilo donde se creó y exportalo de nuevo.» |
+| `format_invalid` | «El formato «{NOMBRE}» del archivo tiene un problema: {MOTIVO}. Corregilo donde se creó y exportalo de nuevo.» |
+| `format_type_missing` | «El formato «{NOMBRE}» es de un tipo que no viene en el archivo. Exportalo de nuevo junto con su tipo.» |
+
+- **{MOTIVO}**: el issue del archivo dice solo qué elemento falló (`path`), no por qué. La
+  interfaz vuelve a validar ese tipo o formato con `validateUserEntityType` o `validateFormat`
+  (con el mismo contexto que `validateFormatsFile`) y usa el texto de su primer código de las
+  tablas de arriba, en minúscula y sin el «qué hacer», que ya lo dice esta fila.
+- **{UBICACIÓN}** dice el elemento en palabras («el tipo 2», «el formato 3»), nunca el `path`
+  crudo.
+- `id_invalid`, `id_taken` y `optional_nested` no salen del formulario: solo con datos guardados o
+  importados dañados. Tienen texto igual, porque todo código que llega a la interfaz lo tiene.
 
 ---
 
