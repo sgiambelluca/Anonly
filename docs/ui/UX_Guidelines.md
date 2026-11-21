@@ -1139,6 +1139,7 @@ atajos de la tabla de §9, que es la misma que los declara (ADR-224 §5, ADR-229
 | «Formatos de detección» sin tipos propios | «Tus tipos» muestra solo la banda punteada «Nuevo tipo», con su aclaración |
 | Tipo propio sin formatos | «Todavía no tiene formatos: no detecta nada solo. Igual podés usarlo al agregar una entidad a mano.» |
 | Búsqueda del árbol sin resultados | «Ningún tipo ni formato coincide con «…».» y «Borrar la búsqueda» |
+| Documento sin entidades ni tipos del documento | La banda punteada «Nuevo tipo» arriba, en su ranura, y debajo el estado vacío del panel. Decisión del mantenedor, 2026-11-21 |
 | Tipo del documento sin entidades | La banda, con «Todavía no tiene entidades. Seleccioná el texto en el PDF o agregalo desde acá.» y «Agregar entidad» |
 | Filtros sin resultados | «Ninguna entidad cumple los filtros» y «Quitar filtros» |
 | Generador sin pieza elegida | «Elegí una pieza para ajustarla, o sumá una con «Pieza». Para cambiarles el orden, arrastralas.» |

@@ -1484,6 +1484,8 @@ apps/react-client/src/components/
 
 - **`NewTypeBand`**: banda punteada arriba de la lista. Abre `UserTypeDialog` con
   `scope: "document"`, `mode: "create"`.
+  - **También con el panel vacío** (un documento sin entidades ni tipos del documento): la banda va
+    arriba, en su ranura, y debajo el estado vacío de siempre. Decisión del mantenedor, 2026-11-21.
 - **Orden de los tipos**: primero los propios (guardados y del documento), después los del
   catálogo.
 - **Un tipo del documento se muestra siempre**, aunque no tenga grupos: su banda dice «solo en este
