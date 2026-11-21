@@ -48,12 +48,21 @@ export interface DialogProps {
    * Ancho máximo. `md` es el de siempre; `lg` es para diálogos con contenido
    * en columnas (`AboutDialog`, los diálogos de edición de ADR-169 §10).
    */
-  readonly size?: "md" | "lg";
+  readonly size?: "md" | "lg" | "xl";
+  /**
+   * `alertdialog` para una confirmación que interrumpe (rechazo de una
+   * importación, borrar un tipo con sus formatos). Radix lo deja en `dialog` por
+   * defecto; sin la prop, nada cambia.
+   */
+  readonly role?: "alertdialog";
+  /** Acciones del encabezado, a la izquierda del botón de cierre (p. ej. «Importar…» y «Exportar…»). */
+  readonly headerActions?: ReactNode;
 }
 
 const SIZE_CLASS: Readonly<Record<NonNullable<DialogProps["size"]>, string>> = {
   md: "max-w-md",
   lg: "max-w-xl",
+  xl: "max-w-3xl",
 };
 
 export function Dialog({
@@ -67,6 +76,8 @@ export function Dialog({
   footer,
   hideCloseButton = false,
   size = "md",
+  role,
+  headerActions,
 }: DialogProps) {
   const [selectOpen, setSelectOpen] = useState(false);
   const handleSelectOpenChange = useCallback((next: boolean) => setSelectOpen(next), []);
@@ -105,6 +116,7 @@ export function Dialog({
           {/* Radix Select's modal portal disables outside pointer events. Re-enable
               them only over this Dialog while its own Select is open. */}
           <RadixDialog.Content
+            {...(role !== undefined ? { role } : {})}
             style={selectOpen ? { pointerEvents: "auto" } : undefined}
             className={`fixed left-1/2 top-1/2 z-50 flex max-h-[85vh] w-[calc(100%-2rem)] ${SIZE_CLASS[size]} -translate-x-1/2 -translate-y-1/2 flex-col rounded-lg bg-bg-primary p-5 shadow-md focus:outline-none`}
           >
@@ -126,6 +138,7 @@ export function Dialog({
                     </RadixDialog.Description>
                   ) : null}
                 </div>
+                {headerActions}
                 {hideCloseButton ? null : closeButton}
               </div>
             ) : (
@@ -135,6 +148,7 @@ export function Dialog({
                     {titleNode}
                     {titleAside}
                   </div>
+                  {headerActions}
                   {hideCloseButton ? null : closeButton}
                 </div>
                 {description ? (

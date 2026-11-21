@@ -10,8 +10,10 @@
  * - **Barra superior**: logo, nombre y `SettingsButton` (ADR-125 §1).
  * - **Caja principal**: título, bajada y la `DropZone` de cuatro estados.
  * - **`HowItWorks`**: la animación de tres fases con sus tres pasos.
- * - **Tres tarjetas** con lo que la herramienta **garantiza** (no repiten los
- *   pasos, que dicen qué hace el usuario).
+ * - **`DetectionCard`**: una sola tarjeta ancha, que es un botón y abre
+ *   `DetectionFormatsDialog` (`Components.md` §13b.1). Reemplazó a las tres
+ *   tarjetas de rasgos; las dos garantías pasaron a `LoadGuarantees`, debajo de
+ *   la `DropZone` (ADR-227 §1).
  * - **Pie**: el botón de versión que abre "Novedades" (`ReleaseNotesMenu`,
  *   ADR-216), la licencia, "Acerca de…" (`AboutDialog`, ADR-168 §3) y
  *   "Reportar un problema".
@@ -27,6 +29,7 @@
  */
 
 import {
+  ArrowRightIcon,
   ArrowUpRightIcon,
   BugIcon,
   InfoIcon,
@@ -37,7 +40,11 @@ import {
 import { useEffect, useState, type ReactNode } from "react";
 
 import { actions } from "../../core-adapter/actions.js";
+import { useDetectionStore } from "../../store/detection.store.js";
 import { Logo } from "../common/Logo.js";
+import { showToast } from "../common/toast.js";
+import { DetectionFormatsDialog } from "../formats/DetectionFormatsDialog.js";
+import { describeDetectionCard } from "../formats/formatsTree.js";
 import { SettingsButton } from "../toolbar/SettingsButton.js";
 
 import { AboutDialog } from "./AboutDialog.js";
@@ -60,6 +67,8 @@ export function LoadScreen() {
   // pantalla por otro camino, no reaparece.
   const [error, setError] = useState<DropZoneError | null>(() => peekImportFailure());
   const [aboutOpen, setAboutOpen] = useState(false);
+  const [formatsOpen, setFormatsOpen] = useState(false);
+  const savedDetection = useDetectionStore((state) => state.saved);
 
   useEffect(() => {
     clearImportFailure();
@@ -121,6 +130,7 @@ export function LoadScreen() {
               </p>
             </div>
             <DropZone openingFileName={openingFileName} error={error} onFile={accept} />
+            <LoadGuarantees />
           </section>
 
           <div className="anonly-rise anonly-rise-2 flex">
@@ -128,26 +138,30 @@ export function LoadScreen() {
           </div>
         </main>
 
-        <dl className="anonly-rise anonly-rise-3 grid grid-cols-1 gap-3 md:grid-cols-3">
-          <Feature
-            icon={<ShieldCheckIcon className="h-5 w-5" aria-hidden />}
-            iconClass="bg-success/15 text-text-primary"
-            title="Todo local"
-            description="Tus documentos nunca salen de tu computadora."
-          />
-          <Feature
-            icon={<ScanSearchIcon className="h-5 w-5" aria-hidden />}
-            iconClass="bg-accent/10 text-accent"
-            title="Detección automática"
-            description="Reglas para DNI y CUIT, y un modelo que reconoce nombres por el contexto de la frase."
-          />
-          <Feature
-            icon={<LockIcon className="h-5 w-5" aria-hidden />}
-            iconClass="bg-bg-tertiary text-text-primary"
-            title="No se puede deshacer"
-            description="El dato no queda escondido bajo una tachadura: no hay nada debajo que copiar ni recuperar."
-          />
-        </dl>
+        {/*
+          ADR-227 §1: una sola tarjeta ancha, que es un botón. Reemplaza a las tres
+          tarjetas de rasgos; «Todo local» y «No se puede deshacer» pasaron a
+          `LoadGuarantees`, dentro de la caja principal.
+        */}
+        <button
+          type="button"
+          onClick={() => setFormatsOpen(true)}
+          className="anonly-rise anonly-rise-3 flex w-full items-center gap-3 rounded-xl border border-border bg-bg-primary px-3.5 py-3 text-left shadow-sm hover:bg-bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+        >
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent/10 text-accent">
+            <ScanSearchIcon className="h-5 w-5" aria-hidden />
+          </span>
+          <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+            <span className="text-sm font-semibold text-text-primary">Detección automática</span>
+            <span className="text-sm leading-snug text-text-secondary">
+              {describeDetectionCard(savedDetection)}
+            </span>
+          </span>
+          <span className="flex shrink-0 items-center gap-1.5 text-sm font-semibold text-accent">
+            Ver y editar los formatos
+            <ArrowRightIcon className="h-4 w-4" aria-hidden />
+          </span>
+        </button>
 
         <footer className="anonly-rise anonly-rise-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-bg-primary p-1.5">
           {/*
@@ -184,11 +198,45 @@ export function LoadScreen() {
       </div>
 
       <AboutDialog open={aboutOpen} onClose={() => setAboutOpen(false)} />
+      <DetectionFormatsDialog
+        open={formatsOpen}
+        onClose={() => setFormatsOpen(false)}
+        onSaved={() =>
+          showToast({
+            title: "Formatos guardados",
+            description: "Se aplican al próximo documento que abras",
+            tone: "success",
+          })
+        }
+      />
     </div>
   );
 }
 
-function Feature({
+/**
+ * Las dos garantías, en una fila **debajo** de la `DropZone`, dentro de la caja
+ * principal (`Components.md` §13b.1). Cada cosa se dice una vez en la pantalla.
+ */
+function LoadGuarantees() {
+  return (
+    <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <Guarantee
+        icon={<ShieldCheckIcon className="h-4 w-4" aria-hidden />}
+        iconClass="bg-success/15 text-text-primary"
+        title="Todo local"
+        description="Nunca salen de tu computadora."
+      />
+      <Guarantee
+        icon={<LockIcon className="h-4 w-4" aria-hidden />}
+        iconClass="bg-bg-tertiary text-text-primary"
+        title="No se puede deshacer"
+        description="No queda nada debajo para recuperar."
+      />
+    </dl>
+  );
+}
+
+function Guarantee({
   icon,
   iconClass,
   title,
@@ -200,11 +248,11 @@ function Feature({
   readonly description: string;
 }) {
   return (
-    <div className="flex items-start gap-3 rounded-xl border border-border bg-bg-primary px-3.5 py-3 shadow-sm">
-      <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${iconClass}`}>
+    <div className="flex items-start gap-2.5">
+      <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${iconClass}`}>
         {icon}
       </span>
-      <div className="flex flex-col gap-0.5">
+      <div className="flex flex-col">
         <dt className="text-sm font-semibold text-text-primary">{title}</dt>
         <dd className="text-sm leading-snug text-text-secondary">{description}</dd>
       </div>

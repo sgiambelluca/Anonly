@@ -32,6 +32,7 @@ import {
 } from "@anonly/anonymization-core";
 
 import { useDegradedStore } from "../store/degraded.store.js";
+import { useDetectionStore } from "../store/detection.store.js";
 import { useDocumentStore } from "../store/document.store.js";
 import { useEntitiesStore } from "../store/entities.store.js";
 import { usePipelineStore } from "../store/pipeline.store.js";
@@ -41,7 +42,7 @@ import { useUnreadableInkStore } from "../store/unreadableInk.store.js";
 import { useViewerStore, type ViewerKind } from "../store/viewer.store.js";
 
 import { useHistoryStore } from "./history.js";
-import { deriveEngineConfigOverrides } from "./settingsToEngineConfig.js";
+import { deriveCoreOverrides } from "./settingsToEngineConfig.js";
 
 import { getCore, getCoreWhenReady, recreateCoreIfOverridesChanged } from "./index.js";
 
@@ -411,6 +412,9 @@ export const actions = {
     // documento que se cierra, no debe sobrevivirlo.
     useUnreadableInkStore.getState().reset();
     // ADR-194 §9: un perfil elegido con el documento abierto rige desde acá.
-    recreateCoreIfOverridesChanged(deriveEngineConfigOverrides(useSettingsStore.getState()));
+    // También los formatos guardados con el documento abierto (ADR-225 §5).
+    recreateCoreIfOverridesChanged(
+      deriveCoreOverrides(useSettingsStore.getState(), useDetectionStore.getState().saved),
+    );
   },
 };
