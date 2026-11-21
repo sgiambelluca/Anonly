@@ -5,16 +5,19 @@
  *
  * Cada formato del archivo cuyo nombre choca con uno que el usuario ya tiene
  * (sin ser idéntico) trae su campo con el nombre del archivo y, debajo, en una
- * **ranura de alto fijo**, el texto de `name_taken` (`UX_Guidelines.md` §11b.16)
+ * **línea de ayuda** (§11b.17), el texto de `name_taken` (`UX_Guidelines.md` §11b.16)
  * mientras siga chocando, también contra otro formato del mismo archivo.
  * «Importar» queda apagado hasta que no quede ningún conflicto. «Cancelar» no
  * importa nada.
  */
 
-import { TriangleAlertIcon } from "lucide-react";
-
 import { Button } from "../common/Button.js";
 import { Dialog } from "../common/Dialog.js";
+import { FieldHint } from "../common/FieldHint.js";
+import { fieldBorderClass } from "../common/fieldHintText.js";
+
+/** La ayuda bajo el nombre cuando ya no choca (§11b.17). */
+export const NAME_CONFLICT_HELP = "Así se va a ver en tu lista de formatos";
 
 export interface NameConflictEntry {
   /** Posición del formato en el archivo: la clave del renombre. */
@@ -61,27 +64,22 @@ export function ImportNameConflictsDialog({
     >
       <div className="flex flex-col gap-3">
         {(entries ?? []).map((entry) => (
-          <div key={entry.index} className="flex flex-col gap-1.5">
+          <div key={entry.index} className="flex flex-col gap-1">
             <input
               type="text"
               value={entry.value}
               aria-label="Nombre del formato"
               aria-invalid={entry.slot !== null}
+              aria-describedby={`import-name-hint-${entry.index}`}
               onChange={(event) => onRename(entry.index, event.target.value)}
-              className="rounded-lg border border-border bg-bg-primary px-3 py-2 text-sm text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              className={`rounded-lg border ${fieldBorderClass(entry.slot !== null)} bg-bg-primary px-3 py-2 text-sm text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent`}
             />
-            {/* Ranura de alto fijo: el error no mueve el diseño (UX-10). */}
-            <p
-              role={entry.slot === null ? undefined : "alert"}
-              className="flex h-10 items-start gap-1.5 text-sm leading-snug text-error"
-            >
-              {entry.slot !== null ? (
-                <>
-                  <TriangleAlertIcon className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
-                  <span className="line-clamp-2">{entry.slot}</span>
-                </>
-              ) : null}
-            </p>
+            {/* Línea de ayuda (§11b.17): sin choque dice cómo se ve; con choque, el error. */}
+            <FieldHint
+              id={`import-name-hint-${entry.index}`}
+              help={NAME_CONFLICT_HELP}
+              error={entry.slot}
+            />
           </div>
         ))}
       </div>

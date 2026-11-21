@@ -36,7 +36,7 @@ import {
   SAVED_TYPE_TOOLTIP,
 } from "./documentTypeCopy.js";
 import { PICKER_TYPE_ORDER, typeSingular } from "./entityTypeLabels.js";
-import { previewOfNewType, type NewTypeDraft } from "./newTypeInline.js";
+import { NEW_TYPE_HINT_ID, previewOfNewType, type NewTypeDraft } from "./newTypeInline.js";
 import { TypeDot } from "./TypeDot.js";
 import { userTypeDefinitions, type KnownUserType } from "./userTypes.js";
 
@@ -164,7 +164,9 @@ export function EntityTypePicker({
   ) : (
     <div
       data-new-type="field"
-      className="col-span-full flex h-8 min-w-0 items-center gap-2 rounded-md border border-dashed border-accent bg-bg-primary px-2 text-sm"
+      className={`col-span-full flex h-8 min-w-0 items-center gap-2 rounded-md border border-dashed bg-bg-primary px-2 text-sm ${
+        newTypeError !== null ? "border-error" : "border-accent"
+      }`}
     >
       <input
         type="text"
@@ -174,6 +176,7 @@ export function EntityTypePicker({
         placeholder="Nombre del tipo"
         aria-label="Nombre del tipo nuevo"
         aria-invalid={newTypeError !== null}
+        aria-describedby={NEW_TYPE_HINT_ID}
         onChange={(event) => onNewTypeChange({ name: event.target.value })}
         onKeyDown={(event) => {
           if (event.key === "Enter") {

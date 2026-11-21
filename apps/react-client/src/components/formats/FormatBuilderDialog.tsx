@@ -26,6 +26,7 @@ import { Banner } from "../common/Banner.js";
 import { Button } from "../common/Button.js";
 import { ConfirmDialog } from "../common/ConfirmDialog.js";
 import { Dialog } from "../common/Dialog.js";
+import { FieldHint } from "../common/FieldHint.js";
 import { Select } from "../common/Select.js";
 
 import { ContextWords } from "./ContextWords.js";
@@ -81,6 +82,7 @@ export interface FormatBuilderDialogProps {
 
 export const BUILDER_TEXTS = {
   nameLabel: "Nombre del formato",
+  nameHelp: "Así lo vas a ver en tu lista de formatos",
   namePlaceholder: "Por ejemplo, «Legajo»",
   typeLabel: "Es un…",
   addVariant: "+ Variante",
@@ -260,19 +262,24 @@ function BuilderForm({ setup, state, onSubmit, onClose }: FormProps) {
           {setup.notice !== null ? <Banner variant="info">{setup.notice}</Banner> : null}
 
           <div className="grid grid-cols-[1fr_14rem] gap-3">
-            <label className="flex flex-col gap-1.5">
-              <span className="text-sm font-semibold text-text-primary">
-                {BUILDER_TEXTS.nameLabel}
-              </span>
-              <input
-                type="text"
-                value={draft.name}
-                placeholder={BUILDER_TEXTS.namePlaceholder}
-                onChange={(event) => setDraft({ ...draft, name: event.target.value })}
-                autoFocus
-                className={INPUT_CLASS}
-              />
-            </label>
+            <div className="flex flex-col gap-1">
+              <label className="flex flex-col gap-1.5">
+                <span className="text-sm font-semibold text-text-primary">
+                  {BUILDER_TEXTS.nameLabel}
+                </span>
+                <input
+                  type="text"
+                  value={draft.name}
+                  placeholder={BUILDER_TEXTS.namePlaceholder}
+                  onChange={(event) => setDraft({ ...draft, name: event.target.value })}
+                  autoFocus
+                  aria-describedby="format-name-hint"
+                  className={INPUT_CLASS}
+                />
+              </label>
+              {/* Línea de ayuda (§11b.17): el nombre no tiene error propio. */}
+              <FieldHint id="format-name-hint" help={BUILDER_TEXTS.nameHelp} />
+            </div>
             <div className="flex flex-col gap-1.5">
               <span className="text-sm font-semibold text-text-primary">
                 {BUILDER_TEXTS.typeLabel}

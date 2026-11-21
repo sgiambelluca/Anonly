@@ -45,6 +45,7 @@ import { matchContext } from "../viewer/searchResults.js";
 import { addManualEntityWithFeedback } from "./addManualEntity.js";
 import { NEW_TYPE_ADD_FOOTNOTE } from "./documentTypeCopy.js";
 import { EntityTypePicker } from "./EntityTypePicker.js";
+import { NEW_TYPE_HINT_ID } from "./newTypeInline.js";
 import { useTypeChoice } from "./useTypeChoice.js";
 
 export interface AddEntityDialogProps {
@@ -154,6 +155,7 @@ export function AddEntityDialog({ open, onClose, initialType }: AddEntityDialogP
           {/* La línea de pie: el error del nombre del tipo nuevo ocupa su lugar (ADR-229 §2). */}
           {choice.error !== null ? (
             <span
+              id={NEW_TYPE_HINT_ID}
               role="alert"
               className="inline-flex min-w-0 flex-1 items-center gap-2 text-sm font-medium text-error"
             >
@@ -161,7 +163,10 @@ export function AddEntityDialog({ open, onClose, initialType }: AddEntityDialogP
               <span className="line-clamp-2">{choice.error}</span>
             </span>
           ) : (
-            <span className="inline-flex flex-1 items-center gap-2 text-sm text-text-secondary">
+            <span
+              id={NEW_TYPE_HINT_ID}
+              className="inline-flex flex-1 items-center gap-2 text-sm text-text-secondary"
+            >
               <MousePointerClickIcon className="h-4 w-4 shrink-0" aria-hidden />
               <span className="line-clamp-2">
                 {choice.creating && choice.canConfirm

@@ -24,20 +24,23 @@ import type {
   UserEntityTypeDefinition,
   UserEntityTypeId,
 } from "@anonly/anonymization-core";
-import { TriangleAlertIcon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { Button } from "../common/Button.js";
 import { Dialog } from "../common/Dialog.js";
+import { FieldHint } from "../common/FieldHint.js";
+import { fieldBorderClass } from "../common/fieldHintText.js";
 
 import {
   evaluateTypeForm,
   fieldsOf,
   replacementLadder,
   replacementTokens,
+  SHORT_LABEL_HELP,
   TYPE_FORM_COPY,
   typeFormLead,
   typeFormNote,
+  typeNameHelp,
   type UserTypeFields,
   type UserTypeMode,
   type UserTypeScope,
@@ -90,7 +93,9 @@ export function UserTypeDialog({
   );
   const ladder = replacementLadder(fields);
   const editing = mode === "edit";
-  const hasError = result.slot.kind === "error";
+  const errorText = result.slot.kind === "error" ? result.slot.text : null;
+  const nameError = result.errorField === "name" ? errorText : null;
+  const shortError = result.errorField === "short" ? errorText : null;
 
   function update(patch: Partial<UserTypeFields>): void {
     setFields((current) => ({ ...current, ...patch }));
@@ -126,32 +131,23 @@ export function UserTypeDialog({
           submit();
         }}
       >
-        <label className="flex flex-col gap-1.5">
-          <span className="text-sm font-semibold text-text-primary">
-            {TYPE_FORM_COPY.nameLabel}
-          </span>
-          <input
-            type="text"
-            value={fields.name}
-            onChange={(event) => update({ name: event.target.value })}
-            aria-invalid={hasError}
-            autoFocus
-            className="rounded-lg border border-border bg-bg-primary px-3 py-2 text-sm text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-          />
-        </label>
-
-        {/* Ranura de alto fijo (UX-10): en reposo queda vacía; el error ocupa su lugar. */}
-        <div
-          role={hasError ? "alert" : undefined}
-          aria-live="polite"
-          className="flex h-10 items-start gap-2 text-sm font-medium leading-snug text-error"
-        >
-          {result.slot.kind === "error" ? (
-            <>
-              <TriangleAlertIcon className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
-              <span className="line-clamp-2">{result.slot.text}</span>
-            </>
-          ) : null}
+        <div className="flex flex-col gap-1">
+          <label className="flex flex-col gap-1.5">
+            <span className="text-sm font-semibold text-text-primary">
+              {TYPE_FORM_COPY.nameLabel}
+            </span>
+            <input
+              type="text"
+              value={fields.name}
+              onChange={(event) => update({ name: event.target.value })}
+              aria-invalid={nameError !== null}
+              aria-describedby="user-type-name-hint"
+              autoFocus
+              className={`rounded-lg border ${fieldBorderClass(nameError !== null)} bg-bg-primary px-3 py-2 text-sm text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent`}
+            />
+          </label>
+          {/* Línea de ayuda (§11b.17): el contador y cómo queda; con error, el error. */}
+          <FieldHint id="user-type-name-hint" help={typeNameHelp(fields)} error={nameError} />
         </div>
 
         <div className="flex flex-col gap-2 rounded-lg border border-border p-3">
@@ -182,7 +178,9 @@ export function UserTypeDialog({
                 value={fields.level1}
                 placeholder={ladder.level1}
                 onChange={(event) => update({ level1: event.target.value })}
-                className="rounded-lg border border-border bg-bg-primary px-3 py-1.5 text-sm text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                aria-invalid={shortError !== null}
+                aria-describedby="user-type-short-hint"
+                className={`rounded-lg border ${fieldBorderClass(shortError !== null)} bg-bg-primary px-3 py-1.5 text-sm text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent`}
               />
             </label>
             <label className="flex flex-col gap-1 text-sm text-text-secondary">
@@ -192,11 +190,13 @@ export function UserTypeDialog({
                 value={fields.level2}
                 placeholder={ladder.level2}
                 onChange={(event) => update({ level2: event.target.value })}
-                className="rounded-lg border border-border bg-bg-primary px-3 py-1.5 text-sm text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                aria-invalid={shortError !== null}
+                aria-describedby="user-type-short-hint"
+                className={`rounded-lg border ${fieldBorderClass(shortError !== null)} bg-bg-primary px-3 py-1.5 text-sm text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent`}
               />
             </label>
           </div>
-          <span className="text-xs text-text-secondary">{TYPE_FORM_COPY.shortLabelsHint}</span>
+          <FieldHint id="user-type-short-hint" help={SHORT_LABEL_HELP} error={shortError} />
         </div>
 
         <p className="text-sm text-text-secondary">{TYPE_FORM_COPY.replacementInfo}</p>

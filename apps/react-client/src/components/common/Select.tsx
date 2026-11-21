@@ -62,7 +62,7 @@ export function Select<T extends string>({
         </RadixSelect.Icon>
       </RadixSelect.Trigger>
       <RadixSelect.Portal>
-        <RadixSelect.Content className="z-50 overflow-hidden rounded-md border border-border bg-bg-primary shadow-md">
+        <RadixSelect.Content className="z-[95] overflow-hidden rounded-md border border-border bg-bg-primary shadow-md">
           <RadixSelect.Viewport className="p-1">
             {options.map((option) => (
               <RadixSelect.Item
