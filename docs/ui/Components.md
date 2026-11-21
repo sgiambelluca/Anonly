@@ -1460,15 +1460,17 @@ apps/react-client/src/components/
   ejemplo), «Cuántos» y, si son letras, «Escritas». Para un separador: cuáles y un `Checkbox`
   «Puede faltar». Para un texto fijo: el campo y el aviso de guardado.
 - **`ContextWords`**: plegada en una fila si no hay palabras. Abierta: etiquetas rectas con
-  subrayado punteado, campo, «Agregar» y contador.
+  subrayado punteado, campo, «Agregar» y contador. Junto al campo, el mismo aviso de guardado que
+  el texto fijo (`UX_Guidelines.md` §11b.9).
 - **`FormatTestPanel`**: panel **flotante** que se mueve por su encabezado. Texto de prueba,
   cantidad de coincidencias y resultado resaltado (`testFormat`). Su texto vive solo en el estado
   del componente: nunca se guarda ni se loguea.
 - **`FormatStatusBox`**: fija al final del cuerpo, arriba del pie, de **alto fijo** y siempre en
   caja. Sale de `validateFormat` y `compareFormat`: verde, amarillo (deja crear) o rojo (apaga el
   botón principal).
-- **Confirmaciones** (`ConfirmDialog`): «¿Borrar la variante N?» y, al cerrar con cambios —con
-  «Cancelar», con la X o con un clic afuera—, «¿Cerrar sin guardar?».
+- **Confirmaciones** (`ConfirmDialog`): «¿Borrar la variante N?», que dice cuántas piezas se
+  pierden, y, al cerrar con cambios —con «Cancelar», con la X o con un clic afuera—, «¿Cerrar sin
+  guardar?», con «Seguir editando» y «Descartar cambios» (`UX_Guidelines.md` §11b.5).
 - **Límites**: los de `Contracts.md` §6 (`FORMAT_*`). Los contadores aparecen cerca del tope.
 
 ### 13b.6 Panel de entidades (ADR-225, ADR-226, ADR-229)
@@ -1484,8 +1486,8 @@ apps/react-client/src/components/
 - **`DocumentTypeMenu`** (⋯, solo en tipos del documento): «Editar nombre y abreviaturas…»
   (`UserTypeDialog`, `mode: "edit"`), «Guardar para los próximos documentos» y «Borrar tipo…».
 - **`RemoveDocumentTypeDialog`**: `alertdialog`. Con entidades, las lista y muestra el aviso «Sus
-  entidades quedan libres y descubiertas»; botón «Borrar tipo y entidad(es)». Vacío, sin lista ni
-  aviso.
+  entidades quedan libres y descubiertas», que sugiere cambiarles el tipo antes (`UX_Guidelines.md`
+  §11b.10); botón «Borrar tipo y entidad(es)». Vacío, sin lista ni aviso.
   - **Con choques sin resolver** de entidades del tipo, suma antes de la lista el aviso de
     `UX_Guidelines.md` §11b.10. Recomienda resolverlos y no bloquea el botón (ADR-225 §4, precisión
     del 2026-11-20).

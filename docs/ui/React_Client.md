@@ -721,7 +721,7 @@ refreshDocumentTypes(): void;
 | `defineDocumentType(def)` | `history.record` → `orchestrator.defineDocumentEntityType` → `refreshDocumentTypes` |
 | `updateDocumentType(def)` | `history.record` → `await orchestrator.updateDocumentEntityType` → `refreshDocumentTypes` |
 | `removeDocumentType(id)` | `history.record` → borra las reglas de ese tipo y de sus grupos, como al eliminar una entidad (ADR-171 §5) → `await orchestrator.removeDocumentEntityType` → `refreshDocumentTypes` |
-| `saveDocumentType(id)` | `detection.saveDocumentType(def)` y suma el id a `savedDuringDocument`. **Sin** `history.record`: no es una edición del documento |
+| `saveDocumentType(id)` | busca la definición de `id` en `documentTypes`, `detection.saveDocumentType(def)` y suma el id a `savedDuringDocument`. **Sin** `history.record`: no es una edición del documento |
 | `unsaveDocumentType(id)` | lo inverso; es el «Deshacer» del aviso de guardar |
 
 - **«Crear y agregar» y «Crear y cambiar»** (`EntityTypePicker`, ADR-229 §2): **un solo**

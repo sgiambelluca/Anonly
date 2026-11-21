@@ -249,12 +249,9 @@ specs de interfaz (`Components.md` §13b.3 y §13b.6, `UX_Guidelines.md`
 
 **Falta:**
 
-1. **Los textos de falla, antes de F7** (decisión del mantenedor, 2026-11-20).
-   Cada código de `UserEntityTypeIssueCode`, `FormatIssueCode` y
-   `FormatsFileIssueCode` necesita un texto que diga por qué no se puede, con
-   el dato que choca, y qué hacer. Van en la tabla de `UX_Guidelines.md`
-   §11b.16. Los propone el planificador y los aprueba el mantenedor. Ya está
-   aprobado el de `label_taken`.
+1. ~~Los textos de falla, antes de F7~~. **Hecho el 2026-11-20:** el
+   mantenedor aprobó un texto por cada código de `UserEntityTypeIssueCode`,
+   `FormatIssueCode` y `FormatsFileIssueCode`, en `UX_Guidelines.md` §11b.16.
 2. **El frente F6** (Chile y Uruguay, para la 1.1.1) tiene su propia aprobación de tablas antes de escribir sus filas (ADR-221 §6). Su investigación no necesita código y puede arrancar en paralelo.
 
 ## 7. Frentes de implementación
@@ -336,6 +333,29 @@ mantenedor, 2026-11-20). Un archivo de formatos de la 1.1.1 con referencias
 a Chile o Uruguay, importado en la 1.1, se rechaza entero como de una versión
 más nueva (`version_newer`, ADR-223 §6). El usuario actualiza y lo vuelve a
 importar. Es F4.
+
+**Cómo se parte F7** (planificador, 2026-11-20). Son cuatro tandas por
+pantalla, en orden, y cada una deja los gates en verde y va en su commit
+(todas tocan solo `react-client`). Cada tanda lee solo las secciones que toca:
+
+1. **Formatos de detección:** `detection.store`, la tarjeta de inicio, el
+   árbol con su subnivel y «Guardar», «Nuevo tipo» y `UserTypeDialog` para
+   los tipos guardados, y exportar e importar. Lee `React_Client.md` §3.8,
+   `Components.md` §13b.1 a §13b.4 y §13b.9, y `UX_Guidelines.md` §11b.1 a
+   §11b.5, §11b.11, §11b.15 y §11b.16.
+2. **El generador:** `FormatBuilderDialog` con sus piezas, la prueba y la caja
+   de estado. Lee `Components.md` §13b.5, `UX_Guidelines.md` §11b.6 a §11b.9 y
+   la tabla de formatos de §11b.16.
+3. **Panel de entidades:** los tipos del documento, sus filtros, el subnivel
+   del panel, el `EntityTypePicker` con «Nuevo tipo» y `UserTypeDialog` para el
+   documento. Lee `React_Client.md` §3.9, §3.10 y §3.12, `Components.md`
+   §13b.3, §13b.6 y §13b.7, y `UX_Guidelines.md` §11b.10, §11b.11 y §11b.15.
+4. **Visor, barra, export y configuración:** el tooltip, el aviso de
+   `skippedFormats` y la ayuda de atajos. Lee `React_Client.md` §3.11,
+   `Components.md` §13b.8 y `UX_Guidelines.md` §11b.12 a §11b.14.
+
+Las cuatro leen además `Contracts.md` §3.5, §5.2 y §6, que son la API del
+façade, las funciones puras y los límites.
 
 **Cómo se revisa** (decisión del mantenedor, 2026-11-20). Hay un revisor por
 bloque de frentes que comparten spec, no uno por frente. El costo fijo de una
