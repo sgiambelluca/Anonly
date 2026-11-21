@@ -317,7 +317,10 @@ export function PieceInspector({
   return (
     <section
       aria-label="Ajuste de la pieza"
-      className="flex h-[12.25rem] shrink-0 flex-col gap-3 overflow-y-auto rounded-lg border border-border p-3"
+      className={`flex shrink-0 flex-col gap-3 rounded-lg border border-border p-3 ${
+        // El alto fijo vale con una pieza elegida; sin pieza, el estado vacío es más bajo.
+        piece === null || path === null ? "" : "h-[12.25rem] overflow-y-auto"
+      }`}
     >
       {piece === null || path === null ? (
         <p className="text-sm text-text-secondary">{BUILDER_COPY.noPieceSelected}</p>

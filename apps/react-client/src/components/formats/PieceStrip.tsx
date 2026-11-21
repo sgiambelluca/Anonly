@@ -227,10 +227,18 @@ function AddPieceMenu({ disabled, onAdd }: AddPieceMenuProps) {
                 setOpen(false);
                 onAdd(entry.id);
               }}
-              className="flex w-full flex-col rounded-md px-2.5 py-2 text-left hover:bg-bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left hover:bg-bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
             >
-              <span className="text-sm font-medium text-text-primary">{entry.label}</span>
-              <span className="text-xs text-text-secondary">{entry.description}</span>
+              <span
+                aria-hidden
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-bg-tertiary font-mono text-xs font-semibold text-text-secondary"
+              >
+                {entry.glyph}
+              </span>
+              <span className="flex min-w-0 flex-col">
+                <span className="text-sm font-medium text-text-primary">{entry.label}</span>
+                <span className="text-xs text-text-secondary">{entry.description}</span>
+              </span>
             </button>
           ))}
         </div>

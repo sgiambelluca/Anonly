@@ -48,6 +48,7 @@ import {
   formatIssueText,
   formatsFileIssueText,
   pieceAtPreorder,
+  shortenQuoted,
   userTypeIssueReason,
   userTypeIssueText,
 } from "../components/formats/formatTexts.js";
@@ -149,7 +150,7 @@ describe("textos de tipos propios", () => {
         ...type,
         shortLabels: { level2: "toolongvalue" },
       }),
-    ).toContain("«toolongvalue»");
+    ).toContain("«toolongval…» tiene que tener de 1 a 8");
     expect(userTypeIssueText("label_taken", type)).toBe(
       "Ya hay un tipo que se reemplaza como HISTORIA CLINICA, y en el documento no se distinguirían. Elegí otro nombre.",
     );
@@ -220,7 +221,7 @@ describe("textos de formatos", () => {
 
   it("nombra el dato que choca", () => {
     expect(text("name_taken")).toBe(
-      "Ya tenés un formato llamado «Legajo largo». Elegí otro nombre para distinguirlos en la lista.",
+      "Ya tenés un formato llamado «Legajo lar…». Elegí otro nombre para distinguirlos en la lista.",
     );
     expect(text("variant_empty", { variantIndex: 1 })).toBe(
       "La variante 2 no tiene piezas. Sumá una con «+ Pieza» o borrá la variante.",
@@ -275,6 +276,45 @@ describe("textos de formatos", () => {
     expect(
       formatIssueText({ code: "too_many_context_words" }, userFormat(0, "Sin contexto"), []),
     ).toContain("tiene 0");
+  });
+});
+
+describe("valores largos entre « »", () => {
+  it("acorta el valor y deja entero el texto que lo rodea", () => {
+    expect(shortenQuoted("corto")).toBe("corto");
+    expect(shortenQuoted("1234567890")).toBe("1234567890");
+    expect(shortenQuoted("12345678901")).toBe("1234567890…");
+    expect(shortenQuoted("abcdef", 3)).toBe("abc…");
+    expect(shortenQuoted("")).toBe("");
+    // Un carácter fuera del plano básico cuenta como uno, no se parte a la mitad.
+    expect(shortenQuoted("😀".repeat(11))).toBe(`${"😀".repeat(10)}…`);
+  });
+
+  it("la versión corta larga conserva «tiene que tener de 1 a N»", () => {
+    const text = userTypeIssueText("short_label_invalid", {
+      ...userType(0, "Legajo"),
+      shortLabels: { level1: "una versión corta larguísima" },
+    });
+    expect(text).toContain("«una versió…» tiene que tener de 1 a 8 letras o números");
+    expect(text).not.toContain("larguísima");
+  });
+
+  it("los nombres largos de formato, tipo y palabra de contexto también se acortan", () => {
+    const big = "N".repeat(30);
+    const own = userType(0, big);
+    const definition: FormatDefinition = {
+      ...userFormat(0, big, own.id),
+      contextBefore: ["palabra".repeat(8)],
+    };
+    expect(formatIssueText({ code: "name_taken" }, definition, [own])).toContain(
+      `«${"N".repeat(10)}…»`,
+    );
+    expect(formatIssueText({ code: "type_unknown" }, definition, [own])).toContain(
+      `«${"N".repeat(10)}…»`,
+    );
+    expect(formatIssueText({ code: "context_too_long" }, definition, [])).toContain(
+      "«palabrapal…» tiene 56 caracteres",
+    );
   });
 });
 
