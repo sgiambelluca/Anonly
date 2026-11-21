@@ -6,6 +6,8 @@
   tomó el 2026-10-20, al cerrar la pantalla de trabajo en el lienzo de diseño
   de la 1.1.
 - **Fecha**: 2026-11-16.
+- **Precisión del 2026-11-21** (mantenedor): qué hace el clic sobre una
+  entidad del visor (§4).
 - **Decidido por**: el mantenedor.
 - **Origen**: el diseño de la interfaz de la 1.1 (`Plan_1.1.md` §6, frente F7).
 - **Alcance**: `react-client`. **No cambia el contrato**: `EntityGroup.formatId`
@@ -101,7 +103,12 @@ aparece **solo si el formato es del usuario**.
 **Cuándo se va o no aparece:**
 
 - al sacar el mouse o apretar `Esc`;
-- al hacer clic. El clic selecciona la entidad en la lista, como hoy;
+- al hacer clic. Un clic sin arrastrar sobre una entidad **activa** (que se
+  reemplaza) la selecciona en el panel de entidades: la lista va a su fila y
+  la resalta. Sobre una entidad desactivada el clic solo cierra el tooltip.
+  Arrastrar sigue seleccionando texto, como en la 1.0. Precisión del
+  mantenedor, 2026-11-21: hasta la 1.1 el visor no seleccionaba entidades con
+  un clic;
 - mientras se arrastra para seleccionar texto, mientras se hace zoom, o con
   un menú o un diálogo abierto.
 

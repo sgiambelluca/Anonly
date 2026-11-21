@@ -1535,7 +1535,9 @@ apps/react-client/src/components/
 
 - **`EntityTooltip`** (ADR-226 §4): aparece a los ~400 ms de dejar el mouse quieto sobre una
   entidad, en las dos vistas. Tipo y número, valor original, reemplazo, apariciones y, **solo si el
-  formato es del usuario**, «Formato». Se cierra al salir, con `Esc` o con un clic; no aparece
+  formato es del usuario**, «Formato». Se cierra al salir, con `Esc` o con un clic. Un clic sin
+  arrastrar sobre una entidad activa la selecciona en el panel (va a su fila y la resalta); sobre una
+  desactivada solo cierra el tooltip (ADR-226 §4, precisión del 2026-11-21); no aparece
   durante una selección por arrastre, un zoom, ni con un menú o un diálogo abierto. No se ata al
   foco.
 - **`SkippedFormatsNotice`** (ADR-229 §7): en la ranura de la barra que usa el aviso de análisis
