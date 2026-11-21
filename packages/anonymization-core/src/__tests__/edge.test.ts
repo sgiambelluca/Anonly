@@ -2481,4 +2481,39 @@ describe("Orchestrator — 1.1 F4 (casos límite)", () => {
     const sameName = file({ formats: [format, { ...format, id: broken.id }] });
     expect(validateFormatsFile(sameName, "AR").ok).toBe(true);
   });
+
+  // Caso 52 (ADR-233): los nombres de variante viajan en el archivo.
+  it("validateFormatsFile keeps variant names and rejects a malformed list", () => {
+    const type = createUserTypeDefinition("Afiliado", 1);
+    const format = {
+      id: "fmt:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      name: "Numero de afiliado",
+      entityType: type.id,
+      variants: [
+        [{ kind: "chars", charClass: "digit", min: 3, max: 3 }],
+        [{ kind: "chars", charClass: "digit", min: 4, max: 4 }],
+      ],
+      enabled: true,
+    };
+    const file = (variantNames: unknown): string =>
+      JSON.stringify({
+        kind: "anonly-formats",
+        version: 1,
+        types: [type],
+        formats: [{ ...format, variantNames }],
+        catalogRefs: [],
+      });
+    const codesOf = (text: string): string[] => {
+      const result = validateFormatsFile(text, "AR");
+      return result.ok ? [] : result.issues.map((issue) => issue.code);
+    };
+
+    const kept = validateFormatsFile(file(["Corto", ""]), "AR");
+    expect(kept.ok).toBe(true);
+    if (kept.ok) expect(kept.content.formats[0]?.variantNames).toEqual(["Corto", ""]);
+
+    expect(codesOf(file("x"))).toEqual(["schema_invalid"]);
+    expect(codesOf(file([1, "a"]))).toEqual(["schema_invalid"]);
+    expect(codesOf(file(["solo una"]))).toEqual(["format_invalid"]);
+  });
 });

@@ -2305,6 +2305,26 @@ describe("RegexEngine — unit tests", () => {
         }),
       ).toEqual(["too_many_context_words"]);
 
+      // Nombres de variante (ADR-233).
+      const twoVariants: FormatDefinition = { ...valid, variants: [[digits(1)], [digits(2)]] };
+      expect(
+        validateFormat({ ...twoVariants, variantNames: ["Con guiones", "Con guiones"] }, context),
+      ).toEqual({ ok: true, issues: [] });
+      expect(validateFormat({ ...twoVariants, variantNames: ["", "   "] }, context).ok).toBe(true);
+      expect(
+        validateFormat(
+          { ...twoVariants, variantNames: ["a", "x".repeat(FORMAT_MAX_TEXT + 1)] },
+          context,
+        ).issues,
+      ).toEqual([{ code: "variant_name_too_long", variantIndex: 1 }]);
+      expect(
+        validateFormat({ ...twoVariants, variantNames: ["x".repeat(FORMAT_MAX_TEXT)] }, context)
+          .issues,
+      ).toEqual([{ code: "variant_names_mismatch" }]);
+      expect(codesOf({ ...twoVariants, variantNames: ["a", "b", "c"] })).toEqual([
+        "variant_names_mismatch",
+      ]);
+
       // Estados: ocho variantes de 64 dígitos pasan de FORMAT_MAX_STATES; siete no.
       const wide = (count: number): FormatDefinition => ({
         ...valid,
@@ -2358,6 +2378,33 @@ describe("RegexEngine — unit tests", () => {
         { start: 1, end: 9 },
         { start: 11, end: 19 },
       ]);
+    });
+
+    it("variant names do not change what testFormat finds", () => {
+      const base = makeFormat(1, CBU_TYPE.id, [digits(5)], {
+        variants: [[digits(5)], [fixedText("N-"), digits(3)]],
+      });
+      const text = "Ref 12345 y N-678 y 67890.";
+      const expected = testFormat(base, text);
+      expect(expected.length).toBeGreaterThan(0);
+
+      expect(testFormat({ ...base, variantNames: ["Cinco", "Con N"] }, text)).toEqual(expected);
+      expect(testFormat({ ...base, variantNames: ["", "  "] }, text)).toEqual(expected);
+      // Un nombre demasiado largo no impide probar.
+      const long = "x".repeat(FORMAT_MAX_TEXT + 1);
+      expect(testFormat({ ...base, variantNames: [long, "b"] }, text)).toEqual(expected);
+      expect(testFormat({ ...base, variantNames: ["solo uno"] }, text)).toEqual(expected);
+    });
+
+    it("compareFormat ignores variant names", () => {
+      const a = makeFormat(1, CBU_TYPE.id, [digits(5)], { variantNames: ["Cinco"] });
+      const b = makeFormat(2, CBU_TYPE.id, [digits(5)], { variantNames: ["Otro nombre"] });
+      const others = { country: "AR" as const, baseFormats: [], userFormats: [b], catalogRefs: [] };
+
+      expect(compareFormat(a, others).identicalTo).toBe(b.id);
+      // Sin el campo, también: el nombre no entra en la forma canónica.
+      const unnamed = makeFormat(1, CBU_TYPE.id, [digits(5)]);
+      expect(compareFormat(unnamed, others).identicalTo).toBe(b.id);
     });
 
     it("compareFormat detects identical structure regardless of order and case", () => {

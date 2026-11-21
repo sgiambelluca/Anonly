@@ -43,6 +43,8 @@ const CODES_OUTSIDE_THE_SHAPE: ReadonlySet<FormatIssueCode> = new Set<FormatIssu
   "type_unknown",
   "type_not_admitted",
   "id_invalid",
+  "variant_name_too_long",
+  "variant_names_mismatch",
 ]);
 
 /** Códigos que impiden compilar el autómata para contar sus estados. */
@@ -118,6 +120,23 @@ function checkContext(definition: FormatDefinition, issues: FormatIssue[]): void
   if (words.length > FORMAT_MAX_CONTEXT) issues.push({ code: "too_many_context_words" });
 }
 
+/*
+ * ADR-233: el nombre de cada variante. Se revisa cada nombre presente aunque el
+ * largo de la lista no coincida; vacío o solo espacios y repetidos se admiten.
+ */
+function checkVariantNames(definition: FormatDefinition, issues: FormatIssue[]): void {
+  const names = definition.variantNames;
+  if (names === undefined) return;
+  if (names.length !== definition.variants.length) {
+    issues.push({ code: "variant_names_mismatch" });
+  }
+  names.forEach((name, variantIndex) => {
+    if (lengthInCharacters(name) > FORMAT_MAX_TEXT) {
+      issues.push({ code: "variant_name_too_long", variantIndex });
+    }
+  });
+}
+
 function checkType(
   definition: FormatDefinition,
   context: FormatValidationContext,
@@ -169,6 +188,7 @@ export function validateFormat(
     if (!walk.hasChars) issues.push({ code: "variant_without_chars", variantIndex });
   });
 
+  checkVariantNames(definition, issues);
   checkContext(definition, issues);
 
   const canCompile = !issues.some((issue) => CODES_THAT_BLOCK_COMPILING.has(issue.code));
