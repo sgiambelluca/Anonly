@@ -92,12 +92,15 @@ function isFormatShape(value: unknown): value is FormatDefinition {
   if (!isRecord(value)) return false;
   const variants = value["variants"];
   const contextBefore = value["contextBefore"];
+  const variantNames = value["variantNames"];
   return (
     typeof value["id"] === "string" &&
     typeof value["name"] === "string" &&
     typeof value["entityType"] === "string" &&
     Array.isArray(variants) &&
     variants.every((variant) => Array.isArray(variant) && variant.every(isFormatPieceShape)) &&
+    (variantNames === undefined ||
+      (Array.isArray(variantNames) && variantNames.every((name) => typeof name === "string"))) &&
     (contextBefore === undefined ||
       (Array.isArray(contextBefore) && contextBefore.every((word) => typeof word === "string"))) &&
     isOptionalString(value["basedOn"]) &&

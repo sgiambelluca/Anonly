@@ -839,6 +839,12 @@ export interface FormatDefinition {
   /** Tipo propio o uno de `FORMAT_ADMITTING_BASE_TYPES`. */
   readonly entityType: EntityTypeId;
   readonly variants: ReadonlyArray<ReadonlyArray<FormatPiece>>;
+  /**
+   * ADR-233: el nombre de cada variante, en el mismo orden que `variants`.
+   * Ausente = todas con el nombre automático. "" (o solo espacios) = esa
+   * variante con el nombre automático.
+   */
+  readonly variantNames?: ReadonlyArray<string>;
   /** Ausente = sin contexto. */
   readonly contextBefore?: ReadonlyArray<string>;
   /** ADR-220 §4: id del formato base editado. */
@@ -936,7 +942,9 @@ export type FormatIssueCode =
   | "too_many_states"
   | "type_unknown"
   | "type_not_admitted"
-  | "id_invalid";
+  | "id_invalid"
+  | "variant_name_too_long" // ADR-233: con variantIndex
+  | "variant_names_mismatch"; // ADR-233: variantNames no tiene el largo de variants
 
 export interface FormatIssue {
   readonly code: FormatIssueCode;
