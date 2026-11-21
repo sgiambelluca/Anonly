@@ -504,6 +504,12 @@ interface SettingsSlice {
    * pie del panel). Persistido: cerrado una vez, no vuelve.
    */
   readonly dismissedHints: ReadonlyArray<"selection-hint" | "panel-footer-hint">;
+  /**
+   * Pasada de UI de la 1.1 (2026-11-21): si el original muestra el resaltado de
+   * entidades (`Components.md` §5.4b, §13b.8). Default `true`. Persistido; un
+   * valor guardado que no es booleano se ignora y queda el default.
+   */
+  readonly highlightEntities: boolean;
   persist(): void;   // guarda en localStorage (solo settings, nunca documentos)
   load(): void;
 }
@@ -739,6 +745,7 @@ refreshDocumentTypes(): void;
 
 ```ts
 interface EntityFilters {
+  readonly types: ReadonlySet<EntityTypeId>;                          // «Tipos» (ADR-229 §5, 2026-11-21)
   readonly formatIds: ReadonlySet<string>;                            // «Tus formatos»
   readonly modes: ReadonlySet<ReplacementMode>;                       // «Modo de reemplazo»
   readonly review: ReadonlySet<"disabled" | "conflict" | "manual">;   // «Para revisar»
@@ -751,9 +758,13 @@ clearFilters(): void;
 - **Son de la interfaz**: no emiten nada y no entran a la pila de deshacer.
 - **Combinación** (ADR-224 §3): dentro de un mismo conjunto, alcanza con cumplir una opción; entre
   conjuntos, hay que cumplir todos. Con el buscador de la lista se combinan igual.
+- **`types`** admite cualquier tipo, de base o propio (ADR-229 §5, precisión del 2026-11-21).
+  El panel ofrece los que tienen grupos en el documento, más los ya elegidos que se quedaron sin
+  grupos, para poder destildarlos.
 - **`formatIds` solo admite formatos del usuario** (ADR-226 §3): ids presentes en
-  `detection.saved.userFormats` o `catalogRefs`. La sección no se muestra si ningún grupo del
-  documento tiene uno.
+  `detection.saved.userFormats` o `catalogRefs`. El panel ofrece solo los que separan algo dentro
+  de su tipo, con la regla del subnivel (`splitByFormat`, ADR-226 §2 y §3, precisión del
+  2026-11-21). La sección no se muestra si no queda ninguno.
 - **`"conflict"`** incluye los conflictos que nacieron resueltos (ADR-224 §3). Por eso
   `conflicts` **conserva los resueltos** del documento, con su estado, en vez de quitarlos al
   resolverse.

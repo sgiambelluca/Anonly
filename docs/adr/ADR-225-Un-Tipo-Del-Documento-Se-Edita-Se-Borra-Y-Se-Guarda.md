@@ -8,7 +8,8 @@
   el mantenedor los aceptó ese día. **Precisado por el mantenedor el
   2026-11-20** (§4: borrar un tipo descarta también el agregado a mano
   retenido en un choque, y la confirmación avisa de los choques sin
-  resolver).
+  resolver). **Precisado por el mantenedor el 2026-11-21** (§5: guardar
+  también se ofrece al crear el tipo).
 - **Fecha**: 2026-11-16.
 - **Decidido por**: el mantenedor, a propuesta del planificador en lo técnico.
 - **Origen**: el diseño de la interfaz de la 1.1 (`Plan_1.1.md` §6, frente F7).
@@ -206,6 +207,16 @@ se puede pasar a guardado en la 1.1» (ADR-219 §5, `Plan_1.1.md` §4 punto 4).
   `EngineConfig.detection.userTypes`.
 
 No hace falta un método nuevo del Core: guardar es de la aplicación.
+
+**Precisión del mantenedor, 2026-11-21: guardar también se ofrece al
+crearlo.** Solo en el ⋯ pasaba desapercibido, y quien se tomó el trabajo de
+crear un tipo tenía que encontrarlo después. Al crear un tipo del documento,
+el diálogo «Nuevo tipo» y el campo «Nuevo tipo» del selector llevan una
+casilla para guardarlo también para los próximos documentos, destildada.
+Tildada, al crear se hace lo mismo que «Guardar para los próximos
+documentos» del ⋯, con las mismas reglas de esta sección: no toca el
+documento abierto y el deshacer no lo alcanza. El ⋯ sigue estando para
+guardarlo después. Detalle en `Components.md` §13b.3 y §13b.7.
 
 ### 6. Las definiciones de tipo entran al punto de restauración
 

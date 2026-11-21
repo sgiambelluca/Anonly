@@ -8,6 +8,9 @@
 - **Fecha**: 2026-11-16.
 - **Precisión del 2026-11-21** (mantenedor): qué hace el clic sobre una
   entidad del visor (§4).
+- **Segunda precisión del 2026-11-21** (mantenedor): «Tus formatos» lista un
+  formato solo si separa algo dentro de su tipo, con la regla del subnivel
+  (§3).
 - **Decidido por**: el mantenedor.
 - **Origen**: el diseño de la interfaz de la 1.1 (`Plan_1.1.md` §6, frente F7).
 - **Alcance**: `react-client`. **No cambia el contrato**: `EntityGroup.formatId`
@@ -80,6 +83,11 @@ de siempre (aparición o A–Z).
 
 - El filtro por formato de ADR-224 §3 lista **solo los formatos del
   usuario** que detectaron algo en el documento.
+- **Y solo los que separan algo dentro de su tipo**, con la misma regla que
+  el subnivel del árbol (§2): un tipo cuyo contenido sale todo de un único
+  formato del usuario no lo ofrece, porque filtrar por ese formato daría lo
+  mismo que filtrar por el tipo en «Tipos» (ADR-229 §5). Precisión del
+  mantenedor, 2026-11-21.
 - Se llama «Tus formatos».
 - **Si no hay ninguno, la sección no aparece.**
 

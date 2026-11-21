@@ -7,6 +7,14 @@
 - **Fecha**: 2026-11-16.
 - **Precisión del 2026-11-21** (mantenedor): «Es un…» no ofrece «Nuevo
   tipo…» (§1, punto 2).
+- **Precisiones del 2026-11-21, pasada de UI de la 1.1** (mantenedor, sobre
+  la aplicación andando): la caja de estado va en el pie (§1, §7); cada
+  variante tiene su menú ⋯ con «Duplicar variante» y «Borrar variante…»
+  (§2); la flecha del final de un renglón apunta hacia adelante, un clic
+  derecho sobre una pieza abre su menú y `Supr` la borra (§3); una parte
+  opcional se completa con un «+» dentro de su caja y admite también «Letras
+  o dígitos» (§4); «Solo si antes dice…» se pliega aunque tenga palabras, y
+  las palabras van en etiquetas con borde (§5).
 - **Decidido por**: el mantenedor, sobre el lienzo «Anonly 1.1 — UI final»,
   tableros *Generador de formatos* y *Generador · validación y comparación*
   (2026-11-15 y 2026-11-16).
@@ -55,10 +63,11 @@ De arriba abajo:
 4. **La tira de piezas** de la variante elegida (§3).
 5. **«Se lee»** y **«Ejemplo»**: la variante dicha en palabras, y un texto
    de ejemplo armado con sus piezas.
-6. **El ajuste de la pieza elegida** (§4), en una caja de alto fijo.
+6. **El ajuste de la pieza elegida** (§4), en una caja que mide lo que su
+   contenido (precisión del 2026-11-21).
 7. **«Solo si antes dice…»**, opcional (§5).
-8. **La caja de estado** (§7), fija al final.
-9. **Pie**: «Cancelar» y el botón principal.
+8. **Pie**: la caja de estado (§7) a la izquierda, y «Cancelar» y el botón
+   principal a la derecha, en la misma fila (precisión del 2026-11-21).
 
 **Tres casos, el mismo diálogo:**
 
@@ -75,8 +84,16 @@ Al editar una copia, «Es un…» está fijo.
 - Cada variante es una pestaña: «Variante 1», «Variante 2»… «+ Variante»
   suma una, con la aclaración «Otra forma de escribir el mismo dato».
 - Una variante con un problema lleva un punto rojo en su pestaña.
-- **«Borrar variante» pide confirmación**, y dice cuántas piezas se pierden.
-  Con una sola variante está apagado.
+- **La pestaña elegida tiene un menú ⋯** (precisión del 2026-11-21): con
+  «Duplicar variante», que suma una copia justo después y la elige, y
+  «Borrar variante…». Antes «Borrar variante» era un botón rojo en la fila
+  de las pestañas, y se confundía con borrar una pieza.
+- **«Borrar variante…» pide confirmación**, y dice cuántas piezas se pierden.
+  Con una sola variante está apagado. «Duplicar variante» se apaga en el
+  tope de variantes.
+- **Una variante puede tener nombre** (ADR-233, 2026-11-21): la pestaña lo
+  muestra, o «Variante N» si no tiene; el ⋯ suma «Cambiar nombre…», y
+  «Duplicar variante» nombra la copia «Copia de …».
 - **Los límites se muestran cuando queda poco**: el contador de variantes
   (8, `FORMAT_MAX_VARIANTS`) y el de piezas (16, `FORMAT_MAX_PIECES`)
   aparecen solo cerca del tope. Al llegar, «+ Variante» o «+ Pieza» se
@@ -112,13 +129,23 @@ adentro.
   izquierda» y «Mover a la derecha» de su ajuste. El arrastre no es el
   único camino.
 - **Cuando las piezas ocupan más de un renglón**, una flecha al final de un
-  renglón y otra igual al principio del siguiente muestran por dónde sigue
-  la lectura.
+  renglón y otra al principio del siguiente muestran por dónde sigue la
+  lectura. La del final apunta hacia adelante y abajo (⤵), no de vuelta
+  hacia la ficha; la del principio, hacia abajo y adelante (↳). Precisión
+  del 2026-11-21.
+- **Clic derecho sobre una pieza** abre su menú: «Mover a la izquierda»,
+  «Mover a la derecha» y «Borrar pieza». Sobre una parte opcional, «Borrar
+  parte opcional», que se lleva sus piezas. Con teclado, la tecla de menú o
+  `Mayús`+`F10` lo abren, y `Supr` borra la pieza elegida. Precisión del
+  2026-11-21.
 
 ### 4. El ajuste de la pieza elegida
 
-Vive en una caja de alto fijo: cambia el contenido, nunca el alto (ADR-169
-§1). Arriba dice qué pieza es y tiene «Mover», a izquierda y a derecha, y
+Vive en una caja que mide lo que su contenido, sin scroll propio
+(precisión del 2026-11-21). El alto fijo de ADR-169 §1 dejaba hueco en las
+piezas cortas y, en las largas, una segunda barra de scroll por unos
+píxeles. Al crecer corre solo lo que está debajo («Solo si antes dice…»),
+nunca la tira ni las pestañas. Arriba dice qué pieza es y tiene «Mover», a izquierda y a derecha, y
 «Borrar pieza».
 
 **Un bloque de caracteres** se ajusta en tres pasos:
@@ -141,20 +168,28 @@ Vive en una caja de alto fijo: cambia el contenido, nunca el alto (ADR-169
 
 **Un texto fijo**: el texto, de hasta 40 caracteres, con el aviso de §8.
 
-**Una parte opcional**: cuántas piezas tiene y botones para sumarle
-dígitos, letras, un separador o un texto fijo.
+**Una parte opcional**: cuántas piezas tiene y cómo sumarle. Se suman con
+un «+» dentro de su caja, en la tira, que ofrece las cinco clases que entran
+en ella: dígitos, letras, letras o dígitos, un separador o un texto fijo.
+Al crearla, ese menú se abre solo. Precisión del 2026-11-21: antes eran
+botones en el ajuste, y sin «Letras o dígitos».
 
 ### 5. «Solo si antes dice…»
 
 Son las palabras de contexto de ADR-220 §2 (`contextBefore`).
 
-- Si el formato no tiene ninguna, la sección es **una sola fila**:
-  «Detectarlo solo si antes dice una palabra (opcional)». Al apretarla se
-  abre.
+- Si el formato no tiene ninguna, la sección arranca como **una sola
+  fila**: «Detectarlo solo si antes dice una palabra (opcional)». Al
+  apretarla se abre.
+- **Se pliega y se despliega desde su encabezado**, tenga o no palabras.
+  Plegada con palabras, la fila las nombra: «Solo si antes dice «legajo» o
+  «leg.»». Precisión del 2026-11-21.
 - Abierta, muestra las palabras, un campo para sumar otra y el contador,
   hasta 5 (`FORMAT_MAX_CONTEXT`).
-- **Las palabras no son pastillas**: son etiquetas rectas con subrayado
-  punteado, el mismo con que la palabra se marca en el texto de prueba.
+- **Las palabras van en etiquetas con borde**, cada una con su X para
+  sacarla. El subrayado punteado queda para el texto de prueba, donde marca
+  la palabra dentro de una frase. Precisión del 2026-11-21: el subrayado
+  suelto en una lista no se leía como algo que se puede sacar.
 - «Se lee» las incluye: «Después de «legajo» o «leg.»: …».
 
 ### 6. «Probalo»: un panel flotante
@@ -172,7 +207,9 @@ Son las palabras de contexto de ADR-220 §2 (`contextBefore`).
 
 ### 7. La caja de estado
 
-Va **al final del panel, arriba del pie**. Mide siempre lo mismo y es
+Va **en el pie, a la izquierda de los botones** (precisión del 2026-11-21;
+antes iba arriba del pie, en una fila propia). Así no ocupa un renglón más
+del diálogo. Mide siempre lo mismo, con lugar para tres renglones, y es
 siempre una caja:
 
 | Estado | Color | Deja crear |

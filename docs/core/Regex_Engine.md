@@ -5,8 +5,10 @@
 > Detecta patrones determinísticos (DNI, CUIT, teléfono, email, IBAN, tarjeta, fecha, matrícula, patente) y los formatos que arma el usuario con el generador (ADR-220) en el texto de cada página. Emite `Occurrence[]` con `source: "regex"` y `confidence: 1.0`. Es determinista: mismo input → mismo output.
 
 **EngineId**: `regex`
-**Versión del spec**: 2.0.2
-**Última actualización**: 2026-11-20
+**Versión del spec**: 2.1.0
+**Última actualización**: 2026-11-21
+
+> **Nota (v2.1.0, ADR-233, 2026-11-21 — una variante puede tener nombre)**: versión menor porque **suma contrato público** sin retirar nada. `FormatDefinition` gana `variantNames`, opcional y en paralelo a `variants`, y `validateFormat` gana dos códigos: `variant_name_too_long` (con `variantIndex`) y `variant_names_mismatch` (del formato entero) (`Contracts.md` §5.2). El nombre **no cambia qué se reconoce**: el autómata, `process` y `testFormat` no lo leen, `testFormat` no cuenta los dos códigos como problema de forma, y `compareFormat` lo deja fuera de la forma canónica. `init` descarta un formato con esos códigos como a cualquier inválido. Ver §6, caso 49 y dos filas nuevas en §14.
 
 > **Nota (v2.0.2, 2026-11-20 — auditoría antes de F2)**: precisiones para los ítems 26 a 28. No cambia ningún contrato público. Las dos primeras las decidió el mantenedor el 2026-11-20.
 >
@@ -340,12 +342,12 @@ No reciben `EngineContext`, no emiten eventos y no loguean. El façade las reexp
 
 **`testFormat`** usa **el mismo** recorrido que `process` (bordes, contexto, recorte y guarda de corrida) sobre `sampleText`, sin `mapSpanToWords`: devuelve índices sobre el texto. Un test aserta que da los mismos tramos que `process` sobre un documento con ese texto (caso 49).
 
-- **Cuándo devuelve `[]` por inválido** (`Contracts.md` §5.2): cuando `validateFormat` daría algún código de la forma del formato. No cuentan `name_empty`, `name_too_long`, `name_taken`, `type_unknown`, `type_not_admitted` ni `id_invalid`, porque no cambian qué se reconoce y `testFormat` no recibe el contexto para revisarlos.
+- **Cuándo devuelve `[]` por inválido** (`Contracts.md` §5.2): cuando `validateFormat` daría algún código de la forma del formato. No cuentan `name_empty`, `name_too_long`, `name_taken`, `variant_name_too_long`, `variant_names_mismatch` (ADR-233), `type_unknown`, `type_not_admitted` ni `id_invalid`, porque no cambian qué se reconoce y `testFormat` no recibe el contexto para revisarlos.
 - **`sampleText` se recorre tal como llega**, sin normalizar, y los índices son sobre ese texto. `Page.text` ya llega en NFC, así que un texto de muestra en otra forma puede dar tramos distintos.
 
 **`compareFormat`** responde dos preguntas.
 
-**¿Es idéntico?** Dos formatos son idénticos si tienen la misma forma canónica. La forma canónica de una definición:
+**¿Es idéntico?** Dos formatos son idénticos si tienen la misma forma canónica. La forma canónica sale de `variants` y `contextBefore`; el nombre del formato y `variantNames` (ADR-233) no entran. La forma canónica de una definición:
 
 - ordena y deduplica los `chars` de cada `separator`;
 - pliega los `text` y las palabras de contexto;
@@ -595,6 +597,8 @@ Casos del catálogo, los formatos del generador y las colisiones (v2.0.0; ADR-22
     - el `warn` lleva el id del formato, la página y el `name` del error, y **ningún texto de la página**: ni el `message` ni el `stack` del error (§11).
 49. **Funciones puras** (ADR-220 §3):
     - **`validateFormat`** devuelve cada código de `FormatIssueCode` en su caso, con `variantIndex` y `pieceIndex` cuando corresponden, y `ok: true` sin issues sobre un formato válido.
+    - **Nombres de variante** (ADR-233). `variant_name_too_long` lleva el `variantIndex` del nombre largo; `variant_names_mismatch` va sin `variantIndex` cuando `variantNames` no tiene el largo de `variants`. Sin el campo, con nombres vacíos, de espacios o repetidos, ninguno de los dos. `testFormat` da los mismos tramos con y sin nombres, también con un nombre demasiado largo.
+    - **`compareFormat` y los nombres de variante** (ADR-233). Dos formatos que solo difieren en `variantNames` dan `identicalTo`.
     - **`testFormat`** da los mismos tramos que `process` sobre un documento de una página con el mismo texto.
     - **`compareFormat`, identidad.** Dos formatos con las mismas piezas, en otro orden de separadores y de variantes y con textos en otras mayúsculas, son idénticos.
     - **`compareFormat` contra un autómata.** `digit 8..8` contra `dni-ar`, que es `structure`, da solapamiento con un ejemplo de 8 dígitos, el más corto que reconocen los dos.
@@ -742,6 +746,8 @@ Casos del catálogo, los formatos del generador y las colisiones (v2.0.0; ADR-22
 | `an invalid user format at init is skipped and reported` | `edge.test.ts` | edge | caso 47 |
 | **`a user format that throws on a page is skipped on that page and reported without page text`** | `edge.test.ts` | edge | caso 48 |
 | `validateFormat reports each issue code` | `unit.test.ts` | unit | caso 49 |
+| `variant names do not change what testFormat finds` | `unit.test.ts` | unit | caso 49 (ADR-233) |
+| `compareFormat ignores variant names` | `unit.test.ts` | unit | caso 49 (ADR-233) |
 | **`testFormat finds the same spans as process`** | `unit.test.ts` | unit | caso 49: un solo recorrido para las dos entradas |
 | `compareFormat detects identical structure regardless of order and case` | `unit.test.ts` | unit | caso 49 |
 | `compareFormat gives the shortest shared text against an automaton format` | `unit.test.ts` | unit | caso 49 |

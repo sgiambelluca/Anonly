@@ -512,7 +512,18 @@ bajo ese rótulo es la peor clase de defecto posible en una herramienta de priva
 
 ### 5.2 Highlight en la vista Original
 
-- Cada ocurrencia de un grupo habilitado tiene un borde color sobre el bbox.
+- Cada ocurrencia de un grupo habilitado tiene un borde color sobre el bbox, con un relleno suave del
+  mismo color, para que se vea de un vistazo qué detectó el análisis.
+- Una ocurrencia de un grupo **desactivado** se marca con borde punteado gris y sin relleno: no se
+  va a tapar, y tiene que notarse.
+- Lo dibuja la capa de interacción, no la imagen (`Components.md` §5.4): desactivar un grupo o
+  cambiarle el tipo se ve al instante.
+- **Se puede apagar** desde Configuración › Apariencia, «Resaltar en el original lo que se
+  detectó» (prendido por defecto): a quien le molesta ver el documento marcado lo ve limpio, y el
+  tooltip y el clic siguen igual. Pasada de UI de la 1.1, 2026-11-21.
+- Después de un clic sobre una entidad, sus cajas quedan con el relleno fuerte mientras su fila se
+  ilumina en el panel. **La fila se ilumina más en el tema oscuro** (acento al 40 % y un borde
+  interior), porque el 18 % del tema claro casi no se ve sobre fondo oscuro.
 - Color por tipo: Personas=verde, DNI=azul, Direcciones=naranja, etc. (paleta accesible, ver §9).
 - Hover sobre un highlight: tooltip con tipo, valor canónico, modo de reemplazo, conteo de ocurrencias del grupo.
 - Click en un highlight: selecciona el grupo correspondiente en el árbol (scroll into view + resaltado).
@@ -1142,7 +1153,7 @@ atajos de la tabla de §9, que es la misma que los declara (ADR-224 §5, ADR-229
 | Documento sin entidades ni tipos del documento | La banda punteada «Nuevo tipo» arriba, en su ranura, y debajo el estado vacío del panel. Decisión del mantenedor, 2026-11-21 |
 | Tipo del documento sin entidades | La banda, con «Todavía no tiene entidades. Seleccioná el texto en el PDF o agregalo desde acá.» y «Agregar entidad» |
 | Filtros sin resultados | «Ninguna entidad cumple los filtros» y «Quitar filtros» |
-| Generador sin pieza elegida | «Elegí una pieza para ajustarla, o sumá una con «Pieza». Para cambiarles el orden, arrastralas.» |
+| Generador sin pieza elegida | «Elegí una pieza para ajustarla, o sumá una con «Pieza». Arrastralas para cambiarles el orden; con clic derecho, las movés o las borrás.» |
 
 ### 11b.16 Cada falla dice por qué y qué hacer
 
@@ -1176,7 +1187,9 @@ no se escriben a mano.
 | `id_taken` | «Este tipo choca con otro guardado y no se puede guardar. Crealo de nuevo.» |
 
 **Formatos** (`FormatIssueCode`, caja de estado del generador, §11b.8). {P} y {N} salen de
-`pieceIndex` y `variantIndex`, contados desde 1:
+`pieceIndex` y `variantIndex`, contados desde 1. Si la variante tiene nombre (ADR-233), {N} es
+su nombre entre comillas: «La variante «Con guiones» no tiene piezas.». En
+`variant_name_too_long` {N} es siempre el número, porque el nombre es lo que falla:
 
 | Código | Texto |
 |---|---|
@@ -1185,6 +1198,8 @@ no se escriben a mano.
 | `name_taken` | «Ya tenés un formato llamado «{NOMBRE}». Elegí otro nombre para distinguirlos en la lista.» |
 | `no_variants` | «El formato no tiene ninguna variante. Sumá una con «+ Variante».» |
 | `too_many_variants` | «Un formato admite hasta 8 variantes y este tiene {N}. Borrá alguna o creá otro formato.» |
+| `variant_name_too_long` | «El nombre de la variante {N} tiene {L} caracteres y el máximo es 40. Acortalo.» |
+| `variant_names_mismatch` | «Los nombres de las variantes de este formato quedaron dañados. Crealo de nuevo.» |
 | `variant_empty` | «La variante {N} no tiene piezas. Sumá una con «+ Pieza» o borrá la variante.» |
 | `variant_without_chars` | «La variante {N} tiene solo textos fijos y separadores, y así no reconoce ningún dato. Sumale un bloque de letras o números.» |
 | `too_many_pieces` | «La variante {N} tiene {M} piezas y el máximo es 16, contando las de las partes opcionales. Juntá bloques o borrá alguna.» |
@@ -1240,13 +1255,36 @@ Vale para toda la aplicación, no solo para la detección a medida.
   (`6/40`), una pista o cómo va a quedar (`Así se ve: [LEGAJO 01]`). Cuando hay un error, esa
   misma línea pasa a rojo con el texto del error y el campo se marca con borde rojo. **No hay hueco
   vacío reservado** bajo un campo, y nada se mueve al aparecer o irse el error.
-  - Si el error no entra en una línea, se corta con «…» y el texto completo queda en `title` y en
-    `aria-describedby` del campo.
+  - Si el error no entra en una línea, **usa un segundo renglón** que ocupa el espacio que ya hay
+    entre ese bloque y el siguiente (16 px o más), así que tampoco mueve nada. Sin eso, el «qué
+    hacer» del error, que va al final (§11b.16), quedaba cortado. Si no entra en dos renglones, se
+    corta con «…» y el texto completo queda en `title` y en `aria-describedby` del campo. Pasada de
+    UI de la 1.1, 2026-11-21.
+  - La ayuda dice algo que el resto del diálogo no dice: si el diálogo ya muestra cómo queda (la
+    escalera de «Cómo se reemplaza» de un tipo), la línea da el contador y qué caracteres se
+    admiten, no repite el reemplazo.
   - Esto reemplaza las ranuras vacías de alto fijo bajo los campos; las cajas de estado de alto fijo
     que siempre muestran algo (la del generador, §11b.8) no cambian.
 - **Un diálogo desenfoca lo de atrás.** El fondo de todo diálogo modal lleva, además del velo oscuro,
   un desenfoque leve (`backdrop-filter: blur` de unos 3 px). Un diálogo abierto encima de otro
   desenfoca también al de abajo, para que se vea claro cuál está al frente.
+
+### 11b.18 Scroll solo cuando hace falta (pasada de UI de la 1.1, 2026-11-21)
+
+Vale para toda la aplicación.
+
+- **Un diálogo no scrollea por unos pocos píxeles.** Con su contenido de siempre —incluidos los
+  tipos propios en el selector y una pieza elegida en el generador—, cada diálogo entra sin scroll
+  en una ventana de 1280 × 800. Si sobra poco, se compacta: se juntan avisos que dicen lo mismo, un
+  aviso pasa a un lugar que ya existe (el pie, el estado vacío de una caja) o se achica una caja de
+  alto fijo. Scrollea lo que es largo de verdad: una lista, la configuración entera.
+- **Una caja dentro de un diálogo no tiene scroll propio** si su contenido es corto y de largo
+  conocido (el ajuste de una pieza): crece, y si hace falta scrollea el cuerpo del diálogo. Dos
+  barras de scroll anidadas para unos píxeles no se usan.
+- **La barra de scroll es de la aplicación**: angosta, redondeada, sin flechas, sobre un riel
+  transparente. El color sale de `text-secondary` con transparencia, más marcado al pasar el mouse,
+  así que acompaña al tema claro y al oscuro (`Components.md` §10.3). En un navegador que no admite
+  `::-webkit-scrollbar`, `scrollbar-width: thin` y `scrollbar-color` con los mismos colores.
 
 ## 12. Referencias
 
