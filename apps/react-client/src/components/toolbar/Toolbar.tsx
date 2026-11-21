@@ -30,6 +30,7 @@
 
 import { PipelineStage } from "@anonly/anonymization-core";
 
+import { useDocumentStore } from "../../store/document.store.js";
 import { usePipelineStore } from "../../store/pipeline.store.js";
 import { Logo } from "../common/Logo.js";
 
@@ -37,12 +38,16 @@ import { CancelButton } from "./CancelButton.js";
 import { CloseDocumentButton } from "./CloseDocumentButton.js";
 import { ExportButton } from "./ExportButton.js";
 import { ImportButton } from "./ImportButton.js";
+import { describeOpenDocument } from "./openDocumentLine.js";
 import { PipelineStatus } from "./PipelineStatus.js";
 import { SettingsButton } from "./SettingsButton.js";
 
 export function Toolbar() {
   const stage = usePipelineStore((state) => state.stage);
   const isIdle = stage === PipelineStage.Idle;
+  const documentName = useDocumentStore((state) => state.name);
+  const pageCount = useDocumentStore((state) => state.pageCount);
+  const documentLine = describeOpenDocument(documentName, pageCount);
 
   return (
     <header className="flex h-14 items-center justify-between border-b border-border bg-bg-primary px-4">
@@ -55,8 +60,12 @@ export function Toolbar() {
         <Logo size={26} className="shrink-0" />
         <div className="flex min-w-0 flex-col">
           <span className="truncate text-sm font-semibold">Anonly</span>
-          <span className="hidden truncate text-sm text-text-secondary sm:block">
-            Anonimización documental local
+          {/* Components.md §2.1: qué documento está abierto, no un lema. */}
+          <span
+            className="hidden truncate text-sm text-text-secondary sm:block"
+            {...(documentLine !== null ? { title: documentLine } : {})}
+          >
+            {documentLine ?? "Anonimización documental local"}
           </span>
         </div>
       </div>

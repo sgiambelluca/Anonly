@@ -3,9 +3,11 @@
  * (`Components.md` §13b.6, ADR-229 §5, `React_Client.md` §3.10).
  *
  * El botón va junto al buscador de la lista y abre un panel **flotante**: no
- * agrega una fila de fichas ni mueve la lista (`UX_Guidelines.md` §11b.7). Tres
+ * agrega una fila de fichas ni mueve la lista (`UX_Guidelines.md` §11b.7). Cuatro
  * secciones de casillas:
  *
+ * - **«Tipos»**: los tipos con entidades en el documento, de base y propios, en
+ *   el orden de la lista y en dos columnas (precisión del 2026-11-21).
  * - **«Tus formatos»**: los formatos del usuario que detectaron algo en el
  *   documento. **Si no hay ninguno, la sección no se muestra** (ADR-226 §3).
  * - **«Modo de reemplazo»**: cada modo con una muestra de cómo queda y su cantidad.
@@ -16,9 +18,9 @@
  * nada y no entran a la pila de deshacer (`useEntitiesStore.filters`).
  */
 
-import { ReplacementMode, type EntityGroup } from "@anonly/anonymization-core";
+import { ReplacementMode, type EntityGroup, type EntityTypeId } from "@anonly/anonymization-core";
 import { FilterIcon } from "lucide-react";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
 import { useDetectionStore } from "../../store/detection.store.js";
 import { useEntitiesStore } from "../../store/entities.store.js";
@@ -34,18 +36,88 @@ import {
   modeCounts,
   REVIEW_FILTER_OPTIONS,
   toggleInSet,
+  typeFilterOptions,
   userFormatNameOf,
 } from "./entityFilters.js";
+import { typePlural } from "./entityTypeLabels.js";
 import { REPLACEMENT_MODE_LABEL } from "./replacementModeOptions.js";
+import { TypeDot } from "./TypeDot.js";
+import { userTypeDefinitions } from "./userTypes.js";
+import { useKnownUserTypes } from "./useUserTypes.js";
 
 export interface EntityFiltersPopoverProps {
   /** Todos los grupos del documento, sin filtrar: de ahí salen las opciones y las cantidades. */
   readonly groups: ReadonlyArray<EntityGroup>;
+  /** Los tipos en el orden de la lista, con sus grupos sin filtrar (`visibleTypeEntries`). */
+  readonly typeEntries: ReadonlyArray<readonly [EntityTypeId, ReadonlyArray<EntityGroup>]>;
 }
 
-export function EntityFiltersPopover({ groups }: EntityFiltersPopoverProps) {
+/** Ancho del panel: entra «Reemplazar por dato falso» con su muestra sin cortarse. */
+const FILTERS_PANEL_WIDTH_PX = 360;
+/** Alto máximo del panel; con menos lugar, scrollea por dentro. 640: entra «Tipos» sin scroll. */
+const FILTERS_PANEL_MAX_HEIGHT_PX = 640;
+/** Margen contra los bordes de la ventana. */
+const WINDOW_MARGIN_PX = 16;
+
+interface PanelPlace {
+  readonly left: number;
+  readonly top: number;
+  readonly maxHeight: number;
+}
+
+/**
+ * Dónde va el panel, en coordenadas de ventana: debajo del botón, alineado a su
+ * borde izquierdo y corrido lo justo para no salirse por la derecha. Pura.
+ */
+export function placeFiltersPanel(
+  trigger: { readonly left: number; readonly bottom: number },
+  viewport: { readonly width: number; readonly height: number },
+): PanelPlace {
+  const width = Math.min(FILTERS_PANEL_WIDTH_PX, viewport.width - WINDOW_MARGIN_PX * 2);
+  const left = Math.max(
+    WINDOW_MARGIN_PX,
+    Math.min(trigger.left, viewport.width - width - WINDOW_MARGIN_PX),
+  );
+  const top = trigger.bottom + 4;
+  const maxHeight = Math.max(
+    160,
+    Math.min(FILTERS_PANEL_MAX_HEIGHT_PX, viewport.height - top - WINDOW_MARGIN_PX),
+  );
+  return { left, top, maxHeight };
+}
+
+export function EntityFiltersPopover({ groups, typeEntries }: EntityFiltersPopoverProps) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  // `fixed` y no `absolute`: el panel de entidades recorta lo que se sale de su
+  // ancho (`overflow-hidden`), y el panel de filtros es más ancho que el hueco
+  // que queda a la derecha del botón. Flota sobre el visor, como en el lienzo.
+  const [place, setPlace] = useState<PanelPlace | null>(null);
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setPlace(null);
+      return;
+    }
+    function measure(): void {
+      const rect = buttonRef.current?.getBoundingClientRect();
+      if (rect === undefined) return;
+      setPlace(
+        placeFiltersPanel(
+          { left: rect.left, bottom: rect.bottom },
+          { width: window.innerWidth, height: window.innerHeight },
+        ),
+      );
+    }
+    measure();
+    window.addEventListener("resize", measure);
+    document.addEventListener("scroll", measure, true);
+    return () => {
+      window.removeEventListener("resize", measure);
+      document.removeEventListener("scroll", measure, true);
+    };
+  }, [open]);
   const filters = useEntitiesStore((state) => state.filters);
   const detection = useDetectionStore((state) => state.saved);
   const count = activeFilterCount(filters);
@@ -71,6 +143,9 @@ export function EntityFiltersPopover({ groups }: EntityFiltersPopoverProps) {
     };
   }, [open]);
 
+  const knownUserTypes = useKnownUserTypes();
+  const userTypes = userTypeDefinitions(knownUserTypes);
+  const typeOptions = typeFilterOptions(typeEntries, filters.types);
   const formatOptions = formatFilterOptions(groups, userFormatNameOf(detection));
   const counts = modeCounts(groups);
   // `getState()` dentro de los handlers: el valor vigente al hacer clic, no el del render.
@@ -79,6 +154,7 @@ export function EntityFiltersPopover({ groups }: EntityFiltersPopoverProps) {
   return (
     <div ref={containerRef} className="relative shrink-0">
       <button
+        ref={buttonRef}
         type="button"
         aria-expanded={open}
         aria-label={count > 0 ? `Filtros (${count})` : "Filtros"}
@@ -101,9 +177,54 @@ export function EntityFiltersPopover({ groups }: EntityFiltersPopoverProps) {
         <div
           role="group"
           aria-label="Filtros de la lista"
-          className="absolute left-0 top-full z-50 mt-1 flex max-h-[min(70vh,30rem)] w-[20rem] max-w-[calc(100vw-2rem)] flex-col rounded-xl border border-border bg-bg-primary text-sm shadow-md"
+          className={`fixed z-50 flex w-[22.5rem] max-w-[calc(100vw-2rem)] flex-col rounded-xl border border-border bg-bg-primary text-sm shadow-md ${
+            place === null ? "invisible" : ""
+          }`}
+          style={
+            place === null
+              ? { left: 0, top: 0 }
+              : { left: place.left, top: place.top, maxHeight: place.maxHeight }
+          }
         >
           <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3">
+            {typeOptions.length > 0 ? (
+              <Section title="Tipos">
+                <div className="grid grid-cols-2 gap-x-3 gap-y-2">
+                  {typeOptions.map((option) => {
+                    const label = typePlural(option.type, userTypes);
+                    const documentOnly =
+                      knownUserTypes.find((entry) => entry.definition.id === option.type)
+                        ?.documentOnly ?? false;
+                    return (
+                      // `min-w-0`: sin él, un nombre largo empuja la columna en vez de cortarse.
+                      <div key={option.type} className="min-w-0">
+                        <Checkbox
+                          checked={filters.types.has(option.type)}
+                          onCheckedChange={() =>
+                            store().setFilters({
+                              ...store().filters,
+                              types: toggleInSet(store().filters.types, option.type),
+                            })
+                          }
+                          label={
+                            <span
+                              className="flex min-w-0 flex-1 items-center gap-1.5"
+                              title={label}
+                            >
+                              <TypeDot type={option.type} documentOnly={documentOnly} />
+                              <span className="min-w-0 flex-1 truncate">{label}</span>
+                              <span className="shrink-0 tabular-nums text-text-secondary">
+                                {option.count}
+                              </span>
+                            </span>
+                          }
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              </Section>
+            ) : null}
             {formatOptions.length > 0 ? (
               <Section title="Tus formatos">
                 {formatOptions.map((option) => (

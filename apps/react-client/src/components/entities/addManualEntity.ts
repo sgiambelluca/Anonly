@@ -54,6 +54,7 @@ import { currentUserTypes } from "./useUserTypes.js";
 export async function addManualEntityWithFeedback(
   request: ManualEntityRequest,
   newType?: UserEntityTypeDefinition,
+  saveNewType = false,
 ): Promise<ManualEntityFeedback> {
   const recorded = recordEdit(`Agregaste «${request.value}»`);
   if (newType !== undefined) {
@@ -64,6 +65,9 @@ export async function addManualEntityWithFeedback(
       showToast({ title: TYPE_ACTION_FAILED_TOAST, tone: "error" });
       return "error";
     }
+    // «Guardarlo», tildada en el campo «Nuevo tipo» (ADR-225 §5, precisión del
+    // 2026-11-21): lo mismo que el ⋯ después. El deshacer no lo alcanza.
+    if (saveNewType) actions.saveDocumentType(newType.id);
   }
   const keepEntry = newType !== undefined;
   const userTypes = currentUserTypes();

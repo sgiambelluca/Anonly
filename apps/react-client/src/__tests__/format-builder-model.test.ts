@@ -505,7 +505,7 @@ describe("textos del ajuste de pieza (pasada de textos F7)", () => {
 
   it("el estado vacío es el de UX_Guidelines.md §11b.15", () => {
     expect(BUILDER_COPY.noPieceSelected).toBe(
-      "Elegí una pieza para ajustarla, o sumá una con «Pieza». Para cambiarles el orden, arrastralas.",
+      "Elegí una pieza para ajustarla, o sumá una con «Pieza». Arrastralas para cambiarles el orden; con clic derecho, las movés o las borrás.",
     );
   });
 

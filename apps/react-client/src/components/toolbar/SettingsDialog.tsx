@@ -94,6 +94,8 @@ import {
   describeTheme,
   OCR_LANGUAGES_SLOT_TEXT,
   describePerformancePreset,
+  HIGHLIGHT_ENTITIES_HINT,
+  HIGHLIGHT_ENTITIES_LABEL,
   PERFORMANCE_PRESET_LABEL,
   PERFORMANCE_PRESET_ORDER,
   resolveOcrLanguagesSlot,
@@ -186,6 +188,9 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
    * en cada render — no cambia durante la vida de la página.
    */
   const [theme, setTheme] = useState<Theme>(() => useSettingsStore.getState().theme);
+  const [highlightEntities, setHighlightEntities] = useState<boolean>(
+    () => useSettingsStore.getState().highlightEntities,
+  );
   const [shellUpdater] = useState(() => getShellUpdater());
   const [platform] = useState(() => readShellPlatform());
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -215,6 +220,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
     setOcrLanguages(current.ocrLanguages);
     setUpdateMode(current.updateMode);
     setTheme(current.theme);
+    setHighlightEntities(current.highlightEntities);
     setSaveError(null);
     setShortcutsOpen(false);
     manualUpdateCheckRef.current = "idle";
@@ -228,6 +234,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
     ocrLanguages: ReadonlyArray<string>;
     updateMode: UpdateMode;
     theme: Theme;
+    highlightEntities: boolean;
   }): void {
     const previousMode = useSettingsStore.getState().updateMode;
     const previousSearches = searchesAutomatically(previousMode);
@@ -266,6 +273,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
       ocrLanguages,
       updateMode,
       theme,
+      highlightEntities,
     };
     const change = diffReanalyzeChange(previous, next);
     const needsReanalyze =
@@ -327,6 +335,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
       ocrLanguages,
       updateMode,
       theme,
+      highlightEntities,
     };
     const change = diffReanalyzeChange(previous, next);
     const patches = planReanalyzePatches(change);
@@ -558,6 +567,21 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                   </span>
                 </button>
               ))}
+            </div>
+            <div className="h-px bg-border" />
+            {/*
+              Pasada de UI de la 1.1 (Components.md §13b.8): el resaltado de lo
+              detectado en el original se puede apagar. Se aplica al guardar, como
+              el tema.
+            */}
+            <div className="flex flex-col gap-1">
+              <Checkbox
+                id="settings-highlight-entities"
+                checked={highlightEntities}
+                onCheckedChange={setHighlightEntities}
+                label={HIGHLIGHT_ENTITIES_LABEL}
+              />
+              <span className="pl-6 text-sm text-text-secondary">{HIGHLIGHT_ENTITIES_HINT}</span>
             </div>
           </Section>
 

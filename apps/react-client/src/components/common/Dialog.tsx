@@ -133,7 +133,8 @@ export function Dialog({
   }, [open]);
 
   const titleNode = (
-    <RadixDialog.Title className="text-sm font-semibold text-text-primary">
+    // 16 px: más que los rótulos de los campos (14 px), para que se lea como título (§8.2).
+    <RadixDialog.Title className="text-base font-semibold leading-snug text-text-primary">
       {title}
     </RadixDialog.Title>
   );

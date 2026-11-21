@@ -43,7 +43,7 @@ import { createSearchDebouncer } from "../viewer/searchDebounce.js";
 import { matchContext } from "../viewer/searchResults.js";
 
 import { addManualEntityWithFeedback } from "./addManualEntity.js";
-import { NEW_TYPE_ADD_FOOTNOTE } from "./documentTypeCopy.js";
+import { NEW_TYPE_ADD_FOOTNOTE, NEW_TYPE_SAVED_FOOTNOTE } from "./documentTypeCopy.js";
 import { EntityTypePicker } from "./EntityTypePicker.js";
 import { NEW_TYPE_HINT_ID } from "./newTypeInline.js";
 import { useTypeChoice } from "./useTypeChoice.js";
@@ -124,6 +124,7 @@ export function AddEntityDialog({ open, onClose, initialType }: AddEntityDialogP
     const feedback = await addManualEntityWithFeedback(
       { value: trimmed, entityType: resolved.entityType },
       resolved.newType,
+      resolved.saveNewType === true,
     );
     setSubmitting(false);
     // ADR-174 §4 / ADR-175 §3: "held" cierra este diálogo igual que "added"
@@ -150,6 +151,9 @@ export function AddEntityDialog({ open, onClose, initialType }: AddEntityDialogP
       title="Agregar entidad"
       description="Marcá un dato que el análisis no encontró. Se oculta en todas sus apariciones."
       size="lg"
+      // Alto de diálogo alto: con los tipos propios en el selector, el de 85vh
+      // scrolleaba por unos píxeles (UX_Guidelines.md §11b.18).
+      tall
       footer={
         <div className="flex flex-wrap items-center gap-2.5">
           {/* La línea de pie: el error del nombre del tipo nuevo ocupa su lugar (ADR-229 §2). */}
@@ -170,7 +174,9 @@ export function AddEntityDialog({ open, onClose, initialType }: AddEntityDialogP
               <MousePointerClickIcon className="h-4 w-4 shrink-0" aria-hidden />
               <span className="line-clamp-2">
                 {choice.creating && choice.canConfirm
-                  ? NEW_TYPE_ADD_FOOTNOTE
+                  ? choice.state.newType?.save === true
+                    ? NEW_TYPE_SAVED_FOOTNOTE
+                    : NEW_TYPE_ADD_FOOTNOTE
                   : "También podés seleccionarlo en el PDF original."}
               </span>
             </span>
@@ -191,7 +197,7 @@ export function AddEntityDialog({ open, onClose, initialType }: AddEntityDialogP
         </div>
       }
     >
-      <div className="flex flex-col gap-5">
+      <div className="flex flex-col gap-4">
         <div className="flex flex-col gap-2.5">
           <label
             htmlFor="add-entity-value"
@@ -216,12 +222,20 @@ export function AddEntityDialog({ open, onClose, initialType }: AddEntityDialogP
           {/* Caja de alto fijo (UX-10): los tres estados miden lo mismo. */}
           <div
             aria-live="polite"
-            className="flex h-40 flex-col overflow-hidden rounded-lg border border-border bg-bg-secondary"
+            className="flex h-32 flex-col overflow-hidden rounded-lg border border-border bg-bg-secondary"
           >
             {trimmed.length < MIN_QUERY_LENGTH ? (
-              <p className="p-3.5 text-sm text-text-secondary">
-                Mientras escribís, acá aparecen los lugares del documento donde está ese texto.
-              </p>
+              // Antes de escribir, la caja también da el consejo de las formas
+              // distintas, que tenía su propio recuadro abajo (§11b.18).
+              <div className="flex flex-col gap-2 p-3.5 text-sm">
+                <p className="text-text-secondary">
+                  Mientras escribís, acá aparecen los lugares del documento donde está ese texto.
+                </p>
+                <p className="flex gap-2 text-text-primary">
+                  <InfoIcon className="mt-0.5 h-4 w-4 shrink-0 text-accent" aria-hidden />
+                  <span>{DIFFERENT_FORMS_TIP}</span>
+                </p>
+              </div>
             ) : pending ? (
               <p className="p-3.5 text-sm text-text-secondary">Buscando…</p>
             ) : notFound || matches.length === 0 ? (
@@ -234,7 +248,7 @@ export function AddEntityDialog({ open, onClose, initialType }: AddEntityDialogP
                   <b className="font-semibold text-text-primary">No aparece en el documento.</b>{" "}
                   <span className="text-text-secondary">
                     Revisá cómo está escrito: tiene que coincidir letra por letra (no importan
-                    mayúsculas ni tildes).
+                    mayúsculas ni tildes). Si aparece de otra forma, agregá esa.
                   </span>
                 </span>
               </div>
@@ -285,18 +299,14 @@ export function AddEntityDialog({ open, onClose, initialType }: AddEntityDialogP
             aria-labelledby="add-entity-type"
           />
         </div>
-
-        <div className="flex gap-2.5 rounded-lg border border-accent/35 bg-accent/10 px-3 py-2.5 text-sm leading-snug text-text-primary">
-          <InfoIcon className="mt-0.5 h-4 w-4 shrink-0 text-accent" aria-hidden />
-          <span>
-            Si el mismo dato aparece escrito de otra forma (por ejemplo «J. Pérez» y «José Pérez»),
-            agregalo también: cada forma se busca por separado.
-          </span>
-        </div>
       </div>
     </Dialog>
   );
 }
+
+/** El consejo de las formas distintas de un mismo dato. */
+const DIFFERENT_FORMS_TIP =
+  "Si el mismo dato aparece escrito de otra forma (por ejemplo «J. Pérez» y «José Pérez»), agregalo también: cada forma se busca por separado.";
 
 function StepNumber({ children }: { readonly children: string }) {
   return (

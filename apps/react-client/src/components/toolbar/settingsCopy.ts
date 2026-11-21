@@ -95,6 +95,14 @@ export const UPDATE_NETWORK_NOTICE_EMPHASIS =
 export const UPDATE_NETWORK_NOTICE_CHECK_OFF =
   'Si elegís "No buscar", Anonly no se conecta a internet salvo que toques "Buscar actualizaciones ahora".';
 
+/**
+ * Pasada de UI de la 1.1 (`Components.md` §13b.8): la casilla de «Apariencia»
+ * que apaga el resaltado de entidades del original.
+ */
+export const HIGHLIGHT_ENTITIES_LABEL = "Resaltar en el original lo que se detectó";
+export const HIGHLIGHT_ENTITIES_HINT =
+  "Marca cada entidad con el color de su tipo. Apagado, el original se ve limpio.";
+
 /** ADR-229 §8: la sección «Atajos de teclado» (`Configuracion.dc.html`). */
 export const SHORTCUTS_SECTION_TITLE = "Atajos de teclado";
 export const SHORTCUTS_SECTION_SUBTITLE = "Los atajos que ya tiene Anonly, con sus teclas.";

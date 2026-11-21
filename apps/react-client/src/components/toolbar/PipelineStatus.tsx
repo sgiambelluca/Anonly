@@ -34,6 +34,7 @@
  */
 
 import { PipelineStage } from "@anonly/anonymization-core";
+import { CircleCheckIcon } from "lucide-react";
 
 import { actions } from "../../core-adapter/actions.js";
 import { usePipelineStore } from "../../store/pipeline.store.js";
@@ -132,7 +133,13 @@ export function PipelineStatus() {
     // texto por debajo de ~1100 px de ventana y a 900 px la barra quedaba
     // tapada por el botón "Exportar".
     <div className="flex min-w-0 flex-col gap-1" role="status" aria-live="polite">
-      <span className="truncate text-sm font-medium text-text-primary">{label}</span>
+      {/* Components.md §2.3: ícono y texto. Terminado bien, una tilde verde. */}
+      <span className="flex min-w-0 items-center gap-1.5 text-sm font-medium text-text-primary">
+        {stage === PipelineStage.Ready || stage === PipelineStage.Done ? (
+          <CircleCheckIcon className="h-4 w-4 shrink-0 text-success" aria-hidden />
+        ) : null}
+        <span className="truncate">{label}</span>
+      </span>
       {showProgressBar ? (
         <div className="h-1.5 w-full overflow-hidden rounded-full bg-bg-tertiary">
           <div

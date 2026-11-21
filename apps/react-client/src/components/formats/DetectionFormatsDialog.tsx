@@ -28,9 +28,12 @@ import {
   ChevronDownIcon,
   ChevronRightIcon,
   DownloadIcon,
+  PencilIcon,
   PlusIcon,
+  RotateCcwIcon,
   SearchIcon,
   ShieldCheckIcon,
+  Trash2Icon,
   TriangleAlertIcon,
   UploadIcon,
 } from "lucide-react";
@@ -307,6 +310,7 @@ export function DetectionFormatsDialog({ open, onClose, onSaved }: DetectionForm
       return [
         {
           label: "Restaurar original",
+          icon: RotateCcwIcon,
           onSelect: () => {
             const basedOn = state.userFormats.find((format) => format.id === row.id)?.basedOn;
             const original = getCatalog(state.country).find((info) => info.id === basedOn);
@@ -321,6 +325,7 @@ export function DetectionFormatsDialog({ open, onClose, onSaved }: DetectionForm
       return [
         {
           label: "Borrar formato",
+          icon: Trash2Icon,
           danger: true,
           onSelect: () => {
             apply({ kind: "deleteFormat", formatId: row.id });
@@ -337,15 +342,26 @@ export function DetectionFormatsDialog({ open, onClose, onSaved }: DetectionForm
     const typeId = band.entityType;
     if (!isUserEntityType(typeId)) return [];
     return [
-      { label: "Editar tipo…", onSelect: () => setTypeDialog({ mode: "edit", typeId }) },
       {
+        label: "Editar tipo…",
+        icon: PencilIcon,
+        onSelect: () => setTypeDialog({ mode: "edit", typeId }),
+      },
+      {
+        // El mismo ícono que «Exportar…» del encabezado.
         label: "Exportar este tipo…",
+        icon: DownloadIcon,
         onSelect: () => {
           setExportPreselected(typeId);
           setExportOpen(true);
         },
       },
-      { label: "Borrar tipo…", danger: true, onSelect: () => setDeleteTypeId(typeId) },
+      {
+        label: "Borrar tipo…",
+        icon: Trash2Icon,
+        danger: true,
+        onSelect: () => setDeleteTypeId(typeId),
+      },
     ];
   }
 

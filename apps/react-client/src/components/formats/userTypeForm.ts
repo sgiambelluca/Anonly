@@ -101,12 +101,13 @@ export function replacementTokens(ladder: ReplacementLadder): readonly [string, 
 
 /** La ayuda bajo el nombre: el contador y cómo queda (§11b.17), p. ej. `6/40 · Así se ve: [LEGAJO 01]`. */
 export function typeNameHelp(fields: UserTypeFields): string {
-  const [full] = replacementTokens(replacementLadder(fields));
-  return joinHelp(
-    lengthCounter(fields.name, USER_TYPE_NAME_MAX),
-    fields.name.trim() === "" ? "" : `Así se ve: ${full}`,
-  );
+  // Cómo queda ya lo muestra «Cómo se reemplaza», justo abajo (§11b.17): la
+  // línea dice lo que no está a la vista, qué caracteres se admiten.
+  return joinHelp(lengthCounter(fields.name, USER_TYPE_NAME_MAX), TYPE_NAME_CHARS_HINT);
 }
+
+/** Lo que admite el nombre de un tipo: lo mismo que pide `name_invalid_chars` (§11b.16). */
+export const TYPE_NAME_CHARS_HINT = "Letras, números, espacios y guiones";
 
 /** La ayuda bajo cada versión corta (§11b.17). */
 export const SHORT_LABEL_HELP = `Hasta ${USER_TYPE_SHORT_LABEL_MAX} letras o números; vacías, se arman solas`;
@@ -174,7 +175,11 @@ export const TYPE_FORM_COPY = {
   noteSavedEdit:
     "El cambio se aplica al próximo documento que abras. Lo que ya exportaste queda como estaba.",
   noteDocument:
-    "Es solo de este documento: se pierde al cerrarlo. Para tenerlo siempre y que se detecte solo, crealo en la pantalla de inicio y sumale un formato.",
+    "Es solo de este documento: se pierde al cerrarlo. Si lo vas a volver a usar, guardalo también para los próximos documentos.",
+  /** La nota con «Guardarlo también…» tildada (ADR-225 §5, precisión del 2026-11-21). */
+  noteDocumentSaved:
+    "Se guarda en este equipo y queda en «Tus tipos», en la pantalla de inicio. Para que se detecte solo, sumale un formato desde ahí.",
+  saveForLater: "Guardarlo también para los próximos documentos",
   noteDocumentEdit:
     "Sigue siendo solo de este documento. Los tipos guardados solo se editan desde «Formatos de detección», en la pantalla de inicio.",
 } as const;
@@ -198,9 +203,14 @@ export function typeFormLead(
 }
 
 /** La nota al pie del cuerpo según el alcance (`Components.md` §13b.3). */
-export function typeFormNote(scope: UserTypeScope, mode: UserTypeMode = "create"): string {
+export function typeFormNote(
+  scope: UserTypeScope,
+  mode: UserTypeMode = "create",
+  save = false,
+): string {
   if (scope === "saved") {
     return mode === "edit" ? TYPE_FORM_COPY.noteSavedEdit : TYPE_FORM_COPY.noteSaved;
   }
-  return mode === "edit" ? TYPE_FORM_COPY.noteDocumentEdit : TYPE_FORM_COPY.noteDocument;
+  if (mode === "edit") return TYPE_FORM_COPY.noteDocumentEdit;
+  return save ? TYPE_FORM_COPY.noteDocumentSaved : TYPE_FORM_COPY.noteDocument;
 }

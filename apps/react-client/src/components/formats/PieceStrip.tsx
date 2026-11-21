@@ -13,7 +13,15 @@
  */
 
 import type { FormatPiece } from "@anonly/anonymization-core";
-import { CornerDownLeftIcon, CornerDownRightIcon, GripVerticalIcon, PlusIcon } from "lucide-react";
+import {
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  CornerDownRightIcon,
+  CornerRightDownIcon,
+  GripVerticalIcon,
+  PlusIcon,
+  Trash2Icon,
+} from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -22,13 +30,18 @@ import {
   useState,
   type DragEvent,
   type KeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
 } from "react";
 
+import { useEscapeClosesMenu } from "../common/useEscapeClosesMenu.js";
 import { observeMenuLayout, type MenuLayout } from "../entities/menuPlacement.js";
 
 import {
   lineStarts,
+  moveStep,
   moveToSlot,
+  OPTIONAL_INNER_MENU,
+  pieceAt,
   pieceCard,
   PIECE_MENU,
   samePath,
@@ -36,10 +49,12 @@ import {
   slotAfter,
   slotBefore,
   type PieceClassId,
+  type PieceMenuEntry,
   type PiecePath,
   type Pieces,
   type Slot,
 } from "./formatBuilderModel.js";
+import { PieceContextMenu } from "./PieceContextMenu.js";
 
 export interface PieceStripProps {
   readonly variant: Pieces;
@@ -50,6 +65,32 @@ export interface PieceStripProps {
   /** El arrastre dejó la variante así, con la pieza movida en `selected`. */
   readonly onMoved: (variant: Pieces, selected: PiecePath) => void;
   readonly onAdd: (id: PieceClassId) => void;
+  /** El «+» de adentro de una parte opcional: suma la pieza al final de esa parte. */
+  readonly onAddInside: (parent: number, id: PieceClassId) => void;
+  /** «Borrar pieza» del clic derecho, o `Supr` sobre la ficha. */
+  readonly onDelete: (path: PiecePath) => void;
+}
+
+/** El menú del clic derecho abierto: sobre qué pieza y dónde. */
+interface PieceMenuState {
+  readonly path: PiecePath;
+  readonly x: number;
+  readonly y: number;
+}
+
+/**
+ * Dónde abrir el menú. Con el mouse, en el puntero; con la tecla de menú o
+ * `Mayús`+`F10` el evento puede traer un punto que no está sobre la ficha, y
+ * entonces va debajo de su borde izquierdo.
+ */
+function menuPoint(event: ReactMouseEvent<HTMLElement>): { x: number; y: number } {
+  const rect = event.currentTarget.getBoundingClientRect();
+  const inside =
+    event.clientX >= rect.left &&
+    event.clientX <= rect.right &&
+    event.clientY >= rect.top &&
+    event.clientY <= rect.bottom;
+  return inside ? { x: event.clientX, y: event.clientY } : { x: rect.left + 8, y: rect.bottom + 4 };
 }
 
 const DRAG_MIME = "text/plain";
@@ -70,25 +111,24 @@ function inRightHalf(event: DragEvent<HTMLElement>): boolean {
 
 interface DropSlotProps {
   readonly active: boolean;
-  /** Una parte opcional vacía muestra un lugar más ancho, con una pista. */
-  readonly wide?: boolean;
   readonly onOver: (event: DragEvent<HTMLElement>) => void;
   readonly onDrop: (event: DragEvent<HTMLElement>) => void;
 }
 
-function DropSlot({ active, wide = false, onOver, onDrop }: DropSlotProps) {
+/**
+ * Dónde cae lo que se arrastra. Una parte opcional vacía ya no lleva un lugar
+ * ancho: su «+» ocupa ese espacio y la zona entera recibe lo que se suelta.
+ */
+function DropSlot({ active, onOver, onDrop }: DropSlotProps) {
   return (
     <div
       onDragOver={onOver}
       onDrop={onDrop}
-      className={`flex shrink-0 items-center justify-center self-stretch ${
-        wide ? "min-w-24 px-2 text-xs text-text-secondary" : "w-3"
-      }`}
+      className="flex w-3 shrink-0 items-center justify-center self-stretch"
     >
       <span
         className={`h-full min-h-12 w-0.5 rounded-full ${active ? "bg-accent" : "bg-transparent"}`}
       />
-      {wide ? <span className="sr-only">Lugar para soltar una pieza</span> : null}
     </div>
   );
 }
@@ -99,10 +139,22 @@ interface PieceChipProps {
   /** Dentro de una parte opcional: más baja, para que el grupo mida como una tarjeta suelta. */
   readonly compact?: boolean;
   readonly onSelect: () => void;
+  readonly onMenu: (event: ReactMouseEvent<HTMLElement>) => void;
+  readonly onDelete: () => void;
   readonly onDragStart: (event: DragEvent<HTMLElement>) => void;
   readonly onDragEnd: () => void;
   readonly onDragOver: (event: DragEvent<HTMLElement>) => void;
   readonly onDrop: (event: DragEvent<HTMLElement>) => void;
+}
+
+/** `Enter`/espacio eligen; `Supr` borra (ADR-228 §3, precisión del 2026-11-21). */
+function chipKeys(event: KeyboardEvent<HTMLElement>, onSelect: () => void, onDelete: () => void) {
+  if (event.key === "Delete") {
+    event.preventDefault();
+    onDelete();
+    return;
+  }
+  activate(event, onSelect);
 }
 
 function PieceChip({
@@ -110,6 +162,8 @@ function PieceChip({
   selected,
   compact = false,
   onSelect,
+  onMenu,
+  onDelete,
   onDragStart,
   onDragEnd,
   onDragOver,
@@ -124,7 +178,8 @@ function PieceChip({
       aria-pressed={selected}
       aria-label={`${card.title}, ${card.detail}`}
       onClick={onSelect}
-      onKeyDown={(event) => activate(event, onSelect)}
+      onContextMenu={onMenu}
+      onKeyDown={(event) => chipKeys(event, onSelect, onDelete)}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
       onDragOver={onDragOver}
@@ -149,23 +204,64 @@ function PieceChip({
 interface AddPieceMenuProps {
   readonly disabled: boolean;
   readonly onAdd: (id: PieceClassId) => void;
+  /**
+   * El «+» de adentro de una parte opcional: un cubo chico del alto de las
+   * tarjetas de adentro, y solo las cuatro clases que admite (ADR-228 §4).
+   */
+  readonly inside?: boolean;
+  /** Arranca abierto: la parte opcional recién creada ofrece su primera pieza en el mismo paso. */
+  readonly openOnMount?: boolean;
+}
+
+/**
+ * El borde derecho de lo que recorta al menú horizontalmente: el primer ancestro
+ * con scroll (el cuerpo del generador) o la ventana.
+ */
+function horizontalBoundaryRight(element: HTMLElement): number {
+  for (let node = element.parentElement; node !== null; node = node.parentElement) {
+    const style = window.getComputedStyle(node);
+    if (style.overflowX !== "visible" || style.overflowY !== "visible") {
+      return Math.min(node.getBoundingClientRect().right, window.innerWidth);
+    }
+  }
+  return window.innerWidth;
+}
+
+/** Si el menú, abierto hacia la derecha desde el botón, se saldría del borde. Pura. */
+export function menuOpensLeft(
+  trigger: { readonly left: number },
+  boundaryRight: number,
+  menuWidth: number,
+): boolean {
+  return trigger.left + menuWidth > boundaryRight - 4;
 }
 
 /**
  * El menú «+ Pieza»: las seis clases, cada una con su descripción. Mismo
  * disclosure hecho a mano que `ActionsMenu`, flotante y sin empujar nada.
  */
-function AddPieceMenu({ disabled, onAdd }: AddPieceMenuProps) {
-  const [open, setOpen] = useState(false);
+function AddPieceMenu({ disabled, onAdd, inside = false, openOnMount = false }: AddPieceMenuProps) {
+  const entries: ReadonlyArray<PieceMenuEntry> = inside ? OPTIONAL_INNER_MENU : PIECE_MENU;
+  const [open, setOpen] = useState(openOnMount && !disabled);
   const containerRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const [layout, setLayout] = useState<MenuLayout>({ placement: "bottom", top: 0, maxHeight: 0 });
+  // A la izquierda del botón si a su derecha no entra: «+ Pieza» se corre a la
+  // derecha a medida que se suman piezas, y el área del generador recorta.
+  const [alignRight, setAlignRight] = useState(false);
 
   useLayoutEffect(() => {
     if (!open) return;
     const container = containerRef.current;
     const menu = menuRef.current;
     if (container === null || menu === null) return;
+    setAlignRight(
+      menuOpensLeft(
+        container.getBoundingClientRect(),
+        horizontalBoundaryRight(container),
+        menu.getBoundingClientRect().width,
+      ),
+    );
     return observeMenuLayout(container, menu, (next) => {
       setLayout((previous) =>
         previous.placement === next.placement &&
@@ -193,36 +289,51 @@ function AddPieceMenu({ disabled, onAdd }: AddPieceMenuProps) {
     if (disabled) setOpen(false);
   }, [disabled]);
 
+  // `Esc` cierra el menú y no el generador.
+  const closeMenu = useCallback(() => setOpen(false), []);
+  useEscapeClosesMenu(open, closeMenu);
+
   return (
-    <div ref={containerRef} className="relative ml-1 shrink-0 self-center">
-      <button
-        type="button"
-        disabled={disabled}
-        aria-expanded={open}
-        aria-haspopup="true"
-        onClick={() => setOpen(!open)}
-        onKeyDown={(event) => {
-          if (event.key === "Escape" && open) {
-            // Cierra el menú y no el diálogo.
-            event.stopPropagation();
-            setOpen(false);
-          }
-        }}
-        className="flex h-[4.5rem] w-24 flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-border-strong text-sm font-medium text-accent hover:bg-accent/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50"
-      >
-        <PlusIcon className="h-4 w-4" aria-hidden />
-        Pieza
-      </button>
+    <div ref={containerRef} className={`relative shrink-0 self-center ${inside ? "" : "ml-1"}`}>
+      {inside ? (
+        <button
+          type="button"
+          disabled={disabled}
+          aria-expanded={open}
+          aria-haspopup="true"
+          aria-label="Sumar una pieza a la parte opcional"
+          title="Sumar una pieza a la parte opcional"
+          onClick={() => setOpen(!open)}
+          className="flex h-16 w-11 items-center justify-center rounded-lg border border-dashed border-border-strong text-accent hover:bg-accent/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <PlusIcon className="h-4 w-4" aria-hidden />
+        </button>
+      ) : (
+        <button
+          type="button"
+          disabled={disabled}
+          aria-expanded={open}
+          aria-haspopup="true"
+          onClick={() => setOpen(!open)}
+          className="flex h-[4.5rem] w-24 flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-border-strong text-sm font-medium text-accent hover:bg-accent/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <PlusIcon className="h-4 w-4" aria-hidden />
+          Pieza
+        </button>
+      )}
       {open ? (
         <div
           ref={menuRef}
           role="group"
-          aria-label="Clases de pieza"
+          aria-label={inside ? "Clases de pieza para la parte opcional" : "Clases de pieza"}
           data-placement={layout.placement}
           style={{ top: `${layout.top}px`, maxHeight: `${layout.maxHeight}px` }}
-          className="absolute left-0 z-50 w-80 overflow-y-auto overscroll-contain rounded-xl border border-border bg-bg-primary p-1.5 shadow-md"
+          // 26rem: cada descripción entra en un renglón y las seis opciones caben
+          // sin scroll (con 20rem casi todas pasaban a dos y aparecía la barra).
+          // El scroll queda solo como resguardo de una ventana muy baja.
+          className={`absolute ${alignRight ? "right-0" : "left-0"} z-50 w-[26rem] max-w-[calc(100vw-2rem)] overflow-y-auto overscroll-contain rounded-xl border border-border bg-bg-primary p-1 shadow-md`}
         >
-          {PIECE_MENU.map((entry) => (
+          {entries.map((entry) => (
             <button
               key={entry.id}
               type="button"
@@ -230,7 +341,7 @@ function AddPieceMenu({ disabled, onAdd }: AddPieceMenuProps) {
                 setOpen(false);
                 onAdd(entry.id);
               }}
-              className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left hover:bg-bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left hover:bg-bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
             >
               <span
                 aria-hidden
@@ -257,9 +368,24 @@ export function PieceStrip({
   onSelect,
   onMoved,
   onAdd,
+  onAddInside,
+  onDelete,
 }: PieceStripProps) {
   const [dragging, setDragging] = useState<PiecePath | null>(null);
   const [over, setOver] = useState<Slot | null>(null);
+  const [menu, setMenu] = useState<PieceMenuState | null>(null);
+  const closeMenu = useCallback(() => setMenu(null), []);
+  // Una variante que cambia por otro camino (otra pestaña, el ajuste) deja el menú sin pieza.
+  useEffect(() => {
+    setMenu(null);
+  }, [variant]);
+  // La parte opcional que se acaba de crear con «+ Pieza»: su «+» de adentro
+  // monta abierto, para elegir la primera pieza en el mismo paso (una parte
+  // opcional vacía no deja crear el formato). Se limpia apenas se usó.
+  const [openInsideOf, setOpenInsideOf] = useState<number | null>(null);
+  useEffect(() => {
+    if (openInsideOf !== null) setOpenInsideOf(null);
+  }, [openInsideOf]);
   const [starts, setStarts] = useState<ReadonlyArray<number>>([]);
   const rowRef = useRef<HTMLDivElement>(null);
   const itemRefs = useRef<Array<HTMLDivElement | null>>([]);
@@ -326,6 +452,54 @@ export function PieceStrip({
     return inRightHalf(event) ? slotAfter(path) : slotBefore(path);
   }
 
+  /** Clic derecho (o tecla de menú): elige la pieza y abre su menú. */
+  function openMenu(event: ReactMouseEvent<HTMLElement>, path: PiecePath): void {
+    event.preventDefault();
+    event.stopPropagation();
+    onSelect(path);
+    setMenu({ path, ...menuPoint(event) });
+  }
+
+  function moveFromMenu(path: PiecePath, direction: -1 | 1): void {
+    const result = moveStep(variant, path, direction);
+    if (result !== null) onMoved(result.variant, result.path);
+  }
+
+  function renderMenu(state: PieceMenuState) {
+    const piece = pieceAt(variant, state.path);
+    if (piece === undefined) return null;
+    const optional = piece.kind === "optional";
+    const name = optional ? "Parte opcional" : pieceCard(piece).title;
+    return (
+      <PieceContextMenu
+        x={state.x}
+        y={state.y}
+        label={`Acciones de la pieza ${name}`}
+        onClose={closeMenu}
+        items={[
+          {
+            label: "Mover a la izquierda",
+            icon: ChevronLeftIcon,
+            disabled: moveStep(variant, state.path, -1) === null,
+            onSelect: () => moveFromMenu(state.path, -1),
+          },
+          {
+            label: "Mover a la derecha",
+            icon: ChevronRightIcon,
+            disabled: moveStep(variant, state.path, 1) === null,
+            onSelect: () => moveFromMenu(state.path, 1),
+          },
+          {
+            label: optional ? "Borrar parte opcional" : "Borrar pieza",
+            icon: Trash2Icon,
+            danger: true,
+            onSelect: () => onDelete(state.path),
+          },
+        ]}
+      />
+    );
+  }
+
   function renderChip(
     piece: Exclude<FormatPiece, { readonly kind: "optional" }>,
     path: PiecePath,
@@ -337,6 +511,8 @@ export function PieceStrip({
         compact={compact}
         selected={samePath(selected, path)}
         onSelect={() => onSelect(path)}
+        onMenu={(event) => openMenu(event, path)}
+        onDelete={() => onDelete(path)}
         onDragStart={(event) => startDrag(event, path)}
         onDragEnd={endDrag}
         onDragOver={(event) => hover(event, chipSlot(event, path))}
@@ -345,11 +521,10 @@ export function PieceStrip({
     );
   }
 
-  function renderSlot(slot: Slot, wide = false) {
+  function renderSlot(slot: Slot) {
     return (
       <DropSlot
         active={over !== null && sameSlot(over, slot)}
-        wide={wide}
         onOver={(event) => hover(event, slot)}
         onDrop={(event) => drop(event, slot)}
       />
@@ -361,7 +536,7 @@ export function PieceStrip({
       ref={rowRef}
       role="group"
       aria-label="Piezas de la variante"
-      className="flex min-h-[6.25rem] flex-wrap content-start items-center gap-y-4 rounded-lg border border-border bg-bg-secondary p-3"
+      className="flex min-h-[6.25rem] flex-wrap content-start items-center gap-y-3 rounded-lg border border-border bg-bg-secondary p-3"
     >
       {variant.map((piece, index) => {
         const path: PiecePath = [index];
@@ -385,6 +560,8 @@ export function PieceStrip({
               ) : null}
               {piece.kind === "optional" ? (
                 <div
+                  // Clic derecho en cualquier lugar de la caja que no sea una ficha de adentro.
+                  onContextMenu={(event) => openMenu(event, path)}
                   className={`flex h-[4.5rem] items-stretch gap-1.5 rounded-xl border-[1.5px] border-dashed bg-bg-secondary px-1.5 py-[2px] ${
                     samePath(selected, path)
                       ? "border-accent ring-2 ring-accent/40"
@@ -398,7 +575,13 @@ export function PieceStrip({
                     aria-pressed={samePath(selected, path)}
                     aria-label={`Parte opcional, ${piece.pieces.length} piezas`}
                     onClick={() => onSelect(path)}
-                    onKeyDown={(event) => activate(event, () => onSelect(path))}
+                    onKeyDown={(event) =>
+                      chipKeys(
+                        event,
+                        () => onSelect(path),
+                        () => onDelete(path),
+                      )
+                    }
                     onDragStart={(event) => startDrag(event, path)}
                     onDragEnd={endDrag}
                     onDragOver={(event) => hover(event, chipSlot(event, path))}
@@ -414,9 +597,6 @@ export function PieceStrip({
                     }
                     onDrop={(event) => drop(event, { parent: index, index: piece.pieces.length })}
                   >
-                    {piece.pieces.length === 0
-                      ? renderSlot({ parent: index, index: 0 }, true)
-                      : null}
                     {piece.pieces.map((inner, innerIndex) => {
                       const innerPath: PiecePath = [index, innerIndex];
                       return (
@@ -426,16 +606,27 @@ export function PieceStrip({
                         </div>
                       );
                     })}
-                    {piece.pieces.length > 0
-                      ? renderSlot({ parent: index, index: piece.pieces.length })
-                      : null}
+                    {renderSlot({ parent: index, index: piece.pieces.length })}
+                    {/*
+                      El «+» de adentro (pasada de UI de la 1.1): se suma donde se ve
+                      que cae la pieza, igual que «+ Pieza» afuera. Toda esta zona
+                      sigue recibiendo lo que se arrastra, al final de la parte.
+                    */}
+                    <AddPieceMenu
+                      inside
+                      openOnMount={openInsideOf === index}
+                      disabled={addDisabled}
+                      onAdd={(id) => onAddInside(index, id)}
+                    />
                   </div>
                 </div>
               ) : (
                 renderChip(piece, path)
               )}
               {endsLine ? (
-                <CornerDownLeftIcon
+                // Hacia adelante y abajo: la lectura sigue en el renglón de abajo,
+                // no vuelve a esta ficha (ADR-228 §3, precisión del 2026-11-21).
+                <CornerRightDownIcon
                   data-continuation="end"
                   className="pointer-events-none absolute -right-3 top-1/2 h-3 w-3 -translate-y-1/2 text-text-secondary"
                   aria-hidden
@@ -446,7 +637,15 @@ export function PieceStrip({
         );
       })}
       {renderSlot({ parent: null, index: variant.length })}
-      <AddPieceMenu disabled={addDisabled} onAdd={onAdd} />
+      <AddPieceMenu
+        disabled={addDisabled}
+        onAdd={(id) => {
+          // «+ Pieza» suma siempre al final: la parte opcional nueva queda en `variant.length`.
+          if (id === "optional") setOpenInsideOf(variant.length);
+          onAdd(id);
+        }}
+      />
+      {menu !== null ? renderMenu(menu) : null}
     </div>
   );
 }

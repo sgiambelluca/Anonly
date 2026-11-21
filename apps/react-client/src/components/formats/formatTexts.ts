@@ -214,6 +214,11 @@ export function admittedTypesList(): string {
 export interface FormatIssueParams {
   /** `variantIndex` del issue, contado desde 1 (`{N}`); 0 si el problema es del formato entero. */
   readonly variant: number;
+  /**
+   * Cómo se nombra esa variante en el texto (`{N}`): su nombre entre comillas si
+   * tiene uno (ADR-233), o su número.
+   */
+  readonly variantRef: string;
   /** `pieceIndex` del issue, contado desde 1 (`{P}`). */
   readonly piece: number;
   readonly definition: FormatDefinition;
@@ -228,6 +233,19 @@ function pieceOf(params: FormatIssueParams): FormatPiece | undefined {
 function variantPieceCount(params: FormatIssueParams): number {
   const variant = params.definition.variants[params.variant - 1];
   return variant === undefined ? 0 : countPieces(variant);
+}
+
+function variantNameLength(params: FormatIssueParams): number {
+  return (params.definition.variantNames?.[params.variant - 1] ?? "").length;
+}
+
+/**
+ * Cómo se nombra la variante `index` en un texto: «Con guiones» si tiene nombre
+ * (ADR-233), o su número. `{N}` de `UX_Guidelines.md` §11b.16.
+ */
+export function variantReference(definition: FormatDefinition, index: number): string {
+  const name = definition.variantNames?.[index]?.trim() ?? "";
+  return name === "" ? String(index + 1) : `«${shortenQuoted(name)}»`;
 }
 
 function charsOf(params: FormatIssueParams): { readonly min: number; readonly max: number } {
@@ -265,58 +283,69 @@ const FORMAT_ISSUE_TEXTS: Readonly<Record<FormatIssueCode, IssueText<FormatIssue
     why: () => "El formato no tiene ninguna variante",
     todo: "Sumá una con «+ Variante».",
   },
+  // ADR-233: {N} es el número, porque lo que falla es el nombre.
+  variant_name_too_long: {
+    why: (params) =>
+      `El nombre de la variante ${params.variant} tiene ${variantNameLength(params)} caracteres y el máximo es ${FORMAT_MAX_TEXT}`,
+    todo: "Acortalo.",
+  },
+  variant_names_mismatch: {
+    why: () => "Los nombres de las variantes de este formato quedaron dañados",
+    todo: "Crealo de nuevo.",
+  },
   too_many_variants: {
     why: ({ definition }) =>
       `Un formato admite hasta ${FORMAT_MAX_VARIANTS} variantes y este tiene ${definition.variants.length}`,
     todo: "Borrá alguna o creá otro formato.",
   },
   variant_empty: {
-    why: ({ variant }) => `La variante ${variant} no tiene piezas`,
+    why: ({ variantRef }) => `La variante ${variantRef} no tiene piezas`,
     todo: "Sumá una con «+ Pieza» o borrá la variante.",
   },
   variant_without_chars: {
-    why: ({ variant }) =>
-      `La variante ${variant} tiene solo textos fijos y separadores, y así no reconoce ningún dato`,
+    why: ({ variantRef }) =>
+      `La variante ${variantRef} tiene solo textos fijos y separadores, y así no reconoce ningún dato`,
     todo: "Sumale un bloque de letras o números.",
   },
   too_many_pieces: {
     why: (params) =>
-      `La variante ${params.variant} tiene ${variantPieceCount(params)} piezas y el máximo es ${FORMAT_MAX_PIECES}, contando las de las partes opcionales`,
+      `La variante ${params.variantRef} tiene ${variantPieceCount(params)} piezas y el máximo es ${FORMAT_MAX_PIECES}, contando las de las partes opcionales`,
     todo: "Juntá bloques o borrá alguna.",
   },
   chars_range_invalid: {
     why: (params) => {
       const { min, max } = charsOf(params);
-      return `En la pieza ${params.piece} de la variante ${params.variant}, «Cuántos» va de ${min} a ${max}: el mínimo tiene que ser 1 o más y no pasar del máximo`;
+      return `En la pieza ${params.piece} de la variante ${params.variantRef}, «Cuántos» va de ${min} a ${max}: el mínimo tiene que ser 1 o más y no pasar del máximo`;
     },
     todo: "Corregí los números.",
   },
   chars_repeat_too_large: {
     why: (params) =>
-      `En la pieza ${params.piece} de la variante ${params.variant}, el máximo es ${charsOf(params).max} y un bloque admite hasta ${FORMAT_MAX_REPEAT}`,
+      `En la pieza ${params.piece} de la variante ${params.variantRef}, el máximo es ${charsOf(params).max} y un bloque admite hasta ${FORMAT_MAX_REPEAT}`,
     todo: "Bajalo o partí el dato en dos bloques.",
   },
   text_empty: {
-    why: ({ piece, variant }) =>
-      `El texto fijo de la pieza ${piece} (variante ${variant}) está vacío`,
+    why: ({ piece, variantRef }) =>
+      `El texto fijo de la pieza ${piece} (variante ${variantRef}) está vacío`,
     todo: "Escribilo o borrá la pieza.",
   },
   text_too_long: {
     why: (params) =>
-      `El texto fijo de la pieza ${params.piece} (variante ${params.variant}) tiene ${textLengthOf(params)} caracteres y el máximo es ${FORMAT_MAX_TEXT}`,
+      `El texto fijo de la pieza ${params.piece} (variante ${params.variantRef}) tiene ${textLengthOf(params)} caracteres y el máximo es ${FORMAT_MAX_TEXT}`,
     todo: "Acortalo.",
   },
   separator_empty: {
-    why: ({ piece, variant }) =>
-      `El separador de la pieza ${piece} (variante ${variant}) no tiene ningún carácter elegido`,
+    why: ({ piece, variantRef }) =>
+      `El separador de la pieza ${piece} (variante ${variantRef}) no tiene ningún carácter elegido`,
     todo: "Elegí al menos uno o borrá la pieza.",
   },
   optional_empty: {
-    why: ({ variant }) => `Hay una parte opcional vacía en la variante ${variant}`,
+    why: ({ variantRef }) => `Hay una parte opcional vacía en la variante ${variantRef}`,
     todo: "Arrastrale una pieza o borrala.",
   },
   optional_nested: {
-    why: ({ variant }) => `Una parte opcional no puede ir dentro de otra (variante ${variant})`,
+    why: ({ variantRef }) =>
+      `Una parte opcional no puede ir dentro de otra (variante ${variantRef})`,
     todo: "Sacala afuera.",
   },
   context_empty: {
@@ -363,6 +392,8 @@ function formatParams(
 ): FormatIssueParams {
   return {
     variant: issue.variantIndex === undefined ? 0 : issue.variantIndex + 1,
+    variantRef:
+      issue.variantIndex === undefined ? "" : variantReference(definition, issue.variantIndex),
     piece: issue.pieceIndex === undefined ? 0 : issue.pieceIndex + 1,
     definition,
     userTypes,

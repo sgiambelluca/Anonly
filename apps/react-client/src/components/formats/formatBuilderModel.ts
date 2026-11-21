@@ -17,6 +17,7 @@ import {
   FORMAT_ADMITTING_BASE_TYPES,
   FORMAT_MAX_PIECES,
   getCatalog,
+  FORMAT_MAX_TEXT,
   FORMAT_MAX_VARIANTS,
   type EntityTypeId,
   type FormatCharClass,
@@ -231,9 +232,26 @@ export const PIECE_MENU: ReadonlyArray<PieceMenuEntry> = [
   },
 ];
 
-/** Las cuatro clases que se pueden sumar adentro de una parte opcional (ADR-228 §4). */
-export const OPTIONAL_INNER_MENU: ReadonlyArray<PieceMenuEntry> = PIECE_MENU.filter((entry) =>
-  ["digits", "letters", "separator", "text"].includes(entry.id),
+/**
+ * Lo que dice el ajuste de una parte opcional: cuántas piezas tiene y cómo se le
+ * suman. Se suman con el «+» de adentro de la caja, en la tira, donde se ve dónde
+ * caen (pasada de UI de la 1.1, 2026-11-21).
+ */
+export function describeOptionalContent(count: number): string {
+  if (count === 0) {
+    return "Todavía está vacía. Sumale piezas con el «+» de adentro de la caja, o arrastralas hasta ella.";
+  }
+  const pieces = count === 1 ? "1 pieza" : `${count} piezas`;
+  return `Tiene ${pieces}. Sumale más con el «+» de adentro de la caja, o arrastralas hasta ella.`;
+}
+
+/**
+ * Las cinco clases que se pueden sumar adentro de una parte opcional: todas menos
+ * otra parte opcional (ADR-220 §1). «Letras o dígitos» se sumó en la pasada de UI
+ * de la 1.1 (ADR-228 §4, precisión del 2026-11-21): afuera estaba y adentro no.
+ */
+export const OPTIONAL_INNER_MENU: ReadonlyArray<PieceMenuEntry> = PIECE_MENU.filter(
+  (entry) => entry.id !== "optional",
 );
 
 /** Una pieza nueva con valores de partida que el usuario ajusta después. */
@@ -548,6 +566,12 @@ export interface BuilderDraft {
   readonly name: string;
   readonly entityType: EntityTypeId;
   readonly variants: ReadonlyArray<Pieces>;
+  /**
+   * ADR-233: el nombre de cada variante, con el largo de `variants`; "" = el
+   * automático. Ausente si ninguna tiene nombre: así un formato sin nombres no
+   * cambia de forma al abrirlo y guardarlo.
+   */
+  readonly variantNames?: ReadonlyArray<string>;
   readonly context: ReadonlyArray<string>;
 }
 
@@ -582,7 +606,7 @@ export const BUILDER_COPY = {
   readyDetail: "No se pisa con ningún formato prendido.",
   /** Estado vacío del ajuste de pieza (`UX_Guidelines.md` §11b.15, textual). */
   noPieceSelected:
-    "Elegí una pieza para ajustarla, o sumá una con «Pieza». Para cambiarles el orden, arrastralas.",
+    "Elegí una pieza para ajustarla, o sumá una con «Pieza». Arrastralas para cambiarles el orden; con clic derecho, las movés o las borrás.",
   /** El rótulo del separador opcional, con los ejemplos de ese separador. */
   separatorOptional: (separator: string) =>
     `Puede faltar: «12${separator}345» y «12345» valen igual`,
@@ -642,12 +666,12 @@ export function resolveBuilderSetup(
 }
 
 function draftOf(format: FormatDefinition, name: string): BuilderDraft {
-  return {
-    name,
-    entityType: format.entityType,
-    variants: format.variants.length === 0 ? [[]] : format.variants,
-    context: format.contextBefore ?? [],
-  };
+  const variants = format.variants.length === 0 ? [[]] : format.variants;
+  return withVariants(
+    { name, entityType: format.entityType, variants, context: format.contextBefore ?? [] },
+    variants,
+    variants.map((_, index) => format.variantNames?.[index] ?? ""),
+  );
 }
 
 /** La definición que el borrador describe: lo que se valida, se prueba y se entrega. */
@@ -657,6 +681,9 @@ export function buildDefinition(draft: BuilderDraft, setup: BuilderSetup): Forma
     name: draft.name.trim(),
     entityType: draft.entityType,
     variants: draft.variants,
+    ...(draft.variantNames !== undefined
+      ? { variantNames: draft.variantNames.map((name) => name.trim()) }
+      : {}),
     ...(draft.context.length > 0 ? { contextBefore: draft.context } : {}),
     ...(setup.basedOn !== undefined ? { basedOn: setup.basedOn } : {}),
     enabled: setup.enabled,
@@ -718,6 +745,104 @@ export function removeVariant(
 ): ReadonlyArray<Pieces> {
   // Con una sola, no se borra (ADR-228 §2).
   return variants.length <= 1 ? variants : variants.filter((_, i) => i !== index);
+}
+
+/**
+ * «Duplicar variante» (ADR-228 §2, precisión del 2026-11-21): una copia de la
+ * variante `index` justo después de ella. En el tope de variantes no cambia nada.
+ */
+export function duplicateVariant(
+  variants: ReadonlyArray<Pieces>,
+  index: number,
+): ReadonlyArray<Pieces> {
+  const source = variants[index];
+  if (source === undefined || variants.length >= FORMAT_MAX_VARIANTS) return variants;
+  return [...variants.slice(0, index + 1), source, ...variants.slice(index + 1)];
+}
+
+// ─── Nombres de variante (ADR-233) ───
+
+/** El nombre automático de la variante `index`, por posición. */
+export function automaticVariantName(index: number): string {
+  return `Variante ${index + 1}`;
+}
+
+/** El nombre que el usuario le puso a la variante `index`, recortado; "" si no tiene. */
+export function variantNameAt(draft: BuilderDraft, index: number): string {
+  return draft.variantNames?.[index]?.trim() ?? "";
+}
+
+/** Lo que dice la pestaña: el nombre, o «Variante N». */
+export function variantLabel(draft: BuilderDraft, index: number): string {
+  const name = variantNameAt(draft, index);
+  return name === "" ? automaticVariantName(index) : name;
+}
+
+/** El nombre de la copia de «Duplicar variante»: «Copia de » + el que se ve, hasta el tope. */
+export function copyVariantName(label: string): string {
+  // Por caracteres y no por unidades de UTF-16: no parte un emoji al medio.
+  return Array.from(`Copia de ${label}`).slice(0, FORMAT_MAX_TEXT).join("").trimEnd();
+}
+
+function namesOf(draft: BuilderDraft): ReadonlyArray<string> {
+  return draft.variants.map((_, index) => draft.variantNames?.[index] ?? "");
+}
+
+/** El borrador con estas variantes y nombres; sin `variantNames` si ninguna tiene nombre. */
+function withVariants(
+  draft: BuilderDraft,
+  variants: ReadonlyArray<Pieces>,
+  names: ReadonlyArray<string>,
+): BuilderDraft {
+  const base = { name: draft.name, entityType: draft.entityType, variants, context: draft.context };
+  return names.some((name) => name.trim() !== "") ? { ...base, variantNames: names } : base;
+}
+
+/** «+ Variante»: una vacía al final, sin nombre. */
+export function draftWithNewVariant(draft: BuilderDraft): BuilderDraft {
+  return withVariants(draft, addVariant(draft.variants), [...namesOf(draft), ""]);
+}
+
+/** «Borrar variante…» ya confirmado: se va con su nombre. Con una sola, no cambia. */
+export function draftWithoutVariant(draft: BuilderDraft, index: number): BuilderDraft {
+  if (draft.variants.length <= 1) return draft;
+  return withVariants(
+    draft,
+    removeVariant(draft.variants, index),
+    namesOf(draft).filter((_, i) => i !== index),
+  );
+}
+
+/** «Duplicar variante»: la copia va justo después, con el nombre «Copia de …». */
+export function draftWithDuplicate(draft: BuilderDraft, index: number): BuilderDraft {
+  const variants = duplicateVariant(draft.variants, index);
+  if (variants === draft.variants) return draft;
+  const names = namesOf(draft);
+  const copy = copyVariantName(variantLabel(draft, index));
+  return withVariants(draft, variants, [
+    ...names.slice(0, index + 1),
+    copy,
+    ...names.slice(index + 1),
+  ]);
+}
+
+/** «Cambiar nombre…»: recortado; vacío vuelve al automático. */
+export function draftWithVariantName(
+  draft: BuilderDraft,
+  index: number,
+  name: string,
+): BuilderDraft {
+  const names = namesOf(draft).map((current, i) => (i === index ? name.trim() : current));
+  return withVariants(draft, draft.variants, names);
+}
+
+/** La pieza cambió en la variante `index`: los nombres quedan como estaban. */
+export function draftWithVariant(
+  draft: BuilderDraft,
+  index: number,
+  variant: Pieces,
+): BuilderDraft {
+  return withVariants(draft, replaceVariant(draft.variants, index, variant), namesOf(draft));
 }
 
 export function replaceVariant(

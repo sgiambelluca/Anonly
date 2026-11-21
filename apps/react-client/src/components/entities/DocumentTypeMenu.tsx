@@ -8,6 +8,8 @@
  * catálogo no lo tienen.
  */
 
+import { BookmarkPlusIcon, PencilIcon, Trash2Icon } from "lucide-react";
+
 import { ActionsMenu } from "../formats/ActionsMenu.js";
 
 import { MENU_DELETE_LABEL, MENU_EDIT_LABEL, MENU_SAVE_LABEL } from "./documentTypeCopy.js";
@@ -31,9 +33,9 @@ export function DocumentTypeMenu({
     <ActionsMenu
       label={`Acciones del tipo ${typeName}`}
       items={[
-        { label: MENU_EDIT_LABEL, onSelect: onEdit },
-        { label: MENU_SAVE_LABEL, onSelect: onSave },
-        { label: MENU_DELETE_LABEL, onSelect: onDelete, danger: true },
+        { label: MENU_EDIT_LABEL, icon: PencilIcon, onSelect: onEdit },
+        { label: MENU_SAVE_LABEL, icon: BookmarkPlusIcon, onSelect: onSave },
+        { label: MENU_DELETE_LABEL, icon: Trash2Icon, onSelect: onDelete, danger: true },
       ]}
       {...(onOpenChange !== undefined ? { onOpenChange } : {})}
     />

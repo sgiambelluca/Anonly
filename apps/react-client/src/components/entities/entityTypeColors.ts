@@ -54,16 +54,21 @@ export function hexToRgbChannels(hex: string): string {
 }
 
 /**
+ * Los canales del color de un tipo, para componer `rgb(… / alpha)`: los del
+ * catálogo salen de su hex; un tipo propio usa el acento, como su franja.
+ */
+export function typeColorChannels(type: EntityTypeId): string {
+  return isUserEntityType(type) ? "var(--color-accent)" : hexToRgbChannels(ENTITY_TYPE_COLOR[type]);
+}
+
+/**
  * ADR-169 §2: el fondo de la franja de tipo — el gris de `bg-tertiary` con
  * apenas el color del tipo encima. La opacidad la pone el tema
  * (`--anonly-band-tint`, `index.css`: 6 % en claro, 7 % en oscuro), así que
  * esto no necesita saber qué tema está activo.
  */
 export function typeBandTint(type: EntityTypeId): string {
-  const channels = isUserEntityType(type)
-    ? "var(--color-accent)"
-    : hexToRgbChannels(ENTITY_TYPE_COLOR[type]);
-  const tint = `rgb(${channels} / var(--anonly-band-tint))`;
+  const tint = `rgb(${typeColorChannels(type)} / var(--anonly-band-tint))`;
   return `linear-gradient(${tint}, ${tint})`;
 }
 

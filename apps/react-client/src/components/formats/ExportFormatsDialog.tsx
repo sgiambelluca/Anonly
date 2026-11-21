@@ -261,7 +261,9 @@ function ExportRow({
       <span
         aria-hidden
         className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
-          on ? "border-accent bg-accent text-white" : "border-border-strong bg-bg-primary"
+          on
+            ? "border-accent bg-accent text-accent-foreground"
+            : "border-text-secondary bg-bg-primary"
         }`}
       >
         {checked === true ? <CheckIcon className="h-3 w-3" strokeWidth={3} /> : null}

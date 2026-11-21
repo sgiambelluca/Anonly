@@ -93,7 +93,10 @@ export function FormatTestPanel({ definition, text, onTextChange, onClose }: For
 
   function onPointerDown(event: PointerEvent<HTMLDivElement>): void {
     if (event.button !== 0 || offset === null) return;
-    if (event.target instanceof HTMLElement && event.target.closest("button") !== null) return;
+    // `Element` y no `HTMLElement`: un clic sobre el dibujo de la X tiene de destino
+    // el `<svg>`, que no es `HTMLElement`. Con el chequeo anterior el encabezado
+    // capturaba el puntero para arrastrar y el clic nunca llegaba a «Cerrar».
+    if (event.target instanceof Element && event.target.closest("button") !== null) return;
     event.currentTarget.setPointerCapture(event.pointerId);
     drag.current = { x: event.clientX, y: event.clientY, origin: offset };
   }

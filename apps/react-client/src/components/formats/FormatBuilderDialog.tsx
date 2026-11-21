@@ -17,25 +17,41 @@
  * (ADR-228 §1); un tipo nuevo se crea antes, desde «Tus tipos».
  */
 
-import type { EntityTypeId } from "@anonly/anonymization-core";
-import { FlaskConicalIcon, PlusIcon, Trash2Icon, TriangleAlertIcon } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import {
+  FORMAT_MAX_TEXT,
+  FORMAT_MAX_VARIANTS,
+  type EntityTypeId,
+} from "@anonly/anonymization-core";
+import {
+  CopyIcon,
+  FlaskConicalIcon,
+  PencilIcon,
+  PlusIcon,
+  Trash2Icon,
+  TriangleAlertIcon,
+} from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { DetectionChange, DetectionState } from "../../store/detectionState.js";
 import { Banner } from "../common/Banner.js";
 import { Button } from "../common/Button.js";
 import { ConfirmDialog } from "../common/ConfirmDialog.js";
 import { Dialog } from "../common/Dialog.js";
-import { FieldHint } from "../common/FieldHint.js";
 import { Select } from "../common/Select.js";
+import { useEscapeClosesMenu } from "../common/useEscapeClosesMenu.js";
 
+import { ActionsMenu } from "./ActionsMenu.js";
 import { ContextWords } from "./ContextWords.js";
 import {
-  addVariant,
   appendPiece,
+  automaticVariantName,
   BUILDER_COPY,
   buildDefinition,
   describeVariant,
+  draftWithDuplicate,
+  draftWithNewVariant,
+  draftWithoutVariant,
+  draftWithVariantName,
   exampleOfVariant,
   hasChanges,
   moveStep,
@@ -43,13 +59,14 @@ import {
   pieceAt,
   pieceCounter,
   removeAt,
-  removeVariant,
   replaceAt,
   replaceVariant,
   resolveBuilderSetup,
   submitChange,
   typeOptions,
   variantCounter,
+  variantLabel,
+  variantNameAt,
   type BuilderDraft,
   type BuilderSetup,
   type PieceClassId,
@@ -83,16 +100,25 @@ export interface FormatBuilderDialogProps {
 export const BUILDER_TEXTS = {
   nameLabel: "Nombre del formato",
   nameHelp: "Así lo vas a ver en tu lista de formatos",
-  namePlaceholder: "Por ejemplo, «Legajo»",
+  namePlaceholder: "Por ejemplo, «Legajo»: así lo vas a ver en tu lista",
   typeLabel: "Es un…",
   addVariant: "Variante",
   addVariantHint: "Otra forma de escribir el mismo dato",
-  deleteVariant: "Borrar variante",
+  variantActions: (n: number) => `Acciones de la variante ${n}`,
+  renameVariant: "Cambiar nombre…",
+  variantNameLabel: "Nombre de la variante",
+  /** El `title` de la pestaña: el nombre entero y cómo cambiarlo. */
+  variantTabTitle: (label: string) => `${label} · Doble clic para cambiarle el nombre`,
+  duplicateVariant: "Duplicar variante",
+  duplicateVariantLimit: `Ya hay ${FORMAT_MAX_VARIANTS} variantes, el máximo`,
+  deleteVariant: "Borrar variante…",
+  deleteVariantOnly: "Un formato tiene al menos una variante",
   readsLabel: "Se lee",
   exampleLabel: "Ejemplo",
   testButton: "Probar con un texto",
   cancel: "Cancelar",
-  deleteVariantTitle: (n: number) => `¿Borrar la variante ${n}?`,
+  /** `ref`: «la variante 2», o el nombre entre comillas si tiene (ADR-233). */
+  deleteVariantTitle: (ref: string) => `¿Borrar ${ref}?`,
   deleteVariantLine: (pieces: number, others: number) => {
     const lost =
       pieces === 0
@@ -156,6 +182,8 @@ function BuilderForm({ setup, state, onSubmit, onClose }: FormProps) {
   const [testOpen, setTestOpen] = useState(false);
   const [sampleText, setSampleText] = useState("");
   const [deleteIndex, setDeleteIndex] = useState<number | null>(null);
+  // La pestaña que se está renombrando (ADR-233): se vuelve un campo.
+  const [renaming, setRenaming] = useState<number | null>(null);
   const [confirmClose, setConfirmClose] = useState(false);
 
   const definition = useMemo(() => buildDefinition(draft, setup), [draft, setup]);
@@ -211,15 +239,43 @@ function BuilderForm({ setup, state, onSubmit, onClose }: FormProps) {
     setSelected(null);
   }
 
+  /** «Duplicar variante»: la copia queda justo después y elegida. */
+  function duplicate(index: number): void {
+    if (variants.atLimit) return;
+    setDraft((current) => draftWithDuplicate(current, index));
+    selectVariant(index + 1);
+  }
+
+  function deletePiece(path: PiecePath): void {
+    setVariant(removeAt(variant, path), null);
+  }
+
   function confirmDeleteVariant(): void {
     if (deleteIndex === null) return;
-    setDraft((current) => ({ ...current, variants: removeVariant(current.variants, deleteIndex) }));
-    setVariantIndex((current) => Math.max(0, Math.min(current, draft.variants.length - 2)));
-    setSelected(null);
+    setDraft((current) => draftWithoutVariant(current, deleteIndex));
+    // Con el ⋯ de cada pestaña se puede borrar una que no es la elegida: la elegida
+    // sigue siendo la misma, y si estaba después de la borrada corre un lugar.
+    setVariantIndex((current) =>
+      Math.max(
+        0,
+        Math.min(deleteIndex < current ? current - 1 : current, draft.variants.length - 2),
+      ),
+    );
+    if (deleteIndex === variantIndex) setSelected(null);
     setDeleteIndex(null);
   }
 
   const deletingPieces = deleteIndex === null ? 0 : countPieces(draft.variants[deleteIndex] ?? []);
+  const deletingRef =
+    deleteIndex === null || variantNameAt(draft, deleteIndex) === ""
+      ? `la variante ${(deleteIndex ?? 0) + 1}`
+      : `«${variantNameAt(draft, deleteIndex)}»`;
+
+  const commitRename = useCallback((index: number, name: string): void => {
+    setDraft((current) => draftWithVariantName(current, index, name));
+    setRenaming(null);
+  }, []);
+  const cancelRename = useCallback((): void => setRenaming(null), []);
 
   return (
     <>
@@ -253,10 +309,11 @@ function BuilderForm({ setup, state, onSubmit, onClose }: FormProps) {
           </Button>
         }
         footer={
-          <div className="flex flex-col gap-2.5">
-            {/* La caja de estado va fija entre el cuerpo y los botones: no scrollea (ADR-228 §7). */}
+          // La caja de estado va en el pie, a la izquierda de los botones: no scrollea
+          // y no ocupa un renglón propio (ADR-228 §7, precisión del 2026-11-21).
+          <div className="flex items-center gap-3">
             <FormatStatusBox status={evaluation.status} />
-            <div className="flex justify-end gap-2">
+            <div className="flex shrink-0 gap-2">
               <Button variant="secondary" onClick={requestClose}>
                 {BUILDER_TEXTS.cancel}
               </Button>
@@ -272,28 +329,29 @@ function BuilderForm({ setup, state, onSubmit, onClose }: FormProps) {
           </div>
         }
       >
-        <div className="flex flex-col gap-2.5">
+        {/* `gap-2`: con dos renglones de piezas y «Letras» elegida entra sin scroll a 1280 × 800 (§11b.18). */}
+        <div className="flex flex-col gap-2">
           {setup.notice !== null ? <Banner variant="info">{setup.notice}</Banner> : null}
 
           <div className="grid grid-cols-[1fr_14rem] gap-3">
-            <div className="flex flex-col gap-1">
-              <label className="flex flex-col gap-1.5">
-                <span className="text-sm font-semibold text-text-primary">
-                  {BUILDER_TEXTS.nameLabel}
-                </span>
-                <input
-                  type="text"
-                  value={draft.name}
-                  placeholder={BUILDER_TEXTS.namePlaceholder}
-                  onChange={(event) => setDraft({ ...draft, name: event.target.value })}
-                  autoFocus
-                  aria-describedby="format-name-hint"
-                  className={INPUT_CLASS}
-                />
-              </label>
-              {/* Línea de ayuda (§11b.17): el nombre no tiene error propio. */}
-              <FieldHint id="format-name-hint" help={BUILDER_TEXTS.nameHelp} />
-            </div>
+            {/*
+              Sin línea de ayuda: el nombre no tiene error propio (lo dice la caja de
+              estado) y la ayuda va en el placeholder. Ahorra un renglón (§11b.18).
+            */}
+            <label className="flex flex-col gap-1.5">
+              <span className="text-sm font-semibold text-text-primary">
+                {BUILDER_TEXTS.nameLabel}
+              </span>
+              <input
+                type="text"
+                value={draft.name}
+                placeholder={BUILDER_TEXTS.namePlaceholder}
+                title={BUILDER_TEXTS.nameHelp}
+                onChange={(event) => setDraft({ ...draft, name: event.target.value })}
+                autoFocus
+                className={INPUT_CLASS}
+              />
+            </label>
             <div className="flex flex-col gap-1.5">
               <span className="text-sm font-semibold text-text-primary">
                 {BUILDER_TEXTS.typeLabel}
@@ -312,64 +370,114 @@ function BuilderForm({ setup, state, onSubmit, onClose }: FormProps) {
           </div>
 
           <div className="flex flex-col gap-2">
+            {/*
+              Con muchas variantes o nombres largos, las pestañas pasan a un segundo
+              renglón en vez de desbordar el diálogo (ADR-233 §5).
+            */}
             <div
-              className="flex items-end gap-0.5 border-b border-border"
+              className="flex flex-wrap items-end gap-x-0.5 border-b border-border"
               role="tablist"
               aria-label="Variantes"
             >
-              {draft.variants.map((_, index) => (
-                <button
-                  key={index}
-                  type="button"
-                  role="tab"
-                  aria-selected={index === variantIndex}
-                  onClick={() => selectVariant(index)}
-                  className={`-mb-px flex h-9 items-center gap-1.5 border-b-2 px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
-                    index === variantIndex
-                      ? "border-accent font-semibold text-text-primary"
-                      : "border-transparent text-text-secondary hover:text-text-primary"
-                  }`}
-                >
-                  Variante {index + 1}
-                  {evaluation.variantsWithIssues.has(index) ? (
-                    <span
-                      data-variant-issue
-                      role="img"
-                      aria-label="Tiene un problema"
-                      className="h-1.5 w-1.5 rounded-full bg-error"
+              {draft.variants.map((_, index) => {
+                const label = variantLabel(draft, index);
+                const active = index === variantIndex;
+                return (
+                  // Cada pestaña lleva su ⋯ (ADR-228 §2, precisión del 2026-11-21): todas, y
+                  // no solo la elegida, para que elegir otra no cambie los anchos.
+                  <div
+                    key={index}
+                    role="presentation"
+                    className={`-mb-px flex h-8 max-w-[13rem] items-center border-b-2 pr-1 ${
+                      active ? "border-accent" : "border-transparent"
+                    }`}
+                  >
+                    {renaming === index ? (
+                      <VariantNameField
+                        initial={variantNameAt(draft, index)}
+                        placeholder={automaticVariantName(index)}
+                        onCommit={(name) => commitRename(index, name)}
+                        onCancel={cancelRename}
+                      />
+                    ) : (
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={active}
+                        title={BUILDER_TEXTS.variantTabTitle(label)}
+                        onClick={() => selectVariant(index)}
+                        onDoubleClick={() => {
+                          selectVariant(index);
+                          setRenaming(index);
+                        }}
+                        className={`flex h-full min-w-0 items-center gap-1.5 pl-3 pr-1.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+                          active
+                            ? "font-semibold text-text-primary"
+                            : "text-text-secondary hover:text-text-primary"
+                        }`}
+                      >
+                        <span className="truncate">{label}</span>
+                        {evaluation.variantsWithIssues.has(index) ? (
+                          <span
+                            data-variant-issue
+                            role="img"
+                            aria-label="Tiene un problema"
+                            className="h-1.5 w-1.5 shrink-0 rounded-full bg-error"
+                          />
+                        ) : null}
+                      </button>
+                    )}
+                    <ActionsMenu
+                      label={BUILDER_TEXTS.variantActions(index + 1)}
+                      align="start"
+                      compact
+                      muted={!active}
+                      items={[
+                        {
+                          label: BUILDER_TEXTS.renameVariant,
+                          icon: PencilIcon,
+                          onSelect: () => {
+                            selectVariant(index);
+                            setRenaming(index);
+                          },
+                        },
+                        {
+                          label: BUILDER_TEXTS.duplicateVariant,
+                          icon: CopyIcon,
+                          disabled: variants.atLimit,
+                          disabledReason: BUILDER_TEXTS.duplicateVariantLimit,
+                          onSelect: () => duplicate(index),
+                        },
+                        {
+                          label: BUILDER_TEXTS.deleteVariant,
+                          icon: Trash2Icon,
+                          danger: true,
+                          disabled: draft.variants.length <= 1,
+                          disabledReason: BUILDER_TEXTS.deleteVariantOnly,
+                          onSelect: () => setDeleteIndex(index),
+                        },
+                      ]}
                     />
-                  ) : null}
-                </button>
-              ))}
+                  </div>
+                );
+              })}
               <button
                 type="button"
                 disabled={variants.atLimit}
                 title={BUILDER_TEXTS.addVariantHint}
                 onClick={() => {
-                  setDraft({ ...draft, variants: addVariant(draft.variants) });
+                  setDraft(draftWithNewVariant(draft));
                   selectVariant(draft.variants.length);
                 }}
-                className="-mb-px flex h-9 items-center gap-1.5 border-b-2 border-transparent px-3 text-sm font-semibold text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50"
+                className="-mb-px flex h-8 shrink-0 items-center gap-1.5 border-b-2 border-transparent px-3 text-sm font-semibold text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <PlusIcon className="h-4 w-4" aria-hidden />
                 {BUILDER_TEXTS.addVariant}
               </button>
               <span className="flex-1" />
-              <span className="self-center pb-1 text-xs text-text-secondary">
+              <span className="shrink-0 self-center pb-1 text-xs text-text-secondary">
                 {variants.visible ? variants.text : ""}
               </span>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="mb-1 ml-2 !text-error hover:!bg-error/10"
-                disabled={draft.variants.length <= 1}
-                onClick={() => setDeleteIndex(variantIndex)}
-              >
-                <span className="flex items-center gap-1.5">
-                  <Trash2Icon className="h-4 w-4" aria-hidden />
-                  {BUILDER_TEXTS.deleteVariant}
-                </span>
-              </Button>
             </div>
 
             <PieceStrip
@@ -379,6 +487,8 @@ function BuilderForm({ setup, state, onSubmit, onClose }: FormProps) {
               onSelect={setSelected}
               onMoved={(next, path) => setVariant(next, path)}
               onAdd={(id) => add(id, null)}
+              onAddInside={(parent, id) => add(id, parent)}
+              onDelete={deletePiece}
             />
           </div>
 
@@ -404,15 +514,11 @@ function BuilderForm({ setup, state, onSubmit, onClose }: FormProps) {
             canMoveRight={selected !== null && moveStep(variant, selected, 1) !== null}
             onMove={move}
             onDelete={() => {
-              if (selected !== null) setVariant(removeAt(variant, selected), null);
+              if (selected !== null) deletePiece(selected);
             }}
             onChange={(next) => {
               if (selected !== null) setVariant(replaceAt(variant, selected, next), selected);
             }}
-            onAddInside={(id) => {
-              if (selected !== null && selected.length === 1) add(id, selected[0]);
-            }}
-            addDisabled={pieces.atLimit}
           />
 
           <ContextWords
@@ -433,7 +539,7 @@ function BuilderForm({ setup, state, onSubmit, onClose }: FormProps) {
 
       <ConfirmDialog
         open={deleteIndex !== null}
-        title={BUILDER_TEXTS.deleteVariantTitle((deleteIndex ?? 0) + 1)}
+        title={BUILDER_TEXTS.deleteVariantTitle(deletingRef)}
         message={BUILDER_TEXTS.deleteVariantLine(deletingPieces, draft.variants.length - 1)}
         confirmLabel={BUILDER_TEXTS.deleteVariantConfirm}
         cancelLabel={BUILDER_TEXTS.keepVariant}
@@ -461,5 +567,52 @@ function BuilderForm({ setup, state, onSubmit, onClose }: FormProps) {
         }
       />
     </>
+  );
+}
+
+interface VariantNameFieldProps {
+  readonly initial: string;
+  readonly placeholder: string;
+  readonly onCommit: (name: string) => void;
+  readonly onCancel: () => void;
+}
+
+/**
+ * La pestaña mientras se renombra (ADR-233 §5): `Enter` o salir del campo guardan,
+ * `Esc` deja el nombre como estaba sin cerrar el generador, y vacío vuelve al
+ * nombre automático, que se ve como placeholder.
+ */
+function VariantNameField({ initial, placeholder, onCommit, onCancel }: VariantNameFieldProps) {
+  const [value, setValue] = useState(initial);
+  // Al cancelar, el campo se desmonta y pierde el foco: ese blur no guarda.
+  const cancelled = useRef(false);
+  const cancel = useCallback((): void => {
+    cancelled.current = true;
+    onCancel();
+  }, [onCancel]);
+  useEscapeClosesMenu(true, cancel);
+
+  return (
+    <input
+      type="text"
+      value={value}
+      autoFocus
+      maxLength={FORMAT_MAX_TEXT}
+      placeholder={placeholder}
+      aria-label={BUILDER_TEXTS.variantNameLabel}
+      onFocus={(event) => event.currentTarget.select()}
+      onChange={(event) => setValue(event.target.value)}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          cancelled.current = true;
+          onCommit(value);
+        }
+      }}
+      onBlur={() => {
+        if (!cancelled.current) onCommit(value);
+      }}
+      className="ml-1 h-7 w-44 min-w-0 rounded-md border border-accent bg-bg-primary px-2 text-sm text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+    />
   );
 }

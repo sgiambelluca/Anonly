@@ -54,6 +54,8 @@ export interface ChoiceResolution {
   readonly entityType: EntityTypeId;
   /** Presente si hay que crear el tipo antes («Crear y agregar» / «Crear y cambiar»). */
   readonly newType?: UserEntityTypeDefinition;
+  /** Con el tipo nuevo: si además se guarda para los próximos documentos (ADR-225 §5). */
+  readonly saveNewType?: boolean;
 }
 
 /** Lo que el contenedor necesita para confirmar, o `null` si todavía no se puede. */
@@ -67,7 +69,11 @@ export function resolveChoice(
   if (state.newType === null) return null;
   if (!evaluateNewType(state.newType, existing, country).canSubmit) return null;
   const definition = createNewTypeDefinition(state.newType, newId);
-  return { entityType: definition.id, newType: definition };
+  return {
+    entityType: definition.id,
+    newType: definition,
+    saveNewType: state.newType.save === true,
+  };
 }
 
 export function evaluateChoice(

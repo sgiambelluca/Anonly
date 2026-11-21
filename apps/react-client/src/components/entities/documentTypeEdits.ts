@@ -16,6 +16,7 @@ import { useEntitiesStore } from "../../store/entities.store.js";
 import { showToast } from "../common/toast.js";
 
 import {
+  CREATED_AND_SAVED_TYPE_HINT,
   createdTypeToast,
   CREATED_TYPE_HINT,
   removedTypeHint,
@@ -35,7 +36,10 @@ function failed(recorded: boolean): false {
 }
 
 /** «Nuevo tipo» de la banda. Devuelve si el tipo quedó creado. */
-export function applyCreateDocumentType(definition: UserEntityTypeDefinition): boolean {
+export function applyCreateDocumentType(
+  definition: UserEntityTypeDefinition,
+  save = false,
+): boolean {
   const title = createdTypeToast(definition.name);
   const recorded = recordEdit(title);
   try {
@@ -43,7 +47,19 @@ export function applyCreateDocumentType(definition: UserEntityTypeDefinition): b
   } catch {
     return failed(recorded);
   }
-  showToast(editToast({ title, description: CREATED_TYPE_HINT, tone: "success" }, recorded));
+  // «Guardarlo también para los próximos documentos», tildada al crearlo (ADR-225 §5,
+  // precisión del 2026-11-21): lo mismo que el ⋯ después. El deshacer no lo alcanza.
+  const saved = save && actions.saveDocumentType(definition.id);
+  showToast(
+    editToast(
+      {
+        title,
+        description: saved ? CREATED_AND_SAVED_TYPE_HINT : CREATED_TYPE_HINT,
+        tone: "success",
+      },
+      recorded,
+    ),
+  );
   return true;
 }
 

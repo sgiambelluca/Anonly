@@ -140,6 +140,12 @@ export interface SettingsSlice {
    * la nota al pie del panel). **Persistido**: cerrado una vez, no vuelve.
    */
   readonly dismissedHints: ReadonlyArray<DismissibleHint>;
+  /**
+   * Pasada de UI de la 1.1 (2026-11-21): si el original muestra el resaltado de
+   * entidades (`Components.md` §5.4b, §13b.8). Prendido por defecto; quien lo
+   * apaga ve el documento limpio, con el tooltip y el clic iguales.
+   */
+  readonly highlightEntities: boolean;
   persist(): void;
   load(): void;
 }
@@ -186,6 +192,7 @@ type SettingsData = Pick<
   | "updateMode"
   | "theme"
   | "dismissedHints"
+  | "highlightEntities"
 >;
 
 const DEFAULT_SETTINGS: SettingsData = {
@@ -197,6 +204,7 @@ const DEFAULT_SETTINGS: SettingsData = {
   updateMode: "notify",
   theme: "system",
   dismissedHints: [],
+  highlightEntities: true,
 };
 
 type PersistedSettings = Partial<SettingsData> & {
@@ -223,6 +231,7 @@ export const useSettingsStore = create<SettingsSlice>((set, get) => ({
       updateMode: state.updateMode,
       theme: state.theme,
       dismissedHints: state.dismissedHints,
+      highlightEntities: state.highlightEntities,
     };
     try {
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(toStore));
@@ -272,6 +281,10 @@ export const useSettingsStore = create<SettingsSlice>((set, get) => ({
       // puede esconder un aviso nuevo.
       ...(Array.isArray(parsed.dismissedHints)
         ? { dismissedHints: parsed.dismissedHints.filter(isDismissibleHint) }
+        : {}),
+      // Solo un booleano: cualquier otra cosa deja el default (prendido).
+      ...(typeof parsed.highlightEntities === "boolean"
+        ? { highlightEntities: parsed.highlightEntities }
         : {}),
     });
   },

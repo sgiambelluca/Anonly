@@ -12,15 +12,24 @@
  * El panel es **flotante**: no empuja nada (`UX_Guidelines.md` §11b.7).
  */
 
-import { MoreHorizontalIcon } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { MoreHorizontalIcon, type LucideIcon } from "lucide-react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
+import { useEscapeClosesMenu } from "../common/useEscapeClosesMenu.js";
 import { observeMenuLayout, type MenuLayout } from "../entities/menuPlacement.js";
 
 export interface ActionsMenuItem {
   readonly label: string;
+  /**
+   * Obligatorio: todos los menús ⋯ de la aplicación llevan un ícono por opción,
+   * como el de las entidades (`GroupContextMenu`). Pasada de UI de la 1.1.
+   */
+  readonly icon: LucideIcon;
   readonly onSelect: () => void;
   readonly danger?: boolean;
+  /** Apagada, con su motivo en `title` (el tope de variantes, una sola variante). */
+  readonly disabled?: boolean;
+  readonly disabledReason?: string;
 }
 
 export interface ActionsMenuProps {
@@ -29,9 +38,26 @@ export interface ActionsMenuProps {
   readonly items: ReadonlyArray<ActionsMenuItem>;
   /** Avisa cuándo se abre o se cierra: una franja `sticky` tiene que subir de capa mientras el menú está abierto. */
   readonly onOpenChange?: (open: boolean) => void;
+  /**
+   * Hacia dónde se abre el panel: `end` (default) lo alinea al borde derecho del
+   * botón; `start`, al izquierdo, para un ⋯ que está cerca del borde izquierdo
+   * (las pestañas de variante del generador).
+   */
+  readonly align?: "start" | "end";
+  /** Un botón más chico, para ir dentro de una pestaña. */
+  readonly compact?: boolean;
+  /** Un ⋯ que no es el de lo elegido se ve más tenue hasta pasarle el mouse. */
+  readonly muted?: boolean;
 }
 
-export function ActionsMenu({ label, items, onOpenChange }: ActionsMenuProps) {
+export function ActionsMenu({
+  label,
+  items,
+  onOpenChange,
+  align = "end",
+  compact = false,
+  muted = false,
+}: ActionsMenuProps) {
   const [open, setOpenState] = useState(false);
   const onOpenChangeRef = useRef(onOpenChange);
   onOpenChangeRef.current = onOpenChange;
@@ -69,16 +95,13 @@ export function ActionsMenu({ label, items, onOpenChange }: ActionsMenuProps) {
         setOpen(false);
       }
     }
-    function handleKeydown(event: KeyboardEvent): void {
-      if (event.key === "Escape") setOpen(false);
-    }
     document.addEventListener("mousedown", handlePointerDown);
-    document.addEventListener("keydown", handleKeydown);
-    return () => {
-      document.removeEventListener("mousedown", handlePointerDown);
-      document.removeEventListener("keydown", handleKeydown);
-    };
+    return () => document.removeEventListener("mousedown", handlePointerDown);
   }, [open]);
+
+  // `Esc` cierra el menú y no «Formatos de detección», que lo contiene.
+  const closeMenu = useCallback(() => setOpen(false), []);
+  useEscapeClosesMenu(open, closeMenu);
 
   return (
     <div ref={containerRef} className="relative flex justify-center">
@@ -87,8 +110,8 @@ export function ActionsMenu({ label, items, onOpenChange }: ActionsMenuProps) {
         aria-label={label}
         aria-expanded={open}
         onClick={() => setOpen(!open)}
-        className={`flex h-7 w-7 items-center justify-center rounded-md text-text-secondary hover:bg-bg-tertiary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
-          open ? "bg-bg-tertiary text-text-primary" : ""
+        className={`flex ${compact ? "h-6 w-6" : "h-7 w-7"} items-center justify-center rounded-md text-text-secondary hover:bg-bg-tertiary hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+          open ? "bg-bg-tertiary text-text-primary" : muted ? "opacity-60 hover:opacity-100" : ""
         }`}
       >
         <MoreHorizontalIcon className="h-4 w-4" aria-hidden />
@@ -100,22 +123,33 @@ export function ActionsMenu({ label, items, onOpenChange }: ActionsMenuProps) {
           aria-label={label}
           data-placement={layout.placement}
           style={{ top: `${layout.top}px`, maxHeight: `${layout.maxHeight}px` }}
-          className="absolute right-0 z-50 w-56 overflow-y-auto overscroll-contain rounded-xl border border-border bg-bg-primary p-1.5 shadow-md"
+          // `w-max` entre 14 y 20 rem: con el ícono, «Guardar para los próximos
+          // documentos» ya no entraba en los 14 rem fijos de antes.
+          className={`absolute ${align === "start" ? "left-0" : "right-0"} z-50 w-max min-w-[14rem] max-w-[20rem] overflow-y-auto overscroll-contain rounded-xl border border-border bg-bg-primary p-1.5 shadow-md`}
         >
           {items.map((item) => (
             <button
               key={item.label}
               type="button"
+              disabled={item.disabled === true}
+              {...(item.disabled === true && item.disabledReason !== undefined
+                ? { title: item.disabledReason }
+                : {})}
               onClick={() => {
                 setOpen(false);
                 item.onSelect();
               }}
-              className={`flex w-full items-center rounded-md px-2.5 py-2 text-left text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+              className={`flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50 ${
                 item.danger === true
-                  ? "text-error hover:bg-error/10"
-                  : "text-text-primary hover:bg-bg-secondary"
+                  ? "text-error enabled:hover:bg-error/10"
+                  : "text-text-primary enabled:hover:bg-bg-secondary"
               }`}
             >
+              {/* Mismo trato que `GroupContextMenu`: gris, salvo en la opción de peligro. */}
+              <item.icon
+                className={`h-4 w-4 shrink-0 ${item.danger === true ? "" : "text-text-secondary"}`}
+                aria-hidden
+              />
               {item.label}
             </button>
           ))}
