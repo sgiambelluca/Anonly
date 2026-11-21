@@ -12,9 +12,11 @@ import {
   fieldsOf,
   replacementLadder,
   replacementTokens,
+  SHORT_LABEL_HELP,
   TYPE_FORM_COPY,
   typeFormLead,
   typeFormNote,
+  typeNameHelp,
 } from "../components/formats/userTypeForm.js";
 
 import { userType } from "./helpers/detectionFixtures.js";
@@ -132,5 +134,18 @@ describe("userTypeForm", () => {
       "Corta",
       "Mínima",
     ]);
+  });
+
+  it("la ayuda del nombre trae el contador y cómo queda (§11b.17)", () => {
+    expect(typeNameHelp(fields(""))).toBe("0/40");
+    expect(typeNameHelp(fields("Legajo"))).toBe("6/40 · Así se ve: [LEGAJO 01]");
+    expect(SHORT_LABEL_HELP).toContain("8");
+  });
+
+  it("el error dice en qué campo va: nombre o versiones cortas", () => {
+    expect(evaluateTypeForm(ID, fields(""), [], "AR").errorField).toBeNull();
+    expect(evaluateTypeForm(ID, fields("Legajo"), [], "AR").errorField).toBeNull();
+    expect(evaluateTypeForm(ID, fields("Legajo #4"), [], "AR").errorField).toBe("name");
+    expect(evaluateTypeForm(ID, fields("Legajo", "ab cd"), [], "AR").errorField).toBe("short");
   });
 });

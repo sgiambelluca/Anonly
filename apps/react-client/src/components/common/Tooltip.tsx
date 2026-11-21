@@ -33,7 +33,7 @@ export function Tooltip({ content, children, delayDuration = 300 }: TooltipProps
         <RadixTooltip.Portal>
           <RadixTooltip.Content
             sideOffset={4}
-            className="z-50 max-w-[17rem] rounded-lg bg-text-primary px-2.5 py-2 text-sm leading-snug text-bg-primary shadow-md"
+            className="z-[95] max-w-[17rem] rounded-lg bg-text-primary px-2.5 py-2 text-sm leading-snug text-bg-primary shadow-md"
           >
             {content}
             <RadixTooltip.Arrow className="fill-text-primary" />

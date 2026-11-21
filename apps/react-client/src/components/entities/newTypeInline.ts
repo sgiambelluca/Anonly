@@ -20,6 +20,9 @@ import {
 
 import { buildUserTypeDefinition, evaluateTypeForm } from "../formats/userTypeForm.js";
 
+/** El `id` de la línea de ayuda del contenedor, a la que apunta el campo (§11b.17). */
+export const NEW_TYPE_HINT_ID = "new-type-hint";
+
 /** El estado del campo en línea; `null` en el picker es «sin campo» (la celda punteada). */
 export interface NewTypeDraft {
   readonly name: string;

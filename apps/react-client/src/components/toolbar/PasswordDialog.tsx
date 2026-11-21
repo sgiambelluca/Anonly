@@ -35,6 +35,8 @@ import { usePipelineStore } from "../../store/pipeline.store.js";
 import { Button } from "../common/Button.js";
 import { ConfirmDialog } from "../common/ConfirmDialog.js";
 import { Dialog } from "../common/Dialog.js";
+import { FieldHint } from "../common/FieldHint.js";
+import { fieldBorderClass } from "../common/fieldHintText.js";
 
 export function PasswordDialog() {
   const [open, setOpen] = useState(false);
@@ -106,22 +108,27 @@ export function PasswordDialog() {
           }}
           className="flex flex-col gap-3"
         >
-          <label htmlFor="pdf-password" className="text-sm font-medium text-text-secondary">
-            Contraseña
-          </label>
-          <input
-            id="pdf-password"
-            type="password"
-            autoComplete="off"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            className="rounded-md border border-border px-3 py-1.5 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent"
-          />
-          {wrongPassword ? (
-            <p role="alert" className="text-sm text-error">
-              Contraseña incorrecta.
-            </p>
-          ) : null}
+          <div className="flex flex-col gap-1">
+            <label htmlFor="pdf-password" className="text-sm font-medium text-text-secondary">
+              Contraseña
+            </label>
+            <input
+              id="pdf-password"
+              type="password"
+              autoComplete="off"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              aria-invalid={wrongPassword}
+              aria-describedby="pdf-password-hint"
+              className={`rounded-md border ${fieldBorderClass(wrongPassword)} px-3 py-1.5 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent`}
+            />
+            {/* Línea de ayuda (§11b.17): siempre ocupa su renglón. */}
+            <FieldHint
+              id="pdf-password-hint"
+              help="Distingue mayúsculas de minúsculas."
+              error={wrongPassword ? "Contraseña incorrecta." : null}
+            />
+          </div>
           <div className="flex justify-end gap-2 pt-1">
             <Button type="button" variant="secondary" onClick={handleOfferClose}>
               Cancelar

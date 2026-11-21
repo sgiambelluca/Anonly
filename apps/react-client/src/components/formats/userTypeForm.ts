@@ -9,12 +9,16 @@
  */
 
 import {
+  USER_TYPE_NAME_MAX,
+  USER_TYPE_SHORT_LABEL_MAX,
   userTypeLabel,
   validateUserEntityType,
   type CountryCode,
   type UserEntityTypeDefinition,
   type UserEntityTypeId,
 } from "@anonly/anonymization-core";
+
+import { joinHelp, lengthCounter } from "../common/fieldHintText.js";
 
 import { userTypeIssueText } from "./formatTexts.js";
 
@@ -95,6 +99,18 @@ export function replacementTokens(ladder: ReplacementLadder): readonly [string, 
   return [token(ladder.level0, " "), token(ladder.level1, " "), token(ladder.level2, "-")];
 }
 
+/** La ayuda bajo el nombre: el contador y cómo queda (§11b.17), p. ej. `6/40 · Así se ve: [LEGAJO 01]`. */
+export function typeNameHelp(fields: UserTypeFields): string {
+  const [full] = replacementTokens(replacementLadder(fields));
+  return joinHelp(
+    lengthCounter(fields.name, USER_TYPE_NAME_MAX),
+    fields.name.trim() === "" ? "" : `Así se ve: ${full}`,
+  );
+}
+
+/** La ayuda bajo cada versión corta (§11b.17). */
+export const SHORT_LABEL_HELP = `Hasta ${USER_TYPE_SHORT_LABEL_MAX} letras o números; vacías, se arman solas`;
+
 /** Lo que muestra la ranura de alto fijo (`Components.md` §13b.3). */
 export type TypeFormSlot =
   | { readonly kind: "idle" }
@@ -103,6 +119,8 @@ export type TypeFormSlot =
 export interface TypeFormResult {
   readonly definition: UserEntityTypeDefinition;
   readonly slot: TypeFormSlot;
+  /** En qué campo va el error (§11b.17): las versiones cortas, o el nombre en todo lo demás. */
+  readonly errorField: "name" | "short" | null;
   /** El botón principal se apaga con un error o con el nombre todavía vacío. */
   readonly canSubmit: boolean;
 }
@@ -123,13 +141,16 @@ export function evaluateTypeForm(
   const definition = buildUserTypeDefinition(id, fields);
   const validation = validateUserEntityType(definition, { country, existing });
   const first = validation.issues[0];
-  if (first === undefined) return { definition, slot: { kind: "idle" }, canSubmit: true };
+  if (first === undefined) {
+    return { definition, slot: { kind: "idle" }, errorField: null, canSubmit: true };
+  }
   if (definition.name === "" && first.code === "name_empty") {
-    return { definition, slot: { kind: "idle" }, canSubmit: false };
+    return { definition, slot: { kind: "idle" }, errorField: null, canSubmit: false };
   }
   return {
     definition,
     slot: { kind: "error", text: userTypeIssueText(first.code, definition) },
+    errorField: first.code === "short_label_invalid" ? "short" : "name",
     canSubmit: false,
   };
 }

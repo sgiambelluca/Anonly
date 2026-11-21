@@ -16,7 +16,37 @@
 
 import * as RadixDialog from "@radix-ui/react-dialog";
 import { XIcon } from "lucide-react";
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useState,
+  type ReactNode,
+} from "react";
+
+import { dialogLayerFor, dialogZIndex } from "./dialogLayers.js";
+
+/** Cuántos diálogos modales hay abiertos: el siguiente que abre toma esa capa. */
+let openDialogCount = 0;
+
+/**
+ * La capa del diálogo en la pila (§11b.17): un diálogo abierto sobre otro sube
+ * una capa, para que su fondo desenfoque también al de abajo.
+ */
+function useDialogLayer(open: boolean): number {
+  const [layer, setLayer] = useState(0);
+  useLayoutEffect(() => {
+    if (!open) return;
+    setLayer(dialogLayerFor(openDialogCount));
+    openDialogCount += 1;
+    return () => {
+      openDialogCount -= 1;
+    };
+  }, [open]);
+  return layer;
+}
 
 const DialogSelectOpenContext = createContext<(open: boolean) => void>(() => undefined);
 
@@ -87,6 +117,7 @@ export function Dialog({
   onEscapeKeyDown,
 }: DialogProps) {
   const [selectOpen, setSelectOpen] = useState(false);
+  const zIndex = dialogZIndex(useDialogLayer(open));
   const handleSelectOpenChange = useCallback((next: boolean) => setSelectOpen(next), []);
 
   useEffect(() => {
@@ -119,14 +150,22 @@ export function Dialog({
         }}
       >
         <RadixDialog.Portal>
-          <RadixDialog.Overlay onClick={onClose} className="fixed inset-0 z-40 bg-black/40" />
+          {/* Velo oscuro y desenfoque leve (§11b.17); el z-index sigue la pila de diálogos. */}
+          <RadixDialog.Overlay
+            onClick={onClose}
+            style={{ zIndex: zIndex.overlay }}
+            className="fixed inset-0 bg-black/40 backdrop-blur-[3px]"
+          />
           {/* Radix Select's modal portal disables outside pointer events. Re-enable
               them only over this Dialog while its own Select is open. */}
           <RadixDialog.Content
             {...(role !== undefined ? { role } : {})}
             {...(onEscapeKeyDown !== undefined ? { onEscapeKeyDown } : {})}
-            style={selectOpen ? { pointerEvents: "auto" } : undefined}
-            className={`fixed left-1/2 top-1/2 z-50 flex max-h-[85vh] w-[calc(100%-2rem)] ${SIZE_CLASS[size]} -translate-x-1/2 -translate-y-1/2 flex-col rounded-lg bg-bg-primary p-5 shadow-md focus:outline-none`}
+            style={{
+              zIndex: zIndex.content,
+              ...(selectOpen ? { pointerEvents: "auto" as const } : {}),
+            }}
+            className={`fixed left-1/2 top-1/2 flex max-h-[85vh] w-[calc(100%-2rem)] ${SIZE_CLASS[size]} -translate-x-1/2 -translate-y-1/2 flex-col rounded-lg bg-bg-primary p-5 shadow-md focus:outline-none`}
           >
             {icon !== undefined ? (
               // ADR-215 §3: con ícono, el título y la descripción van en una

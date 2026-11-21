@@ -38,7 +38,7 @@ import {
 } from "./editPreviews.js";
 import { EntityLine } from "./EntityLine.js";
 import { EntityTypePicker } from "./EntityTypePicker.js";
-import { previewOfNewType } from "./newTypeInline.js";
+import { NEW_TYPE_HINT_ID, previewOfNewType } from "./newTypeInline.js";
 import { useTypeChoice } from "./useTypeChoice.js";
 import { useUserTypes } from "./useUserTypes.js";
 
@@ -135,6 +135,7 @@ export function ChangeTypeDialog({ group, open, onClose }: ChangeTypeDialogProps
             // Línea de pie del contenedor: el error del nombre y, si es válido, lo que se crea.
             <>
               <span
+                id={NEW_TYPE_HINT_ID}
                 className={`line-clamp-3 ${choice.error !== null ? "text-error" : "text-text-secondary"}`}
               >
                 {choice.error ??
