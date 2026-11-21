@@ -54,7 +54,8 @@ import { SelectionHintCard } from "./components/viewer/SelectionHintCard.js";
 import { ViewerModeToggle } from "./components/viewer/ViewerModeToggle.js";
 import { ZoomControls } from "./components/viewer/ZoomControls.js";
 import { initCore } from "./core-adapter/index.js";
-import { deriveEngineConfigOverrides } from "./core-adapter/settingsToEngineConfig.js";
+import { deriveCoreOverrides } from "./core-adapter/settingsToEngineConfig.js";
+import { useDetectionStore } from "./store/detection.store.js";
 import { useEntitiesStore } from "./store/entities.store.js";
 import {
   installsWithoutAsking,
@@ -90,7 +91,12 @@ export function App() {
     // Después de hidratar y antes del primer render con contenido: si se
     // aplicara más tarde, la app parpadearía en claro antes de pasar a oscuro.
     applyTheme(useSettingsStore.getState().theme);
-    const overrides = deriveEngineConfigOverrides(useSettingsStore.getState());
+    // ADR-223 §2: lo guardado en «Formatos de detección» entra al primer Core.
+    useDetectionStore.getState().load();
+    const overrides = deriveCoreOverrides(
+      useSettingsStore.getState(),
+      useDetectionStore.getState().saved,
+    );
     initCore(overrides).catch((error: unknown) => {
       // console.error es la única salida disponible acá sin ocultar el fallo
       // (no-console permite warn/error en apps/, Code_Standards.md §12). No

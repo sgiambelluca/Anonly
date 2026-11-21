@@ -196,7 +196,12 @@ export function ToastHost() {
           </RadixToast.Close>
         </RadixToast.Root>
       ) : null}
-      <RadixToast.Viewport className="fixed bottom-[var(--anonly-toast-bottom,1.25rem)] right-5 z-[100] flex max-w-[calc(100vw-2.5rem)] flex-col outline-none" />
+      {/*
+        `pointer-events-auto`: un diálogo modal de Radix deja `pointer-events: none`
+        en el body, y el «Deshacer» de «Formatos de detección» tiene que seguir
+        siendo clicable con el diálogo abierto (`UX_Guidelines.md` §11b.11).
+      */}
+      <RadixToast.Viewport className="pointer-events-auto fixed bottom-[var(--anonly-toast-bottom,1.25rem)] right-5 z-[100] flex max-w-[calc(100vw-2.5rem)] flex-col outline-none" />
     </RadixToast.Provider>
   );
 }

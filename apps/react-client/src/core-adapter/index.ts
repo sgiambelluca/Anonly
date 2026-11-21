@@ -401,6 +401,9 @@ function mergeTestEngineOverrides(
     grouping: { ...config?.grouping, ...testOverrides.grouping },
     render: { ...config?.render, ...testOverrides.render },
     export: { ...config?.export, ...testOverrides.export },
+    // `detection` no viaja por el canal de medición (ADR-223 §2): lo guardado
+    // por el usuario pasa tal cual, sin que el merge lo descarte.
+    ...(config?.detection !== undefined ? { detection: config.detection } : {}),
   };
 }
 

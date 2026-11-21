@@ -51,11 +51,12 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { actions } from "../../core-adapter/actions.js";
 import { recreateCore } from "../../core-adapter/index.js";
 import {
-  deriveEngineConfigOverrides,
+  deriveCoreOverrides,
   readDeviceSignals,
   readShellPlatform,
   sameEngineConfigOverrides,
 } from "../../core-adapter/settingsToEngineConfig.js";
+import { useDetectionStore } from "../../store/detection.store.js";
 import { useDocumentStore } from "../../store/document.store.js";
 import {
   installsWithoutAsking,
@@ -282,11 +283,12 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
      * garantiza que nadie suelte un PDF en la ventana sin core, donde
      * `getCore()` lanzaría.
      */
-    const nextOverrides = deriveEngineConfigOverrides(next, deviceSignals);
+    const detection = useDetectionStore.getState().saved;
+    const nextOverrides = deriveCoreOverrides(next, detection, deviceSignals);
     const needsRecreate =
       documentId === null &&
       !sameEngineConfigOverrides(
-        deriveEngineConfigOverrides(previous, deviceSignals),
+        deriveCoreOverrides(previous, detection, deviceSignals),
         nextOverrides,
       );
 
