@@ -42,7 +42,7 @@ import {
   type DetectionState,
 } from "../../store/detectionState.js";
 
-import { entityTypeName, formatIssueReason } from "./formatTexts.js";
+import { describeOverlap, entityTypeName, formatIssueReason } from "./formatTexts.js";
 
 export interface ImportedItem {
   readonly kind: "type" | "format";
@@ -51,6 +51,8 @@ export interface ImportedItem {
   readonly typeName?: string;
   /** Formatos con los que comparte textos: el aviso amarillo. */
   readonly overlapsWith?: ReadonlyArray<string>;
+  /** El texto más corto que comparte con cada formato de `overlapsWith`, en el mismo orden. */
+  readonly overlapExamples?: ReadonlyArray<string>;
 }
 
 export interface SkippedItem {
@@ -106,7 +108,7 @@ function catalogName(id: string, state: DetectionState): string | undefined {
   return getCatalog(state.country).find((info) => info.id === bare)?.name;
 }
 
-function nameOfFormat(
+export function nameOfFormat(
   id: string,
   state: DetectionState,
   accepted: ReadonlyArray<FormatDefinition>,
@@ -238,7 +240,9 @@ export function planFormatsImport(
       kind: "format",
       name: candidate.name,
       typeName,
-      ...(overlapsWith.length > 0 ? { overlapsWith } : {}),
+      ...(overlapsWith.length > 0
+        ? { overlapsWith, overlapExamples: comparison.overlaps.map((overlap) => overlap.example) }
+        : {}),
     };
     if (isUserEntityType(mappedType) && mergedTypeIds.has(mappedType)) {
       merged.push(item);
@@ -301,11 +305,15 @@ export function limitRejectionMessages(messages: ReadonlyArray<string>): {
 }
 
 /**
- * El aviso amarillo de un formato importado que comparte textos con otros. Texto
- * provisional de esta tanda: el aviso «que al crear» lo define el generador
- * (`FormatBuilderDialog`) y los dos deben decir lo mismo.
+ * El aviso amarillo de un formato importado que comparte textos con otros: el
+ * mismo texto que la caja de estado del generador (`describeOverlap`).
  */
 export function describeOverlapWarning(item: ImportedItem): string {
-  const others = (item.overlapsWith ?? []).map((name) => `«${name}»`).join(", ");
-  return `«${item.name}» comparte textos con ${others}. Si los dos están prendidos, un mismo texto puede reconocerse dos veces.`;
+  return describeOverlap(
+    item.name,
+    (item.overlapsWith ?? []).map((name, index) => {
+      const example = item.overlapExamples?.[index];
+      return example === undefined ? { name } : { name, example };
+    }),
+  );
 }

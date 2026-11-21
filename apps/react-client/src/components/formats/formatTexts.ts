@@ -532,3 +532,43 @@ export function describeFormatsFileIssues(
 export function formatsFileIssueText(code: FormatsFileIssueCode, location = "el archivo"): string {
   return FILE_ISSUE_TEXTS[code]({ location, name: "", reason: "" });
 }
+
+// ─── Formatos que comparten textos (aviso amarillo) ───
+
+/** Un formato con el que otro comparte textos, y el texto más corto que los dos reconocen (si se conoce). */
+export interface OverlapTarget {
+  readonly name: string;
+  readonly example?: string;
+}
+
+/** Cuántos nombres lista el aviso antes de resumir el resto. */
+const OVERLAP_NAMES_SHOWN = 3;
+
+function listOverlapNames(names: ReadonlyArray<string>): string {
+  const quoted = names.map((name) => `«${name}»`);
+  if (quoted.length <= OVERLAP_NAMES_SHOWN) {
+    if (quoted.length <= 1) return quoted.join("");
+    return `${quoted.slice(0, -1).join(", ")} y ${quoted[quoted.length - 1] ?? ""}`;
+  }
+  const hidden = quoted.length - 2;
+  return `${quoted.slice(0, 2).join(", ")} y ${hidden} más`;
+}
+
+/**
+ * El aviso amarillo de un formato que comparte textos con otros (ADR-220 §3,
+ * ADR-228 §7). Lo usan la caja de estado del generador y el resultado de
+ * importar un archivo, para que los dos digan lo mismo. `subject` es el nombre
+ * del formato; sin nombre todavía, «Este formato».
+ */
+export function describeOverlap(
+  subject: string | null,
+  others: ReadonlyArray<OverlapTarget>,
+): string {
+  const who = subject === null || subject.trim() === "" ? "Este formato" : `«${subject}»`;
+  const first = others.find((other) => other.example !== undefined && other.example !== "");
+  const example =
+    first?.example === undefined
+      ? ""
+      : ` Por ejemplo, «${first.example}» también lo reconoce «${first.name}».`;
+  return `${who} comparte textos con ${listOverlapNames(others.map((other) => other.name))}.${example} Si están prendidos a la vez, un mismo texto puede reconocerse más de una vez.`;
+}
