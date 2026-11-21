@@ -14,7 +14,7 @@
  * es más código para el mismo resultado.
  */
 
-import { EntityType } from "@anonly/anonymization-core";
+import { EntityType, isUserEntityType, type EntityTypeId } from "@anonly/anonymization-core";
 
 export const ENTITY_TYPE_COLOR: Readonly<Record<EntityType, string>> = {
   [EntityType.Person]: "#10b981",
@@ -32,6 +32,18 @@ export const ENTITY_TYPE_COLOR: Readonly<Record<EntityType, string>> = {
   [EntityType.Custom]: "#64748b",
 };
 
+/**
+ * El color de un tipo propio: el de acento de la aplicación (el mismo que usa
+ * «Formatos de detección», `FormatTypeBand`). Los tipos propios se distinguen
+ * del catálogo por el punto hueco (`Components.md` §9), no por un color propio.
+ */
+export const USER_TYPE_COLOR = "rgb(var(--color-accent))";
+
+/** El color de cualquier tipo, base o propio. */
+export function typeColor(type: EntityTypeId): string {
+  return isUserEntityType(type) ? USER_TYPE_COLOR : ENTITY_TYPE_COLOR[type];
+}
+
 /** `"#10b981"` → `"16 185 129"`: canales para componer `rgb(… / alpha)`. */
 export function hexToRgbChannels(hex: string): string {
   const value = hex.replace("#", "");
@@ -47,8 +59,23 @@ export function hexToRgbChannels(hex: string): string {
  * (`--anonly-band-tint`, `index.css`: 6 % en claro, 7 % en oscuro), así que
  * esto no necesita saber qué tema está activo.
  */
-export function typeBandTint(type: EntityType): string {
-  const channels = hexToRgbChannels(ENTITY_TYPE_COLOR[type]);
+export function typeBandTint(type: EntityTypeId): string {
+  const channels = isUserEntityType(type)
+    ? "var(--color-accent)"
+    : hexToRgbChannels(ENTITY_TYPE_COLOR[type]);
   const tint = `rgb(${channels} / var(--anonly-band-tint))`;
   return `linear-gradient(${tint}, ${tint})`;
+}
+
+/**
+ * El estilo del punto de un tipo (`Components.md` §9): relleno con el color del
+ * tipo; **hueco** (solo el borde) para un tipo propio, y **punteado** si además
+ * es «solo de este documento» (ADR-229 §2).
+ */
+export function typeDotStyle(
+  type: EntityTypeId,
+  documentOnly = false,
+): { readonly background?: string; readonly border?: string } {
+  if (!isUserEntityType(type)) return { background: ENTITY_TYPE_COLOR[type] };
+  return { border: `2px ${documentOnly ? "dotted" : "solid"} ${USER_TYPE_COLOR}` };
 }

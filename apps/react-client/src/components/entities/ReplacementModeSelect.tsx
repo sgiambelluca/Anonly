@@ -35,7 +35,11 @@
  * cambiar el modo **destruye ese texto sin vuelta**.
  */
 
-import type { EntityGroup, ReplacementMode } from "@anonly/anonymization-core";
+import {
+  isUserEntityType,
+  type EntityGroup,
+  type ReplacementMode,
+} from "@anonly/anonymization-core";
 import { ChevronDownIcon } from "lucide-react";
 
 import { useRulesStore } from "../../store/rules.store.js";
@@ -43,7 +47,11 @@ import { useRulesStore } from "../../store/rules.store.js";
 import { applyModeAtLevel } from "./applyMode.js";
 import { hasOwnDecision, planApplyGroupMode } from "./modeLevels.js";
 import { ModeSelectMenu } from "./ModeSelectMenu.js";
-import { REPLACEMENT_MODE_LABEL, REPLACEMENT_MODE_SHORT_LABEL } from "./replacementModeOptions.js";
+import {
+  modesForType,
+  REPLACEMENT_MODE_LABEL,
+  REPLACEMENT_MODE_SHORT_LABEL,
+} from "./replacementModeOptions.js";
 import { discardedTextToastText } from "./undoableEdits.js";
 
 export interface ReplacementModeSelectProps {
@@ -82,6 +90,7 @@ export function ReplacementModeSelect({ group, onOpenChange }: ReplacementModeSe
       // ADR-170 §1: las cuatro vistas previas exactas de esta entidad.
       previews={group.replacementPreviews}
       onSelect={handleSelect}
+      modes={modesForType(isUserEntityType(group.type))}
       subject={group.canonicalValue}
       {...(onOpenChange !== undefined ? { onOpenChange } : {})}
       align="right"

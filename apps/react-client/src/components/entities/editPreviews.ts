@@ -17,29 +17,33 @@ import {
   type EntityGroup,
   EntityType,
   type EntityTypeId,
+  isUserEntityType,
   ReplacementMode,
+  type UserEntityTypeDefinition,
 } from "@anonly/anonymization-core";
-
-import { toBaseEntityType } from "../../baseEntityType.js";
 
 import {
   describeEntityNumber,
-  ENTITY_TYPE_LABEL,
-  ENTITY_TYPE_SINGULAR,
   formatIndexInType,
+  typePlural,
+  typeSingular,
 } from "./entityTypeLabels.js";
+import { NO_USER_TYPES } from "./userTypes.js";
 
 function appearances(count: number): string {
   return count === 1 ? "1 aparición" : `${count} apariciones`;
 }
 
 /** "Persona N.º 03 · 2 apariciones": la línea que identifica a una entidad en los diálogos. */
-export function describeEntityLine(group: {
-  readonly type: EntityTypeId;
-  readonly indexInType: number;
-  readonly memberCount: number;
-}): string {
-  return `${describeEntityNumber(group.type, group.indexInType)} · ${appearances(group.memberCount)}`;
+export function describeEntityLine(
+  group: {
+    readonly type: EntityTypeId;
+    readonly indexInType: number;
+    readonly memberCount: number;
+  },
+  userTypes: ReadonlyArray<UserEntityTypeDefinition> = NO_USER_TYPES,
+): string {
+  return `${describeEntityNumber(group.type, group.indexInType, userTypes)} · ${appearances(group.memberCount)}`;
 }
 
 /**
@@ -91,10 +95,11 @@ export function mergeButtonLabel(selectedCount: number): string {
 export function mergeToastText(
   entityCount: number,
   result: EditPreviewGroup,
+  userTypes: ReadonlyArray<UserEntityTypeDefinition> = NO_USER_TYPES,
 ): { readonly title: string; readonly description: string } {
   return {
     title: `Fusionaste ${entityCount} entidades en «${result.canonicalValue}»`,
-    description: describeEntityLine(result),
+    description: describeEntityLine(result, userTypes),
   };
 }
 
@@ -127,6 +132,7 @@ export function summarizeSplit(
   group: EntityGroup,
   selectedCount: number,
   preview: EditPreview | null,
+  userTypes: ReadonlyArray<UserEntityTypeDefinition> = NO_USER_TYPES,
 ): SplitSummary {
   const created = preview?.groups.find((candidate) => candidate.groupId === null);
   return {
@@ -134,8 +140,8 @@ export function summarizeSplit(
     stayCount: Math.max(0, group.members.length - selectedCount),
     moveLabel:
       created !== undefined
-        ? describeEntityNumber(created.type, created.indexInType)
-        : `${ENTITY_TYPE_SINGULAR[toBaseEntityType(group.type)]} nueva`,
+        ? describeEntityNumber(created.type, created.indexInType, userTypes)
+        : `${typeSingular(group.type, userTypes)} nueva`,
     moveCount: selectedCount,
   };
 }
@@ -162,11 +168,12 @@ export function splitToastText(
   canonicalValue: string,
   movedCount: number,
   created: EditPreviewGroup | undefined,
+  userTypes: ReadonlyArray<UserEntityTypeDefinition> = NO_USER_TYPES,
 ): { readonly title: string; readonly description: string } {
   const verb = movedCount === 1 ? "pasó" : "pasaron";
   const where =
     created !== undefined
-      ? describeEntityNumber(created.type, created.indexInType)
+      ? describeEntityNumber(created.type, created.indexInType, userTypes)
       : "una entidad nueva";
   return {
     title: `Dividiste «${canonicalValue}»`,
@@ -178,7 +185,7 @@ export function splitToastText(
 
 export function typePreviewRequest(
   group: EntityGroup,
-  type: EntityType,
+  type: EntityTypeId,
 ): EditPreviewRequest | null {
   if (type === group.type) return null;
   return { kind: "type", groupId: group.id, type };
@@ -191,21 +198,29 @@ export interface TypeChangeSummary {
   readonly note: string;
   /** ADR-169 §10: al dejar de ser Persona, el género se borra. */
   readonly dropsGender: boolean;
+  /** ADR-229 §3: un tipo propio no tiene «Dato falso»; una entidad que lo usaba pasa a «Etiquetar». */
+  readonly becomesLabel: boolean;
 }
+
+/** El aviso de que la entidad pasa a «Etiquetar» (ADR-229 §3, ADR-219 §3). */
+export const BECOMES_LABEL_NOTE = "Los tipos propios no tienen dato falso: pasa a «Etiquetar».";
 
 export function summarizeTypeChange(
   group: EntityGroup,
   preview: EditPreview | null,
+  userTypes: ReadonlyArray<UserEntityTypeDefinition> = NO_USER_TYPES,
 ): TypeChangeSummary | null {
   const next = preview?.groups[0];
   if (next === undefined) return null;
   return {
     before: displayReplacement(group),
     after: displayReplacement(next),
-    note: `Pasa a ${ENTITY_TYPE_LABEL[toBaseEntityType(next.type)]} con el N.º ${formatIndexInType(
+    note: `Pasa a ${typePlural(next.type, userTypes)} con el N.º ${formatIndexInType(
       next.indexInType,
     )}, el próximo libre.`,
     dropsGender: group.type === EntityType.Person && next.type !== EntityType.Person,
+    becomesLabel:
+      isUserEntityType(next.type) && group.replacementMode === ReplacementMode.Synthetic,
   };
 }
 
@@ -213,11 +228,12 @@ export function summarizeTypeChange(
 export function typeChangeToastText(
   canonicalValue: string,
   next: EditPreviewGroup | undefined,
+  userTypes: ReadonlyArray<UserEntityTypeDefinition> = NO_USER_TYPES,
 ): { readonly title: string; readonly description?: string } {
   return {
     title: `Cambiaste el tipo de «${canonicalValue}»`,
     ...(next !== undefined
-      ? { description: `Ahora es ${describeEntityNumber(next.type, next.indexInType)}` }
+      ? { description: `Ahora es ${describeEntityNumber(next.type, next.indexInType, userTypes)}` }
       : {}),
   };
 }

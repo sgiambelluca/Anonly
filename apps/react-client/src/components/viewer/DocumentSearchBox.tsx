@@ -32,15 +32,16 @@ import { EntityType, type TextMatch, type Word } from "@anonly/anonymization-cor
 import { CheckIcon, PlusIcon, SearchIcon, XIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { toBaseEntityType } from "../../baseEntityType.js";
 import { actions } from "../../core-adapter/actions.js";
 import { useEntitiesStore } from "../../store/entities.store.js";
 import { useViewerStore } from "../../store/viewer.store.js";
 import { Button } from "../common/Button.js";
 import { addManualEntityWithFeedback } from "../entities/addManualEntity.js";
-import { ENTITY_TYPE_COLOR } from "../entities/entityTypeColors.js";
+import { typeDotStyle } from "../entities/entityTypeColors.js";
 import { describeEntityNumber } from "../entities/entityTypeLabels.js";
 import { EntityTypePicker } from "../entities/EntityTypePicker.js";
+import { useTypeChoice } from "../entities/useTypeChoice.js";
+import { useUserTypes } from "../entities/useUserTypes.js";
 
 import { createSearchDebouncer } from "./searchDebounce.js";
 import {
@@ -313,6 +314,7 @@ function ResultItem({
   readonly onStartAdd: () => void;
 }) {
   const { match, context, status } = row;
+  const userTypes = useUserTypes();
   const hidden = status.kind === "hidden";
   return (
     <li
@@ -336,14 +338,14 @@ function ResultItem({
               <span
                 aria-hidden
                 className="h-2 w-2 rounded-full"
-                style={{ background: ENTITY_TYPE_COLOR[toBaseEntityType(status.type)] }}
+                style={typeDotStyle(status.type)}
               />
-              Oculto como {describeEntityNumber(status.type, status.indexInType)}
+              Oculto como {describeEntityNumber(status.type, status.indexInType, userTypes)}
             </span>
           ) : (
             <span className="rounded-md bg-warning/15 px-2 py-0.5 text-sm font-medium text-warning-strong">
               {status.kind === "disabled"
-                ? `Sin ocultar · ${describeEntityNumber(status.type, status.indexInType)} desactivada`
+                ? `Sin ocultar · ${describeEntityNumber(status.type, status.indexInType, userTypes)} desactivada`
                 : "Sin ocultar"}
             </span>
           )}
@@ -387,14 +389,19 @@ function AddPopover({
   readonly className: string;
   readonly onClose: () => void;
 }) {
-  const [entityType, setEntityType] = useState<EntityType>(EntityType.Person);
+  const choice = useTypeChoice(EntityType.Person);
   const [notFound, setNotFound] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [estimated] = useState(() => count ?? actions.findText(value).length);
 
   async function handleAdd(): Promise<void> {
+    const resolved = choice.resolve();
+    if (resolved === null) return;
     setSubmitting(true);
-    const feedback = await addManualEntityWithFeedback({ value, entityType });
+    const feedback = await addManualEntityWithFeedback(
+      { value, entityType: resolved.entityType },
+      resolved.newType,
+    );
     setSubmitting(false);
     if (feedback === "not-found") {
       setNotFound(true);
@@ -415,23 +422,35 @@ function AddPopover({
       <p className="truncate">
         Agregar <b className="font-semibold">«{value}»</b> como…
       </p>
-      <EntityTypePicker value={entityType} onChange={setEntityType} aria-label="Tipo de entidad" />
+      <EntityTypePicker
+        {...choice.pickerProps}
+        onNewTypeSubmit={() => void handleAdd()}
+        aria-label="Tipo de entidad"
+      />
+      {/* La línea de pie: el error del nombre del tipo nuevo ocupa su lugar (ADR-229 §2). */}
       <p
         aria-live="polite"
-        className={`h-5 truncate ${notFound ? "text-error" : "text-text-secondary"}`}
+        className={`h-5 truncate ${notFound || choice.error !== null ? "text-error" : "text-text-secondary"}`}
       >
-        {notFound
-          ? "No se encontró ese texto exacto en el documento."
-          : estimated === 1
-            ? "Se va a ocultar su única aparición en el documento."
-            : `Se van a ocultar sus ${estimated} apariciones en el documento.`}
+        {choice.error !== null
+          ? choice.error
+          : notFound
+            ? "No se encontró ese texto exacto en el documento."
+            : estimated === 1
+              ? "Se va a ocultar su única aparición en el documento."
+              : `Se van a ocultar sus ${estimated} apariciones en el documento.`}
       </p>
       <div className="flex justify-end gap-2">
         <Button variant="secondary" onClick={onClose} disabled={submitting}>
           Cancelar
         </Button>
-        <Button variant="primary" loading={submitting} onClick={() => void handleAdd()}>
-          Agregar
+        <Button
+          variant="primary"
+          loading={submitting}
+          disabled={!choice.canConfirm}
+          onClick={() => void handleAdd()}
+        >
+          {choice.creating ? "Crear y agregar" : "Agregar"}
         </Button>
       </div>
     </div>

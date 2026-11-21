@@ -49,6 +49,17 @@ export const REPLACEMENT_MODE_ORDER: ReadonlyArray<ReplacementMode> = [
   ReplacementMode.Redact,
 ];
 
+/**
+ * Los modos que se ofrecen para un tipo (ADR-229 §4): un tipo propio **no ofrece
+ * «Dato falso»** (no hay un sintetizador para un dato que el catálogo no conoce,
+ * ADR-219 §3). Etiquetar, ocultar parcialmente y tapar con negro quedan.
+ */
+export function modesForType(isUserType: boolean): ReadonlyArray<ReplacementMode> {
+  return isUserType
+    ? REPLACEMENT_MODE_ORDER.filter((mode) => mode !== ReplacementMode.Synthetic)
+    : REPLACEMENT_MODE_ORDER;
+}
+
 export const REPLACEMENT_MODE_OPTIONS: ReadonlyArray<SelectOption<ReplacementMode>> =
   REPLACEMENT_MODE_ORDER.map((mode) => ({ value: mode, label: REPLACEMENT_MODE_LABEL[mode] }));
 

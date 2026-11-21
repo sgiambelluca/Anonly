@@ -21,7 +21,12 @@
  * `null` (sin documento) es no-op.
  */
 
-import { EntityType, type TextMatch, type Word } from "@anonly/anonymization-core";
+import {
+  EntityType,
+  type EntityTypeId,
+  type TextMatch,
+  type Word,
+} from "@anonly/anonymization-core";
 import {
   CheckIcon,
   InfoIcon,
@@ -39,17 +44,22 @@ import { matchContext } from "../viewer/searchResults.js";
 
 import { addManualEntityWithFeedback } from "./addManualEntity.js";
 import { EntityTypePicker } from "./EntityTypePicker.js";
+import { useTypeChoice } from "./useTypeChoice.js";
 
 export interface AddEntityDialogProps {
   readonly open: boolean;
   readonly onClose: () => void;
+  /** El tipo elegido al abrir (la fila «Agregar entidad» de un tipo del documento vacío); por defecto, Persona. */
+  readonly initialType?: EntityTypeId;
 }
 
 /** Por debajo de esto no se busca: dos letras cualesquiera aparecen en todo documento. */
 const MIN_QUERY_LENGTH = 2;
 
-export function AddEntityDialog({ open, onClose }: AddEntityDialogProps) {
-  const [entityType, setEntityType] = useState<EntityType>(EntityType.Person);
+export function AddEntityDialog({ open, onClose, initialType }: AddEntityDialogProps) {
+  const startType = initialType ?? EntityType.Person;
+  const choice = useTypeChoice(startType);
+  const resetChoice = choice.reset;
   const [value, setValue] = useState("");
   const [matches, setMatches] = useState<ReadonlyArray<TextMatch>>([]);
   const [searched, setSearched] = useState("");
@@ -60,13 +70,13 @@ export function AddEntityDialog({ open, onClose }: AddEntityDialogProps) {
   // Re-sincroniza el formulario cada vez que se abre.
   useEffect(() => {
     if (!open) return;
-    setEntityType(EntityType.Person);
+    resetChoice(startType);
     setValue("");
     setMatches([]);
     setSearched("");
     setSubmitting(false);
     setNotFound(false);
-  }, [open]);
+  }, [open, resetChoice, startType]);
 
   const trimmed = value.trim();
 
@@ -105,9 +115,14 @@ export function AddEntityDialog({ open, onClose }: AddEntityDialogProps) {
 
   async function handleConfirm(): Promise<void> {
     if (count === 0) return;
+    const resolved = choice.resolve();
+    if (resolved === null) return;
     setSubmitting(true);
     setNotFound(false);
-    const feedback = await addManualEntityWithFeedback({ value: trimmed, entityType });
+    const feedback = await addManualEntityWithFeedback(
+      { value: trimmed, entityType: resolved.entityType },
+      resolved.newType,
+    );
     setSubmitting(false);
     // ADR-174 §4 / ADR-175 §3: "held" cierra este diálogo igual que "added"
     // — lo que sigue es `ManualOverlapDialog`. "error" también cierra: el
@@ -117,8 +132,14 @@ export function AddEntityDialog({ open, onClose }: AddEntityDialogProps) {
     else if (feedback === "not-found") setNotFound(true);
   }
 
-  const addLabel =
-    count === 0 ? "Agregar" : count === 1 ? "Agregar 1 aparición" : `Agregar ${count} apariciones`;
+  // «Crear y agregar» (ADR-229 §2): el contenedor decide el botón.
+  const addLabel = choice.creating
+    ? "Crear y agregar"
+    : count === 0
+      ? "Agregar"
+      : count === 1
+        ? "Agregar 1 aparición"
+        : `Agregar ${count} apariciones`;
 
   return (
     <Dialog
@@ -129,10 +150,21 @@ export function AddEntityDialog({ open, onClose }: AddEntityDialogProps) {
       size="lg"
       footer={
         <div className="flex flex-wrap items-center gap-2.5">
-          <span className="inline-flex flex-1 items-center gap-2 text-sm text-text-secondary">
-            <MousePointerClickIcon className="h-4 w-4 shrink-0" aria-hidden />
-            También podés seleccionarlo en el PDF original.
-          </span>
+          {/* La línea de pie: el error del nombre del tipo nuevo ocupa su lugar (ADR-229 §2). */}
+          {choice.error !== null ? (
+            <span
+              role="alert"
+              className="inline-flex min-w-0 flex-1 items-center gap-2 text-sm font-medium text-error"
+            >
+              <TriangleAlertIcon className="h-4 w-4 shrink-0" aria-hidden />
+              <span className="line-clamp-2">{choice.error}</span>
+            </span>
+          ) : (
+            <span className="inline-flex flex-1 items-center gap-2 text-sm text-text-secondary">
+              <MousePointerClickIcon className="h-4 w-4 shrink-0" aria-hidden />
+              También podés seleccionarlo en el PDF original.
+            </span>
+          )}
           <Button variant="secondary" onClick={onClose} disabled={submitting}>
             Cancelar
           </Button>
@@ -140,7 +172,7 @@ export function AddEntityDialog({ open, onClose }: AddEntityDialogProps) {
           <Button
             variant="primary"
             className="min-w-[12rem]"
-            disabled={count === 0 || submitting}
+            disabled={count === 0 || submitting || !choice.canConfirm}
             loading={submitting}
             onClick={() => void handleConfirm()}
           >
@@ -237,9 +269,9 @@ export function AddEntityDialog({ open, onClose }: AddEntityDialogProps) {
             ¿Qué es?
           </span>
           <EntityTypePicker
-            value={entityType}
-            onChange={setEntityType}
+            {...choice.pickerProps}
             columns={3}
+            onNewTypeSubmit={() => void handleConfirm()}
             aria-labelledby="add-entity-type"
           />
         </div>

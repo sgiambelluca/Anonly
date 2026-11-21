@@ -12,7 +12,12 @@
  * grupo que cambia de `type`.
  */
 
-import { EntityType, ReplacementMode, type EntityGroup } from "@anonly/anonymization-core";
+import {
+  EntityType,
+  ReplacementMode,
+  type EntityGroup,
+  type EntityTypeId,
+} from "@anonly/anonymization-core";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { useEntitiesStore } from "../store/entities.store.js";
@@ -42,7 +47,7 @@ function makeGroup(overrides?: Partial<EntityGroup>): EntityGroup {
   };
 }
 
-function typeOf(groupId: string): EntityType | undefined {
+function typeOf(groupId: string): EntityTypeId | undefined {
   for (const [type, groups] of useEntitiesStore.getState().groupsByType) {
     if (groups.some((g) => g.id === groupId)) return type;
   }

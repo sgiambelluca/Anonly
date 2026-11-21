@@ -23,10 +23,16 @@
  *    encontró" sobre algo que el Core sí encontró.
  */
 
-import type { EntityGroup, EntityType, ManualEntityResult } from "@anonly/anonymization-core";
+import type {
+  EntityGroup,
+  EntityTypeId,
+  ManualEntityResult,
+  UserEntityTypeDefinition,
+} from "@anonly/anonymization-core";
 
 import { findGroupById } from "./entityTree.js";
-import { describeEntityNumber, ENTITY_TYPE_SINGULAR } from "./entityTypeLabels.js";
+import { describeEntityNumber, typeSingular } from "./entityTypeLabels.js";
+import { NO_USER_TYPES } from "./userTypes.js";
 
 export type ManualEntityFeedback = "added" | "not-found" | "no-op" | "held" | "error";
 
@@ -52,9 +58,9 @@ export function manualEntityFeedback(result: ManualEntityResult | null): ManualE
  * aplica esa preferencia.
  */
 export function resolveAddedGroup(
-  groupsByType: ReadonlyMap<EntityType, ReadonlyArray<EntityGroup>>,
+  groupsByType: ReadonlyMap<EntityTypeId, ReadonlyArray<EntityGroup>>,
   groupIds: ReadonlyArray<string>,
-  entityType: EntityType,
+  entityType: EntityTypeId,
 ): EntityGroup | undefined {
   const groups = groupIds
     .map((groupId) => findGroupById(groupsByType, groupId))
@@ -74,15 +80,18 @@ export interface ManualAddToastText {
  */
 export function describeManualAdd(params: {
   readonly value: string;
-  readonly entityType: EntityType;
+  readonly entityType: EntityTypeId;
   readonly occurrenceCount: number;
   readonly group: EntityGroup | undefined;
+  /** Para nombrar un tipo propio; sin ella, uno propio sale como «Tipo propio». */
+  readonly userTypes?: ReadonlyArray<UserEntityTypeDefinition>;
 }): ManualAddToastText {
   const { value, entityType, occurrenceCount, group } = params;
+  const userTypes = params.userTypes ?? NO_USER_TYPES;
   const who =
     group !== undefined
-      ? describeEntityNumber(group.type, group.indexInType)
-      : ENTITY_TYPE_SINGULAR[entityType];
+      ? describeEntityNumber(group.type, group.indexInType, userTypes)
+      : typeSingular(entityType, userTypes);
   const count =
     occurrenceCount === 1 ? "1 aparición oculta" : `${occurrenceCount} apariciones ocultas`;
   return { title: `Agregaste «${value}»`, description: `${who} · ${count}` };

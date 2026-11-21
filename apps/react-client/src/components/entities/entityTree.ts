@@ -8,7 +8,12 @@
  * (mismo criterio que `components/viewer/visibleRange.ts`).
  */
 
-import { PipelineStage, type EntityGroup, type EntityType } from "@anonly/anonymization-core";
+import {
+  isUserEntityType,
+  PipelineStage,
+  type EntityGroup,
+  type EntityTypeId,
+} from "@anonly/anonymization-core";
 
 import type { EntitySortOrder } from "../../store/entities.store.js";
 
@@ -43,18 +48,45 @@ export function cascadeCheckboxState(groups: ReadonlyArray<EntityGroup>): Cascad
   return "indeterminate";
 }
 
+export interface TypeEntryOptions {
+  /** Los tipos propios en el orden en que se muestran (`mergeUserTypes`): primero guardados, después del documento. */
+  readonly userTypeOrder?: ReadonlyArray<EntityTypeId>;
+  /** Tipos que se muestran aunque no tengan grupos: los del documento (`React_Client.md` §3.9). */
+  readonly alwaysShow?: ReadonlySet<EntityTypeId>;
+}
+
 /**
- * Entradas de `groupsByType` con al menos un grupo, preservando el orden fijo
- * del `Map` (`entities.store.ts`: `ENTITY_TYPE_ORDER`, `ui/Components.md` §3.1).
- * Los tipos sin grupos no se muestran en el árbol.
+ * Entradas del árbol: **primero los tipos propios, después los del catálogo**
+ * (`Components.md` §13b.6). De los tipos propios se muestran los del documento
+ * aunque no tengan grupos (`alwaysShow`) y los guardados solo si tienen alguno
+ * (`React_Client.md` §3.9). Los del catálogo, solo con grupos, en el orden fijo
+ * del `Map` (`entities.store.ts`, `ui/Components.md` §3.1).
  */
 export function visibleTypeEntries(
-  groupsByType: ReadonlyMap<EntityType, ReadonlyArray<EntityGroup>>,
+  groupsByType: ReadonlyMap<EntityTypeId, ReadonlyArray<EntityGroup>>,
   sortOrder: EntitySortOrder = "appearance",
-): ReadonlyArray<readonly [EntityType, ReadonlyArray<EntityGroup>]> {
-  return Array.from(groupsByType.entries())
-    .filter(([, groups]) => groups.length > 0)
-    .map(([type, groups]) => [type, sortGroups(groups, sortOrder)] as const);
+  options: TypeEntryOptions = {},
+): ReadonlyArray<readonly [EntityTypeId, ReadonlyArray<EntityGroup>]> {
+  const order = options.userTypeOrder ?? [];
+  const alwaysShow = options.alwaysShow ?? new Set<EntityTypeId>();
+  const entries: Array<readonly [EntityTypeId, ReadonlyArray<EntityGroup>]> = [];
+
+  const known = new Set<EntityTypeId>(order);
+  const userIds: EntityTypeId[] = [
+    ...order,
+    // Un grupo de un tipo propio que la interfaz no conoce: se muestra igual, al final de los propios.
+    ...Array.from(groupsByType.keys()).filter((type) => isUserEntityType(type) && !known.has(type)),
+  ];
+  for (const type of userIds) {
+    const groups = groupsByType.get(type) ?? [];
+    if (groups.length > 0 || alwaysShow.has(type))
+      entries.push([type, sortGroups(groups, sortOrder)]);
+  }
+  for (const [type, groups] of groupsByType) {
+    if (isUserEntityType(type) || groups.length === 0) continue;
+    entries.push([type, sortGroups(groups, sortOrder)]);
+  }
+  return entries;
 }
 
 /**
@@ -98,10 +130,11 @@ export function isIndexInTypeVisible(stage: PipelineStage): boolean {
 
 /** Resumen de la cabecera del panel: "12 entidades en 4 tipos" (ADR-169 §2). */
 export function summarizeEntities(
-  entries: ReadonlyArray<readonly [EntityType, ReadonlyArray<EntityGroup>]>,
+  entries: ReadonlyArray<readonly [EntityTypeId, ReadonlyArray<EntityGroup>]>,
 ): string {
   const total = entries.reduce((sum, [, groups]) => sum + groups.length, 0);
-  const types = entries.length;
+  // Un tipo del documento sin entidades se muestra pero no cuenta como tipo con entidades.
+  const types = entries.filter(([, groups]) => groups.length > 0).length;
   return `${total} ${total === 1 ? "entidad" : "entidades"} en ${types} ${
     types === 1 ? "tipo" : "tipos"
   }`;
@@ -130,7 +163,7 @@ function sortByDocumentOrder(groups: ReadonlyArray<EntityGroup>): ReadonlyArray<
 
 /** Busca un `EntityGroup` por `id` en cualquier bucket de tipo. `undefined` si no existe. */
 export function findGroupById(
-  groupsByType: ReadonlyMap<EntityType, ReadonlyArray<EntityGroup>>,
+  groupsByType: ReadonlyMap<EntityTypeId, ReadonlyArray<EntityGroup>>,
   groupId: string,
 ): EntityGroup | undefined {
   for (const groups of groupsByType.values()) {
@@ -142,10 +175,58 @@ export function findGroupById(
 
 /** `true` si hay al menos un grupo en cualquier tipo (`App.tsx` decide con esto si monta `EntitiesPanel`). */
 export function hasAnyGroup(
-  groupsByType: ReadonlyMap<EntityType, ReadonlyArray<EntityGroup>>,
+  groupsByType: ReadonlyMap<EntityTypeId, ReadonlyArray<EntityGroup>>,
 ): boolean {
   for (const groups of groupsByType.values()) {
     if (groups.length > 0) return true;
   }
   return false;
+}
+
+/** Los grupos de un tipo repartidos en niveles (`FormatSubgroup`, ADR-226 §2). */
+export interface TypeLevels {
+  /** Van directo bajo el tipo: sin formato, o con un formato del catálogo. */
+  readonly direct: ReadonlyArray<EntityGroup>;
+  /** Uno por formato del usuario, en el orden de su primer grupo. Vacío si el subnivel no separa nada. */
+  readonly subgroups: ReadonlyArray<{
+    readonly formatId: string;
+    readonly groups: ReadonlyArray<EntityGroup>;
+  }>;
+}
+
+/**
+ * ADR-226 §2: los grupos cuyo formato es del usuario van en un subnivel con el
+ * nombre del formato; el resto, directo bajo el tipo y primero. **El subnivel
+ * aparece solo si separa algo**: un tipo cuyo contenido sale todo de un único
+ * formato del usuario no lo muestra (tampoco uno sin ningún formato del usuario).
+ * Los grupos llegan en el orden de la vista (aparición o A–Z) y lo conservan
+ * dentro de cada nivel.
+ */
+export function splitByFormat(
+  groups: ReadonlyArray<EntityGroup>,
+  isUserFormat: (formatId: string) => boolean,
+): TypeLevels {
+  const direct: EntityGroup[] = [];
+  const byFormat = new Map<string, EntityGroup[]>();
+  for (const group of groups) {
+    const formatId = group.formatId;
+    if (formatId === undefined || !isUserFormat(formatId)) {
+      direct.push(group);
+      continue;
+    }
+    const bucket = byFormat.get(formatId);
+    if (bucket === undefined) byFormat.set(formatId, [group]);
+    else bucket.push(group);
+  }
+  const levels = (direct.length > 0 ? 1 : 0) + byFormat.size;
+  if (byFormat.size === 0 || levels < 2) return { direct: groups, subgroups: [] };
+  return {
+    direct,
+    subgroups: Array.from(byFormat, ([formatId, members]) => ({ formatId, groups: members })),
+  };
+}
+
+/** Los grupos en el orden en que se dibujan: los directos y después cada subnivel. */
+export function levelsInOrder(levels: TypeLevels): ReadonlyArray<EntityGroup> {
+  return [...levels.direct, ...levels.subgroups.flatMap((subgroup) => subgroup.groups)];
 }

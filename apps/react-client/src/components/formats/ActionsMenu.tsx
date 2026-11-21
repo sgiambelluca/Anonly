@@ -27,10 +27,18 @@ export interface ActionsMenuProps {
   /** Nombre accesible del botón y del grupo: «Acciones del tipo Historia clínica». */
   readonly label: string;
   readonly items: ReadonlyArray<ActionsMenuItem>;
+  /** Avisa cuándo se abre o se cierra: una franja `sticky` tiene que subir de capa mientras el menú está abierto. */
+  readonly onOpenChange?: (open: boolean) => void;
 }
 
-export function ActionsMenu({ label, items }: ActionsMenuProps) {
-  const [open, setOpen] = useState(false);
+export function ActionsMenu({ label, items, onOpenChange }: ActionsMenuProps) {
+  const [open, setOpenState] = useState(false);
+  const onOpenChangeRef = useRef(onOpenChange);
+  onOpenChangeRef.current = onOpenChange;
+  function setOpen(next: boolean): void {
+    setOpenState(next);
+    onOpenChangeRef.current?.(next);
+  }
   const containerRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const [layout, setLayout] = useState<MenuLayout>({ placement: "bottom", top: 0, maxHeight: 0 });

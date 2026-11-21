@@ -9,7 +9,7 @@
  */
 
 import {
-  type EntityType,
+  type EntityTypeId,
   type ReplacementMode,
   type Rule,
   type RuleScope,
@@ -26,7 +26,7 @@ export interface ApplyModeInput {
   readonly scope: RuleScope;
   readonly mode: ReplacementMode;
   /** Presente en `scope: "type"`. */
-  readonly entityType?: EntityType;
+  readonly entityType?: EntityTypeId;
   /** Presente en `scope: "group"`. */
   readonly groupId?: string;
   /** Qué se hizo, para la pila de deshacer (ADR-172 §2). */

@@ -19,17 +19,17 @@
  * confirmar no cambia datos. Ver `conflictResolution.ts`.
  */
 
-import { ConflictReason, type EntityType } from "@anonly/anonymization-core";
+import { ConflictReason, type EntityTypeId } from "@anonly/anonymization-core";
 import { CheckIcon, InfoIcon } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 
-import { toBaseEntityType } from "../../baseEntityType.js";
 import { useEntitiesStore } from "../../store/entities.store.js";
 import { Button } from "../common/Button.js";
 import { Dialog } from "../common/Dialog.js";
 import { applyConflictResolution } from "../entities/applyEdits.js";
-import { ENTITY_TYPE_COLOR } from "../entities/entityTypeColors.js";
-import { ENTITY_TYPE_SINGULAR } from "../entities/entityTypeLabels.js";
+import { typeDotStyle } from "../entities/entityTypeColors.js";
+import { typeSingular } from "../entities/entityTypeLabels.js";
+import { useUserTypes } from "../entities/useUserTypes.js";
 import { ConflictSymbol } from "../entities/warningSymbols.js";
 
 import { CONFLICT_REASON_LABEL } from "./conflictLabels.js";
@@ -77,7 +77,8 @@ export function ConflictDialog({
     }
     return undefined;
   });
-  const [selectedType, setSelectedType] = useState<EntityType | null>(null);
+  const [selectedType, setSelectedType] = useState<EntityTypeId | null>(null);
+  const userTypes = useUserTypes();
   const [selectedSpelling, setSelectedSpelling] = useState<string | null>(null);
 
   // El default se recalcula al abrir: es el candidato de mayor confidence, o
@@ -92,8 +93,7 @@ export function ConflictDialog({
       .getState()
       .conflicts.find((candidate) => candidate.id === conflictId);
     if (current === undefined) return;
-    // Guarda provisional (F0): el selector sigue siendo de tipos base; F7 la reemplaza.
-    const defaultType = toBaseEntityType(defaultCandidate(current).entityType);
+    const defaultType = defaultCandidate(current).entityType;
     setSelectedType(defaultType);
     // ADR-106: preselecciona la escritura vigente, para que aplicar sin tocar
     // nada no cambie el valor canónico.
@@ -224,10 +224,10 @@ export function ConflictDialog({
                 value={type}
                 checked={selectedType === type}
                 isCurrent={group?.type === type}
-                dotColor={ENTITY_TYPE_COLOR[type]}
+                dotStyle={typeDotStyle(type)}
                 onSelect={() => setSelectedType(type)}
               >
-                {ENTITY_TYPE_SINGULAR[type]}
+                {typeSingular(type, userTypes)}
               </ChoiceOption>
             ))}
           </ChoiceGroup>
@@ -242,10 +242,7 @@ export function ConflictDialog({
           <p className="flex items-center gap-1.5 text-success">
             <CheckIcon className="h-4 w-4 shrink-0" aria-hidden />
             Ya revisado
-            {conflict.resolvedType
-              ? ` (${ENTITY_TYPE_SINGULAR[toBaseEntityType(conflict.resolvedType)]})`
-              : ""}
-            .
+            {conflict.resolvedType ? ` (${typeSingular(conflict.resolvedType, userTypes)})` : ""}.
           </p>
         ) : null}
       </div>
@@ -284,7 +281,7 @@ function ChoiceOption({
   value,
   checked,
   isCurrent,
-  dotColor,
+  dotStyle,
   onSelect,
   children,
 }: {
@@ -293,7 +290,7 @@ function ChoiceOption({
   readonly checked: boolean;
   /** La opción que ya está aplicada en el documento. */
   readonly isCurrent: boolean;
-  readonly dotColor?: string;
+  readonly dotStyle?: CSSProperties;
   readonly onSelect: () => void;
   readonly children: ReactNode;
 }) {
@@ -313,12 +310,8 @@ function ChoiceOption({
         onChange={onSelect}
         className="sr-only"
       />
-      {dotColor !== undefined ? (
-        <span
-          aria-hidden
-          className="h-2 w-2 shrink-0 rounded-full"
-          style={{ background: dotColor }}
-        />
+      {dotStyle !== undefined ? (
+        <span aria-hidden className="h-2 w-2 shrink-0 rounded-full" style={dotStyle} />
       ) : null}
       <span className="min-w-0 flex-1 break-words">{children}</span>
       {isCurrent ? <span className="shrink-0 font-normal text-text-secondary">Actual</span> : null}
