@@ -24,7 +24,12 @@ import { useState } from "react";
 import { Checkbox } from "../common/Checkbox.js";
 
 import { applyEnabled } from "./applyEdits.js";
-import { EMPTY_TYPE_ACTION, EMPTY_TYPE_TEXT } from "./documentTypeCopy.js";
+import {
+  EMPTY_TYPE_ACTION,
+  EMPTY_TYPE_TEXT,
+  SAVED_CAPTION,
+  SAVED_CAPTION_TOOLTIP,
+} from "./documentTypeCopy.js";
 import { DocumentTypeMenu } from "./DocumentTypeMenu.js";
 import { EntityGroupItem } from "./EntityGroupItem.js";
 import { cascadeCheckboxState, type TypeLevels } from "./entityTree.js";
@@ -159,7 +164,10 @@ export function EntityTypeGroup({
             {label}
           </span>
           {ownType?.caption != null ? (
-            <span className="min-w-0 shrink truncate text-sm font-normal normal-case tracking-normal text-text-secondary">
+            <span
+              {...(ownType.caption === SAVED_CAPTION ? { title: SAVED_CAPTION_TOOLTIP } : {})}
+              className="min-w-0 shrink truncate text-sm font-normal normal-case tracking-normal text-text-secondary"
+            >
               {ownType.caption}
             </span>
           ) : null}

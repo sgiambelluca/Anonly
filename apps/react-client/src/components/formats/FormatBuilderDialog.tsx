@@ -91,12 +91,16 @@ export const BUILDER_TEXTS = {
   testButton: "Probar con un texto",
   cancel: "Cancelar",
   deleteVariantTitle: (n: number) => `¿Borrar la variante ${n}?`,
-  deleteVariantLine: (pieces: number) =>
-    pieces === 0
-      ? "La variante no tiene piezas."
-      : pieces === 1
-        ? "Se pierde 1 pieza."
-        : `Se pierden ${pieces} piezas.`,
+  deleteVariantLine: (pieces: number, others: number) => {
+    const lost =
+      pieces === 0
+        ? "La variante no tiene piezas."
+        : pieces === 1
+          ? "Se pierde 1 pieza."
+          : `Se pierden ${pieces} piezas.`;
+    if (others === 0) return lost;
+    return `${lost} ${others === 1 ? "La otra variante queda como está." : `Las otras ${others} variantes quedan como están.`}`;
+  },
   deleteVariantConfirm: "Borrar variante",
   keepVariant: "Conservarla",
   discardTitle: "¿Cerrar sin guardar?",
@@ -365,6 +369,8 @@ function BuilderForm({ setup, state, onSubmit, onClose }: FormProps) {
 
           <PieceInspector
             piece={piece}
+            path={selected}
+            variantLength={variant.length}
             canMoveLeft={selected !== null && moveStep(variant, selected, -1) !== null}
             canMoveRight={selected !== null && moveStep(variant, selected, 1) !== null}
             onMove={move}
@@ -401,7 +407,7 @@ function BuilderForm({ setup, state, onSubmit, onClose }: FormProps) {
       <ConfirmDialog
         open={deleteIndex !== null}
         title={BUILDER_TEXTS.deleteVariantTitle((deleteIndex ?? 0) + 1)}
-        message={BUILDER_TEXTS.deleteVariantLine(deletingPieces)}
+        message={BUILDER_TEXTS.deleteVariantLine(deletingPieces, draft.variants.length - 1)}
         confirmLabel={BUILDER_TEXTS.deleteVariantConfirm}
         cancelLabel={BUILDER_TEXTS.keepVariant}
         variant="danger"

@@ -27,12 +27,13 @@
  * flechas que no está implementada).
  */
 
-import type { ReplacementMode, ReplacementPreviews } from "@anonly/anonymization-core";
+import { ReplacementMode, type ReplacementPreviews } from "@anonly/anonymization-core";
 import { CheckIcon } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
 import { observeMenuLayout, type MenuLayout } from "./menuPlacement.js";
 import {
+  NO_SYNTHETIC_NOTE,
   REPLACEMENT_MODE_DESCRIPTION,
   REPLACEMENT_MODE_LABEL,
   REPLACEMENT_MODE_ORDER,
@@ -186,6 +187,9 @@ export function ModeSelectMenu({
               </button>
             );
           })}
+          {modes.includes(ReplacementMode.Synthetic) ? null : (
+            <p className="px-2.5 pb-1 pt-1.5 text-sm text-text-secondary">{NO_SYNTHETIC_NOTE}</p>
+          )}
         </div>
       ) : null}
     </div>

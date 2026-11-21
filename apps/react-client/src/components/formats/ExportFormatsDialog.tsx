@@ -36,6 +36,7 @@ import {
   typeCheckState,
   type ExportSelection,
 } from "./formatsExport.js";
+import { partialTypeNote } from "./formatTexts.js";
 
 export interface ExportFormatsDialogProps {
   readonly open: boolean;
@@ -90,7 +91,7 @@ export function ExportFormatsDialog({
           </p>
           <div className="flex items-center gap-2">
             <span className="min-w-0 flex-1 truncate text-sm text-text-secondary">
-              {summary === null ? "Nada elegido" : `Se exportan ${summary}`}
+              {summary === null ? "Elegí al menos un formato" : `Se exportan ${summary}`}
             </span>
             <Button variant="secondary" onClick={onClose}>
               Cancelar
@@ -136,7 +137,20 @@ export function ExportFormatsDialog({
                   id={`export-type-${entry.type.id}`}
                   checked={typeCheckState(entry, selection)}
                   onCheckedChange={(on) => setSelection(toggleType(selection, entry, on))}
-                  label={<span className="font-medium">{entry.type.name}</span>}
+                  label={
+                    <span>
+                      <span className="font-medium">{entry.type.name}</span>
+                      {typeCheckState(entry, selection) === "indeterminate" ? (
+                        <span className="text-text-secondary">
+                          {" · "}
+                          {partialTypeNote(
+                            entry.formats.filter((format) => selection.has(format.id)).length,
+                            entry.formats.length,
+                          )}
+                        </span>
+                      ) : null}
+                    </span>
+                  }
                 />
                 <div className="ml-6 flex flex-col gap-1.5">
                   {entry.formats.map((format) => (

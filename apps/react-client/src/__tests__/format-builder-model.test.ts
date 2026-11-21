@@ -24,6 +24,8 @@ import {
   parseCount,
   pieceAt,
   pieceCard,
+  pieceHeading,
+  BUILDER_COPY,
   pieceCounter,
   removeAt,
   removeContextWord,
@@ -487,5 +489,31 @@ describe("el borrador y el pedido", () => {
     // Un tipo que ya no existe se conserva para que el selector no quede vacío.
     const gone = typeOptions([], `user:${uuid(5)}`);
     expect(gone[gone.length - 1]?.label).toBe("sin nombre");
+  });
+});
+
+describe("textos del ajuste de pieza (pasada de textos F7)", () => {
+  const digits: FormatPiece = { kind: "chars", charClass: "digit", min: 2, max: 2 };
+
+  it("el título dice qué número de pieza es y de qué clase", () => {
+    expect(pieceHeading([1], 5, digits)).toBe("Pieza 2 de 5 · Dígitos");
+    expect(pieceHeading([1, 0], 5, digits)).toBe("Pieza 2.1 · Dígitos");
+  });
+
+  it("el estado vacío es el de UX_Guidelines.md §11b.15", () => {
+    expect(BUILDER_COPY.noPieceSelected).toBe(
+      "Elegí una pieza para ajustarla, o sumá una con «Pieza». Para cambiarles el orden, arrastralas.",
+    );
+  });
+
+  it("el separador opcional da ejemplos con su carácter", () => {
+    expect(BUILDER_COPY.separatorOptional("-")).toBe(
+      "Puede faltar: «12-345» y «12345» valen igual",
+    );
+    expect(BUILDER_COPY.separatorOptional(".")).toContain("«12.345»");
+  });
+
+  it("el verde dice que no se pisa con nada", () => {
+    expect(BUILDER_COPY.readyDetail).toBe("No se pisa con ningún formato prendido.");
   });
 });

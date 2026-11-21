@@ -23,6 +23,11 @@ export interface DeleteUserTypeDialogProps {
   readonly onCancel: () => void;
 }
 
+export const DELETE_TYPE_LINES = {
+  noMoreDetection: "Los documentos que abras después ya no van a detectarlos.",
+  exported: "Lo que ya exportaste no cambia. Hasta que guardes, lo podés deshacer.",
+} as const;
+
 /** La línea bajo el título, según cuántos formatos se pierden. */
 export function describeTypeDeletion(formatCount: number): string {
   if (formatCount === 0) return "El tipo no tiene formatos. Se borra de tus tipos.";
@@ -71,6 +76,10 @@ export function DeleteUserTypeDialog({
             ))}
           </ul>
         ) : null}
+        {formats.length > 0 ? (
+          <p className="text-sm text-text-primary">{DELETE_TYPE_LINES.noMoreDetection}</p>
+        ) : null}
+        <p className="text-sm text-text-secondary">{DELETE_TYPE_LINES.exported}</p>
       </div>
     </Dialog>
   );

@@ -30,6 +30,12 @@ import { disabledBaseIds, type DetectionState } from "../../store/detectionState
 import { ENTITY_TYPE_LABEL, ENTITY_TYPE_ORDER } from "../entities/entityTypeLabels.js";
 
 import { baseFormatExample, buildFormatExample } from "./formatExamples.js";
+import {
+  BASE_CONTROL_LABEL,
+  BASE_STRUCTURE_LABEL,
+  NO_PENDING_CHANGES,
+  SECTION_HINTS,
+} from "./formatTexts.js";
 
 export type FormatTag = "Tuyo" | "Editado" | "Del catálogo" | "Con control";
 
@@ -68,6 +74,8 @@ export type FormatsSectionId = "own" | "catalog" | "fixed";
 export interface FormatsSectionModel {
   readonly id: FormatsSectionId;
   readonly title: string;
+  /** La aclaración gris junto al título; vacía si la sección no la lleva. */
+  readonly hint: string;
   readonly bands: ReadonlyArray<TypeBandModel>;
 }
 
@@ -132,7 +140,7 @@ function baseRow(info: CatalogFormatInfo, enabled: boolean): FormatRowModel {
     id: info.id,
     source: "base",
     name: info.name,
-    classLabel: isStructure ? "De pura forma" : "Con verificación",
+    classLabel: isStructure ? BASE_STRUCTURE_LABEL : BASE_CONTROL_LABEL,
     example: baseFormatExample(info.id),
     tag: isStructure ? "Del catálogo" : "Con control",
     enabled,
@@ -231,9 +239,14 @@ export function buildFormatsTree(state: DetectionState, query: string): FormatsT
   }
 
   const all: ReadonlyArray<FormatsSectionModel> = [
-    { id: "own", title: SECTION_TITLES.own, bands: visible(own) },
-    { id: "catalog", title: SECTION_TITLES.catalog, bands: visible(catalog) },
-    { id: "fixed", title: SECTION_TITLES.fixed, bands: visible(fixed) },
+    { id: "own", title: SECTION_TITLES.own, hint: SECTION_HINTS.own, bands: visible(own) },
+    {
+      id: "catalog",
+      title: SECTION_TITLES.catalog,
+      hint: SECTION_HINTS.catalog,
+      bands: visible(catalog),
+    },
+    { id: "fixed", title: SECTION_TITLES.fixed, hint: "", bands: visible(fixed) },
   ];
   // Sin búsqueda, «Tus tipos» siempre está (lleva la banda punteada «Nuevo tipo»).
   const sections = all.filter(
@@ -254,6 +267,7 @@ export function describeCounts(counts: FormatsTreeModel["counts"]): string {
 
 /** El resumen de «N cambios sin guardar» del pie. */
 export function describePendingChanges(count: number): string {
+  if (count === 0) return NO_PENDING_CHANGES;
   return count === 1 ? "1 cambio sin guardar" : `${count} cambios sin guardar`;
 }
 

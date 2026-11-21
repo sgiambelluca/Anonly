@@ -27,6 +27,7 @@ import {
   FREED_ENTITIES_REST,
   occurrencesLabel,
   removeTypeConfirmLabel,
+  removeTypeLead,
   removeTypeTitle,
   unresolvedConflictCount,
   unresolvedConflictsWarning,
@@ -62,6 +63,10 @@ export function RemoveDocumentTypeDialog({ type, open, onClose }: RemoveDocument
       open={open}
       onClose={onClose}
       title={removeTypeTitle(type.name)}
+      description={removeTypeLead(
+        entities.length,
+        entities.reduce((total, group) => total + group.members.length, 0),
+      )}
       role="alertdialog"
       icon={
         <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-error/10 text-error">

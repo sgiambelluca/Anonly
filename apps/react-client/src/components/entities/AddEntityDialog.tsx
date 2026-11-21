@@ -43,6 +43,7 @@ import { createSearchDebouncer } from "../viewer/searchDebounce.js";
 import { matchContext } from "../viewer/searchResults.js";
 
 import { addManualEntityWithFeedback } from "./addManualEntity.js";
+import { NEW_TYPE_ADD_FOOTNOTE } from "./documentTypeCopy.js";
 import { EntityTypePicker } from "./EntityTypePicker.js";
 import { useTypeChoice } from "./useTypeChoice.js";
 
@@ -162,7 +163,11 @@ export function AddEntityDialog({ open, onClose, initialType }: AddEntityDialogP
           ) : (
             <span className="inline-flex flex-1 items-center gap-2 text-sm text-text-secondary">
               <MousePointerClickIcon className="h-4 w-4 shrink-0" aria-hidden />
-              También podés seleccionarlo en el PDF original.
+              <span className="line-clamp-2">
+                {choice.creating && choice.canConfirm
+                  ? NEW_TYPE_ADD_FOOTNOTE
+                  : "También podés seleccionarlo en el PDF original."}
+              </span>
             </span>
           )}
           <Button variant="secondary" onClick={onClose} disabled={submitting}>

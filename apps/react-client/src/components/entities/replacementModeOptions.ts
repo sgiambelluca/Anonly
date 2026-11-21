@@ -60,6 +60,9 @@ export function modesForType(isUserType: boolean): ReadonlyArray<ReplacementMode
     : REPLACEMENT_MODE_ORDER;
 }
 
+/** La nota al pie del menú de modo de un tipo propio (ADR-229 §4). */
+export const NO_SYNTHETIC_NOTE = "«Dato falso» no está disponible para tipos propios.";
+
 export const REPLACEMENT_MODE_OPTIONS: ReadonlyArray<SelectOption<ReplacementMode>> =
   REPLACEMENT_MODE_ORDER.map((mode) => ({ value: mode, label: REPLACEMENT_MODE_LABEL[mode] }));
 

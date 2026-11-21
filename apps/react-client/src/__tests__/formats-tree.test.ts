@@ -203,6 +203,7 @@ describe("textos del árbol", () => {
 
   it("el conteo de la barra y el contador del pie", () => {
     expect(describeCounts({ on: 14, off: 1, own: 2 })).toBe("14 prendidos · 1 apagados · 2 tuyos");
+    expect(describePendingChanges(0)).toBe("Sin cambios");
     expect(describePendingChanges(1)).toBe("1 cambio sin guardar");
     expect(describePendingChanges(3)).toBe("3 cambios sin guardar");
   });

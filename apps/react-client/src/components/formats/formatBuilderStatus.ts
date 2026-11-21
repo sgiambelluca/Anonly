@@ -24,13 +24,18 @@ import { disabledBaseIds, type DetectionState } from "../../store/detectionState
 
 import { BUILDER_COPY, type BuilderMode } from "./formatBuilderModel.js";
 import { nameOfFormat } from "./formatsImport.js";
-import { describeOverlap, formatIssueText } from "./formatTexts.js";
+import { describeOverlapParts, formatIssueText } from "./formatTexts.js";
 
 export type StatusTone = "ready" | "warning" | "error";
 
 export interface BuilderStatus {
   readonly tone: StatusTone;
+  /** El texto completo (titular y detalle juntos): lo leen los lectores de pantalla y el `title`. */
   readonly text: string;
+  /** El titular, en negrita; ausente si el texto es una sola frase (los errores de §11b.16). */
+  readonly headline?: string;
+  /** Lo que sigue al titular, en tono normal. */
+  readonly detail?: string;
   /** Con un error, el botón principal está apagado; con un aviso, no. */
   readonly canSubmit: boolean;
 }
@@ -67,9 +72,19 @@ function comparisonInput(
   };
 }
 
-/** El texto del rojo «Ya existe un formato igual». */
-export function identicalText(otherName: string): string {
-  return `Ya existe un formato igual: «${otherName}». Cambiá alguna pieza, o usá ese.`;
+/** Los dos tramos del rojo «Ya existe un formato igual»; `own` dice si el otro es un formato tuyo. */
+export function identicalParts(
+  otherName: string,
+  own: boolean,
+): { readonly headline: string; readonly detail: string } {
+  return {
+    headline: "Ya existe un formato igual.",
+    detail: `Tiene la misma forma que «${otherName}», ${own ? "tuyo" : "del catálogo"}. Si querés cambiarlo, editá ese.`,
+  };
+}
+
+function joinParts(parts: { readonly headline: string; readonly detail: string }): string {
+  return `${parts.headline} ${parts.detail}`;
 }
 
 export function evaluateBuilder(
@@ -104,42 +119,52 @@ export function evaluateBuilder(
 
   const comparison = compareFormat(definition, comparisonInput(definition, state));
   if (comparison.identicalTo !== null) {
+    const identicalId = comparison.identicalTo;
+    const identical = identicalParts(
+      nameOfFormat(identicalId, state, []),
+      state.userFormats.some((format) => format.id === identicalId),
+    );
     return {
       validation,
       comparison,
       variantsWithIssues,
       status: {
         tone: "error",
-        text: identicalText(nameOfFormat(comparison.identicalTo, state, [])),
+        text: joinParts(identical),
+        ...identical,
         canSubmit: false,
       },
     };
   }
   if (comparison.overlaps.length > 0) {
+    const overlap = describeOverlapParts(
+      comparison.overlaps.map((entry) => ({
+        name: nameOfFormat(entry.formatId, state, []),
+        example: entry.example,
+      })),
+    );
     return {
       validation,
       comparison,
       variantsWithIssues,
       status: {
         tone: "warning",
-        text: describeOverlap(
-          definition.name,
-          comparison.overlaps.map((overlap) => ({
-            name: nameOfFormat(overlap.formatId, state, []),
-            example: overlap.example,
-          })),
-        ),
+        text: joinParts(overlap),
+        ...overlap,
         canSubmit: true,
       },
     };
   }
+  const headline = mode === "create" ? BUILDER_COPY.readyCreate : BUILDER_COPY.readySave;
   return {
     validation,
     comparison,
     variantsWithIssues,
     status: {
       tone: "ready",
-      text: mode === "create" ? BUILDER_COPY.readyCreate : BUILDER_COPY.readySave,
+      text: `${headline} ${BUILDER_COPY.readyDetail}`,
+      headline,
+      detail: BUILDER_COPY.readyDetail,
       canSubmit: true,
     },
   };
@@ -252,7 +277,7 @@ export interface BoxRect {
 }
 
 /** Ancho y alto con los que se dibuja el panel de prueba. */
-export const TEST_PANEL_SIZE: PanelSize = { width: 320, height: 340 };
+export const TEST_PANEL_SIZE: PanelSize = { width: 320, height: 400 };
 const PANEL_GAP = 12;
 const PANEL_MARGIN = 8;
 

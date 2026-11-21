@@ -28,7 +28,9 @@ import {
 } from "./formatBuilderStatus.js";
 
 export const TEST_PANEL_COPY = {
-  title: "Probar con un texto",
+  title: "Probalo",
+  resultLabel: "Se detectaría",
+  legend: "Resaltado: se tapa. Subrayado: la palabra que lo habilita, queda a la vista.",
   label: "Texto de prueba",
   placeholder: "Pegá o escribí un texto para ver qué detectaría este formato.",
   notice: "Este texto no se guarda.",
@@ -168,6 +170,9 @@ export function FormatTestPanel({ definition, text, onTextChange, onClose }: For
         <span className="text-sm font-medium text-text-primary" aria-live="polite">
           {TEST_PANEL_COPY.count(outcome.count)}
         </span>
+        <span className="text-xs font-semibold text-text-secondary">
+          {TEST_PANEL_COPY.resultLabel}
+        </span>
         <div
           aria-label="Resultado de la prueba"
           className="min-h-0 flex-1 overflow-y-auto whitespace-pre-wrap break-words rounded-lg border border-border bg-bg-secondary px-2.5 py-1.5 text-sm text-text-primary"
@@ -178,6 +183,7 @@ export function FormatTestPanel({ definition, text, onTextChange, onClose }: For
             </span>
           ))}
         </div>
+        <p className="shrink-0 text-xs text-text-secondary">{TEST_PANEL_COPY.legend}</p>
         <p className="shrink-0 text-xs text-text-secondary">{TEST_PANEL_COPY.notice}</p>
       </div>
     </div>

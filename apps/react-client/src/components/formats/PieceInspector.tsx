@@ -26,7 +26,8 @@ import {
   isExactly,
   OPTIONAL_INNER_MENU,
   parseCount,
-  pieceCard,
+  pieceHeading,
+  BUILDER_COPY,
   SEPARATOR_OPTIONS,
   toExactMode,
   toggleSeparator,
@@ -38,6 +39,7 @@ import {
   type CharsKind,
   type CharsPiece,
   type PieceClassId,
+  type PiecePath,
 } from "./formatBuilderModel.js";
 
 export const SAVED_TEXT_NOTICE = "Queda guardado en este equipo: no escribas datos de un caso.";
@@ -45,6 +47,9 @@ export const SAVED_TEXT_NOTICE = "Queda guardado en este equipo: no escribas dat
 export interface PieceInspectorProps {
   /** La pieza elegida; `null` = ninguna. */
   readonly piece: FormatPiece | null;
+  /** Dónde está la pieza elegida y cuántas piezas tiene su variante: para el título. */
+  readonly path: PiecePath | null;
+  readonly variantLength: number;
   readonly canMoveLeft: boolean;
   readonly canMoveRight: boolean;
   readonly onMove: (direction: -1 | 1) => void;
@@ -239,6 +244,8 @@ function CharsEditor({
 
 export function PieceInspector({
   piece,
+  path,
+  variantLength,
   canMoveLeft,
   canMoveRight,
   onMove,
@@ -252,15 +259,13 @@ export function PieceInspector({
       aria-label="Ajuste de la pieza"
       className="flex h-56 shrink-0 flex-col gap-3 overflow-y-auto rounded-lg border border-border p-3"
     >
-      {piece === null ? (
-        <p className="m-auto text-sm text-text-secondary">
-          Elegí una pieza para ajustarla, o sumá una con «+ Pieza».
-        </p>
+      {piece === null || path === null ? (
+        <p className="m-auto text-sm text-text-secondary">{BUILDER_COPY.noPieceSelected}</p>
       ) : (
         <>
           <div className="flex items-center justify-between gap-2">
             <span className="text-sm font-semibold text-text-primary">
-              {pieceCard(piece).title}
+              {pieceHeading(path, variantLength, piece)}
             </span>
             <div className="flex items-center gap-1.5">
               <span className="text-xs text-text-secondary">Mover</span>
@@ -308,7 +313,7 @@ export function PieceInspector({
               <Checkbox
                 checked={piece.optional}
                 onCheckedChange={(optional) => onChange({ ...piece, optional })}
-                label="Puede faltar"
+                label={BUILDER_COPY.separatorOptional(piece.chars[0] ?? "-")}
               />
             </div>
           ) : null}

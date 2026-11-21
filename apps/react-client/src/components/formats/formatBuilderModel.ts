@@ -357,6 +357,19 @@ function separatorExample(chars: ReadonlyArray<FormatSeparator>): string {
   return chars.map((char) => (char === " " ? "␣" : char)).join(" ");
 }
 
+/**
+ * El título del ajuste: «Pieza 2 de 5 · Separador». Una pieza de adentro de una
+ * parte opcional lleva su posición compuesta: «Pieza 2.1 · Dígitos».
+ */
+export function pieceHeading(path: PiecePath, variantLength: number, piece: FormatPiece): string {
+  const [first, second] = path;
+  const where =
+    second === undefined
+      ? `Pieza ${first + 1} de ${variantLength}`
+      : `Pieza ${first + 1}.${second + 1}`;
+  return `${where} · ${pieceCard(piece).title}`;
+}
+
 /** Los tres renglones de una ficha: qué es, cuánto o cuál, y un texto de ejemplo. */
 export function pieceCard(piece: FormatPiece): PieceCard {
   switch (piece.kind) {
@@ -529,6 +542,13 @@ export const BUILDER_COPY = {
     `Vas a editar una copia de «${name}»: el original se apaga y la copia detecta en su lugar. Con «Restaurar original» volvés al de antes.`,
   readyCreate: "Listo para crear.",
   readySave: "Listo para guardar.",
+  readyDetail: "No se pisa con ningún formato prendido.",
+  /** Estado vacío del ajuste de pieza (`UX_Guidelines.md` §11b.15, textual). */
+  noPieceSelected:
+    "Elegí una pieza para ajustarla, o sumá una con «Pieza». Para cambiarles el orden, arrastralas.",
+  /** El rótulo del separador opcional, con los ejemplos de ese separador. */
+  separatorOptional: (separator: string) =>
+    `Puede faltar: «12${separator}345» y «12345» valen igual`,
 } as const;
 
 export type BuilderRequestLike =

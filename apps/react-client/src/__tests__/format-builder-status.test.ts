@@ -10,13 +10,13 @@ import {
   clampPanelOffset,
   contextRanges,
   evaluateBuilder,
-  identicalText,
+  identicalParts,
   initialPanelOffset,
   runFormatTest,
   TEST_PANEL_SIZE,
 } from "../components/formats/formatBuilderStatus.js";
 import { describeOverlapWarning } from "../components/formats/formatsImport.js";
-import { describeOverlap } from "../components/formats/formatTexts.js";
+import { describeOverlap, describeOverlapParts } from "../components/formats/formatTexts.js";
 import { DEFAULT_DETECTION_STATE } from "../store/detectionState.js";
 
 import { stateWith, userFormat, userType } from "./helpers/detectionFixtures.js";
@@ -38,8 +38,14 @@ function format(overrides: Partial<FormatDefinition> = {}): FormatDefinition {
 describe("evaluateBuilder", () => {
   it("verde: listo para crear o para guardar", () => {
     const create = evaluateBuilder(format(), DEFAULT_DETECTION_STATE, "create");
-    expect(create.status).toEqual({ tone: "ready", text: "Listo para crear.", canSubmit: true });
-    expect(evaluateBuilder(format(), DEFAULT_DETECTION_STATE, "edit").status.text).toBe(
+    expect(create.status).toEqual({
+      tone: "ready",
+      text: "Listo para crear. No se pisa con ningún formato prendido.",
+      headline: "Listo para crear.",
+      detail: "No se pisa con ningún formato prendido.",
+      canSubmit: true,
+    });
+    expect(evaluateBuilder(format(), DEFAULT_DETECTION_STATE, "edit").status.headline).toBe(
       "Listo para guardar.",
     );
     expect(create.variantsWithIssues.size).toBe(0);
@@ -95,11 +101,18 @@ describe("evaluateBuilder", () => {
       enabled: false,
     });
     const result = evaluateBuilder(format(), stateWith({ userFormats: [other] }), "create");
+    const parts = identicalParts("Otro", true);
     expect(result.status).toEqual({
       tone: "error",
-      text: identicalText("Otro"),
+      text: `${parts.headline} ${parts.detail}`,
+      ...parts,
       canSubmit: false,
     });
+    expect(parts.headline).toBe("Ya existe un formato igual.");
+    expect(parts.detail).toBe(
+      "Tiene la misma forma que «Otro», tuyo. Si querés cambiarlo, editá ese.",
+    );
+    expect(identicalParts("DNI", false).detail).toContain("«DNI», del catálogo.");
   });
 
   it("editar un formato no se compara consigo mismo", () => {
@@ -127,9 +140,12 @@ describe("evaluateBuilder", () => {
     const result = evaluateBuilder(mine, stateWith({ userFormats: [other] }), "create");
     expect(result.status.tone).toBe("warning");
     expect(result.status.canSubmit).toBe(true);
-    expect(result.status.text).toContain("«Mi formato» comparte textos con");
-    expect(result.status.text).toContain("«Teléfono interno»");
-    expect(result.status.text).toContain("Por ejemplo, «");
+    expect(result.status.headline).toContain("Comparte textos con «");
+    expect(result.status.headline).toContain("«Teléfono interno»");
+    expect(result.status.detail).toContain(" reconocen, por ejemplo, ");
+    expect(result.status.detail).toContain(
+      "Si se pisan en un documento, elegís en el panel de conflicto.",
+    );
   });
 
   it("un tipo propio que ya no existe es un error con su texto", () => {
@@ -145,10 +161,13 @@ describe("evaluateBuilder", () => {
 describe("describeOverlap: el mismo aviso en el generador y al importar", () => {
   it("nombra al formato y a los otros", () => {
     expect(describeOverlap("A", [{ name: "B" }])).toBe(
-      "«A» comparte textos con «B». Si están prendidos a la vez, un mismo texto puede reconocerse más de una vez.",
+      "«A» comparte textos con «B». Si se pisan en un documento, elegís en el panel de conflicto.",
+    );
+    expect(describeOverlap("A", [{ name: "B", example: "0221 456 7890" }])).toBe(
+      "«A» comparte textos con «B», por ejemplo 0221 456 7890. Si se pisan en un documento, elegís en el panel de conflicto.",
     );
     expect(describeOverlap(null, [{ name: "B" }, { name: "C", example: "12" }])).toContain(
-      "Este formato comparte textos con «B» y «C». Por ejemplo, «12» también lo reconoce «C».",
+      "Este formato comparte textos con «B» y «C», por ejemplo 12.",
     );
     expect(describeOverlap("  ", [{ name: "B" }])).toMatch(/^Este formato/);
   });
@@ -158,6 +177,19 @@ describe("describeOverlap: el mismo aviso en el generador y al importar", () => 
     expect(text).toContain("«1», «2» y 2 más");
     expect(describeOverlap("A", [{ name: "1" }, { name: "2" }, { name: "3" }])).toContain(
       "«1», «2» y «3»",
+    );
+  });
+
+  it("el generador lo parte en titular y detalle", () => {
+    expect(describeOverlapParts([{ name: "B" }])).toEqual({
+      headline: "Comparte textos con «B».",
+      detail: "Si se pisan en un documento, elegís en el panel de conflicto.",
+    });
+    expect(describeOverlapParts([{ name: "B", example: "12" }]).detail).toBe(
+      "Los dos reconocen, por ejemplo, 12. Si se pisan en un documento, elegís en el panel de conflicto.",
+    );
+    expect(describeOverlapParts([{ name: "B" }, { name: "C", example: "12" }]).detail).toContain(
+      "«C» y este formato reconocen, por ejemplo, 12.",
     );
   });
 
