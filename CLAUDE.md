@@ -101,6 +101,7 @@ El modelo de trabajo es planificador, implementador y revisor (`ai/AI_Developmen
 Cómo se coordinan:
 
 - **Un solo sub-agente activo a la vez.** El ciclo es revisor, después implementador, de nuevo revisor, y así hasta APPROVED.
+  - Tope: si el mismo bloqueante sigue en el tercer REJECTED, el ciclo se corta y deciden el planificador o el humano. Suele ser una ambigüedad del spec o un límite del modelo.
 - **Todo `Agent` lleva `model` explícito**: `sonnet` para implementar y para las tareas de apoyo, `opus` solo para el revisor.
   - Los integrados Explore y Plan no toman el modelo por defecto de los subagentes: también llevan `model`.
 - **Se retoma el mismo agente** con `SendMessage` entre rondas y tras un corte (límite de uso, fin de sesión), en vez de lanzar uno nuevo.
@@ -110,6 +111,9 @@ Cómo se coordinan:
   - Las lecturas grandes que no va a editar (barridos de docs, un spec completo para ubicar una sección) se delegan a un subagente que devuelve citas `archivo:línea`.
   - Compacta o traspasa a una sesión nueva en un corte natural, como el cierre de una ronda o un APPROVED. Todavía no hay un umbral fijo.
 - **El revisor se lanza por lote**: cuando todas las tareas de la ronda están listas, no después de cada tanda del implementador.
+- **Antes de aceptar un APPROVED**, el planificador comprueba dos cosas:
+  - que la huella del veredicto coincida con la del estado que se va a commitear (el comando está en `revisor.md`); si no coincide, se revisa de nuevo;
+  - que el revisor haya leído lo que le tocaba. Lo que el brief le pide leer va como lista cerrada, no como índice, y el veredicto dice qué leyó.
 - **El planificador mantiene su turno abierto durante la coordinación.** Espera el aviso de finalización del sub-agente y retoma al siguiente agente según el informe, sin depender de que el humano avise. No cierra el turno solo por haber delegado; lo cierra cuando termina la ronda o hace falta una decisión humana.
   - Cada sub-agente entrega su resultado al planificador al terminar. La espera usa avisos de finalización, sin consultar repetidamente el estado ni el avance de comandos largos.
 - **Los sub-agentes corren los gates en modo síncrono**, nunca en background ni con Monitor: nada los reanuda si el turno termina antes.
