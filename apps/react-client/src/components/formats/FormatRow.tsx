@@ -13,6 +13,7 @@ import { Checkbox } from "../common/Checkbox.js";
 
 import { ActionsMenu, type ActionsMenuItem } from "./ActionsMenu.js";
 import type { FormatRowModel, FormatTag } from "./formatsTree.js";
+import { EDIT_BASE_TOOLTIP, EDIT_OWN_TOOLTIP, FORMAT_EXAMPLE_TOOLTIP } from "./formatTexts.js";
 
 export interface FormatRowProps {
   readonly row: FormatRowModel;
@@ -50,7 +51,7 @@ export function FormatRow({ row, onToggle, onEdit, menuItems }: FormatRowProps) 
       </div>
       <span
         className="hidden w-44 shrink-0 truncate font-mono text-xs text-text-secondary md:block"
-        title={row.example}
+        title={FORMAT_EXAMPLE_TOOLTIP}
       >
         {row.example}
       </span>
@@ -66,6 +67,7 @@ export function FormatRow({ row, onToggle, onEdit, menuItems }: FormatRowProps) 
             type="button"
             onClick={onEdit}
             aria-label={`Editar ${row.name}`}
+            title={row.source === "base" ? EDIT_BASE_TOOLTIP : EDIT_OWN_TOOLTIP}
             className="rounded-md px-2 py-1 text-sm font-medium text-accent hover:bg-accent/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
           >
             Editar

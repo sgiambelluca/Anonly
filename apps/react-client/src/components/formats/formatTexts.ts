@@ -554,11 +554,33 @@ function listOverlapNames(names: ReadonlyArray<string>): string {
   return `${quoted.slice(0, 2).join(", ")} y ${hidden} más`;
 }
 
+const OVERLAP_RESOLVE = "Si se pisan en un documento, elegís en el panel de conflicto.";
+
+/** El aviso amarillo del generador, en dos tramos: el titular (en negrita) y el detalle. */
+export interface OverlapParts {
+  readonly headline: string;
+  readonly detail: string;
+}
+
 /**
  * El aviso amarillo de un formato que comparte textos con otros (ADR-220 §3,
- * ADR-228 §7). Lo usan la caja de estado del generador y el resultado de
- * importar un archivo, para que los dos digan lo mismo. `subject` es el nombre
- * del formato; sin nombre todavía, «Este formato».
+ * ADR-228 §7), para la caja de estado del generador: titular y detalle.
+ */
+export function describeOverlapParts(others: ReadonlyArray<OverlapTarget>): OverlapParts {
+  const first = others.find((other) => other.example !== undefined && other.example !== "");
+  const who =
+    others.length > 1 && first !== undefined ? `«${first.name}» y este formato` : "Los dos";
+  const example =
+    first?.example === undefined ? "" : `${who} reconocen, por ejemplo, ${first.example}. `;
+  return {
+    headline: `Comparte textos con ${listOverlapNames(others.map((other) => other.name))}.`,
+    detail: `${example}${OVERLAP_RESOLVE}`,
+  };
+}
+
+/**
+ * El mismo aviso en una sola oración, para el resumen de importar un archivo.
+ * `subject` es el nombre del formato; sin nombre, «Este formato».
  */
 export function describeOverlap(
   subject: string | null,
@@ -566,9 +588,103 @@ export function describeOverlap(
 ): string {
   const who = subject === null || subject.trim() === "" ? "Este formato" : `«${subject}»`;
   const first = others.find((other) => other.example !== undefined && other.example !== "");
-  const example =
-    first?.example === undefined
+  const example = first?.example === undefined ? "" : `, por ejemplo ${first.example}`;
+  return `${who} comparte textos con ${listOverlapNames(others.map((other) => other.name))}${example}. ${OVERLAP_RESOLVE}`;
+}
+
+// ─── Textos de «Formatos de detección» (lista, filas, avisos; pasada de textos F7) ───
+
+/** La etiqueta de un formato base de pura forma: se edita como copia. */
+export const BASE_STRUCTURE_LABEL = "Del catálogo · se edita como copia";
+/** La etiqueta de un formato base con verificación (el catálogo no dice qué control lleva). */
+export const BASE_CONTROL_LABEL = "Con verificación";
+
+/** La aclaración de cada sección del árbol. */
+export const SECTION_HINTS = {
+  own: "Los creaste vos: se pueden editar y borrar",
+  catalog: "Vienen con Anonly, para Argentina: no se borran, y les podés sumar formatos tuyos",
+} as const;
+
+/** El tooltip del ejemplo de una fila. */
+export const FORMAT_EXAMPLE_TOOLTIP = "Ejemplo de lo que reconoce";
+/** El tooltip de «Editar» de un formato base (se edita una copia) y de uno propio. */
+export const EDIT_BASE_TOOLTIP = "Editar: se edita una copia; el original queda guardado";
+export const EDIT_OWN_TOOLTIP = "Editar el formato";
+
+/** El contador del pie sin cambios pendientes. */
+export const NO_PENDING_CHANGES = "Sin cambios";
+
+/** Los avisos de restaurar el original y de borrar un formato (título y subtítulo). */
+export function restoredFormatToast(originalName: string): {
+  readonly title: string;
+  readonly description: string;
+} {
+  return {
+    title: `Volvió el formato original «${originalName}»`,
+    description: "Se borró tu copia editada.",
+  };
+}
+
+export function deletedFormatToast(name: string): {
+  readonly title: string;
+  readonly description: string;
+} {
+  return { title: `Se borró el formato «${name}»`, description: "Se aplica cuando guardes." };
+}
+
+/** El aviso de borrar un tipo propio guardado, con sus formatos. */
+export function deletedSavedTypeToast(
+  name: string,
+  formatCount: number,
+): { readonly title: string; readonly description: string } {
+  const withFormats =
+    formatCount === 0
       ? ""
-      : ` Por ejemplo, «${first.example}» también lo reconoce «${first.name}».`;
-  return `${who} comparte textos con ${listOverlapNames(others.map((other) => other.name))}.${example} Si están prendidos a la vez, un mismo texto puede reconocerse más de una vez.`;
+      : `${formatCount === 1 ? "Con su formato" : `Con sus ${formatCount} formatos`}. `;
+  return { title: `Se borró «${name}»`, description: `${withFormats}Se aplica cuando guardes.` };
+}
+
+// ─── Exportar ───
+
+/** La nota de un tipo que se exporta en parte: «Va con 2 de 3». */
+export function partialTypeNote(chosen: number, total: number): string {
+  return `Va con ${chosen} de ${total}`;
+}
+
+// ─── Importar: resumen y rechazo ───
+
+/** La línea bajo el título del resumen: «De {archivo}. Todo llega prendido…». */
+export function importSummaryLead(fileName: string): string {
+  return `De ${fileName}. Todo llega prendido y se aplica cuando guardes.`;
+}
+
+/** El pie del resumen. */
+export const IMPORT_SUMMARY_FOOTNOTE = "Cada formato se puede apagar o borrar desde la lista.";
+
+/** El detalle de un tipo nuevo: «tipo nuevo · 2 formatos». */
+export function importedTypeDetail(formatCount: number): string {
+  if (formatCount === 0) return "tipo nuevo";
+  return `tipo nuevo · ${formatCount === 1 ? "1 formato" : `${formatCount} formatos`}`;
+}
+
+/** El detalle de un tipo que ya tenías y al que se suma un formato: «suma «HC de guardia»». */
+export function mergedFormatDetail(formatName: string): string {
+  return `suma «${formatName}»`;
+}
+
+/** La línea gris bajo el motivo de un rechazo, según qué falló en el archivo. */
+export const IMPORT_REJECTION_HINTS = {
+  invalid:
+    "El archivo se revisa entero antes de importar: si algo falla, no entra nada. Pedile a quien lo armó que lo corrija.",
+  notAnonly:
+    "Los formatos se exportan desde Anonly con «Exportar…» y terminan en .anonly-formatos.",
+} as const;
+
+/** Qué línea gris acompaña a un rechazo: `null` si ninguna (por ejemplo, una versión más nueva). */
+export function importRejectionHint(codes: ReadonlyArray<FormatsFileIssueCode>): string | null {
+  if (codes.some((code) => code === "not_json" || code === "wrong_kind")) {
+    return IMPORT_REJECTION_HINTS.notAnonly;
+  }
+  if (codes.every((code) => code === "version_newer")) return null;
+  return IMPORT_REJECTION_HINTS.invalid;
 }

@@ -38,7 +38,13 @@ export function FormatStatusBox({ status }: FormatStatusBoxProps) {
         <ToneIcon tone={status.tone} />
       </span>
       <span className="line-clamp-3" title={status.text}>
-        {status.text}
+        {status.headline === undefined ? (
+          status.text
+        ) : (
+          <>
+            <strong className="font-semibold">{status.headline}</strong> {status.detail}
+          </>
+        )}
       </span>
     </div>
   );

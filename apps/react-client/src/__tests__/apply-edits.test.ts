@@ -243,7 +243,7 @@ describe("applyEdits", () => {
       groupId: "g1",
       patch: { type: EntityType.Organization },
     });
-    expect(toasts.get()?.title).toBe("Cambiaste el tipo de «Juan Pérez»");
+    expect(toasts.get()?.title).toBe("«Juan Pérez» ahora es Organización");
     expect(toasts.get()?.description).toBeUndefined();
     toasts.unsubscribe();
   });

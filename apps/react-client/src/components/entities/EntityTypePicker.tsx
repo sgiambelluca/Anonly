@@ -30,7 +30,11 @@ import type { EntityTypeId } from "@anonly/anonymization-core";
 import { PlusIcon, XIcon } from "lucide-react";
 import { useRef, type KeyboardEvent } from "react";
 
-import { DOCUMENT_ONLY_TOOLTIP, NEW_TYPE_BAND_LABEL } from "./documentTypeCopy.js";
+import {
+  DOCUMENT_ONLY_TOOLTIP,
+  NEW_TYPE_BAND_LABEL,
+  SAVED_TYPE_TOOLTIP,
+} from "./documentTypeCopy.js";
 import { typeDotStyle } from "./entityTypeColors.js";
 import { PICKER_TYPE_ORDER, typeSingular } from "./entityTypeLabels.js";
 import { previewOfNewType, type NewTypeDraft } from "./newTypeInline.js";
@@ -102,7 +106,7 @@ export function EntityTypePicker({
     containerRef.current?.querySelector<HTMLButtonElement>(`[data-entity-type="${next}"]`)?.focus();
   }
 
-  function cell(type: EntityTypeId, documentOnly: boolean) {
+  function cell(type: EntityTypeId, documentOnly: boolean, saved = false) {
     const isCurrent = type === current;
     const checked = type === value && !isCurrent;
     return (
@@ -115,7 +119,11 @@ export function EntityTypePicker({
         disabled={isCurrent}
         data-entity-type={type}
         tabIndex={type === focusType ? 0 : -1}
-        {...(documentOnly ? { title: DOCUMENT_ONLY_TOOLTIP } : {})}
+        {...(documentOnly
+          ? { title: DOCUMENT_ONLY_TOOLTIP }
+          : saved
+            ? { title: SAVED_TYPE_TOOLTIP }
+            : {})}
         onClick={() => {
           if (!isCurrent) onChange(type);
         }}
@@ -226,7 +234,7 @@ export function EntityTypePicker({
         <section aria-label="Tus tipos" className="flex flex-col gap-0.5">
           <h3 className="px-1 text-sm font-semibold text-text-secondary">Tus tipos</h3>
           <div className={`grid gap-0.5 ${COLUMNS_CLASS[columns]}`}>
-            {userTypes.map((entry) => cell(entry.definition.id, entry.documentOnly))}
+            {userTypes.map((entry) => cell(entry.definition.id, entry.documentOnly, true))}
             {newTypeSlot}
           </div>
         </section>

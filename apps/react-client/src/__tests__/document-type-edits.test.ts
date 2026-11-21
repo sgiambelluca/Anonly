@@ -476,7 +476,8 @@ describe("tipos del documento: acciones del usuario", () => {
         patch: { type: afiliado.id },
       });
       expect(useHistoryStore.getState().past).toHaveLength(1);
-      expect(toasts.last()?.description).toBe("Ahora es Número de afiliado");
+      expect(toasts.last()?.title).toBe("«Juan Pérez» ahora es Número de afiliado");
+      expect(toasts.last()?.description).toBe("Tipo nuevo, solo de este documento.");
       toasts.unsubscribe();
     });
 

@@ -35,6 +35,7 @@ import {
   fieldsOf,
   replacementLadder,
   TYPE_FORM_COPY,
+  typeFormLead,
   typeFormNote,
   type UserTypeFields,
   type UserTypeMode,
@@ -50,6 +51,8 @@ export interface UserTypeDialogProps {
   /** Los tipos propios contra los que se compara la etiqueta, sin el que se edita. */
   readonly existing: ReadonlyArray<UserEntityTypeDefinition>;
   readonly country: CountryCode;
+  /** Cuántos formatos tiene el tipo que se edita (`saved`): para «Sus N formatos no cambian». */
+  readonly formatCount?: number;
   readonly onSubmit: (definition: UserEntityTypeDefinition) => void;
   readonly onClose: () => void;
 }
@@ -65,6 +68,7 @@ export function UserTypeDialog({
   initial,
   existing,
   country,
+  formatCount = 0,
   onSubmit,
   onClose,
 }: UserTypeDialogProps) {
@@ -101,6 +105,7 @@ export function UserTypeDialog({
       open={open}
       onClose={onClose}
       title={editing ? TYPE_FORM_COPY.editTitle : TYPE_FORM_COPY.createTitle}
+      description={typeFormLead(scope, mode, formatCount)}
       size="lg"
       footer={
         <div className="flex justify-end gap-2">
@@ -166,9 +171,13 @@ export function UserTypeDialog({
             <dt className="text-text-secondary">Más corto</dt>
             <dd className="font-mono text-text-primary">{ladder.level2 || "—"}</dd>
           </dl>
+          <span className="text-sm font-semibold text-text-primary">
+            {TYPE_FORM_COPY.shortLabelsTitle}{" "}
+            <span className="font-normal text-text-secondary">{TYPE_FORM_COPY.optional}</span>
+          </span>
           <div className="grid grid-cols-2 gap-2">
             <label className="flex flex-col gap-1 text-sm text-text-secondary">
-              {TYPE_FORM_COPY.shortLevel1Label} (opcional)
+              {TYPE_FORM_COPY.shortLevel1Label}
               <input
                 type="text"
                 value={fields.level1}
@@ -178,7 +187,7 @@ export function UserTypeDialog({
               />
             </label>
             <label className="flex flex-col gap-1 text-sm text-text-secondary">
-              {TYPE_FORM_COPY.shortLevel2Label} (opcional)
+              {TYPE_FORM_COPY.shortLevel2Label}
               <input
                 type="text"
                 value={fields.level2}
@@ -188,9 +197,11 @@ export function UserTypeDialog({
               />
             </label>
           </div>
+          <span className="text-xs text-text-secondary">{TYPE_FORM_COPY.shortLabelsHint}</span>
         </div>
 
-        <p className="text-sm text-text-secondary">{typeFormNote(scope)}</p>
+        <p className="text-sm text-text-secondary">{TYPE_FORM_COPY.replacementInfo}</p>
+        <p className="text-sm text-text-secondary">{typeFormNote(scope, mode)}</p>
         {/* Enter dentro de un campo envía el formulario; el botón del pie es el visible. */}
         <button type="submit" className="hidden" aria-hidden tabIndex={-1} />
       </form>

@@ -198,12 +198,17 @@ export interface TypeChangeSummary {
   readonly note: string;
   /** ADR-169 §10: al dejar de ser Persona, el género se borra. */
   readonly dropsGender: boolean;
+  /** El tipo destino admite «Dato falso» y la entidad ya estaba en ese modo: sigue en él. */
+  readonly keepsSynthetic: boolean;
   /** ADR-229 §3: un tipo propio no tiene «Dato falso»; una entidad que lo usaba pasa a «Etiquetar». */
   readonly becomesLabel: boolean;
 }
 
 /** El aviso de que la entidad pasa a «Etiquetar» (ADR-229 §3, ADR-219 §3). */
 export const BECOMES_LABEL_NOTE = "Los tipos propios no tienen dato falso: pasa a «Etiquetar».";
+
+/** El aviso de que la entidad conserva «Dato falso» en el tipo nuevo. */
+export const KEEPS_SYNTHETIC_NOTE = "Sigue en «Dato falso».";
 
 export function summarizeTypeChange(
   group: EntityGroup,
@@ -219,21 +224,23 @@ export function summarizeTypeChange(
       next.indexInType,
     )}, el próximo libre.`,
     dropsGender: group.type === EntityType.Person && next.type !== EntityType.Person,
+    keepsSynthetic:
+      !isUserEntityType(next.type) && group.replacementMode === ReplacementMode.Synthetic,
     becomesLabel:
       isUserEntityType(next.type) && group.replacementMode === ReplacementMode.Synthetic,
   };
 }
 
-/** Toast: "Cambiaste el tipo de «X» · Ahora es Organización N.º 03". */
+/** Toast: «20-1234» ahora es CUIT · Se reemplaza como [CUIT 01]. `typeName` es el tipo destino. */
 export function typeChangeToastText(
   canonicalValue: string,
+  typeName: string,
   next: EditPreviewGroup | undefined,
-  userTypes: ReadonlyArray<UserEntityTypeDefinition> = NO_USER_TYPES,
 ): { readonly title: string; readonly description?: string } {
   return {
-    title: `Cambiaste el tipo de «${canonicalValue}»`,
+    title: `«${canonicalValue}» ahora es ${typeName}`,
     ...(next !== undefined
-      ? { description: `Ahora es ${describeEntityNumber(next.type, next.indexInType, userTypes)}` }
+      ? { description: `Se reemplaza como ${displayReplacement(next)}.` }
       : {}),
   };
 }

@@ -29,7 +29,13 @@ import { Button } from "../common/Button.js";
 import { Dialog } from "../common/Dialog.js";
 
 import { applyTypeChange } from "./applyEdits.js";
-import { BECOMES_LABEL_NOTE, summarizeTypeChange, typePreviewRequest } from "./editPreviews.js";
+import { NEW_TYPE_CHANGE_FOOTNOTE } from "./documentTypeCopy.js";
+import {
+  BECOMES_LABEL_NOTE,
+  KEEPS_SYNTHETIC_NOTE,
+  summarizeTypeChange,
+  typePreviewRequest,
+} from "./editPreviews.js";
 import { EntityLine } from "./EntityLine.js";
 import { EntityTypePicker } from "./EntityTypePicker.js";
 import { previewOfNewType } from "./newTypeInline.js";
@@ -133,7 +139,7 @@ export function ChangeTypeDialog({ group, open, onClose }: ChangeTypeDialogProps
               >
                 {choice.error ??
                   (choice.state.newType !== null && choice.canConfirm
-                    ? `Se crea el tipo «${choice.state.newType.name.trim()}» solo para este documento y la entidad pasa a ser ${previewOfNewType(choice.state.newType)}.`
+                    ? `Se crea el tipo «${choice.state.newType.name.trim()}» solo para este documento y la entidad pasa a ser ${previewOfNewType(choice.state.newType)}. ${NEW_TYPE_CHANGE_FOOTNOTE}`
                     : "Escribí el nombre del tipo nuevo.")}
               </span>
               <span className="h-5 text-text-secondary">
@@ -156,7 +162,11 @@ export function ChangeTypeDialog({ group, open, onClose }: ChangeTypeDialogProps
                 {summary.dropsGender ? "El género se borra: solo se usa para personas." : ""}
               </span>
               <span className="h-5 text-text-secondary">
-                {summary.becomesLabel ? BECOMES_LABEL_NOTE : ""}
+                {summary.becomesLabel
+                  ? BECOMES_LABEL_NOTE
+                  : summary.keepsSynthetic
+                    ? KEEPS_SYNTHETIC_NOTE
+                    : ""}
               </span>
             </>
           ) : (

@@ -12,13 +12,18 @@
 import type { UserEntityTypeDefinition } from "@anonly/anonymization-core";
 
 import { actions } from "../../core-adapter/actions.js";
+import { useEntitiesStore } from "../../store/entities.store.js";
 import { showToast } from "../common/toast.js";
 
 import {
   createdTypeToast,
+  CREATED_TYPE_HINT,
+  removedTypeHint,
   removedTypeToast,
   savedTypeToast,
+  SAVED_TYPE_HINT,
   TYPE_ACTION_FAILED_TOAST,
+  updatedTypeHint,
   updatedTypeToast,
 } from "./documentTypeCopy.js";
 import { discardLastEdit, editToast, recordEdit } from "./editHistory.js";
@@ -38,7 +43,7 @@ export function applyCreateDocumentType(definition: UserEntityTypeDefinition): b
   } catch {
     return failed(recorded);
   }
-  showToast(editToast({ title, tone: "success" }, recorded));
+  showToast(editToast({ title, description: CREATED_TYPE_HINT, tone: "success" }, recorded));
   return true;
 }
 
@@ -53,7 +58,7 @@ export async function applyUpdateDocumentType(
   } catch {
     return failed(recorded);
   }
-  showToast(editToast({ title }, recorded));
+  showToast(editToast({ title, description: updatedTypeHint(definition.name) }, recorded));
   return true;
 }
 
@@ -62,13 +67,16 @@ export async function applyRemoveDocumentType(
   definition: UserEntityTypeDefinition,
 ): Promise<boolean> {
   const title = removedTypeToast(definition.name);
+  const freed = (useEntitiesStore.getState().groupsByType.get(definition.id) ?? []).map(
+    (group) => group.canonicalValue,
+  );
   const recorded = recordEdit(title);
   try {
     await actions.removeDocumentType(definition.id);
   } catch {
     return failed(recorded);
   }
-  showToast(editToast({ title, tone: "deletion" }, recorded));
+  showToast(editToast({ title, description: removedTypeHint(freed), tone: "deletion" }, recorded));
   return true;
 }
 
@@ -81,6 +89,7 @@ export function applySaveDocumentType(definition: UserEntityTypeDefinition): voi
   if (!actions.saveDocumentType(definition.id)) return;
   showToast({
     title: savedTypeToast(definition.name),
+    description: SAVED_TYPE_HINT,
     tone: "success",
     actions: [{ label: "Deshacer", run: () => actions.unsaveDocumentType(definition.id) }],
   });

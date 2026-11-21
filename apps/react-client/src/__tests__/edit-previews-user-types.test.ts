@@ -79,10 +79,33 @@ describe("cambiar a un tipo propio", () => {
     ).toBe(false);
   });
 
+  it("un tipo base conserva «Dato falso»; uno propio pasa a «Etiquetar»", () => {
+    const synthetic = makeGroup({ replacementMode: ReplacementMode.Synthetic });
+    expect(
+      summarizeTypeChange(synthetic, {
+        groups: [previewGroup({ type: EntityType.Organization })],
+      })?.keepsSynthetic,
+    ).toBe(true);
+    expect(
+      summarizeTypeChange(synthetic, { groups: [previewGroup()] }, [afiliado])?.keepsSynthetic,
+    ).toBe(false);
+    expect(
+      summarizeTypeChange(makeGroup(), {
+        groups: [previewGroup({ type: EntityType.Organization })],
+      })?.keepsSynthetic,
+    ).toBe(false);
+  });
+
   it("el toast nombra el tipo propio", () => {
-    expect(typeChangeToastText("20-1234", previewGroup(), [afiliado])).toEqual({
-      title: "Cambiaste el tipo de «20-1234»",
-      description: "Ahora es Número de afiliado N.º 01",
+    expect(
+      typeChangeToastText(
+        "20-1234",
+        afiliado.name,
+        previewGroup({ replacementValue: "[NUMERO DE AFILIADO 01]" }),
+      ),
+    ).toEqual({
+      title: "«20-1234» ahora es Número de afiliado",
+      description: "Se reemplaza como [NUMERO DE AFILIADO 01].",
     });
   });
 });

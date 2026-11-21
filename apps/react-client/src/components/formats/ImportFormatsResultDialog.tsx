@@ -26,10 +26,26 @@ import {
   limitRejectionMessages,
   type ImportSummary,
 } from "./formatsImport.js";
+import {
+  IMPORT_SUMMARY_FOOTNOTE,
+  importedTypeDetail,
+  importSummaryLead,
+  mergedFormatDetail,
+} from "./formatTexts.js";
 
 export type ImportDialogResult =
-  | { readonly kind: "summary"; readonly summary: ImportSummary }
-  | { readonly kind: "rejected"; readonly messages: ReadonlyArray<string> };
+  | {
+      readonly kind: "summary";
+      readonly summary: ImportSummary;
+      /** El nombre del archivo elegido, para la línea bajo el título. */
+      readonly fileName: string;
+    }
+  | {
+      readonly kind: "rejected";
+      readonly messages: ReadonlyArray<string>;
+      /** La línea gris bajo el motivo; `null` si no lleva. */
+      readonly hint?: string | null;
+    };
 
 export interface ImportFormatsResultDialogProps {
   /** `null` = cerrado. */
@@ -76,6 +92,9 @@ export function ImportFormatsResultDialog({
           {shown.map((message) => (
             <li key={message}>{message}</li>
           ))}
+          {result.hint !== undefined && result.hint !== null ? (
+            <li className="text-text-secondary">{result.hint}</li>
+          ) : null}
           {hidden > 0 ? (
             <li className="text-text-secondary">
               {hidden === 1 ? "Y 1 problema más." : `Y ${hidden} problemas más.`}
@@ -93,6 +112,7 @@ export function ImportFormatsResultDialog({
       open
       onClose={onClose}
       title="Resultado de la importación"
+      description={importSummaryLead(result.fileName)}
       icon={
         <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-success/15 text-text-primary">
           <FileCheckIcon className="h-[18px] w-[18px]" aria-hidden />
@@ -100,7 +120,10 @@ export function ImportFormatsResultDialog({
       }
       size="lg"
       footer={
-        <div className="flex justify-end gap-2">
+        <div className="flex items-center gap-3">
+          <span className="min-w-0 flex-1 text-sm text-text-secondary">
+            {IMPORT_SUMMARY_FOOTNOTE}
+          </span>
           <Button variant="primary" onClick={onViewInList}>
             Ver en la lista
           </Button>
@@ -119,7 +142,14 @@ export function ImportFormatsResultDialog({
               {item.typeName !== undefined ? (
                 <span className="text-text-secondary"> · {item.typeName}</span>
               ) : (
-                <span className="text-text-secondary"> · tipo</span>
+                <span className="text-text-secondary">
+                  {" · "}
+                  {importedTypeDetail(
+                    imported.filter(
+                      (other) => other.kind === "format" && other.typeName === item.name,
+                    ).length,
+                  )}
+                </span>
               )}
             </li>
           ))}
@@ -131,8 +161,8 @@ export function ImportFormatsResultDialog({
         >
           {merged.map((item) => (
             <li key={`merged-${item.name}`}>
-              {item.name}
-              <span className="text-text-secondary"> · {item.typeName}</span>
+              <span className="font-medium">{item.typeName}</span>
+              <span className="text-text-secondary"> · {mergedFormatDetail(item.name)}</span>
             </li>
           ))}
         </Group>

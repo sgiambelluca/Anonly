@@ -131,14 +131,45 @@ export const TYPE_FORM_COPY = {
   editButton: "Guardar",
   nameLabel: "Nombre del tipo",
   ladderTitle: "Cómo se reemplaza",
-  shortLevel1Label: "Versión corta 1",
-  shortLevel2Label: "Versión más corta",
+  shortLabelsTitle: "Versiones cortas",
+  optional: "(opcional)",
+  shortLevel1Label: "Corta",
+  shortLevel2Label: "Mínima",
+  shortLabelsHint: "Si las dejás vacías, se arman solas con las primeras letras.",
+  replacementInfo:
+    "Se puede etiquetar, ocultar parcialmente o tapar con negro. Los tipos propios no tienen dato falso.",
   idleSlot: "Para un dato que el catálogo no conoce, como un legajo o una historia clínica.",
   noteSaved: "Se guarda en este equipo y se aplica a los próximos documentos que abras.",
-  noteDocument: "Este tipo es solo de este documento.",
+  noteSavedEdit:
+    "El cambio se aplica al próximo documento que abras. Lo que ya exportaste queda como estaba.",
+  noteDocument:
+    "Es solo de este documento: se pierde al cerrarlo. Para tenerlo siempre y que se detecte solo, crealo en la pantalla de inicio y sumale un formato.",
+  noteDocumentEdit:
+    "Sigue siendo solo de este documento. Los tipos guardados solo se editan desde «Formatos de detección», en la pantalla de inicio.",
 } as const;
 
+/** La línea bajo el título del formulario, según el alcance y si se crea o se edita. */
+export function typeFormLead(
+  scope: UserTypeScope,
+  mode: UserTypeMode,
+  formatCount: number,
+): string {
+  if (scope === "document") {
+    return mode === "edit"
+      ? "Cambia cómo se reemplazan todas las entidades de este tipo."
+      : "Para un dato que el análisis no conoce. Numera y se reemplaza por separado.";
+  }
+  if (mode === "create")
+    return "Un dato que el catálogo no conoce, con nombre y numeración propios.";
+  return `Cambiá cómo se llama y cómo se abrevia. ${
+    formatCount === 1 ? "Su formato no cambia." : `Sus ${formatCount} formatos no cambian.`
+  }`;
+}
+
 /** La nota al pie del cuerpo según el alcance (`Components.md` §13b.3). */
-export function typeFormNote(scope: UserTypeScope): string {
-  return scope === "saved" ? TYPE_FORM_COPY.noteSaved : TYPE_FORM_COPY.noteDocument;
+export function typeFormNote(scope: UserTypeScope, mode: UserTypeMode = "create"): string {
+  if (scope === "saved") {
+    return mode === "edit" ? TYPE_FORM_COPY.noteSavedEdit : TYPE_FORM_COPY.noteSaved;
+  }
+  return mode === "edit" ? TYPE_FORM_COPY.noteDocumentEdit : TYPE_FORM_COPY.noteDocument;
 }

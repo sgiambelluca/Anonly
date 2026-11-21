@@ -30,6 +30,7 @@ import { removedGroupOverlapReveal } from "../conflicts/conflictResolution.js";
 import { TYPE_ACTION_FAILED_TOAST } from "./documentTypeCopy.js";
 import { discardLastEdit, editToast, recordEdit } from "./editHistory.js";
 import { typeChangeToastText } from "./editPreviews.js";
+import { typeSingular } from "./entityTypeLabels.js";
 import {
   discardedTextToastText,
   enabledToastText,
@@ -140,7 +141,11 @@ export function applyTypeChange(
   next: EditPreviewGroup | undefined,
   newType?: UserEntityTypeDefinition,
 ): boolean {
-  const text = typeChangeToastText(group.canonicalValue, next, currentUserTypes());
+  const text = typeChangeToastText(
+    group.canonicalValue,
+    newType?.name ?? typeSingular(type, currentUserTypes()),
+    next,
+  );
   const recorded = recordEdit(text.title);
   if (newType !== undefined) {
     try {
@@ -155,7 +160,7 @@ export function applyTypeChange(
   // Con un tipo nuevo el Core no previsualizó el cambio (el tipo todavía no
   // existía): el toast nombra el tipo desde la definición recién creada.
   const description =
-    newType !== undefined ? { ...text, description: `Ahora es ${newType.name}` } : text;
+    newType !== undefined ? { ...text, description: "Tipo nuevo, solo de este documento." } : text;
   showToast(editToast(description, recorded));
   return true;
 }

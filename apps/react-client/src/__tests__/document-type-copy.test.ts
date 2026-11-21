@@ -9,6 +9,14 @@ import { describe, expect, it } from "vitest";
 import {
   CHANGE_TYPE_FIRST_HINT,
   createdTypeToast,
+  CREATED_TYPE_HINT,
+  NEW_TYPE_ADD_FOOTNOTE,
+  removedTypeHint,
+  removeTypeLead,
+  SAVED_CAPTION_TOOLTIP,
+  SAVED_TYPE_HINT,
+  SAVED_TYPE_TOOLTIP,
+  updatedTypeHint,
   EMPTY_TYPE_ACTION,
   EMPTY_TYPE_TEXT,
   FREED_ENTITIES_LEAD,
@@ -127,6 +135,31 @@ describe("avisos de las acciones y estado vacío", () => {
     expect(updatedTypeToast("Legajo")).toBe("Cambiaste el tipo «Legajo»");
     expect(removedTypeToast("Legajo")).toBe("Borraste el tipo «Legajo»");
     expect(savedTypeToast("Legajo")).toBe("«Legajo» se guardó para los próximos documentos");
+  });
+
+  it("los subtítulos dicen qué pasó y qué sigue", () => {
+    expect(CREATED_TYPE_HINT).toContain("usá «Agregar entidad»");
+    expect(SAVED_TYPE_HINT).toContain("«Formatos de detección»");
+    expect(updatedTypeHint("Legajo")).toBe("Ahora es «Legajo» y se reemplaza como [LEGAJO 01].");
+    expect(removedTypeHint([])).toBe("No tenía entidades.");
+    expect(removedTypeHint(["AF-0034417"])).toBe("«AF-0034417» quedó libre y descubierta.");
+    expect(removedTypeHint(["a", "b"])).toBe("2 entidades quedaron libres y descubiertas.");
+  });
+
+  it("la línea de «Borrar tipo…» cuenta entidades y apariciones", () => {
+    expect(removeTypeLead(0, 0)).toBe("No tiene entidades. Se borra solo de este documento.");
+    expect(removeTypeLead(1, 3)).toBe("Tiene 1 entidad con 3 apariciones.");
+    expect(removeTypeLead(2, 1)).toBe("Tiene 2 entidades con 1 aparición.");
+  });
+
+  it("los tooltips de un tipo guardado", () => {
+    expect(SAVED_TYPE_TOOLTIP).toBe("Guardado en este equipo");
+    expect(SAVED_CAPTION_TOOLTIP).toBe(
+      "Tipo guardado en este equipo: aparece en los próximos documentos",
+    );
+    expect(NEW_TYPE_ADD_FOOTNOTE).toBe(
+      "Tipo nuevo, solo de este documento. Después lo editás o lo guardás desde ⋯ en el panel.",
+    );
   });
 
   it("el estado vacío dice lo de UX_Guidelines.md §11b.15", () => {

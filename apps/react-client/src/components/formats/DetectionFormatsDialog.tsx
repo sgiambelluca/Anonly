@@ -18,7 +18,7 @@
  *   «Editar»: es la tanda 2 de F7.
  */
 
-import { isUserEntityType, validateFormatsFile } from "@anonly/anonymization-core";
+import { getCatalog, isUserEntityType, validateFormatsFile } from "@anonly/anonymization-core";
 import type {
   FormatsFileContent,
   UserEntityTypeDefinition,
@@ -58,7 +58,14 @@ import {
   type FormatsSectionId,
   type TypeBandModel,
 } from "./formatsTree.js";
-import { describeFormatsFileIssues, formatIssueText } from "./formatTexts.js";
+import {
+  deletedFormatToast,
+  deletedSavedTypeToast,
+  describeFormatsFileIssues,
+  formatIssueText,
+  importRejectionHint,
+  restoredFormatToast,
+} from "./formatTexts.js";
 import { FormatTypeBand } from "./FormatTypeBand.js";
 import { ImportFormatsResultDialog, type ImportDialogResult } from "./ImportFormatsResultDialog.js";
 import { ImportNameConflictsDialog, type NameConflictEntry } from "./ImportNameConflictsDialog.js";
@@ -121,6 +128,7 @@ export function DetectionFormatsDialog({ open, onClose, onSaved }: DetectionForm
   // El paso de conflictos de nombre: el archivo ya validado, qué formatos chocaban
   // al empezar (la lista de campos no cambia mientras se escribe) y los nombres nuevos.
   const [nameStep, setNameStep] = useState<{
+    readonly fileName: string;
     readonly content: FormatsFileContent;
     readonly indices: ReadonlyArray<number>;
     readonly renames: ReadonlyMap<number, string>;
@@ -242,6 +250,7 @@ export function DetectionFormatsDialog({ open, onClose, onSaved }: DetectionForm
       setImportResult({
         kind: "rejected",
         messages: describeFormatsFileIssues(text, validation.issues, current.country),
+        hint: importRejectionHint(validation.issues.map((issue) => issue.code)),
       });
       return;
     }
@@ -249,6 +258,7 @@ export function DetectionFormatsDialog({ open, onClose, onSaved }: DetectionForm
     if (plan.conflicts.length > 0) {
       // Antes del resumen, y sin importar nada hasta resolverlo (ADR-223 §6).
       setNameStep({
+        fileName: file.name,
         content: validation.content,
         indices: plan.conflicts.map((conflict) => conflict.index),
         renames: new Map(),
@@ -256,7 +266,7 @@ export function DetectionFormatsDialog({ open, onClose, onSaved }: DetectionForm
       return;
     }
     if (plan.change !== null) apply(plan.change);
-    setImportResult({ kind: "summary", summary: plan.summary });
+    setImportResult({ kind: "summary", summary: plan.summary, fileName: file.name });
   }
 
   const nameEntries: ReadonlyArray<NameConflictEntry> | null = useMemo(() => {
@@ -282,7 +292,7 @@ export function DetectionFormatsDialog({ open, onClose, onSaved }: DetectionForm
     if (plan.conflicts.length > 0) return;
     if (plan.change !== null) apply(plan.change);
     setNameStep(null);
-    setImportResult({ kind: "summary", summary: plan.summary });
+    setImportResult({ kind: "summary", summary: plan.summary, fileName: nameStep.fileName });
   }
 
   function viewImported(): void {
@@ -297,8 +307,11 @@ export function DetectionFormatsDialog({ open, onClose, onSaved }: DetectionForm
         {
           label: "Restaurar original",
           onSelect: () => {
+            const basedOn = state.userFormats.find((format) => format.id === row.id)?.basedOn;
+            const original = getCatalog(state.country).find((info) => info.id === basedOn);
             apply({ kind: "restoreOriginal", formatId: row.id });
-            announce("Se restauró el formato original", row.name);
+            const toast = restoredFormatToast(original?.name ?? row.name);
+            announce(toast.title, toast.description);
           },
         },
       ];
@@ -310,7 +323,8 @@ export function DetectionFormatsDialog({ open, onClose, onSaved }: DetectionForm
           danger: true,
           onSelect: () => {
             apply({ kind: "deleteFormat", formatId: row.id });
-            announce("Formato borrado", row.name);
+            const toast = deletedFormatToast(row.name);
+            announce(toast.title, toast.description);
           },
         },
       ];
@@ -347,7 +361,7 @@ export function DetectionFormatsDialog({ open, onClose, onSaved }: DetectionForm
       ? state.userTypes.find((type) => type.id === typeDialog.typeId)
       : undefined;
   const typeToDelete = state.userTypes.find((type) => type.id === deleteTypeId) ?? null;
-  const pendingText = pending > 0 ? describePendingChanges(pending) : "";
+  const pendingText = describePendingChanges(pending);
 
   return (
     <>
@@ -463,6 +477,11 @@ export function DetectionFormatsDialog({ open, onClose, onSaved }: DetectionForm
                       <ChevronDownIcon className="h-4 w-4" aria-hidden />
                     )}
                     {section.title}
+                    {section.hint === "" ? null : (
+                      <span className="truncate text-xs font-normal normal-case tracking-normal">
+                        {section.hint}
+                      </span>
+                    )}
                   </button>
                   {sectionFolded ? null : (
                     <div className="flex flex-col gap-2">
@@ -574,6 +593,7 @@ export function DetectionFormatsDialog({ open, onClose, onSaved }: DetectionForm
         {...(editingType !== undefined ? { initial: editingType } : {})}
         existing={state.userTypes.filter((type) => type.id !== editingType?.id)}
         country={state.country}
+        formatCount={editingType === undefined ? 0 : formatsOfType(state, editingType.id).length}
         onSubmit={(definition) => {
           apply(
             typeDialog?.mode === "edit"
@@ -594,10 +614,8 @@ export function DetectionFormatsDialog({ open, onClose, onSaved }: DetectionForm
           const count = formatsOfType(state, typeToDelete.id).length;
           apply({ kind: "deleteType", typeId: typeToDelete.id });
           setDeleteTypeId(null);
-          announce(
-            "Tipo borrado",
-            count === 0 ? typeToDelete.name : `${typeToDelete.name} y sus ${count} formatos`,
-          );
+          const toast = deletedSavedTypeToast(typeToDelete.name, count);
+          announce(toast.title, toast.description);
         }}
         onCancel={() => setDeleteTypeId(null)}
       />

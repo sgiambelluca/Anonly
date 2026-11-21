@@ -25,8 +25,23 @@ import { describe, expect, it } from "vitest";
 
 import {
   admittedTypesList,
+  BASE_STRUCTURE_LABEL,
   countPieces,
+  deletedFormatToast,
+  deletedSavedTypeToast,
   describeFilePath,
+  EDIT_BASE_TOOLTIP,
+  EDIT_OWN_TOOLTIP,
+  FORMAT_EXAMPLE_TOOLTIP,
+  IMPORT_REJECTION_HINTS,
+  IMPORT_SUMMARY_FOOTNOTE,
+  importedTypeDetail,
+  importRejectionHint,
+  importSummaryLead,
+  mergedFormatDetail,
+  partialTypeNote,
+  restoredFormatToast,
+  SECTION_HINTS,
   describeFormatsFileIssues,
   entityTypeName,
   formatIssueReason,
@@ -384,5 +399,53 @@ describe("textos de un archivo rechazado", () => {
     ]);
     expect(describeFormatsFileIssues("no es json", issues, "AR")).toHaveLength(2);
     expect(describeFormatsFileIssues("[]", issues, "AR")).toHaveLength(2);
+  });
+});
+
+describe("textos de «Formatos de detección» (pasada de textos F7)", () => {
+  it("las etiquetas, aclaraciones y tooltips de la lista", () => {
+    expect(BASE_STRUCTURE_LABEL).toBe("Del catálogo · se edita como copia");
+    expect(SECTION_HINTS.own).toBe("Los creaste vos: se pueden editar y borrar");
+    expect(SECTION_HINTS.catalog).toContain("Vienen con Anonly, para Argentina");
+    expect(FORMAT_EXAMPLE_TOOLTIP).toBe("Ejemplo de lo que reconoce");
+    expect(EDIT_BASE_TOOLTIP).toBe("Editar: se edita una copia; el original queda guardado");
+    expect(EDIT_OWN_TOOLTIP).toBe("Editar el formato");
+  });
+
+  it("los avisos de restaurar, borrar un formato y borrar un tipo", () => {
+    expect(restoredFormatToast("DNI")).toEqual({
+      title: "Volvió el formato original «DNI»",
+      description: "Se borró tu copia editada.",
+    });
+    expect(deletedFormatToast("Legajo")).toEqual({
+      title: "Se borró el formato «Legajo»",
+      description: "Se aplica cuando guardes.",
+    });
+    expect(deletedSavedTypeToast("Legajo", 2).description).toBe(
+      "Con sus 2 formatos. Se aplica cuando guardes.",
+    );
+    expect(deletedSavedTypeToast("Legajo", 1).description).toBe(
+      "Con su formato. Se aplica cuando guardes.",
+    );
+    expect(deletedSavedTypeToast("Legajo", 0).description).toBe("Se aplica cuando guardes.");
+  });
+
+  it("exportar e importar", () => {
+    expect(partialTypeNote(1, 3)).toBe("Va con 1 de 3");
+    expect(importSummaryLead("formatos.anonly-formatos")).toBe(
+      "De formatos.anonly-formatos. Todo llega prendido y se aplica cuando guardes.",
+    );
+    expect(importedTypeDetail(2)).toBe("tipo nuevo · 2 formatos");
+    expect(importedTypeDetail(1)).toBe("tipo nuevo · 1 formato");
+    expect(importedTypeDetail(0)).toBe("tipo nuevo");
+    expect(mergedFormatDetail("HC de guardia")).toBe("suma «HC de guardia»");
+    expect(IMPORT_SUMMARY_FOOTNOTE).toBe("Cada formato se puede apagar o borrar desde la lista.");
+  });
+
+  it("la línea gris del rechazo según qué falló", () => {
+    expect(importRejectionHint(["wrong_kind"])).toBe(IMPORT_REJECTION_HINTS.notAnonly);
+    expect(importRejectionHint(["not_json"])).toBe(IMPORT_REJECTION_HINTS.notAnonly);
+    expect(importRejectionHint(["format_invalid"])).toBe(IMPORT_REJECTION_HINTS.invalid);
+    expect(importRejectionHint(["version_newer"])).toBeNull();
   });
 });

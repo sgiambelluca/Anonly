@@ -12,6 +12,7 @@ import {
   fieldsOf,
   replacementLadder,
   TYPE_FORM_COPY,
+  typeFormLead,
   typeFormNote,
 } from "../components/formats/userTypeForm.js";
 
@@ -98,6 +99,28 @@ describe("userTypeForm", () => {
   it("la nota al pie depende del alcance", () => {
     expect(typeFormNote("saved")).toBe(TYPE_FORM_COPY.noteSaved);
     expect(typeFormNote("saved")).toContain("próximos documentos");
-    expect(typeFormNote("document")).toBe("Este tipo es solo de este documento.");
+    expect(typeFormNote("document")).toBe(
+      "Es solo de este documento: se pierde al cerrarlo. Para tenerlo siempre y que se detecte solo, crealo en la pantalla de inicio y sumale un formato.",
+    );
+    expect(typeFormNote("saved", "edit")).toBe(
+      "El cambio se aplica al próximo documento que abras. Lo que ya exportaste queda como estaba.",
+    );
+    expect(typeFormNote("document", "edit")).toContain(
+      "solo se editan desde «Formatos de detección»",
+    );
+    expect(typeFormLead("saved", "create", 0)).toBe(
+      "Un dato que el catálogo no conoce, con nombre y numeración propios.",
+    );
+    expect(typeFormLead("saved", "edit", 2)).toBe(
+      "Cambiá cómo se llama y cómo se abrevia. Sus 2 formatos no cambian.",
+    );
+    expect(typeFormLead("saved", "edit", 1)).toContain("Su formato no cambia.");
+    expect(typeFormLead("document", "create", 0)).toContain("Numera y se reemplaza por separado.");
+    expect(typeFormLead("document", "edit", 0)).toContain("todas las entidades de este tipo");
+    expect(TYPE_FORM_COPY.shortLabelsTitle).toBe("Versiones cortas");
+    expect([TYPE_FORM_COPY.shortLevel1Label, TYPE_FORM_COPY.shortLevel2Label]).toEqual([
+      "Corta",
+      "Mínima",
+    ]);
   });
 });

@@ -6,7 +6,12 @@
  * Node sin jsdom.
  */
 
-import type { Conflict, EntityGroup, UserEntityTypeId } from "@anonly/anonymization-core";
+import {
+  userTypeLabel,
+  type Conflict,
+  type EntityGroup,
+  type UserEntityTypeId,
+} from "@anonly/anonymization-core";
 
 /** La leyenda de la banda de un tipo que vive solo en este documento. */
 export const DOCUMENT_ONLY_CAPTION = "solo en este documento";
@@ -14,6 +19,16 @@ export const DOCUMENT_ONLY_CAPTION = "solo en este documento";
 export const SAVED_CAPTION = "guardado";
 /** El `title` del punto punteado del selector (ADR-229 §2). */
 export const DOCUMENT_ONLY_TOOLTIP = "Solo en este documento: no se guarda";
+/** El `title` del punto de un tipo guardado en el selector. */
+export const SAVED_TYPE_TOOLTIP = "Guardado en este equipo";
+/** El `title` de la leyenda «guardado» de la banda de un tipo. */
+export const SAVED_CAPTION_TOOLTIP =
+  "Tipo guardado en este equipo: aparece en los próximos documentos";
+
+/** El pie del selector con «Nuevo tipo» elegido y sin error (Cambiar tipo). */
+export const NEW_TYPE_CHANGE_FOOTNOTE = "Después lo editás o lo guardás desde ⋯ en el panel.";
+/** El pie de «Agregar entidad» con «Nuevo tipo» elegido y sin error. */
+export const NEW_TYPE_ADD_FOOTNOTE = `Tipo nuevo, solo de este documento. ${NEW_TYPE_CHANGE_FOOTNOTE}`;
 
 export const EMPTY_TYPE_TEXT =
   "Todavía no tiene entidades. Seleccioná el texto en el PDF o agregalo desde acá.";
@@ -33,6 +48,14 @@ export const FREED_ENTITIES_REST =
 export const FREED_ENTITIES_WARNING = `${FREED_ENTITIES_LEAD} ${FREED_ENTITIES_REST}`;
 /** Sugerencia que acompaña al aviso (ADR-225 §4: «sugiere cambiarles el tipo antes»). */
 export const CHANGE_TYPE_FIRST_HINT = "Si querés seguir ocultándolas, cambiales el tipo antes.";
+
+/** La línea bajo el título de «Borrar tipo…»: cuántas entidades y apariciones se pierden. */
+export function removeTypeLead(entityCount: number, occurrenceCount: number): string {
+  if (entityCount === 0) return "No tiene entidades. Se borra solo de este documento.";
+  const entities = entityCount === 1 ? "1 entidad" : `${entityCount} entidades`;
+  const occurrences = occurrenceCount === 1 ? "1 aparición" : `${occurrenceCount} apariciones`;
+  return `Tiene ${entities} con ${occurrences}.`;
+}
 
 export function removeTypeTitle(name: string): string {
   return `¿Borrar el tipo «${name}»?`;
@@ -92,6 +115,26 @@ export function removedTypeToast(name: string): string {
 
 export function savedTypeToast(name: string): string {
   return `«${name}» se guardó para los próximos documentos`;
+}
+
+/** El subtítulo del aviso de crear un tipo del documento. */
+export const CREATED_TYPE_HINT =
+  "Ahora seleccioná en el PDF lo que es de este tipo, o usá «Agregar entidad».";
+
+/** El subtítulo del aviso de guardar un tipo del documento. */
+export const SAVED_TYPE_HINT =
+  "Va a estar en los próximos documentos. Desde ahora se edita en «Formatos de detección».";
+
+/** El subtítulo del aviso de editar un tipo: cómo se reemplaza ahora (con el primer número). */
+export function updatedTypeHint(name: string): string {
+  return `Ahora es «${name}» y se reemplaza como [${userTypeLabel(name)} 01].`;
+}
+
+/** El subtítulo del aviso de borrar un tipo: qué pasó con sus entidades. */
+export function removedTypeHint(values: ReadonlyArray<string>): string {
+  if (values.length === 0) return "No tenía entidades.";
+  if (values.length === 1) return `«${values[0] ?? ""}» quedó libre y descubierta.`;
+  return `${values.length} entidades quedaron libres y descubiertas.`;
 }
 
 export const TYPE_ACTION_FAILED_TOAST = "No se pudo aplicar el cambio al tipo.";
