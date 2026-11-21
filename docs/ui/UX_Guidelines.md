@@ -962,7 +962,7 @@ Atajos de teclado:
 | `Cmd/Ctrl+F` | buscar en entidades |
 | `Cmd/Ctrl+E` | exportar |
 | `Cmd/Ctrl+.` | cancelar pipeline |
-| `Cmd/Ctrl+Z` | deshacer (ADR-172) |
+| `Cmd/Ctrl+Z` | deshacer (ADR-172); en «Formatos de detección», el último cambio del borrador (§11b.11) |
 | `Cmd/Ctrl+Y`, `Cmd/Ctrl+Shift+Z` | rehacer (ADR-172) |
 | `Cmd/Ctrl++/-/0` | zoom visores |
 | `↑/↓` | navegar grupos |
@@ -1108,6 +1108,11 @@ espera que el usuario elija), la confirmación suma un aviso, antes de la lista:
   «Deshacer», sin la pista `Ctrl+Z`, y `Ctrl+Z` no lo alcanza (ADR-225 §5).
 - Dentro de «Formatos de detección», las acciones de un menú ⋯ se deshacen desde su aviso hasta
   que se guarda.
+- **Ahí `Ctrl+Z` también deshace el último cambio del borrador** (decisión del mantenedor,
+  2026-11-20). Es porque el diálogo atrapa el foco y el «Deshacer» del aviso no se alcanza con el
+  teclado. No actúa con el foco en un campo de texto, donde deshace lo escrito, ni con un
+  subdiálogo abierto. El aviso sigue igual de legible: trae «Deshacer» y la pista `Ctrl+Z`. La
+  ayuda de atajos lo lista.
 
 ### 11b.12 El tooltip del visor
 

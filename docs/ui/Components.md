@@ -1436,6 +1436,13 @@ apps/react-client/src/components/
   viajan solos». «Elegir todo» y «Nada». Pie con el resumen y «Exportar archivo», apagado sin
   selección. Baja `formatos.anonly-formatos` como cualquier descarga.
 - **`ImportFormatsResultDialog`**: se abre después de elegir el archivo y de `validateFormatsFile`.
+  - **Conflicto de nombre** (decisión del mantenedor, 2026-11-20; ADR-223 §6): si un formato del
+    archivo tiene el nombre de uno que el usuario ya tiene, sin ser idéntico, antes del resumen
+    aparece un paso «Hay formatos con un nombre que ya usás». Cada uno trae su campo con el nombre
+    del archivo y, debajo, en una ranura de alto fijo, el texto de `name_taken` de
+    `UX_Guidelines.md` §11b.16 mientras siga chocando (también contra otro del mismo archivo).
+    «Importar» queda apagado hasta que no quede ningún conflicto. «Cancelar» no importa nada. El
+    resumen después dice qué formatos se renombraron.
   - **Resumen**: «Se importó», «Se sumó a un tipo que ya tenías» y «No se importó», cada grupo con
     su cantidad y, el último, el motivo de cada elemento. Aviso amarillo si un formato comparte
     textos con otro. Botón «Ver en la lista».

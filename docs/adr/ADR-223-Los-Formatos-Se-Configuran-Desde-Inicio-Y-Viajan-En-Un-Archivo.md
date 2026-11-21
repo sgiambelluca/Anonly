@@ -195,6 +195,7 @@ sí conoce.
 | Tipo con la misma etiqueta que uno existente | Sus formatos se suman al existente |
 | Formato idéntico a uno existente (`compareFormat`) | No se importa; figura en el resumen |
 | Formato que comparte textos con otro | Se importa con el mismo aviso que al crear |
+| Formato con el nombre de uno existente, sin ser idéntico | El usuario le pone otro nombre antes de importar, en un paso propio del diálogo (`Components.md` §13b.4); no se importa nada hasta resolverlo. Precisión del mantenedor, 2026-11-20 |
 | Referencia a un formato que no existe en los catálogos de esta versión | No se importa; figura en el resumen |
 | Todo lo demás | Se importa prendido, con ids nuevos |
 
