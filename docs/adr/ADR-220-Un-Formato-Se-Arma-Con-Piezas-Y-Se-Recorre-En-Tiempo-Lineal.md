@@ -5,6 +5,9 @@
 - **Estado**: Aceptado por el mantenedor el 2026-10-19, con los detalles
   técnicos del planificador (`Plan_1.1.md` §4).
 - **Fecha**: 2026-10-19.
+- **Ampliado por ADR-233** (2026-11-21): `FormatDefinition` suma
+  `variantNames`, opcional, con el nombre de cada variante (§1). No cambia
+  qué se reconoce.
 - **Decidido por**: el mantenedor (2026-10-13 y 2026-10-19), a propuesta del
   planificador en lo técnico.
 - **Origen**: `Roadmap_1.x.md` §4 y [`Plan_1.1.md`](../roadmap/Plan_1.1.md).

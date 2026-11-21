@@ -12,6 +12,8 @@
 
 > **1.1 / precisiones de la auditoría de F4, 2026-11-20**, sin tipos, eventos ni códigos nuevos, todas en §3.5: `addManualEntity` declara el `InvalidInputError` de un tipo propio desconocido (ADR-219 §1); `getDocumentEntityTypes` sin sesión devuelve `[]`, como el motor; `updateDocumentEntityType` nombra el `GROUP_REPLACEMENT_CHANGED` que Grouping emite junto con `ENTITY_GROUP_UPDATED`; y la precondición de `reanalyze` suma `Done`, como decidió ADR-040. Además, por decisión del mantenedor (ADR-223 §6), `validateFormatsFile` rechaza como `version_newer` una referencia a un país que esta versión no conoce.
 
+> **1.1 / ADR-233, aceptado el 2026-11-21**: una variante puede tener nombre. §5.2 gana `FormatDefinition.variantNames` (opcional, en paralelo a `variants`) y dos códigos de `FormatIssueCode`, `variant_name_too_long` y `variant_names_mismatch`, que `testFormat` no cuenta como problema de forma. El nombre no cambia qué se reconoce ni lo que `compareFormat` considera idéntico. Sin eventos ni constantes nuevas.
+
 > Define **todos** los tipos, interfaces, enums, error codes y contratos compartidos entre motores. Es el único paquete del que un motor puede importar tipos. Un implementador debe leer este archivo **completo** antes de tocar cualquier motor.
 
 **Paquete**: `@anonly/shared`
@@ -918,6 +920,9 @@ export interface FormatDefinition {
   readonly name: string;
   readonly entityType: EntityTypeId;                     // tipo propio o uno de FORMAT_ADMITTING_BASE_TYPES
   readonly variants: ReadonlyArray<ReadonlyArray<FormatPiece>>;
+  // ADR-233: el nombre de cada variante, en el orden de `variants` y con su mismo largo.
+  // Ausente = todas con el nombre automático de la interfaz; "" o solo espacios = esa variante.
+  readonly variantNames?: ReadonlyArray<string>;
   readonly contextBefore?: ReadonlyArray<string>;        // ausente = sin contexto; [] o una palabra en blanco = context_empty
   readonly basedOn?: string;                             // ADR-220 §4: id del formato base editado
   readonly enabled: boolean;
@@ -982,6 +987,7 @@ export interface UserEntityTypeValidation {
 export type FormatIssueCode =
   | "name_empty" | "name_too_long" | "name_taken"
   | "no_variants" | "too_many_variants"
+  | "variant_name_too_long" | "variant_names_mismatch"   // ADR-233
   | "variant_empty" | "variant_without_chars" | "too_many_pieces"
   | "chars_range_invalid" | "chars_repeat_too_large"
   | "text_empty" | "text_too_long"
@@ -1070,6 +1076,10 @@ export type FormatsFileValidation =
   tipo propio presente en `userTypes` o el tipo base dentro de
   `FORMAT_ADMITTING_BASE_TYPES`, y el autómata compilado dentro de
   `FORMAT_MAX_STATES`. `id_invalid` cuando el `id` no es `fmt:` + UUID v4.
+  Con `variantNames` (ADR-233): `variant_names_mismatch` si su largo no es el
+  de `variants`, y `variant_name_too_long`, con `variantIndex`, si un nombre
+  pasa de `FORMAT_MAX_TEXT` caracteres. Un nombre vacío o de espacios es el
+  automático y no da nada; los nombres repetidos se admiten.
   Las definiciones `structure` del catálogo (`CatalogFormatInfo.definition`,
   con id `fmt:base:<id del patrón>`) son la excepción: nunca pasan por
   `validateFormat` ni entran en `userFormats`, porque al editarlas la
@@ -1079,14 +1089,16 @@ export type FormatsFileValidation =
   bordes, contexto y guarda de corrida, sobre el texto de muestra tal como
   llega. No aplica `enabled`. Devuelve `[]` si el formato tiene un problema
   de forma: algún código de `validateFormat` salvo `name_empty`,
-  `name_too_long`, `name_taken`, `type_unknown`, `type_not_admitted` e
+  `name_too_long`, `name_taken`, `variant_name_too_long`,
+  `variant_names_mismatch`, `type_unknown`, `type_not_admitted` e
   `id_invalid`. Esos no cambian qué se reconoce, y `testFormat` no recibe el
   contexto para revisarlos. La interfaz valida antes de guardar.
 - **`compareFormat`**: compara contra los formatos base de `country` que
   corren (prendidos y sin una copia editada prendida), y contra **todos** los
   propios y las referencias, prendidos o apagados: uno apagado también
   bloquea crear uno idéntico. Un formato idéntico va solo en `identicalTo`, y
-  no también en `overlaps`.
+  no también en `overlaps`. `variantNames` no cuenta: dos formatos que solo
+  difieren en los nombres de sus variantes son idénticos (ADR-233 §3).
 - **`getCatalog(country)`**: los formatos base de ese país más los
   universales, en el orden en que corren.
 - **`validateFormatsFile(text, country)`**: parsea el JSON y valida el archivo

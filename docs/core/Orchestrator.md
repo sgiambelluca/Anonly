@@ -6,8 +6,10 @@
 
 **Componente**: Orchestrator + façade `@anonly/anonymization-core` (no es un motor: **no tiene `EngineId`** y no implementa `IEngine`; este spec adapta la plantilla de 15 secciones de `ai/Module_Specification_Template.md` a un componente host)
 **Ubicación**: `packages/anonymization-core/src/`
-**Versión del spec**: 1.17.1
-**Última actualización**: 2026-11-20
+**Versión del spec**: 1.17.2
+**Última actualización**: 2026-11-21
+
+> **Nota (v1.17.2, ADR-233, 2026-11-21 — una variante puede tener nombre)**: `validateFormatsFile` acepta en cada formato `variantNames` ausente o como lista de textos; cualquier otra cosa es un formato con forma inválida (`schema_invalid`). El largo y el tope los revisa `validateFormat`, y su falla da `format_invalid` (`Regex_Engine.md` v2.1.0). No cambia ningún contrato del Orchestrator. Ver caso 52 y una fila nueva en §14.
 
 > **Nota (v1.17.1, 2026-11-20 — precisiones de F4b, de la auditoría de F4 y del mantenedor)**:
 > - El ítem 37 de §15 aclara que la delegación de `renderLegend` en `renderLegendPages` y un `userTypes: []` provisional llegan con el commit de contrato de F4b (`Plan_1.1.md` §7). F4 llena `userTypes`.
@@ -383,6 +385,7 @@ El Orchestrator **no define códigos de error nuevos**: propaga `SerializedEngin
     - una referencia de `catalogRefs` a un país que esta versión no conoce da `version_newer` (ADR-223 §6, precisión del 2026-11-20);
     - un formato cuyo tipo falta da solo `format_type_missing`, sin sumar `format_invalid` por la misma causa;
     - cada issue lleva en `path` el elemento que falla, como `types[0]` o `formats[1]`;
+    - un formato con `variantNames` que no es una lista de textos da `schema_invalid`; uno cuyo `variantNames` no tiene el largo de `variants`, `format_invalid`; uno con nombres de variante válidos pasa y los conserva tal cual (ADR-233 §4);
     - un archivo válido da `ok: true` con el contenido.
 53. **Editar y borrar un tipo del documento** (ADR-225 §3 y §4):
     - `updateDocumentEntityType` delega en `grouping.updateSessionType`, y las páginas de los grupos que cambiaron de reemplazo se vuelven a renderizar;
@@ -450,6 +453,7 @@ la nueva clave. Fakes remotos resuelven el sobre real, no ejecutan run().
 | **`format and user type functions are exported and work without a core`** | `contract.test.ts` | contract | caso 51 |
 | `validateFormatsFile rejects the whole file on any invalid item` | `unit.test.ts` | unit | caso 52 (ADR-223 §6) |
 | `validateFormatsFile reports each file issue code` | `edge.test.ts` | edge | caso 52 |
+| `validateFormatsFile keeps variant names and rejects a malformed list` | `edge.test.ts` | edge | caso 52 (ADR-233) |
 | `validateFormatsFile rejects a reference to an unknown country as a newer version` | `edge.test.ts` | edge | caso 52 (ADR-223 §6, precisión del 2026-11-20) |
 | `renderLegend is not invoked when includeMarkerLegend is false` | `unit.test.ts` | unit | ADR-059 §5. En el façade, con `ExportEngine` mockeado, afirma las dos mitades que le tocan: `export` recibe `options.includeMarkerLegend === false` y el Orchestrator no invoca la leyenda por su cuenta. Que Export no la pida lo cubre `export-engine` |
 | `addManualEntity produces a new group visible in the grouping snapshot` | `contract.test.ts` | contract | ADR-061 §6 |

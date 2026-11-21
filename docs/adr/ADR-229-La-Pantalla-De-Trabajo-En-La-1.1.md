@@ -5,6 +5,8 @@
 - **Estado**: Aceptado por el mantenedor el 2026-11-16. ADR de interfaz de la pantalla de
   trabajo, como ADR-224 pide para cada pantalla.
 - **Fecha**: 2026-11-16.
+- **Precisión del 2026-11-21** (mantenedor): el panel de filtros suma la
+  sección «Tipos», con los tipos de base y los propios (§5).
 - **Decidido por**: el mantenedor, sobre el lienzo «Anonly 1.1 — UI final»,
   página *Pantalla de trabajo* (cerrada el 2026-10-20; los selectores de
   tipo, el 2026-11-16).
@@ -110,7 +112,12 @@ resultado exacto de cada uno (ADR-169 §6). **No ofrece «Dato falso».**
 
 - Un botón **«Filtros»**, junto al buscador de la lista, abre un panel
   **flotante**. No agrega una fila de fichas: no mueve la lista.
-- El panel tiene tres secciones de casillas:
+- El panel tiene cuatro secciones de casillas:
+  - **«Tipos»** (precisión del mantenedor, 2026-11-21): los tipos que tienen
+    entidades en el documento, los de base y los propios, en el orden de la
+    lista, cada uno con su punto de color y su cantidad. En dos columnas.
+    Filtrar por tipo es otra cosa que filtrar por formato: «Tus formatos»
+    sigue mostrando solo los del usuario (ADR-226 §3);
   - **«Tus formatos»** (ADR-226 §3);
   - **«Modo de reemplazo»**: cada modo con una muestra de cómo queda
     (`[TIPO 01]`, `XX.XXX.XXX`, un nombre inventado, un bloque negro) y su
