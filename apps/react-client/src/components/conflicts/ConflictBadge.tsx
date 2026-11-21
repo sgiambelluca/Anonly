@@ -18,6 +18,7 @@
 
 import { useState } from "react";
 
+import { useDetectionStore } from "../../store/detection.store.js";
 import { useEntitiesStore } from "../../store/entities.store.js";
 import { Tooltip } from "../common/Tooltip.js";
 import { WARNING_TOOLTIP } from "../entities/needsReviewBadgeCopy.js";
@@ -30,6 +31,7 @@ import {
 
 import { ConflictDialog } from "./ConflictDialog.js";
 import { heldManualConflictIdsForGroup } from "./conflictResolution.js";
+import { resolvedByDefaultTooltip } from "./formatConflict.js";
 import { openManualOverlapDialog } from "./manualOverlapController.js";
 
 export interface ConflictBadgeProps {
@@ -86,9 +88,18 @@ export function ConflictBadge({ groupId }: ConflictBadgeProps) {
  */
 export function ResolvedConflictBadge({ conflictId }: { readonly conflictId: string }) {
   const [open, setOpen] = useState(false);
+  const detection = useDetectionStore((state) => state.saved);
+  const conflict = useEntitiesStore((state) =>
+    state.conflicts.find((candidate) => candidate.id === conflictId),
+  );
+  // Un conflicto que nació resuelto a favor de un formato del usuario dice cuál
+  // ganó (`Conflicto.dc.html`); el resto, el texto de siempre.
+  const byDefault = conflict !== undefined ? resolvedByDefaultTooltip(conflict, detection) : null;
   return (
     <>
-      <Tooltip content={<WarningTooltipText {...WARNING_TOOLTIP.resolvedConflict} />}>
+      <Tooltip
+        content={<WarningTooltipText {...(byDefault ?? WARNING_TOOLTIP.resolvedConflict)} />}
+      >
         <button
           type="button"
           aria-label="Conflicto resuelto"

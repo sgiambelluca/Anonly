@@ -20,6 +20,10 @@
  *
  * El globo "Agregar «X» como…" es flotante y usa `EntityTypePicker`.
  *
+ * **Tooltip de la entidad bajo el puntero** (ADR-226 §4): `useEntityHover` toma los
+ * mismos eventos del puntero y `EntityTooltip` flota sobre la página; ver
+ * `entityHover.ts` para qué es «bajo el puntero» en cada vista.
+ *
  * También pinta el resaltado del resultado activo de la lupa
  * (`activeMatchBbox`) — mismo mecanismo, sentido inverso.
  */
@@ -34,11 +38,15 @@ import {
 import { useEffect, useRef, useState, type PointerEvent } from "react";
 
 import { actions } from "../../core-adapter/actions.js";
+import { useDetectionStore } from "../../store/detection.store.js";
 import { Button } from "../common/Button.js";
 import { addManualEntityWithFeedback } from "../entities/addManualEntity.js";
 import { EntityTypePicker } from "../entities/EntityTypePicker.js";
 import { useTypeChoice } from "../entities/useTypeChoice.js";
+import { useUserTypes } from "../entities/useUserTypes.js";
 
+import { EntityTooltip } from "./EntityTooltip.js";
+import { buildEntityTooltip } from "./entityTooltipContent.js";
 import {
   blankStartAnchorIndex,
   pointIsCovered,
@@ -47,6 +55,7 @@ import {
   selectionDirection,
 } from "./interactionProjection.js";
 import { dominantLineWords } from "./selectionLine.js";
+import { useEntityHover } from "./useEntityHover.js";
 import { wordsBoundingBox } from "./viewerGestures.js";
 import { pageRectToScreenRect, pointerSelectionToPageRect } from "./wordSelectionRect.js";
 
@@ -106,6 +115,20 @@ export function WordSelectionOverlay({
   const [dragStart, setDragStart] = useState<Point | null>(null);
   const [dragCurrent, setDragCurrent] = useState<Point | null>(null);
   const dragRevisionRef = useRef<number | null>(null);
+  // ADR-226 §4: el tooltip de la entidad bajo el puntero, con los mismos eventos
+  // que ya atiende esta capa. Flota; no mueve nada.
+  const hover = useEntityHover({
+    pageIndex,
+    kind,
+    displayWidth,
+    displayHeight,
+    interactionGeometry,
+    inert,
+    dragging: dragStart !== null,
+    hasSelection: selection !== null,
+  });
+  const userTypes = useUserTypes();
+  const detection = useDetectionStore((state) => state.saved);
 
   function pointFromEvent(event: PointerEvent<HTMLDivElement>): Point {
     const rect = event.currentTarget.getBoundingClientRect();
@@ -246,7 +269,7 @@ export function WordSelectionOverlay({
   }
 
   const pageSize =
-    (activeMatchBboxes?.length ?? 0) > 0 || selection !== null
+    (activeMatchBboxes?.length ?? 0) > 0 || selection !== null || hover.hovered !== null
       ? actions.getPageSize(pageIndex)
       : null;
   const toScreen = (box: BoundingBox) =>
@@ -268,6 +291,8 @@ export function WordSelectionOverlay({
   const selectionBox = selection !== null && !inert ? wordsBoundingBox(selection.words) : null;
   const selectionRect = selectionBox !== null ? toScreen(selectionBox) : null;
 
+  const tooltipRect = hover.hovered !== null ? toScreen(hover.hovered.anchor) : null;
+
   const dragRect =
     dragStart && dragCurrent
       ? {
@@ -281,8 +306,15 @@ export function WordSelectionOverlay({
   return (
     <div
       className={`absolute inset-0 select-none ${!inert && (kind === "original" || interactionGeometry !== undefined) ? "cursor-crosshair" : "pointer-events-none"}`}
-      onPointerDown={handlePointerDown}
-      onPointerMove={handlePointerMove}
+      onPointerDown={(event) => {
+        hover.onPointerDown();
+        handlePointerDown(event);
+      }}
+      onPointerMove={(event) => {
+        handlePointerMove(event);
+        hover.onPointerMove(event);
+      }}
+      onPointerLeave={hover.onPointerLeave}
       onPointerUp={handlePointerUp}
     >
       {highlightRects.map((rect, index) => (
@@ -296,6 +328,13 @@ export function WordSelectionOverlay({
         <div
           className="pointer-events-none absolute border border-accent bg-accent/20"
           style={dragRect}
+        />
+      ) : null}
+      {hover.hovered !== null && tooltipRect !== null ? (
+        <EntityTooltip
+          rect={tooltipRect}
+          type={hover.hovered.group.type}
+          content={buildEntityTooltip(hover.hovered.group, userTypes, detection)}
         />
       ) : null}
       {selection !== null && !inert && selectionRect !== null ? (

@@ -12,6 +12,7 @@ import { PipelineStage, type SerializedEngineError } from "@anonly/anonymization
 import { create } from "zustand";
 
 import type { FailedJobs } from "../components/toolbar/incompleteAnalysisNotice.js";
+import type { SkippedFormat } from "../components/toolbar/skippedFormatsText.js";
 
 export interface PipelineSlice {
   readonly stage: PipelineStage;
@@ -43,6 +44,14 @@ export interface PipelineSlice {
    * motivó—. Vacío es el caso sano.
    */
   readonly failedJobs: FailedJobs;
+  /**
+   * De `REGEX_FINISHED.skippedFormats` (ADR-220 §6, ADR-229 §7): los formatos
+   * del usuario que no se aplicaron en alguna página, con sus páginas. `[]` es
+   * el caso sano. Lo escribe el bridge (un `reanalyze` lo reemplaza) y lo vacía
+   * cada `DOCUMENT_IMPORTED` y `reset()`. No participa de `exportBlockReason`:
+   * no bloquea la exportación.
+   */
+  readonly skippedFormats: ReadonlyArray<SkippedFormat>;
   /**
    * ADR-168 §4: la última etapa observada antes de `Failed`, o `null` si el
    * pipeline no falló. `Importing`/`Extracting` = fallo de importación: la UI
@@ -86,6 +95,7 @@ const initialState: PipelineData = {
   exportingVersion: null,
   error: null,
   failedJobs: {},
+  skippedFormats: [],
   failedAtStage: null,
   visitedStages: new Set(),
   reanalyzeInFlight: false,

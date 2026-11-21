@@ -226,15 +226,33 @@ export function applyRemove(group: EntityGroup): void {
 /**
  * Resolver un conflicto (ADR-083): elegir la grafía y el tipo son una sola
  * decisión del usuario y una sola entrada de la pila.
+ *
+ * **Confirma con un toast con «Deshacer»** cuando el tipo elegido cambia el del
+ * grupo (`currentType`): «{valor}» ahora es {Tipo} · Se reemplaza como {token}
+ * (`Conflicto.dc.html`, `Components.md` §3.11). El token sale de la vista previa
+ * del Core, pedida **antes** de resolver. Sin `currentType` o sin cambio de tipo
+ * no hay toast: no cambió nada que avisar.
  */
 export function applyConflictResolution(params: {
   readonly conflictId: string;
   readonly groupId: string;
   readonly spelling: string | null;
   readonly entityType: EntityTypeId | undefined;
+  readonly currentType?: EntityTypeId | undefined;
   readonly label: string;
 }): void {
-  recordEdit(`Revisaste «${params.label}»`);
+  const retype =
+    params.entityType !== undefined &&
+    params.currentType !== undefined &&
+    params.entityType !== params.currentType
+      ? params.entityType
+      : null;
+  const next =
+    retype !== null
+      ? (actions.previewEdit({ kind: "type", groupId: params.groupId, type: retype })?.groups[0] ??
+        undefined)
+      : undefined;
+  const recorded = recordEdit(`Revisaste «${params.label}»`);
   if (params.spelling !== null) {
     actions.updateGroup(params.groupId, { canonicalValue: params.spelling });
   }
@@ -242,6 +260,14 @@ export function applyConflictResolution(params: {
     params.conflictId,
     params.entityType !== undefined ? { entityType: params.entityType } : undefined,
   );
+  if (retype !== null) {
+    showToast(
+      editToast(
+        typeChangeToastText(params.label, typeSingular(retype, currentUserTypes()), next),
+        recorded,
+      ),
+    );
+  }
 }
 
 /**
