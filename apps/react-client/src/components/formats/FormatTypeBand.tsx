@@ -39,9 +39,15 @@ export function FormatTypeBand({
   return (
     <section
       aria-label={band.name}
-      className="overflow-hidden rounded-xl border border-border bg-bg-primary"
+      // Sin `overflow-hidden`: recortaría el menú ⋯ al alto de la tarjeta. Las
+      // esquinas las redondea la franja de arriba (abajo también si está plegada).
+      className="rounded-xl border border-border bg-bg-primary"
     >
-      <div className="flex items-center gap-2 bg-bg-secondary px-3 py-2">
+      <div
+        className={`flex items-center gap-2 bg-bg-secondary px-3 py-2 ${
+          folded ? "rounded-[11px]" : "rounded-t-[11px]"
+        }`}
+      >
         <button
           type="button"
           onClick={onToggleFold}
