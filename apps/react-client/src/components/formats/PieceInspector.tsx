@@ -363,17 +363,35 @@ export function PieceInspector({
           {piece.kind === "separator" ? (
             <div className="flex flex-col gap-2">
               <span className="text-xs font-semibold text-text-secondary">Cuáles admite</span>
-              <div className="flex flex-wrap gap-x-5 gap-y-1">
-                {SEPARATOR_OPTIONS.map((option) => (
-                  <Checkbox
-                    key={option.char}
-                    checked={piece.chars.includes(option.char)}
-                    onCheckedChange={() =>
-                      onChange({ ...piece, chars: toggleSeparator(piece.chars, option.char) })
-                    }
-                    label={option.label}
-                  />
-                ))}
+              <div role="group" aria-label="Cuáles admite" className="grid grid-cols-4 gap-2">
+                {SEPARATOR_OPTIONS.map((option) => {
+                  const on = piece.chars.includes(option.char);
+                  return (
+                    <button
+                      key={option.char}
+                      type="button"
+                      aria-pressed={on}
+                      onClick={() =>
+                        onChange({ ...piece, chars: toggleSeparator(piece.chars, option.char) })
+                      }
+                      className={`flex h-10 items-center gap-2.5 rounded-lg border px-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+                        on ? "border-accent bg-accent/10" : "border-border hover:bg-bg-secondary"
+                      }`}
+                    >
+                      <span
+                        aria-hidden
+                        className={`w-4 text-center font-mono text-lg font-semibold ${
+                          on ? "text-accent" : "text-text-secondary"
+                        }`}
+                      >
+                        {option.char === " " ? "␣" : option.char}
+                      </span>
+                      <span className="truncate text-sm font-medium text-text-primary">
+                        {option.label}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
               <Checkbox
                 checked={piece.optional}
