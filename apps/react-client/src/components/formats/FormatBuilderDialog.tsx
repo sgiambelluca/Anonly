@@ -2,29 +2,65 @@
  * `FormatBuilderDialog` — el generador de formatos (`Components.md` §13b.5,
  * ADR-228).
  *
- * **STUB de la tanda 1 de F7.** Esta tanda deja solo el punto de entrada: el
- * contrato de props (`FormatBuilderDialogProps`) y el pedido
- * (`FormatBuilderRequest`) que `DetectionFormatsDialog` ya usa desde «Nuevo
- * formato» y «Editar». La tanda 2 reemplaza el cuerpo de este archivo por el
- * generador real sin tocar a quien lo monta.
+ * Un diálogo de una sola columna: nombre y «Es un…», variantes en pestañas, la
+ * tira de piezas, «Se lee» y «Ejemplo», el ajuste de la pieza elegida, «Solo si
+ * antes dice…» y la caja de estado fija. «Probar con un texto» abre un panel
+ * flotante (`FormatTestPanel`).
  *
- * Contrato que la tanda 2 respeta:
- * - `request` dice qué se abrió: un formato nuevo en un tipo, la edición de un
- *   formato propio o de una copia editada, o la edición de un formato base
- *   `structure` (que crea una copia con `basedOn`, ADR-220 §4);
- * - `state` es el borrador: de ahí salen los tipos guardados y los formatos
- *   existentes para `validateFormat`/`compareFormat`;
- * - `onSubmit` entrega **un** `DetectionChange` (`createFormat`, `editFormat` o
- *   `createEditedCopy`): cuenta como un cambio en `pendingChanges`;
- * - `onClose` cierra sin cambios. Cerrar con cambios sin guardar pide
- *   confirmación dentro del generador (`UX_Guidelines.md` §11b.5).
+ * El estado vive acá, local: el formato en edición, la variante y la pieza
+ * elegidas. Se vuelca al borrador de `detection.store` solo al confirmar, con
+ * **un** `DetectionChange` (`onSubmit`). Toda la lógica está en
+ * `formatBuilderModel.ts` y `formatBuilderStatus.ts`; este archivo conecta
+ * eventos con esas funciones.
+ *
+ * «Es un…» no ofrece crear un tipo: primero va el tipo y después sus formatos
+ * (ADR-228 §1); un tipo nuevo se crea antes, desde «Tus tipos».
  */
 
 import type { EntityTypeId } from "@anonly/anonymization-core";
+import { FlaskConicalIcon, TriangleAlertIcon } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 
 import type { DetectionChange, DetectionState } from "../../store/detectionState.js";
+import { Banner } from "../common/Banner.js";
 import { Button } from "../common/Button.js";
+import { ConfirmDialog } from "../common/ConfirmDialog.js";
 import { Dialog } from "../common/Dialog.js";
+import { Select } from "../common/Select.js";
+
+import { ContextWords } from "./ContextWords.js";
+import {
+  addVariant,
+  appendPiece,
+  BUILDER_COPY,
+  buildDefinition,
+  describeVariant,
+  exampleOfVariant,
+  hasChanges,
+  moveStep,
+  newPiece,
+  pieceAt,
+  pieceCounter,
+  removeAt,
+  removeVariant,
+  replaceAt,
+  replaceVariant,
+  resolveBuilderSetup,
+  submitChange,
+  typeOptions,
+  variantCounter,
+  type BuilderDraft,
+  type BuilderSetup,
+  type PieceClassId,
+  type PiecePath,
+  type Pieces,
+} from "./formatBuilderModel.js";
+import { evaluateBuilder } from "./formatBuilderStatus.js";
+import { FormatStatusBox } from "./FormatStatusBox.js";
+import { FormatTestPanel } from "./FormatTestPanel.js";
+import { countPieces } from "./formatTexts.js";
+import { PieceInspector } from "./PieceInspector.js";
+import { PieceStrip } from "./PieceStrip.js";
 
 export type FormatBuilderRequest =
   /** «Nuevo formato» en la banda de un tipo. */
@@ -43,24 +79,354 @@ export interface FormatBuilderDialogProps {
   readonly onClose: () => void;
 }
 
-export function FormatBuilderDialog({ request, onClose }: FormatBuilderDialogProps) {
+export const BUILDER_TEXTS = {
+  nameLabel: "Nombre del formato",
+  namePlaceholder: "Por ejemplo, «Legajo»",
+  typeLabel: "Es un…",
+  addVariant: "+ Variante",
+  addVariantHint: "Otra forma de escribir el mismo dato",
+  deleteVariant: "Borrar variante",
+  readsLabel: "Se lee",
+  exampleLabel: "Ejemplo",
+  testButton: "Probar con un texto",
+  cancel: "Cancelar",
+  deleteVariantTitle: (n: number) => `¿Borrar la variante ${n}?`,
+  deleteVariantLine: (pieces: number) =>
+    pieces === 0
+      ? "La variante no tiene piezas."
+      : pieces === 1
+        ? "Se pierde 1 pieza."
+        : `Se pierden ${pieces} piezas.`,
+  deleteVariantConfirm: "Borrar variante",
+  keepVariant: "Conservarla",
+  discardTitle: "¿Cerrar sin guardar?",
+  discardLine: "Lo que armaste en este formato no se guarda.",
+  keepEditing: "Seguir editando",
+  discard: "Descartar cambios",
+} as const;
+
+const INPUT_CLASS =
+  "rounded-lg border border-border bg-bg-primary px-3 py-2 text-sm text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent";
+
+export function FormatBuilderDialog(props: FormatBuilderDialogProps) {
+  if (props.request === null) return null;
+  return <BuilderBody {...props} request={props.request} />;
+}
+
+interface BodyProps extends FormatBuilderDialogProps {
+  readonly request: FormatBuilderRequest;
+}
+
+function BuilderBody({ request, state, onSubmit, onClose }: BodyProps) {
+  const [setup] = useState<BuilderSetup | null>(() =>
+    resolveBuilderSetup(request, state, () => crypto.randomUUID()),
+  );
+  if (setup === null) {
+    // Un formato que ya no existe: no hay nada que abrir.
+    return <MissingRequest onClose={onClose} />;
+  }
+  return <BuilderForm setup={setup} state={state} onSubmit={onSubmit} onClose={onClose} />;
+}
+
+function MissingRequest({ onClose }: { readonly onClose: () => void }) {
+  // Se cierra solo: el formato pedido no existe en el borrador.
+  useEffect(() => {
+    onClose();
+  }, [onClose]);
+  return null;
+}
+
+interface FormProps {
+  readonly setup: BuilderSetup;
+  readonly state: DetectionState;
+  readonly onSubmit: (change: DetectionChange) => void;
+  readonly onClose: () => void;
+}
+
+function BuilderForm({ setup, state, onSubmit, onClose }: FormProps) {
+  const [draft, setDraft] = useState<BuilderDraft>(setup.draft);
+  const [variantIndex, setVariantIndex] = useState(0);
+  const [selected, setSelected] = useState<PiecePath | null>(null);
+  const [testOpen, setTestOpen] = useState(false);
+  const [sampleText, setSampleText] = useState("");
+  const [deleteIndex, setDeleteIndex] = useState<number | null>(null);
+  const [confirmClose, setConfirmClose] = useState(false);
+
+  const definition = useMemo(() => buildDefinition(draft, setup), [draft, setup]);
+  const evaluation = useMemo(
+    () => evaluateBuilder(definition, state, setup.mode),
+    [definition, state, setup.mode],
+  );
+  const options = useMemo(
+    () => typeOptions(state.userTypes, draft.entityType),
+    [state.userTypes, draft.entityType],
+  );
+
+  const variant: Pieces = draft.variants[variantIndex] ?? [];
+  const piece = selected === null ? null : (pieceAt(variant, selected) ?? null);
+  const pieces = pieceCounter(variant);
+  const variants = variantCounter(draft.variants.length);
+  const changed = hasChanges(setup.draft, draft);
+
+  function setVariant(next: Pieces, nextSelected: PiecePath | null): void {
+    setDraft((current) => ({
+      ...current,
+      variants: replaceVariant(current.variants, variantIndex, next),
+    }));
+    setSelected(nextSelected);
+  }
+
+  function add(id: PieceClassId, parent: number | null): void {
+    if (pieces.atLimit) return;
+    const result = appendPiece(variant, newPiece(id), parent);
+    setVariant(result.variant, result.path);
+  }
+
+  function move(direction: -1 | 1): void {
+    if (selected === null) return;
+    const result = moveStep(variant, selected, direction);
+    if (result !== null) setVariant(result.variant, result.path);
+  }
+
+  function requestClose(): void {
+    if (changed) setConfirmClose(true);
+    else onClose();
+  }
+
+  function submit(): void {
+    if (!evaluation.status.canSubmit) return;
+    onSubmit(submitChange(setup, definition));
+  }
+
+  function selectVariant(index: number): void {
+    setVariantIndex(index);
+    setSelected(null);
+  }
+
+  function confirmDeleteVariant(): void {
+    if (deleteIndex === null) return;
+    setDraft((current) => ({ ...current, variants: removeVariant(current.variants, deleteIndex) }));
+    setVariantIndex((current) => Math.max(0, Math.min(current, draft.variants.length - 2)));
+    setSelected(null);
+    setDeleteIndex(null);
+  }
+
+  const deletingPieces = deleteIndex === null ? 0 : countPieces(draft.variants[deleteIndex] ?? []);
+
   return (
-    <Dialog
-      open={request !== null}
-      onClose={onClose}
-      title="Generador de formatos"
-      description="Llega en la próxima tanda de la 1.1."
-      footer={
-        <div className="flex justify-end">
-          <Button variant="secondary" onClick={onClose}>
-            Cerrar
+    <>
+      <Dialog
+        open
+        onClose={requestClose}
+        title={setup.title}
+        description={BUILDER_COPY.line}
+        size="xl"
+        onEscapeKeyDown={(event) => {
+          // `Esc` cierra primero el panel de prueba (`UX_Guidelines.md` §11b.7).
+          if (testOpen) {
+            event.preventDefault();
+            setTestOpen(false);
+          }
+        }}
+        headerActions={
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-pressed={testOpen}
+            onClick={() => setTestOpen((current) => !current)}
+          >
+            <span className="flex items-center gap-1.5">
+              <FlaskConicalIcon className="h-4 w-4" aria-hidden />
+              {BUILDER_TEXTS.testButton}
+            </span>
           </Button>
+        }
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={requestClose}>
+              {BUILDER_TEXTS.cancel}
+            </Button>
+            <Button variant="primary" disabled={!evaluation.status.canSubmit} onClick={submit}>
+              {setup.submitLabel}
+            </Button>
+          </div>
+        }
+      >
+        <div className="flex flex-col gap-3.5 pb-1">
+          {setup.notice !== null ? <Banner variant="info">{setup.notice}</Banner> : null}
+
+          <div className="grid grid-cols-[1fr_14rem] gap-3">
+            <label className="flex flex-col gap-1.5">
+              <span className="text-sm font-semibold text-text-primary">
+                {BUILDER_TEXTS.nameLabel}
+              </span>
+              <input
+                type="text"
+                value={draft.name}
+                placeholder={BUILDER_TEXTS.namePlaceholder}
+                onChange={(event) => setDraft({ ...draft, name: event.target.value })}
+                autoFocus
+                className={INPUT_CLASS}
+              />
+            </label>
+            <div className="flex flex-col gap-1.5">
+              <span className="text-sm font-semibold text-text-primary">
+                {BUILDER_TEXTS.typeLabel}
+              </span>
+              <Select
+                aria-label={BUILDER_TEXTS.typeLabel}
+                value={options.find((option) => option.type === draft.entityType)?.value ?? ""}
+                disabled={setup.typeLocked}
+                options={options.map(({ value, label }) => ({ value, label }))}
+                onChange={(value) => {
+                  const chosen = options.find((option) => option.value === value);
+                  if (chosen !== undefined) setDraft({ ...draft, entityType: chosen.type });
+                }}
+              />
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <div
+              className="flex flex-wrap items-center gap-1.5"
+              role="tablist"
+              aria-label="Variantes"
+            >
+              {draft.variants.map((_, index) => (
+                <button
+                  key={index}
+                  type="button"
+                  role="tab"
+                  aria-selected={index === variantIndex}
+                  onClick={() => selectVariant(index)}
+                  className={`flex items-center gap-1.5 rounded-md border px-3 py-1 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+                    index === variantIndex
+                      ? "border-accent bg-accent/10 font-semibold text-text-primary"
+                      : "border-border text-text-secondary hover:bg-bg-secondary"
+                  }`}
+                >
+                  Variante {index + 1}
+                  {evaluation.variantsWithIssues.has(index) ? (
+                    <span
+                      data-variant-issue
+                      role="img"
+                      aria-label="Tiene un problema"
+                      className="h-2 w-2 rounded-full bg-error"
+                    />
+                  ) : null}
+                </button>
+              ))}
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={variants.atLimit}
+                title={BUILDER_TEXTS.addVariantHint}
+                onClick={() => {
+                  setDraft({ ...draft, variants: addVariant(draft.variants) });
+                  selectVariant(draft.variants.length);
+                }}
+              >
+                {BUILDER_TEXTS.addVariant}
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={draft.variants.length <= 1}
+                onClick={() => setDeleteIndex(variantIndex)}
+              >
+                {BUILDER_TEXTS.deleteVariant}
+              </Button>
+              <span className="ml-auto text-xs text-text-secondary">
+                {variants.visible ? variants.text : ""}
+              </span>
+            </div>
+
+            <PieceStrip
+              variant={variant}
+              selected={selected}
+              addDisabled={pieces.atLimit}
+              onSelect={setSelected}
+              onMoved={(next, path) => setVariant(next, path)}
+              onAdd={(id) => add(id, null)}
+            />
+            <div className="h-4 text-right text-xs text-text-secondary">
+              {pieces.visible ? pieces.text : ""}
+            </div>
+          </div>
+
+          <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
+            <dt className="font-semibold text-text-primary">{BUILDER_TEXTS.readsLabel}</dt>
+            <dd className="text-text-secondary">{describeVariant(variant, draft.context)}</dd>
+            <dt className="font-semibold text-text-primary">{BUILDER_TEXTS.exampleLabel}</dt>
+            <dd className="font-mono text-text-primary">
+              {exampleOfVariant(variant, definition) || "—"}
+            </dd>
+          </dl>
+
+          <PieceInspector
+            piece={piece}
+            canMoveLeft={selected !== null && moveStep(variant, selected, -1) !== null}
+            canMoveRight={selected !== null && moveStep(variant, selected, 1) !== null}
+            onMove={move}
+            onDelete={() => {
+              if (selected !== null) setVariant(removeAt(variant, selected), null);
+            }}
+            onChange={(next) => {
+              if (selected !== null) setVariant(replaceAt(variant, selected, next), selected);
+            }}
+            onAddInside={(id) => {
+              if (selected !== null && selected.length === 1) add(id, selected[0]);
+            }}
+            addDisabled={pieces.atLimit}
+          />
+
+          <ContextWords
+            words={draft.context}
+            onChange={(context) => setDraft({ ...draft, context })}
+          />
+
+          <FormatStatusBox status={evaluation.status} />
         </div>
-      }
-    >
-      <p className="text-sm text-text-secondary">
-        Por ahora podés prender y apagar formatos, y crear tipos propios.
-      </p>
-    </Dialog>
+
+        {testOpen ? (
+          <FormatTestPanel
+            definition={definition}
+            text={sampleText}
+            onTextChange={setSampleText}
+            onClose={() => setTestOpen(false)}
+          />
+        ) : null}
+      </Dialog>
+
+      <ConfirmDialog
+        open={deleteIndex !== null}
+        title={BUILDER_TEXTS.deleteVariantTitle((deleteIndex ?? 0) + 1)}
+        message={BUILDER_TEXTS.deleteVariantLine(deletingPieces)}
+        confirmLabel={BUILDER_TEXTS.deleteVariantConfirm}
+        cancelLabel={BUILDER_TEXTS.keepVariant}
+        variant="danger"
+        onConfirm={confirmDeleteVariant}
+        onCancel={() => setDeleteIndex(null)}
+      />
+
+      <ConfirmDialog
+        open={confirmClose}
+        title={BUILDER_TEXTS.discardTitle}
+        message={BUILDER_TEXTS.discardLine}
+        confirmLabel={BUILDER_TEXTS.discard}
+        cancelLabel={BUILDER_TEXTS.keepEditing}
+        variant="danger"
+        onConfirm={() => {
+          setConfirmClose(false);
+          onClose();
+        }}
+        onCancel={() => setConfirmClose(false)}
+        icon={
+          <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-warning/15 text-warning-strong">
+            <TriangleAlertIcon className="h-[18px] w-[18px]" aria-hidden />
+          </span>
+        }
+      />
+    </>
   );
 }

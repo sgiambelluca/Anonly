@@ -57,6 +57,12 @@ export interface DialogProps {
   readonly role?: "alertdialog";
   /** Acciones del encabezado, a la izquierda del botón de cierre (p. ej. «Importar…» y «Exportar…»). */
   readonly headerActions?: ReactNode;
+  /**
+   * `Esc` antes de cerrar: quien lo pasa puede frenar el cierre con
+   * `event.preventDefault()` (el generador de formatos lo usa para cerrar su
+   * panel de prueba flotante primero, `UX_Guidelines.md` §11b.7).
+   */
+  readonly onEscapeKeyDown?: (event: KeyboardEvent) => void;
 }
 
 const SIZE_CLASS: Readonly<Record<NonNullable<DialogProps["size"]>, string>> = {
@@ -78,6 +84,7 @@ export function Dialog({
   size = "md",
   role,
   headerActions,
+  onEscapeKeyDown,
 }: DialogProps) {
   const [selectOpen, setSelectOpen] = useState(false);
   const handleSelectOpenChange = useCallback((next: boolean) => setSelectOpen(next), []);
@@ -117,6 +124,7 @@ export function Dialog({
               them only over this Dialog while its own Select is open. */}
           <RadixDialog.Content
             {...(role !== undefined ? { role } : {})}
+            {...(onEscapeKeyDown !== undefined ? { onEscapeKeyDown } : {})}
             style={selectOpen ? { pointerEvents: "auto" } : undefined}
             className={`fixed left-1/2 top-1/2 z-50 flex max-h-[85vh] w-[calc(100%-2rem)] ${SIZE_CLASS[size]} -translate-x-1/2 -translate-y-1/2 flex-col rounded-lg bg-bg-primary p-5 shadow-md focus:outline-none`}
           >

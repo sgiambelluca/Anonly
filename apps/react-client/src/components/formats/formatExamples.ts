@@ -54,7 +54,7 @@ function sampleChars(charClass: FormatCharClass, length: number): string {
   return out;
 }
 
-function pieceExample(piece: FormatPiece): string {
+export function pieceExample(piece: FormatPiece): string {
   switch (piece.kind) {
     case "chars":
       return sampleChars(piece.charClass, piece.min);

@@ -225,6 +225,8 @@ export default defineConfig({
         "apps/react-client/src/components/formats/formatsExport.ts",
         "apps/react-client/src/components/formats/formatsImport.ts",
         "apps/react-client/src/components/formats/userTypeForm.ts",
+        "apps/react-client/src/components/formats/formatBuilderModel.ts",
+        "apps/react-client/src/components/formats/formatBuilderStatus.ts",
         "scripts/security-audit-policy.ts",
         "tests/e2e/support/exportVerificationOracle.ts",
       ],
@@ -439,6 +441,18 @@ export default defineConfig({
           functions: 80,
         },
         "apps/react-client/src/components/formats/userTypeForm.ts": {
+          lines: 85,
+          statements: 85,
+          branches: 80,
+          functions: 80,
+        },
+        "apps/react-client/src/components/formats/formatBuilderModel.ts": {
+          lines: 85,
+          statements: 85,
+          branches: 80,
+          functions: 80,
+        },
+        "apps/react-client/src/components/formats/formatBuilderStatus.ts": {
           lines: 85,
           statements: 85,
           branches: 80,
