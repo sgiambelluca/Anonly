@@ -172,6 +172,8 @@ function BuilderForm({ setup, state, onSubmit, onClose }: FormProps) {
   const piece = selected === null ? null : (pieceAt(variant, selected) ?? null);
   const pieces = pieceCounter(variant);
   const variants = variantCounter(draft.variants.length);
+  const exampleText = exampleOfVariant(variant, definition) || "—";
+  const readsLine = `${BUILDER_TEXTS.readsLabel}: ${describeVariant(variant, draft.context)} · ${BUILDER_TEXTS.exampleLabel}: ${exampleText}`;
   const changed = hasChanges(setup.draft, draft);
 
   function setVariant(next: Pieces, nextSelected: PiecePath | null): void {
@@ -228,6 +230,7 @@ function BuilderForm({ setup, state, onSubmit, onClose }: FormProps) {
         description={BUILDER_COPY.line}
         size="xl"
         tall
+        descriptionInline
         onEscapeKeyDown={(event) => {
           // `Esc` cierra primero el panel de prueba (`UX_Guidelines.md` §11b.7).
           if (testOpen) {
@@ -250,7 +253,7 @@ function BuilderForm({ setup, state, onSubmit, onClose }: FormProps) {
           </Button>
         }
         footer={
-          <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-2.5">
             {/* La caja de estado va fija entre el cuerpo y los botones: no scrollea (ADR-228 §7). */}
             <FormatStatusBox status={evaluation.status} />
             <div className="flex justify-end gap-2">
@@ -269,7 +272,7 @@ function BuilderForm({ setup, state, onSubmit, onClose }: FormProps) {
           </div>
         }
       >
-        <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-2.5">
           {setup.notice !== null ? <Banner variant="info">{setup.notice}</Banner> : null}
 
           <div className="grid grid-cols-[1fr_14rem] gap-3">
@@ -379,24 +382,18 @@ function BuilderForm({ setup, state, onSubmit, onClose }: FormProps) {
             />
           </div>
 
-          {/* Alto fijo: «Se lee» va en una línea con elipsis y el texto completo en `title`. */}
-          <div className="flex h-11 shrink-0 flex-col justify-center gap-0.5 text-sm">
-            <span className="truncate" title={describeVariant(variant, draft.context)}>
+          {/* Alto fijo de una línea: «Se lee · Ejemplo» con elipsis y el texto completo en `title`. */}
+          <div className="flex h-5 shrink-0 items-baseline justify-between gap-3 text-sm">
+            <span className="min-w-0 truncate" title={readsLine}>
               <b className="font-semibold text-text-primary">{BUILDER_TEXTS.readsLabel}:</b>{" "}
               <span className="text-text-secondary">{describeVariant(variant, draft.context)}</span>
+              {" · "}
+              <b className="font-semibold text-text-primary">{BUILDER_TEXTS.exampleLabel}:</b>{" "}
+              <span className="font-mono text-text-primary">{exampleText}</span>
             </span>
-            <div className="flex items-baseline justify-between gap-3">
-              <span className="min-w-0 truncate">
-                <b className="font-semibold text-text-primary">{BUILDER_TEXTS.exampleLabel}:</b>{" "}
-                <span className="font-mono text-text-primary">
-                  {exampleOfVariant(variant, definition) || "—"}
-                </span>
-              </span>
-              {/* El contador de piezas vive en este renglón fijo: no deja un hueco bajo la tira. */}
-              <span className="shrink-0 text-xs text-text-secondary">
-                {pieces.visible ? pieces.text : ""}
-              </span>
-            </div>
+            <span className="shrink-0 text-xs text-text-secondary">
+              {pieces.visible ? pieces.text : ""}
+            </span>
           </div>
 
           <PieceInspector

@@ -132,7 +132,7 @@ function InspectorRow({
 }) {
   return (
     <div className="flex min-h-8 items-center gap-3">
-      <span className="w-16 shrink-0 text-xs font-semibold text-text-secondary">{label}</span>
+      <span className="w-24 shrink-0 text-xs font-semibold text-text-secondary">{label}</span>
       {children}
     </div>
   );
@@ -318,8 +318,9 @@ export function PieceInspector({
     <section
       aria-label="Ajuste de la pieza"
       className={`flex shrink-0 flex-col gap-3 rounded-lg border border-border p-3 ${
-        // El alto fijo vale con una pieza elegida; sin pieza, el estado vacío es más bajo.
-        piece === null || path === null ? "" : "h-[12.25rem] overflow-y-auto"
+        // Mide lo que su contenido, con tope: un alto fijo dejaba hueco en las
+        // piezas cortas (separador, texto fijo) y obligaba a scrollear el diálogo.
+        piece === null || path === null ? "" : "max-h-[12.25rem] overflow-y-auto"
       }`}
     >
       {piece === null || path === null ? (
@@ -365,56 +366,67 @@ export function PieceInspector({
 
           {piece.kind === "separator" ? (
             <div className="flex flex-col gap-2">
-              <span className="text-xs font-semibold text-text-secondary">Cuáles admite</span>
-              <div role="group" aria-label="Cuáles admite" className="grid grid-cols-4 gap-2">
-                {SEPARATOR_OPTIONS.map((option) => {
-                  const on = piece.chars.includes(option.char);
-                  return (
-                    <button
-                      key={option.char}
-                      type="button"
-                      aria-pressed={on}
-                      onClick={() =>
-                        onChange({ ...piece, chars: toggleSeparator(piece.chars, option.char) })
-                      }
-                      className={`flex h-10 items-center gap-2.5 rounded-lg border px-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
-                        on ? "border-accent bg-accent/10" : "border-border hover:bg-bg-secondary"
-                      }`}
-                    >
-                      <span
-                        aria-hidden
-                        className={`w-4 text-center font-mono text-lg font-semibold ${
-                          on ? "text-accent" : "text-text-secondary"
+              <InspectorRow label="Cuáles admite">
+                <div
+                  role="group"
+                  aria-label="Cuáles admite"
+                  className="grid flex-1 grid-cols-4 gap-2"
+                >
+                  {SEPARATOR_OPTIONS.map((option) => {
+                    const on = piece.chars.includes(option.char);
+                    return (
+                      <button
+                        key={option.char}
+                        type="button"
+                        aria-pressed={on}
+                        onClick={() =>
+                          onChange({ ...piece, chars: toggleSeparator(piece.chars, option.char) })
+                        }
+                        className={`flex h-10 items-center gap-2.5 rounded-lg border px-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+                          on ? "border-accent bg-accent/10" : "border-border hover:bg-bg-secondary"
                         }`}
                       >
-                        {option.char === " " ? "␣" : option.char}
-                      </span>
-                      <span className="truncate text-sm font-medium text-text-primary">
-                        {option.label}
-                      </span>
-                    </button>
-                  );
-                })}
+                        <span
+                          aria-hidden
+                          className={`w-4 text-center font-mono text-lg font-semibold ${
+                            on ? "text-accent" : "text-text-secondary"
+                          }`}
+                        >
+                          {option.char === " " ? "␣" : option.char}
+                        </span>
+                        <span className="truncate text-sm font-medium text-text-primary">
+                          {option.label}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </InspectorRow>
+              <div className="pl-[6.75rem]">
+                <Checkbox
+                  checked={piece.optional}
+                  onCheckedChange={(optional) => onChange({ ...piece, optional })}
+                  label={BUILDER_COPY.separatorOptional(piece.chars[0] ?? "-")}
+                />
               </div>
-              <Checkbox
-                checked={piece.optional}
-                onCheckedChange={(optional) => onChange({ ...piece, optional })}
-                label={BUILDER_COPY.separatorOptional(piece.chars[0] ?? "-")}
-              />
             </div>
           ) : null}
 
           {piece.kind === "text" ? (
             <label className="flex flex-col gap-1.5">
-              <span className="text-xs font-semibold text-text-secondary">Texto</span>
-              <input
-                type="text"
-                value={piece.value}
-                maxLength={FORMAT_MAX_TEXT}
-                onChange={(event) => onChange({ ...piece, value: event.target.value })}
-                className="rounded-lg border border-border bg-bg-primary px-3 py-1.5 text-sm text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-              />
-              <span className="text-xs text-text-secondary">{SAVED_TEXT_NOTICE}</span>
+              <span className="flex items-center gap-3">
+                <span className="w-24 shrink-0 text-xs font-semibold text-text-secondary">
+                  Texto
+                </span>
+                <input
+                  type="text"
+                  value={piece.value}
+                  maxLength={FORMAT_MAX_TEXT}
+                  onChange={(event) => onChange({ ...piece, value: event.target.value })}
+                  className="min-w-0 flex-1 rounded-lg border border-border bg-bg-primary px-3 py-1.5 text-sm text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                />
+              </span>
+              <span className="pl-[6.75rem] text-xs text-text-secondary">{SAVED_TEXT_NOTICE}</span>
             </label>
           ) : null}
 
