@@ -459,15 +459,17 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
               <p className="h-5 truncate text-sm text-text-secondary">
                 {describePerformancePreset(performancePreset, deviceSignals)}
               </p>
-              {/* Ranura reservada aunque no haya documento: no cambia el alto. */}
-              <p
-                className={`flex h-5 items-center gap-1.5 text-sm text-text-secondary ${
-                  documentId === null ? "invisible" : ""
-                }`}
-              >
-                <InfoIcon className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                Se aplica al próximo documento; no cambia el que está abierto.
-              </p>
+              {/*
+                Solo con un documento abierto. No hace falta reservarle lugar:
+                mientras Configuración está abierta no se abre ni se cierra un
+                documento, así que el alto no cambia (UX §11b.17).
+              */}
+              {documentId !== null && (
+                <p className="flex h-5 items-center gap-1.5 text-sm text-text-secondary">
+                  <InfoIcon className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                  Se aplica al próximo documento; no cambia el que está abierto.
+                </p>
+              )}
             </div>
             <div className="h-px bg-border" />
             <div className="flex flex-col gap-2">
