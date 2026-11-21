@@ -23,12 +23,7 @@
  * Módulo puro: los tests de `apps/react-client` corren en Node sin jsdom.
  */
 
-import {
-  type EntityType,
-  type EntityTypeId,
-  ReplacementMode,
-  type Rule,
-} from "@anonly/anonymization-core";
+import { type EntityTypeId, ReplacementMode, type Rule } from "@anonly/anonymization-core";
 
 /**
  * Default del motor cuando no hay ninguna regla
@@ -93,7 +88,7 @@ export type TypeHeaderState =
 
 export function resolveTypeHeaderState(
   rules: ReadonlyArray<Rule>,
-  type: EntityType,
+  type: EntityTypeId,
   groupModes: ReadonlyArray<ReplacementMode>,
 ): TypeHeaderState {
   if (groupModes.length > 0) {
@@ -146,7 +141,7 @@ export function planApplyDocumentMode(rules: ReadonlyArray<Rule>): ApplyModePlan
  */
 export function planApplyTypeMode(
   rules: ReadonlyArray<Rule>,
-  type: EntityType,
+  type: EntityTypeId,
   groupIdsOfType: ReadonlySet<string>,
 ): ApplyModePlan {
   const swept = rules.filter(

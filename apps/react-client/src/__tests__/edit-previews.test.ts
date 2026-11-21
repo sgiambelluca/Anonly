@@ -241,6 +241,7 @@ describe("Cambiar tipo", () => {
       after: "[ORGANIZACION 03]",
       note: "Pasa a Organizaciones con el N.º 03, el próximo libre.",
       dropsGender: true,
+      becomesLabel: false,
     });
     expect(summarizeTypeChange(group(), null)).toBeNull();
   });

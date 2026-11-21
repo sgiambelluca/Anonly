@@ -17,9 +17,7 @@
  */
 
 import { DetectionSource } from "@anonly/anonymization-core";
-import type { Conflict, ConflictCandidate, EntityType } from "@anonly/anonymization-core";
-
-import { toBaseEntityType } from "../../baseEntityType.js";
+import type { Conflict, ConflictCandidate, EntityTypeId } from "@anonly/anonymization-core";
 
 /**
  * El candidato que gana por default (ADR-083 §4). Espejo de
@@ -57,18 +55,17 @@ export function defaultCandidate(conflict: Conflict): ConflictCandidate {
  * sobre la clasificación. Ahí el diálogo no ofrece elección y solo permite
  * descartar el aviso.
  */
-export function candidateTypes(conflict: Conflict): ReadonlyArray<EntityType> {
+export function candidateTypes(conflict: Conflict): ReadonlyArray<EntityTypeId> {
   const ordered = [...conflict.candidates].sort((a, b) => {
     if (b.confidence !== a.confidence) return b.confidence - a.confidence;
     if (a.source === b.source) return 0;
     return a.source === DetectionSource.Regex ? -1 : 1;
   });
 
-  const seen = new Set<EntityType>();
-  const types: EntityType[] = [];
+  const seen = new Set<EntityTypeId>();
+  const types: EntityTypeId[] = [];
   for (const candidate of ordered) {
-    // Guarda provisional (F0): los candidatos siguen siendo de tipos base; F7 la reemplaza.
-    const type = toBaseEntityType(candidate.entityType);
+    const type = candidate.entityType;
     if (seen.has(type)) continue;
     seen.add(type);
     types.push(type);

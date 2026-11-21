@@ -10,7 +10,7 @@
  * `exportPreflight.ts`).
  */
 
-import type { EntityGroup, EntityType } from "@anonly/anonymization-core";
+import type { EntityGroup, EntityTypeId } from "@anonly/anonymization-core";
 
 import { pageHasEntity } from "../../store/entities.store.js";
 
@@ -21,7 +21,7 @@ import { pageHasEntity } from "../../store/entities.store.js";
  */
 export function computePendingPages(
   unreadableInkPages: ReadonlySet<number>,
-  groupsByType: ReadonlyMap<EntityType, ReadonlyArray<EntityGroup>>,
+  groupsByType: ReadonlyMap<EntityTypeId, ReadonlyArray<EntityGroup>>,
 ): ReadonlyArray<number> {
   const pending: number[] = [];
   for (const pageIndex of unreadableInkPages) {

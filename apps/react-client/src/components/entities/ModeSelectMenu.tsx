@@ -58,6 +58,8 @@ export interface ModeSelectMenuProps {
   readonly align?: "left" | "right";
   /** Clases del contenedor, para que el nivel decida si puede encoger. */
   readonly className?: string;
+  /** Los modos que se ofrecen; ausente = los cuatro. Un tipo propio no ofrece «Dato falso» (ADR-229 §4). */
+  readonly modes?: ReadonlyArray<ReplacementMode>;
 }
 
 export function ModeSelectMenu({
@@ -69,6 +71,7 @@ export function ModeSelectMenu({
   onOpenChange,
   align = "left",
   className = "",
+  modes = REPLACEMENT_MODE_ORDER,
 }: ModeSelectMenuProps) {
   const [open, setOpenState] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -139,7 +142,7 @@ export function ModeSelectMenu({
           <p className="truncate px-2.5 pb-2 pt-1.5 text-sm text-text-secondary">
             Cómo reemplazar <b className="font-semibold text-text-primary">«{subject}»</b>
           </p>
-          {REPLACEMENT_MODE_ORDER.map((mode) => {
+          {modes.map((mode) => {
             const preview = resolveModePreview(mode, previews);
             return (
               <button

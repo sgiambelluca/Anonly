@@ -21,7 +21,6 @@ import { DetectionSource } from "@anonly/anonymization-core";
 import { ArrowRightIcon, InfoIcon, TriangleAlertIcon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
-import { toBaseEntityType } from "../../baseEntityType.js";
 import { actions } from "../../core-adapter/actions.js";
 import { useEntitiesStore } from "../../store/entities.store.js";
 import { Button } from "../common/Button.js";
@@ -38,8 +37,9 @@ import {
 } from "./editPreviews.js";
 import { EntityLine } from "./EntityLine.js";
 import { findGroupById } from "./entityTree.js";
-import { ENTITY_TYPE_COLOR } from "./entityTypeColors.js";
+import { typeColor } from "./entityTypeColors.js";
 import { validateSplit } from "./splitValidation.js";
+import { useUserTypes } from "./useUserTypes.js";
 
 export interface SplitDialogProps {
   readonly groupId: string;
@@ -50,6 +50,7 @@ export interface SplitDialogProps {
 export function SplitDialog({ groupId, open, onClose }: SplitDialogProps) {
   const groupsByType = useEntitiesStore((state) => state.groupsByType);
   const group = findGroupById(groupsByType, groupId);
+  const userTypes = useUserTypes();
 
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
 
@@ -73,9 +74,9 @@ export function SplitDialog({ groupId, open, onClose }: SplitDialogProps) {
   }
 
   const validation = validateSplit(group, selectedIds);
-  const summary = summarizeSplit(group, selectedIds.length, preview);
+  const summary = summarizeSplit(group, selectedIds.length, preview, userTypes);
   const slot = splitSlotMessage(group, selectedIds.length);
-  const color = ENTITY_TYPE_COLOR[toBaseEntityType(group.type)];
+  const color = typeColor(group.type);
 
   function toggleMember(occurrenceId: string, checked: boolean): void {
     setSelected((previous) => {
@@ -95,7 +96,7 @@ export function SplitDialog({ groupId, open, onClose }: SplitDialogProps) {
     applySplit({
       group,
       occurrenceIds: selectedIds,
-      toast: splitToastText(group.canonicalValue, moved, created),
+      toast: splitToastText(group.canonicalValue, moved, created, userTypes),
     });
     onClose();
   };

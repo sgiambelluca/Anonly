@@ -17,7 +17,12 @@
  * todos".
  */
 
-import type { EntityGroup, EntityType, ReplacementMode } from "@anonly/anonymization-core";
+import {
+  isUserEntityType,
+  type EntityGroup,
+  type EntityTypeId,
+  type ReplacementMode,
+} from "@anonly/anonymization-core";
 import { ChevronDownIcon } from "lucide-react";
 import { useState } from "react";
 
@@ -25,14 +30,19 @@ import { useRulesStore } from "../../store/rules.store.js";
 import { ConfirmDialog } from "../common/ConfirmDialog.js";
 
 import { applyModeAtLevel } from "./applyMode.js";
-import { ENTITY_TYPE_COLOR } from "./entityTypeColors.js";
-import { ENTITY_TYPE_LABEL } from "./entityTypeLabels.js";
+import { typeColor } from "./entityTypeColors.js";
+import { typePlural } from "./entityTypeLabels.js";
 import { hasOwnDecision, planApplyTypeMode, resolveTypeHeaderState } from "./modeLevels.js";
 import { ModeSelectMenu } from "./ModeSelectMenu.js";
-import { REPLACEMENT_MODE_LABEL, REPLACEMENT_MODE_SHORT_LABEL } from "./replacementModeOptions.js";
+import {
+  modesForType,
+  REPLACEMENT_MODE_LABEL,
+  REPLACEMENT_MODE_SHORT_LABEL,
+} from "./replacementModeOptions.js";
+import { useUserTypes } from "./useUserTypes.js";
 
 export interface TypeModeSelectProps {
-  readonly type: EntityType;
+  readonly type: EntityTypeId;
   readonly groups: ReadonlyArray<EntityGroup>;
   /**
    * La franja es `sticky` (un contexto de apilamiento propio): mientras el
@@ -44,6 +54,7 @@ export interface TypeModeSelectProps {
 
 export function TypeModeSelect({ type, groups, onOpenChange }: TypeModeSelectProps) {
   const rules = useRulesStore((state) => state.rules);
+  const typeName = typePlural(type, useUserTypes());
   const [pendingMode, setPendingMode] = useState<ReplacementMode | null>(null);
 
   const state = resolveTypeHeaderState(
@@ -66,8 +77,8 @@ export function TypeModeSelect({ type, groups, onOpenChange }: TypeModeSelectPro
       scope: "type",
       mode,
       entityType: type,
-      historyLabel: `${ENTITY_TYPE_LABEL[type]} → ${REPLACEMENT_MODE_LABEL[mode]}`,
-      toastText: `${ENTITY_TYPE_LABEL[type]} → ${REPLACEMENT_MODE_LABEL[mode]}`,
+      historyLabel: `${typeName} → ${REPLACEMENT_MODE_LABEL[mode]}`,
+      toastText: `${typeName} → ${REPLACEMENT_MODE_LABEL[mode]}`,
     });
   }
 
@@ -87,7 +98,8 @@ export function TypeModeSelect({ type, groups, onOpenChange }: TypeModeSelectPro
         current={current}
         previews={sampleGroup?.replacementPreviews ?? null}
         onSelect={handleSelect}
-        subject={ENTITY_TYPE_LABEL[type]}
+        modes={modesForType(isUserEntityType(type))}
+        subject={typeName}
         {...(onOpenChange !== undefined ? { onOpenChange } : {})}
         align="right"
         // Ancho fijo (UX-10: "Varios" y "Ocultar parcial" miden distinto) y
@@ -105,7 +117,7 @@ export function TypeModeSelect({ type, groups, onOpenChange }: TypeModeSelectPro
               toggle();
             }}
             aria-expanded={open}
-            aria-label={`Modo de reemplazo de ${ENTITY_TYPE_LABEL[type]}: ${
+            aria-label={`Modo de reemplazo de ${typeName}: ${
               state.kind === "mixed" ? "Varios" : REPLACEMENT_MODE_LABEL[state.mode]
             }`}
             // Relleno gris + barra de acento de la categoría. **El relleno es
@@ -114,7 +126,7 @@ export function TypeModeSelect({ type, groups, onOpenChange }: TypeModeSelectPro
             // transparente. Tres rellenos distintos se distinguen de un
             // vistazo; tres bordes finos, no — que es el error que este
             // tratamiento existe para evitar.
-            style={{ borderLeftColor: ENTITY_TYPE_COLOR[type] }}
+            style={{ borderLeftColor: typeColor(type) }}
             className="flex h-7 w-full items-center justify-between gap-1 rounded border border-l-[3px] border-border bg-bg-tertiary px-2 text-sm font-medium text-text-primary hover:bg-border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
           >
             <span className="truncate">{label}</span>
@@ -125,7 +137,7 @@ export function TypeModeSelect({ type, groups, onOpenChange }: TypeModeSelectPro
 
       <ConfirmDialog
         open={pendingMode !== null}
-        title={`¿Cambiar el modo de ${ENTITY_TYPE_LABEL[type]}?`}
+        title={`¿Cambiar el modo de ${typeName}?`}
         message={`Vas a reemplazar los ajustes de ${ownDecisionCount} ${
           ownDecisionCount === 1 ? "entidad que modificaste" : "entidades que modificaste"
         } a mano.`}

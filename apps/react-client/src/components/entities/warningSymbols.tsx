@@ -28,6 +28,8 @@ export const BADGE_BASE_CLASS =
 
 export const REVIEW_BADGE_CLASS = `${BADGE_BASE_CLASS} w-[22px] bg-warning/15 text-warning-strong hover:bg-warning/25`;
 export const CONFLICT_BADGE_CLASS = `${BADGE_BASE_CLASS} w-[22px] bg-error/10 text-error hover:bg-error/20`;
+/** ADR-229 §5: un conflicto que nació resuelto, con el filtro «con conflicto» activo: el mismo símbolo, en gris. */
+export const RESOLVED_CONFLICT_BADGE_CLASS = `${BADGE_BASE_CLASS} w-[22px] bg-bg-tertiary text-text-secondary hover:bg-border`;
 export const TIGHT_SPACE_BADGE_CLASS = `${BADGE_BASE_CLASS} w-[26px] bg-space/10 text-space hover:bg-space/20`;
 
 /** Sugerida: un signo de pregunta grueso. */

@@ -20,7 +20,6 @@
 import type {
   BoundingBox,
   EntityGroup,
-  EntityType,
   EntityTypeId,
   TextMatch,
   Word,
@@ -97,7 +96,7 @@ export type MatchStatus =
  */
 export function resolveMatchStatus(
   match: TextMatch,
-  groupsByType: ReadonlyMap<EntityType, ReadonlyArray<EntityGroup>>,
+  groupsByType: ReadonlyMap<EntityTypeId, ReadonlyArray<EntityGroup>>,
 ): MatchStatus {
   let disabled: MatchStatus = { kind: "unhidden" };
   for (const groups of groupsByType.values()) {

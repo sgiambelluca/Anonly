@@ -16,9 +16,10 @@
 import type {
   EditPreviewGroup,
   EntityGroup,
-  EntityType,
+  EntityTypeId,
   PersonGenderChoice,
   ReplacementMode,
+  UserEntityTypeDefinition,
 } from "@anonly/anonymization-core";
 
 import { actions } from "../../core-adapter/actions.js";
@@ -26,7 +27,8 @@ import { useEntitiesStore } from "../../store/entities.store.js";
 import { showToast } from "../common/toast.js";
 import { removedGroupOverlapReveal } from "../conflicts/conflictResolution.js";
 
-import { editToast, recordEdit } from "./editHistory.js";
+import { TYPE_ACTION_FAILED_TOAST } from "./documentTypeCopy.js";
+import { discardLastEdit, editToast, recordEdit } from "./editHistory.js";
 import { typeChangeToastText } from "./editPreviews.js";
 import {
   discardedTextToastText,
@@ -34,6 +36,7 @@ import {
   groupsToToggle,
   removedToastText,
 } from "./undoableEdits.js";
+import { currentUserTypes } from "./useUserTypes.js";
 
 /**
  * Habilitar/deshabilitar uno o varios grupos. Cubre las dos superficies que
@@ -124,16 +127,37 @@ export function applyLeaveVisible(group: EntityGroup): void {
   applyEnabled({ groups: [group], next: false, label: group.canonicalValue, isType: false });
 }
 
-/** "Cambiar tipo…" (ADR-082 §6). `next` es la vista previa del Core, para el toast. */
+/**
+ * "Cambiar tipo…" (ADR-082 §6). `next` es la vista previa del Core, para el toast.
+ *
+ * Con `newType` es «Crear y cambiar» (ADR-229 §2): **una sola** entrada del
+ * deshacer, después `defineDocumentEntityType` y después el cambio de tipo
+ * (`React_Client.md` §3.9). `type` es entonces el id del tipo nuevo.
+ */
 export function applyTypeChange(
   group: EntityGroup,
-  type: EntityType,
+  type: EntityTypeId,
   next: EditPreviewGroup | undefined,
-): void {
-  const text = typeChangeToastText(group.canonicalValue, next);
+  newType?: UserEntityTypeDefinition,
+): boolean {
+  const text = typeChangeToastText(group.canonicalValue, next, currentUserTypes());
   const recorded = recordEdit(text.title);
+  if (newType !== undefined) {
+    try {
+      actions.defineDocumentType(newType);
+    } catch {
+      if (recorded) discardLastEdit();
+      showToast({ title: TYPE_ACTION_FAILED_TOAST, tone: "error" });
+      return false;
+    }
+  }
   actions.updateGroup(group.id, { type });
-  showToast(editToast(text, recorded));
+  // Con un tipo nuevo el Core no previsualizó el cambio (el tipo todavía no
+  // existía): el toast nombra el tipo desde la definición recién creada.
+  const description =
+    newType !== undefined ? { ...text, description: `Ahora es ${newType.name}` } : text;
+  showToast(editToast(description, recorded));
+  return true;
 }
 
 /**
@@ -202,7 +226,7 @@ export function applyConflictResolution(params: {
   readonly conflictId: string;
   readonly groupId: string;
   readonly spelling: string | null;
-  readonly entityType: EntityType | undefined;
+  readonly entityType: EntityTypeId | undefined;
   readonly label: string;
 }): void {
   recordEdit(`Revisaste «${params.label}»`);

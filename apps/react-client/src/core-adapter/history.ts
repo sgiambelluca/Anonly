@@ -13,6 +13,7 @@
  */
 
 import { useDocumentStore } from "../store/document.store.js";
+import { useEntitiesStore } from "../store/entities.store.js";
 import { createHistoryStore, type EditCheckpointPort } from "../store/history.store.js";
 import { usePipelineStore } from "../store/pipeline.store.js";
 import { useRulesStore } from "../store/rules.store.js";
@@ -34,6 +35,9 @@ const coreCheckpoints: EditCheckpointPort = {
     if (useDocumentStore.getState().id !== documentId) return;
     const snapshot = getGroupingSnapshot(documentId);
     useRulesStore.getState().replaceRules(snapshot.rules);
+    // ADR-225 §6: el Core no emite nada por las definiciones de tipo, así que se
+    // vuelven a leer (y se reponen los guardados durante este documento).
+    useEntitiesStore.getState().refreshDocumentTypes();
     const { currentVersion } = usePipelineStore.getState();
     usePipelineStore.setState({ currentVersion: currentVersion + 1 });
   },

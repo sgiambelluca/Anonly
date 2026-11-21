@@ -23,7 +23,6 @@ import type { EntityGroup } from "@anonly/anonymization-core";
 import { SearchIcon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
-import { toBaseEntityType } from "../../baseEntityType.js";
 import { actions } from "../../core-adapter/actions.js";
 import { useEntitiesStore } from "../../store/entities.store.js";
 import { Button } from "../common/Button.js";
@@ -41,8 +40,9 @@ import {
 } from "./editPreviews.js";
 import { EntityLine } from "./EntityLine.js";
 import { filterGroups, findGroupById } from "./entityTree.js";
-import { ENTITY_TYPE_LABEL, formatIndexInType } from "./entityTypeLabels.js";
+import { formatIndexInType, typePlural } from "./entityTypeLabels.js";
 import { mergePlan, mergeTargetOptions, validateMultiMerge } from "./mergeValidation.js";
+import { useUserTypes } from "./useUserTypes.js";
 
 export interface MergeDialogProps {
   readonly sourceGroupId: string;
@@ -53,6 +53,7 @@ export interface MergeDialogProps {
 export function MergeDialog({ sourceGroupId, open, onClose }: MergeDialogProps) {
   const groupsByType = useEntitiesStore((state) => state.groupsByType);
   const sourceGroup = findGroupById(groupsByType, sourceGroupId);
+  const userTypes = useUserTypes();
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set());
   const [filter, setFilter] = useState("");
 
@@ -67,12 +68,9 @@ export function MergeDialog({ sourceGroupId, open, onClose }: MergeDialogProps) 
     () =>
       sourceGroup === undefined
         ? []
-        : [
-            ...mergeTargetOptions(
-              sourceGroup,
-              groupsByType.get(toBaseEntityType(sourceGroup.type)) ?? [],
-            ),
-          ].sort((a, b) => a.indexInType - b.indexInType),
+        : [...mergeTargetOptions(sourceGroup, groupsByType.get(sourceGroup.type) ?? [])].sort(
+            (a, b) => a.indexInType - b.indexInType,
+          ),
     [sourceGroup, groupsByType],
   );
   const selected = candidates.filter((group) => selectedIds.has(group.id));
@@ -97,7 +95,7 @@ export function MergeDialog({ sourceGroupId, open, onClose }: MergeDialogProps) 
 
   const validation = validateMultiMerge(sourceGroup, selected);
   // "personas", pero "DNI" y "CUIT" quedan en mayúsculas.
-  const plural = ENTITY_TYPE_LABEL[toBaseEntityType(sourceGroup.type)];
+  const plural = typePlural(sourceGroup.type, userTypes);
   const typeLabel = plural === plural.toUpperCase() ? plural : plural.toLowerCase();
 
   function toggle(groupId: string, checked: boolean): void {
@@ -115,7 +113,7 @@ export function MergeDialog({ sourceGroupId, open, onClose }: MergeDialogProps) 
     if (!validation.valid) return;
     const targets = orderMergeTargets(selected);
     const entityCount = selected.length + 1;
-    const toast = result !== null ? mergeToastText(entityCount, result) : null;
+    const toast = result !== null ? mergeToastText(entityCount, result, userTypes) : null;
     // Los N pedidos de `mergePlan` son una sola entrada de la pila (ADR-172 §2).
     applyMerge({
       steps: mergePlan(sourceGroup.id, targets),
@@ -186,8 +184,8 @@ export function MergeDialog({ sourceGroupId, open, onClose }: MergeDialogProps) 
           >
             {candidates.length === 0 ? (
               <p className="p-2 text-text-secondary">
-                No hay otras entidades de tipo{" "}
-                {ENTITY_TYPE_LABEL[toBaseEntityType(sourceGroup.type)]} para fusionar.
+                No hay otras entidades de tipo {typePlural(sourceGroup.type, userTypes)} para
+                fusionar.
               </p>
             ) : visible.length === 0 ? (
               <p className="p-2 text-text-secondary">Ninguna coincide con el filtro.</p>

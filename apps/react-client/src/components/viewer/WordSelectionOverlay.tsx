@@ -37,6 +37,7 @@ import { actions } from "../../core-adapter/actions.js";
 import { Button } from "../common/Button.js";
 import { addManualEntityWithFeedback } from "../entities/addManualEntity.js";
 import { EntityTypePicker } from "../entities/EntityTypePicker.js";
+import { useTypeChoice } from "../entities/useTypeChoice.js";
 
 import {
   blankStartAnchorIndex,
@@ -353,7 +354,7 @@ function SelectionPopover({
   readonly interactionGeometry?: PreviewInteractionGeometry;
   readonly onClose: () => void;
 }) {
-  const [entityType, setEntityType] = useState<EntityType>(EntityType.Person);
+  const choice = useTypeChoice(EntityType.Person);
   const [notFound, setNotFound] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   // Cuántas veces aparece: la misma búsqueda literal que la lupa. Es una
@@ -369,6 +370,8 @@ function SelectionPopover({
   }, [onClose]);
 
   async function handleConfirm(): Promise<void> {
+    const resolved = choice.resolve();
+    if (resolved === null) return;
     setSubmitting(true);
     if (
       interactionRevision !== null &&
@@ -393,7 +396,10 @@ function SelectionPopover({
     const currentValue = selected.map((item) => item?.word.text ?? "").join(" ");
     // ADR-114 §2: se espera el resultado — "no se encontró" y "se agregaron
     // 18" no pueden verse igual. Con éxito, el toast de ADR-169 §7.
-    const feedback = await addManualEntityWithFeedback({ value: currentValue, entityType });
+    const feedback = await addManualEntityWithFeedback(
+      { value: currentValue, entityType: resolved.entityType },
+      resolved.newType,
+    );
     setSubmitting(false);
     if (feedback === "not-found") {
       setNotFound(true);
@@ -418,23 +424,35 @@ function SelectionPopover({
       <p className="truncate">
         Agregar <b className="font-semibold">«{value}»</b> como…
       </p>
-      <EntityTypePicker value={entityType} onChange={setEntityType} aria-label="Tipo de entidad" />
+      <EntityTypePicker
+        {...choice.pickerProps}
+        onNewTypeSubmit={() => void handleConfirm()}
+        aria-label="Tipo de entidad"
+      />
+      {/* La línea de pie: el error del nombre del tipo nuevo ocupa su lugar (ADR-229 §2). */}
       <p
         aria-live="polite"
-        className={`h-5 truncate ${notFound ? "text-error" : "text-text-secondary"}`}
+        className={`h-5 truncate ${notFound || choice.error !== null ? "text-error" : "text-text-secondary"}`}
       >
-        {notFound
-          ? "No se encontró ese valor en el documento."
-          : count === 1
-            ? "Se va a ocultar su única aparición en el documento."
-            : `Se van a ocultar todas sus apariciones: ${count} en el documento.`}
+        {choice.error !== null
+          ? choice.error
+          : notFound
+            ? "No se encontró ese valor en el documento."
+            : count === 1
+              ? "Se va a ocultar su única aparición en el documento."
+              : `Se van a ocultar todas sus apariciones: ${count} en el documento.`}
       </p>
       <div className="flex justify-end gap-2">
         <Button variant="secondary" onClick={onClose} disabled={submitting}>
           Cancelar
         </Button>
-        <Button variant="primary" loading={submitting} onClick={() => void handleConfirm()}>
-          Agregar
+        <Button
+          variant="primary"
+          loading={submitting}
+          disabled={!choice.canConfirm}
+          onClick={() => void handleConfirm()}
+        >
+          {choice.creating ? "Crear y agregar" : "Agregar"}
         </Button>
       </div>
     </div>

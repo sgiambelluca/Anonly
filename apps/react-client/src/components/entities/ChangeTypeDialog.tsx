@@ -20,19 +20,21 @@
  * es no-op (el motor no emite nada, ADR-082 §1); el picker ni lo ofrece.
  */
 
-import type { EntityGroup, EntityType } from "@anonly/anonymization-core";
+import { ReplacementMode, type EntityGroup } from "@anonly/anonymization-core";
 import { ArrowRightIcon } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
 
-import { toBaseEntityType } from "../../baseEntityType.js";
 import { actions } from "../../core-adapter/actions.js";
 import { Button } from "../common/Button.js";
 import { Dialog } from "../common/Dialog.js";
 
 import { applyTypeChange } from "./applyEdits.js";
-import { summarizeTypeChange, typePreviewRequest } from "./editPreviews.js";
+import { BECOMES_LABEL_NOTE, summarizeTypeChange, typePreviewRequest } from "./editPreviews.js";
 import { EntityLine } from "./EntityLine.js";
 import { EntityTypePicker } from "./EntityTypePicker.js";
+import { previewOfNewType } from "./newTypeInline.js";
+import { useTypeChoice } from "./useTypeChoice.js";
+import { useUserTypes } from "./useUserTypes.js";
 
 export interface ChangeTypeDialogProps {
   readonly group: EntityGroup;
@@ -43,24 +45,30 @@ export interface ChangeTypeDialogProps {
 export function ChangeTypeDialog({ group, open, onClose }: ChangeTypeDialogProps) {
   // Arranca en el tipo vigente, que el picker muestra como "Actual" y no deja
   // elegir: sin elección todavía no hay nada que previsualizar.
-  // Guarda provisional (F0): el picker solo ofrece tipos base; F7 la reemplaza.
-  const currentType = toBaseEntityType(group.type);
-  const [nextType, setNextType] = useState<EntityType>(currentType);
+  const currentType = group.type;
+  const choice = useTypeChoice(currentType);
+  const resetChoice = choice.reset;
+  const userTypes = useUserTypes();
+  const nextType = choice.state.value;
 
   useEffect(() => {
-    if (open) setNextType(currentType);
-  }, [open, currentType]);
+    if (open) resetChoice(currentType);
+  }, [open, currentType, resetChoice]);
 
+  // Con «Nuevo tipo» el tipo todavía no existe: el Core no puede previsualizar el cambio.
   const preview = useMemo(() => {
-    if (!open) return null;
+    if (!open || nextType === "new") return null;
     const request = typePreviewRequest(group, nextType);
     return request === null ? null : actions.previewEdit(request);
   }, [open, group, nextType]);
-  const summary = summarizeTypeChange(group, preview);
+  const summary = summarizeTypeChange(group, preview, userTypes);
+  const canApply = nextType !== currentType && choice.canConfirm;
 
   function handleApply(): void {
-    if (nextType === group.type) return;
-    applyTypeChange(group, nextType, preview?.groups[0]);
+    if (!canApply) return;
+    const resolved = choice.resolve();
+    if (resolved === null) return;
+    if (!applyTypeChange(group, resolved.entityType, preview?.groups[0], resolved.newType)) return;
     onClose();
   }
 
@@ -79,10 +87,11 @@ export function ChangeTypeDialog({ group, open, onClose }: ChangeTypeDialogProps
           <Button
             variant="primary"
             className="min-w-[8rem]"
-            disabled={nextType === group.type}
+            disabled={!canApply}
             onClick={handleApply}
           >
-            Cambiar tipo
+            {/* «Crear y cambiar» (ADR-229 §2): el contenedor decide el botón. */}
+            {choice.creating ? "Crear y cambiar" : "Cambiar tipo"}
           </Button>
         </div>
       }
@@ -102,10 +111,10 @@ export function ChangeTypeDialog({ group, open, onClose }: ChangeTypeDialogProps
             Es un…
           </span>
           <EntityTypePicker
-            value={nextType}
-            onChange={setNextType}
+            {...choice.pickerProps}
             current={currentType}
             columns={3}
+            onNewTypeSubmit={handleApply}
             aria-labelledby="change-type-pick"
           />
         </div>
@@ -113,10 +122,25 @@ export function ChangeTypeDialog({ group, open, onClose }: ChangeTypeDialogProps
         {/* Caja "Cómo queda" de alto fijo (UX-10). */}
         <div
           aria-live="polite"
-          className="flex h-[8.5rem] flex-col gap-2 rounded-lg border border-accent/35 bg-accent/5 px-3.5 py-3"
+          className="flex h-[10.5rem] flex-col gap-2 rounded-lg border border-accent/35 bg-accent/5 px-3.5 py-3"
         >
           <span className="font-semibold text-text-primary">Cómo queda</span>
-          {summary !== null ? (
+          {choice.creating ? (
+            // Línea de pie del contenedor: el error del nombre y, si es válido, lo que se crea.
+            <>
+              <span
+                className={`line-clamp-3 ${choice.error !== null ? "text-error" : "text-text-secondary"}`}
+              >
+                {choice.error ??
+                  (choice.state.newType !== null && choice.canConfirm
+                    ? `Se crea el tipo «${choice.state.newType.name.trim()}» solo para este documento y la entidad pasa a ser ${previewOfNewType(choice.state.newType)}.`
+                    : "Escribí el nombre del tipo nuevo.")}
+              </span>
+              <span className="h-5 text-text-secondary">
+                {group.replacementMode === ReplacementMode.Synthetic ? BECOMES_LABEL_NOTE : ""}
+              </span>
+            </>
+          ) : summary !== null ? (
             <>
               <span className="flex min-w-0 items-center gap-2">
                 <span className="max-w-[10rem] truncate rounded-md bg-bg-tertiary px-1.5 py-0.5 font-mono text-text-primary">
@@ -130,6 +154,9 @@ export function ChangeTypeDialog({ group, open, onClose }: ChangeTypeDialogProps
               <span className="truncate text-text-secondary">{summary.note}</span>
               <span className="h-5 text-text-secondary">
                 {summary.dropsGender ? "El género se borra: solo se usa para personas." : ""}
+              </span>
+              <span className="h-5 text-text-secondary">
+                {summary.becomesLabel ? BECOMES_LABEL_NOTE : ""}
               </span>
             </>
           ) : (
