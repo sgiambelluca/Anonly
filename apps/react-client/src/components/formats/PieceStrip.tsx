@@ -96,6 +96,8 @@ function DropSlot({ active, wide = false, onOver, onDrop }: DropSlotProps) {
 interface PieceChipProps {
   readonly piece: Exclude<FormatPiece, { readonly kind: "optional" }>;
   readonly selected: boolean;
+  /** Dentro de una parte opcional: más baja, para que el grupo mida como una tarjeta suelta. */
+  readonly compact?: boolean;
   readonly onSelect: () => void;
   readonly onDragStart: (event: DragEvent<HTMLElement>) => void;
   readonly onDragEnd: () => void;
@@ -106,6 +108,7 @@ interface PieceChipProps {
 function PieceChip({
   piece,
   selected,
+  compact = false,
   onSelect,
   onDragStart,
   onDragEnd,
@@ -126,7 +129,7 @@ function PieceChip({
       onDragEnd={onDragEnd}
       onDragOver={onDragOver}
       onDrop={onDrop}
-      className={`relative flex h-[4.5rem] min-w-[5.5rem] max-w-[11rem] shrink-0 cursor-grab flex-col justify-center gap-0.5 rounded-lg border bg-bg-primary py-1.5 pl-2.5 pr-5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+      className={`relative flex ${compact ? "h-16 py-1" : "h-[4.5rem] py-1.5"} min-w-[5.5rem] max-w-[11rem] shrink-0 cursor-grab flex-col justify-center gap-0.5 rounded-lg border bg-bg-primary pl-2.5 pr-5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
         selected ? "border-accent ring-2 ring-accent/40" : "border-border-strong"
       }`}
     >
@@ -323,10 +326,15 @@ export function PieceStrip({
     return inRightHalf(event) ? slotAfter(path) : slotBefore(path);
   }
 
-  function renderChip(piece: Exclude<FormatPiece, { readonly kind: "optional" }>, path: PiecePath) {
+  function renderChip(
+    piece: Exclude<FormatPiece, { readonly kind: "optional" }>,
+    path: PiecePath,
+    compact = false,
+  ) {
     return (
       <PieceChip
         piece={piece}
+        compact={compact}
         selected={samePath(selected, path)}
         onSelect={() => onSelect(path)}
         onDragStart={(event) => startDrag(event, path)}
@@ -353,7 +361,7 @@ export function PieceStrip({
       ref={rowRef}
       role="group"
       aria-label="Piezas de la variante"
-      className="flex min-h-[6.5rem] flex-wrap content-start items-center gap-y-4 rounded-lg border border-border bg-bg-secondary p-3"
+      className="flex min-h-[6.25rem] flex-wrap content-start items-center gap-y-4 rounded-lg border border-border bg-bg-secondary p-3"
     >
       {variant.map((piece, index) => {
         const path: PiecePath = [index];
@@ -377,7 +385,7 @@ export function PieceStrip({
               ) : null}
               {piece.kind === "optional" ? (
                 <div
-                  className={`flex flex-col rounded-lg border border-dashed bg-bg-primary p-1.5 ${
+                  className={`flex h-[4.5rem] items-stretch gap-1.5 rounded-xl border-[1.5px] border-dashed bg-bg-secondary px-1.5 py-[2px] ${
                     samePath(selected, path)
                       ? "border-accent ring-2 ring-accent/40"
                       : "border-border-strong"
@@ -395,13 +403,12 @@ export function PieceStrip({
                     onDragEnd={endDrag}
                     onDragOver={(event) => hover(event, chipSlot(event, path))}
                     onDrop={(event) => drop(event, chipSlot(event, path))}
-                    className="flex cursor-grab items-center gap-1 rounded-md px-1 pb-1 text-xs font-semibold text-text-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                    className="flex shrink-0 rotate-180 cursor-grab items-center justify-center rounded-md text-[11px] font-[650] uppercase tracking-[0.06em] text-text-secondary [writing-mode:vertical-rl] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
                   >
-                    <GripVerticalIcon className="h-3 w-3" aria-hidden />
-                    Parte opcional
+                    Opcional
                   </div>
                   <div
-                    className="flex min-h-[4.5rem] items-center"
+                    className="flex items-center"
                     onDragOver={(event) =>
                       hover(event, { parent: index, index: piece.pieces.length })
                     }
@@ -415,7 +422,7 @@ export function PieceStrip({
                       return (
                         <div key={innerIndex} className="flex items-center">
                           {renderSlot({ parent: index, index: innerIndex })}
-                          {inner.kind === "optional" ? null : renderChip(inner, innerPath)}
+                          {inner.kind === "optional" ? null : renderChip(inner, innerPath, true)}
                         </div>
                       );
                     })}

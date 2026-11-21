@@ -95,6 +95,8 @@ export interface DialogProps {
   readonly onEscapeKeyDown?: (event: KeyboardEvent) => void;
   /** Usa hasta el 92 % del alto de la ventana en vez del 85 % (el generador de formatos). */
   readonly tall?: boolean;
+  /** La descripción va en la columna del título, sin un renglón propio debajo (el generador). */
+  readonly descriptionInline?: boolean;
 }
 
 const SIZE_CLASS: Readonly<Record<NonNullable<DialogProps["size"]>, string>> = {
@@ -120,6 +122,7 @@ export function Dialog({
   headerActions,
   onEscapeKeyDown,
   tall = false,
+  descriptionInline = false,
 }: DialogProps) {
   const [selectOpen, setSelectOpen] = useState(false);
   const zIndex = dialogZIndex(useDialogLayer(open));
@@ -196,9 +199,16 @@ export function Dialog({
             ) : (
               <>
                 <div className="mb-3 flex shrink-0 items-start justify-between gap-4">
-                  <div className="flex min-w-0 items-baseline gap-2">
-                    {titleNode}
-                    {titleAside}
+                  <div className="flex min-w-0 flex-col">
+                    <div className="flex min-w-0 items-baseline gap-2">
+                      {titleNode}
+                      {titleAside}
+                    </div>
+                    {descriptionInline && description ? (
+                      <RadixDialog.Description className="text-sm text-text-secondary">
+                        {description}
+                      </RadixDialog.Description>
+                    ) : null}
                   </div>
                   {/* Las acciones van pegadas a la X, no repartidas por `justify-between`. */}
                   <div className="flex shrink-0 items-center gap-1.5">
@@ -209,7 +219,7 @@ export function Dialog({
                     {hideCloseButton ? null : closeButton}
                   </div>
                 </div>
-                {description ? (
+                {description && !descriptionInline ? (
                   <RadixDialog.Description className="mb-3 shrink-0 text-sm text-text-secondary">
                     {description}
                   </RadixDialog.Description>
