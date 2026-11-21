@@ -11,6 +11,7 @@ import {
   evaluateTypeForm,
   fieldsOf,
   replacementLadder,
+  replacementTokens,
   TYPE_FORM_COPY,
   typeFormLead,
   typeFormNote,
@@ -41,6 +42,15 @@ describe("userTypeForm", () => {
       name: "Legajo",
       shortLabels: { level2: "LE" },
     });
+  });
+
+  it("los tres reemplazos reales: completo, corto con espacio y mínimo con guion", () => {
+    expect(replacementTokens(replacementLadder(fields("Legajo")))).toEqual([
+      "[LEGAJO 01]",
+      "[LEGA 01]",
+      "[LEG-01]",
+    ]);
+    expect(replacementTokens(replacementLadder(fields("")))).toEqual(["—", "—", "—"]);
   });
 
   it("«Cómo se reemplaza» muestra los tres largos, con las versiones automáticas de ADR-219 §2", () => {

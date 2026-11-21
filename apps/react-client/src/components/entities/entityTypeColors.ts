@@ -77,5 +77,18 @@ export function typeDotStyle(
   documentOnly = false,
 ): { readonly background?: string; readonly border?: string } {
   if (!isUserEntityType(type)) return { background: ENTITY_TYPE_COLOR[type] };
-  return { border: `2px ${documentOnly ? "dotted" : "solid"} ${USER_TYPE_COLOR}` };
+  return userDotStyle(documentOnly);
+}
+
+/** El color del aro de un tipo propio: `--color-user` (#64748b en claro, #94a3b8 en oscuro). */
+export const USER_DOT_COLOR = "rgb(var(--color-user))";
+
+/** Ancho del borde del aro (lienzo `.udot`). */
+export const USER_DOT_BORDER_PX = 2.2;
+
+/** El aro de un tipo propio: sin relleno; punteado si es solo de este documento. */
+export function userDotStyle(documentOnly = false): { readonly border: string } {
+  return {
+    border: `${USER_DOT_BORDER_PX}px ${documentOnly ? "dashed" : "solid"} ${USER_DOT_COLOR}`,
+  };
 }

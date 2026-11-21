@@ -17,7 +17,7 @@
  * `GROUP_SPLIT_REQUESTED`.
  */
 
-import { DetectionSource } from "@anonly/anonymization-core";
+import { DetectionSource, type EntityTypeId } from "@anonly/anonymization-core";
 import { ArrowRightIcon, InfoIcon, TriangleAlertIcon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
@@ -37,8 +37,8 @@ import {
 } from "./editPreviews.js";
 import { EntityLine } from "./EntityLine.js";
 import { findGroupById } from "./entityTree.js";
-import { typeColor } from "./entityTypeColors.js";
 import { validateSplit } from "./splitValidation.js";
+import { TypeDot } from "./TypeDot.js";
 import { useUserTypes } from "./useUserTypes.js";
 
 export interface SplitDialogProps {
@@ -76,7 +76,6 @@ export function SplitDialog({ groupId, open, onClose }: SplitDialogProps) {
   const validation = validateSplit(group, selectedIds);
   const summary = summarizeSplit(group, selectedIds.length, preview, userTypes);
   const slot = splitSlotMessage(group, selectedIds.length);
-  const color = typeColor(group.type);
 
   function toggleMember(occurrenceId: string, checked: boolean): void {
     setSelected((previous) => {
@@ -189,14 +188,14 @@ export function SplitDialog({ groupId, open, onClose }: SplitDialogProps) {
             caption="Se quedan en"
             label={summary.stayLabel}
             count={summary.stayCount}
-            color={color}
+            type={group.type}
           />
           <ArrowRightIcon className="h-4 w-4 text-text-secondary" aria-hidden />
           <SplitCard
             caption="Pasan a una nueva"
             label={summary.moveLabel}
             count={summary.moveCount}
-            color={color}
+            type={group.type}
           />
         </div>
 
@@ -226,18 +225,18 @@ function SplitCard({
   caption,
   label,
   count,
-  color,
+  type,
 }: {
   readonly caption: string;
   readonly label: string;
   readonly count: number;
-  readonly color: string;
+  readonly type: EntityTypeId;
 }) {
   return (
     <div className="flex flex-col gap-1 rounded-lg border border-border bg-bg-primary px-3 py-2.5">
       <span className="text-text-secondary">{caption}</span>
       <span className="flex min-w-0 items-center gap-2">
-        <span aria-hidden className="h-2 w-2 shrink-0 rounded-full" style={{ background: color }} />
+        <TypeDot type={type} />
         <b className="truncate font-semibold text-text-primary">{label}</b>
       </span>
       <span className="tabular-nums text-text-primary">

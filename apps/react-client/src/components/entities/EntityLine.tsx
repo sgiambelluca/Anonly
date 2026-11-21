@@ -8,7 +8,7 @@ import type { EntityTypeId } from "@anonly/anonymization-core";
 import type { ReactNode } from "react";
 
 import { describeEntityLine } from "./editPreviews.js";
-import { typeDotStyle } from "./entityTypeColors.js";
+import { TypeDot } from "./TypeDot.js";
 import { useUserTypes } from "./useUserTypes.js";
 
 /** Una entidad en una línea: punto de color, nombre, "Persona N.º 03 · 2 apariciones" y token. */
@@ -30,11 +30,7 @@ export function EntityLine({
   const userTypes = useUserTypes();
   return (
     <div className="flex min-w-0 items-center gap-2.5 rounded-lg border border-border bg-bg-secondary px-3 py-2.5">
-      <span
-        aria-hidden
-        className="h-2 w-2 shrink-0 rounded-full"
-        style={typeDotStyle(group.type)}
-      />
+      <TypeDot type={group.type} />
       <b className="min-w-0 truncate font-semibold text-text-primary">{group.canonicalValue}</b>
       <span className="shrink-0 text-text-secondary">{describeEntityLine(group, userTypes)}</span>
       {token !== undefined ? (

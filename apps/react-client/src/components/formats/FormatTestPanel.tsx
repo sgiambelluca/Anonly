@@ -43,7 +43,7 @@ const SAMPLE_MAX = 5000;
 
 const SEGMENT_CLASS: Readonly<Record<SegmentKind, string>> = {
   plain: "",
-  hit: "rounded-sm bg-accent/25 text-text-primary",
+  hit: "rounded-[3px] bg-[var(--anonly-mark)] px-px text-text-primary shadow-[0_0_0_1px_rgb(245_158_11/0.6)]",
   context: "border-b border-dotted border-text-secondary",
 };
 

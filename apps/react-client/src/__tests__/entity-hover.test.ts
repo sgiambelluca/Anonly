@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   boxContains,
+  clickConsumesSelection,
   clickSelectsGroup,
   isClickGesture,
   displayToPagePoint,
@@ -283,6 +284,12 @@ describe("el clic sobre una entidad (ADR-226 §4)", () => {
   it("sobre una entidad activa la selecciona en la lista", () => {
     const hit = { group: makeGroup({ id: "g9" }), boxes: [box(0, 0)], anchor: box(0, 0) };
     expect(clickSelectsGroup(hit)).toBe("g9");
+  });
+
+  it("un clic sobre una entidad activa no sigue como selección de texto; sobre texto común, sí", () => {
+    expect(clickConsumesSelection(true, true)).toBe(true);
+    expect(clickConsumesSelection(true, false)).toBe(false);
+    expect(clickConsumesSelection(false, true)).toBe(false);
   });
 
   it("sobre una desactivada, o sobre nada, no selecciona", () => {

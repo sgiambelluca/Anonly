@@ -12,6 +12,7 @@
 import { TriangleAlertIcon } from "lucide-react";
 
 import { Button } from "../common/Button.js";
+import { UserTypeDot } from "../entities/TypeDot.js";
 import {
   EXPORT_NOTICE_BODY,
   exportNoticeTitle,
@@ -57,10 +58,7 @@ export function SkippedFormatsExportNotice({
                 index > 0 ? "border-t border-border" : ""
               }`}
             >
-              <span
-                aria-hidden
-                className="h-[9px] w-[9px] rounded-full border-2 border-text-secondary"
-              />
+              <UserTypeDot />
               <span className="truncate font-semibold text-text-primary">{entry.name}</span>
               <span className="text-text-secondary">{exportRowPages(entry)}</span>
               <span className="flex justify-end">

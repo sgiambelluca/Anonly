@@ -24,7 +24,7 @@ import type {
   UserEntityTypeDefinition,
   UserEntityTypeId,
 } from "@anonly/anonymization-core";
-import { InfoIcon, TriangleAlertIcon } from "lucide-react";
+import { TriangleAlertIcon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { Button } from "../common/Button.js";
@@ -34,6 +34,7 @@ import {
   evaluateTypeForm,
   fieldsOf,
   replacementLadder,
+  replacementTokens,
   TYPE_FORM_COPY,
   typeFormLead,
   typeFormNote,
@@ -139,38 +140,36 @@ export function UserTypeDialog({
           />
         </label>
 
-        {/* Ranura de alto fijo (UX-10): el texto de reposo y el error ocupan el mismo lugar. */}
+        {/* Ranura de alto fijo (UX-10): en reposo queda vacía; el error ocupa su lugar. */}
         <div
           role={hasError ? "alert" : undefined}
           aria-live="polite"
-          className={`flex h-14 items-start gap-2 rounded-lg border px-3 py-2 text-sm leading-snug ${
-            hasError
-              ? "border-error bg-error/10 font-medium text-error"
-              : "border-border bg-bg-secondary text-text-secondary"
-          }`}
+          className="flex h-10 items-start gap-2 text-sm font-medium leading-snug text-error"
         >
-          {hasError ? (
-            <TriangleAlertIcon className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
-          ) : (
-            <InfoIcon className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
-          )}
-          <span className="line-clamp-2">
-            {result.slot.kind === "error" ? result.slot.text : TYPE_FORM_COPY.idleSlot}
-          </span>
+          {result.slot.kind === "error" ? (
+            <>
+              <TriangleAlertIcon className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+              <span className="line-clamp-2">{result.slot.text}</span>
+            </>
+          ) : null}
         </div>
 
         <div className="flex flex-col gap-2 rounded-lg border border-border p-3">
           <span className="text-sm font-semibold text-text-primary">
             {TYPE_FORM_COPY.ladderTitle}
           </span>
-          <dl className="grid grid-cols-[1fr_auto] gap-x-3 gap-y-1 text-sm">
-            <dt className="text-text-secondary">Largo</dt>
-            <dd className="font-mono text-text-primary">{ladder.level0 || "—"}</dd>
-            <dt className="text-text-secondary">Corto</dt>
-            <dd className="font-mono text-text-primary">{ladder.level1 || "—"}</dd>
-            <dt className="text-text-secondary">Más corto</dt>
-            <dd className="font-mono text-text-primary">{ladder.level2 || "—"}</dd>
-          </dl>
+          <ul className="grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1fr)] items-start gap-2.5">
+            {replacementTokens(ladder).map((token, index) => (
+              <li key={index} className="flex min-w-0 flex-col gap-1">
+                <span className="truncate whitespace-nowrap rounded-md border border-border bg-bg-primary px-2 py-1 font-mono text-sm text-text-primary">
+                  {token}
+                </span>
+                <span className="text-sm text-text-secondary">
+                  {TYPE_FORM_COPY.ladderCaptions[index]}
+                </span>
+              </li>
+            ))}
+          </ul>
           <span className="text-sm font-semibold text-text-primary">
             {TYPE_FORM_COPY.shortLabelsTitle}{" "}
             <span className="font-normal text-text-secondary">{TYPE_FORM_COPY.optional}</span>

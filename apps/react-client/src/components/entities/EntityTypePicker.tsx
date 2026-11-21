@@ -35,9 +35,9 @@ import {
   NEW_TYPE_BAND_LABEL,
   SAVED_TYPE_TOOLTIP,
 } from "./documentTypeCopy.js";
-import { typeDotStyle } from "./entityTypeColors.js";
 import { PICKER_TYPE_ORDER, typeSingular } from "./entityTypeLabels.js";
 import { previewOfNewType, type NewTypeDraft } from "./newTypeInline.js";
+import { TypeDot } from "./TypeDot.js";
 import { userTypeDefinitions, type KnownUserType } from "./userTypes.js";
 
 export interface EntityTypePickerProps {
@@ -135,11 +135,7 @@ export function EntityTypePicker({
               : "border-transparent text-text-primary hover:border-border hover:bg-bg-primary"
         }`}
       >
-        <span
-          aria-hidden
-          className="h-2 w-2 shrink-0 rounded-full"
-          style={typeDotStyle(type, documentOnly)}
-        />
+        <TypeDot type={type} documentOnly={documentOnly} />
         <span className="min-w-0 flex-1 truncate">{typeSingular(type, definitions)}</span>
         {isCurrent ? (
           <span className="shrink-0 text-sm text-text-secondary">Actual</span>

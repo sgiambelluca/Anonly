@@ -135,6 +135,8 @@ function renderPhase(phase: AppPhase): ReactNode {
     return (
       <div className="h-screen overflow-hidden">
         <LoadScreen />
+        {/* La pantalla de carga emite el aviso «Formatos guardados»: necesita su propio host. */}
+        <ToastHost />
       </div>
     );
   }

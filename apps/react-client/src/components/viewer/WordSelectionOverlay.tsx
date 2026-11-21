@@ -35,7 +35,7 @@ import {
   type PreviewInteractionGeometry,
   type Word,
 } from "@anonly/anonymization-core";
-import { useEffect, useRef, useState, type PointerEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent } from "react";
 
 import { actions } from "../../core-adapter/actions.js";
 import { useDetectionStore } from "../../store/detection.store.js";
@@ -45,7 +45,7 @@ import { EntityTypePicker } from "../entities/EntityTypePicker.js";
 import { useTypeChoice } from "../entities/useTypeChoice.js";
 import { useUserTypes } from "../entities/useUserTypes.js";
 
-import { isClickGesture } from "./entityHover.js";
+import { clickConsumesSelection, isClickGesture } from "./entityHover.js";
 import { EntityTooltip } from "./EntityTooltip.js";
 import { buildEntityTooltip } from "./entityTooltipContent.js";
 import {
@@ -55,6 +55,7 @@ import {
   selectVisibleSpan,
   selectionDirection,
 } from "./interactionProjection.js";
+import { shiftIntoWindow } from "./popoverShift.js";
 import { dominantLineWords } from "./selectionLine.js";
 import { useEntityHover } from "./useEntityHover.js";
 import { wordsBoundingBox } from "./viewerGestures.js";
@@ -174,7 +175,12 @@ export function WordSelectionOverlay({
     setDragStart(null);
     setDragCurrent(null);
     // ADR-226 §4: un clic sin arrastre sobre una entidad activa la selecciona en la lista.
-    if (isClickGesture(dragStart, end, CLICK_TOLERANCE_PX)) hover.onClick(end);
+    // Y no sigue como selección de texto (no abre el globo de agregar).
+    const isClick = isClickGesture(dragStart, end, CLICK_TOLERANCE_PX);
+    if (clickConsumesSelection(isClick, isClick && hover.onClick(end))) {
+      dragRevisionRef.current = null;
+      return;
+    }
     if (dragRevisionRef.current !== actions.getPreviewInteractionRevision(pageIndex)) {
       dragRevisionRef.current = null;
       return;
@@ -406,6 +412,16 @@ function SelectionPopover({
   // Cuántas veces aparece: la misma búsqueda literal que la lupa. Es una
   // estimación para el texto; lo que cuenta es el `occurrenceCount` real.
   const [count] = useState(() => actions.findText(value).length);
+  // Que el globo quede entero dentro de la ventana (no se corta por la derecha).
+  const ref = useRef<HTMLDivElement>(null);
+  const [shiftX, setShiftX] = useState(0);
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (element === null) return;
+    const rect = element.getBoundingClientRect();
+    const next = shiftIntoWindow(rect.left - shiftX, rect.right - shiftX, window.innerWidth);
+    if (next !== shiftX) setShiftX(next);
+  }, [left, shiftX]);
 
   useEffect(() => {
     function handleKeydown(event: KeyboardEvent): void {
@@ -461,8 +477,9 @@ function SelectionPopover({
     <div
       role="dialog"
       aria-label="Agregar la selección como entidad"
+      ref={ref}
       className="absolute z-20 flex w-[22.5rem] max-w-[calc(100%-1rem)] flex-col gap-2.5 rounded-xl border border-border bg-bg-primary p-3.5 text-sm text-text-primary shadow-md"
-      style={{ left: Math.max(8, left - 40), top }}
+      style={{ left: Math.max(8, left - 40) + shiftX, top }}
       // El globo vive dentro de la capa que arma la selección: sin esto,
       // cualquier click adentro arrancaría un arrastre nuevo.
       onPointerDown={(event) => event.stopPropagation()}

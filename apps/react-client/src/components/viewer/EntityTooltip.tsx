@@ -12,7 +12,7 @@
 import type { EntityTypeId } from "@anonly/anonymization-core";
 import * as RadixTooltip from "@radix-ui/react-tooltip";
 
-import { typeDotStyle } from "../entities/entityTypeColors.js";
+import { TypeDot } from "../entities/TypeDot.js";
 
 import { TOOLTIP_ROW_LABEL, type EntityTooltipContent } from "./entityTooltipContent.js";
 import type { ScreenRect } from "./wordSelectionRect.js";
@@ -43,11 +43,7 @@ export function EntityTooltip({ rect, type, content }: EntityTooltipProps) {
             className="pointer-events-none z-50 flex w-[292px] flex-col gap-2 rounded-[10px] bg-text-primary px-3.5 py-3 text-[12.5px] leading-snug text-bg-primary shadow-md"
           >
             <span className="flex items-center gap-2">
-              <span
-                aria-hidden
-                className="h-2 w-2 shrink-0 rounded-full"
-                style={typeDotStyle(type)}
-              />
+              <TypeDot type={type} />
               <b className="font-semibold">{content.typeName}</b>
               <span className="opacity-70">{content.number}</span>
             </span>
