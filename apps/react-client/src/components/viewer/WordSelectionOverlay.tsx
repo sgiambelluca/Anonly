@@ -45,6 +45,7 @@ import { EntityTypePicker } from "../entities/EntityTypePicker.js";
 import { useTypeChoice } from "../entities/useTypeChoice.js";
 import { useUserTypes } from "../entities/useUserTypes.js";
 
+import { isClickGesture } from "./entityHover.js";
 import { EntityTooltip } from "./EntityTooltip.js";
 import { buildEntityTooltip } from "./entityTooltipContent.js";
 import {
@@ -57,7 +58,11 @@ import {
 import { dominantLineWords } from "./selectionLine.js";
 import { useEntityHover } from "./useEntityHover.js";
 import { wordsBoundingBox } from "./viewerGestures.js";
-import { pageRectToScreenRect, pointerSelectionToPageRect } from "./wordSelectionRect.js";
+import {
+  CLICK_TOLERANCE_PX,
+  pageRectToScreenRect,
+  pointerSelectionToPageRect,
+} from "./wordSelectionRect.js";
 
 /** Lo señalado en el original: palabras de un renglón de una página. */
 export interface PageSelection {
@@ -168,6 +173,8 @@ export function WordSelectionOverlay({
     const end = pointFromEvent(event);
     setDragStart(null);
     setDragCurrent(null);
+    // ADR-226 §4: un clic sin arrastre sobre una entidad activa la selecciona en la lista.
+    if (isClickGesture(dragStart, end, CLICK_TOLERANCE_PX)) hover.onClick(end);
     if (dragRevisionRef.current !== actions.getPreviewInteractionRevision(pageIndex)) {
       dragRevisionRef.current = null;
       return;

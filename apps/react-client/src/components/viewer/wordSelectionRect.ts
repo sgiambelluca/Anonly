@@ -22,7 +22,7 @@ export function isOriginalPanel(kind: ViewerKind): boolean {
 }
 
 /** Tolerancia de click sin arrastre, en px CSS de pantalla (no de página). */
-const CLICK_TOLERANCE_PX = 3;
+export const CLICK_TOLERANCE_PX = 3;
 
 export interface PointerSelectionInput {
   readonly startX: number;

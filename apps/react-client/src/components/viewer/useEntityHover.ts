@@ -27,6 +27,7 @@ import { useViewerStore } from "../../store/viewer.store.js";
 import {
   ENTITY_TOOLTIP_DELAY_MS,
   OPEN_OVERLAY_SELECTOR,
+  clickSelectsGroup,
   displayToPagePoint,
   hitTestEntity,
   isTooltipSuppressed,
@@ -51,6 +52,8 @@ export interface UseEntityHover {
   readonly onPointerMove: (event: PointerEvent<HTMLDivElement>) => void;
   readonly onPointerLeave: () => void;
   readonly onPointerDown: () => void;
+  /** Un clic sin arrastre: selecciona en la lista la entidad activa bajo el puntero. */
+  readonly onClick: (displayPoint: PagePoint) => void;
 }
 
 function isOverlayOpen(): boolean {
@@ -183,5 +186,38 @@ export function useEntityHover(input: UseEntityHoverInput): UseEntityHover {
     dismiss();
   }, [dismiss]);
 
-  return { hovered, onPointerMove, onPointerLeave, onPointerDown };
+  // Mismo mecanismo que «Ver en la lista» (`entities.store.flashGroupId`): el panel
+  // expande el tipo, lleva la fila a la vista y la resalta.
+  const onClick = useCallback(
+    (displayPoint: PagePoint): void => {
+      const pageSize = actions.getPageSize(pageIndex);
+      if (pageSize === null) return;
+      const point = displayToPagePoint(
+        displayPoint,
+        { width: displayWidth, height: displayHeight },
+        pageSize,
+      );
+      if (point === null) return;
+      if (
+        kind === "anonymized" &&
+        (interactionGeometry === undefined ||
+          interactionGeometry.revision !== actions.getPreviewInteractionRevision(pageIndex))
+      ) {
+        return;
+      }
+      const groupId = clickSelectsGroup(
+        hitTestEntity({
+          kind,
+          pageIndex,
+          point,
+          groups: [...useEntitiesStore.getState().groupsByType.values()].flat(),
+          geometry: interactionGeometry,
+        }),
+      );
+      if (groupId !== null) useEntitiesStore.getState().setFlashGroupId(groupId);
+    },
+    [kind, pageIndex, displayWidth, displayHeight, interactionGeometry],
+  );
+
+  return { hovered, onPointerMove, onPointerLeave, onPointerDown, onClick };
 }
