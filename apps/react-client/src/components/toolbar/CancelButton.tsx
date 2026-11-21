@@ -20,6 +20,8 @@ import { usePipelineStore } from "../../store/pipeline.store.js";
 import { Button } from "../common/Button.js";
 import { ConfirmDialog } from "../common/ConfirmDialog.js";
 
+import { matchesShortcut } from "./shortcuts.js";
+
 /**
  * ADR-087 §7 agrega `Ready`. Ahí el pipeline **ya terminó**: no hay nada que
  * cancelar, y el botón aparecía con peso de secundario junto al CTA primario
@@ -56,7 +58,7 @@ export function CancelButton({ showShortcut = false }: CancelButtonProps = {}) {
   useEffect(() => {
     if (!visible) return;
     function onKeydown(event: KeyboardEvent): void {
-      if ((event.metaKey || event.ctrlKey) && event.key === ".") {
+      if (matchesShortcut("cancel", event)) {
         event.preventDefault();
         setConfirmOpen(true);
       }

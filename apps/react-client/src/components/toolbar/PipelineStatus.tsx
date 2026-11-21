@@ -43,6 +43,7 @@ import { Button } from "../common/Button.js";
 import { getIncompleteAnalysisNotice } from "./incompleteAnalysisNotice.js";
 import { getPipelineErrorPresentation } from "./pipelineErrorPresentation.js";
 import { getPipelineStageLabel } from "./pipelineStageLabel.js";
+import { SkippedFormatsNotice, useSkippedFormatsNotice } from "./SkippedFormatsNotice.js";
 
 /** Stages en los que el pipeline ya no reporta progreso (ADR-087 §7.1). */
 const TERMINAL_STAGES: ReadonlySet<PipelineStage> = new Set([
@@ -60,6 +61,7 @@ export function PipelineStatus() {
   const exportProgress = usePipelineStore((state) => state.exportProgress);
   const error = usePipelineStore((state) => state.error);
   const failedJobs = usePipelineStore((state) => state.failedJobs);
+  const skippedNotice = useSkippedFormatsNotice();
 
   const errorPresentation = getPipelineErrorPresentation(stage, error);
 
@@ -101,6 +103,13 @@ export function PipelineStatus() {
       </Banner>
     );
   }
+
+  /*
+   * ADR-229 §7: un formato del usuario que no se aplicó en alguna página usa la
+   * misma ranura. Va después del análisis incompleto, que es el riesgo mayor
+   * (puede faltar la detección entera); el diálogo de exportar lo repite.
+   */
+  if (skippedNotice) return <SkippedFormatsNotice notice={skippedNotice} />;
 
   const label = getPipelineStageLabel({
     stage,

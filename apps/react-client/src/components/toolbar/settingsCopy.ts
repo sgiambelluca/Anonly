@@ -95,6 +95,11 @@ export const UPDATE_NETWORK_NOTICE_EMPHASIS =
 export const UPDATE_NETWORK_NOTICE_CHECK_OFF =
   'Si elegís "No buscar", Anonly no se conecta a internet salvo que toques "Buscar actualizaciones ahora".';
 
+/** ADR-229 §8: la sección «Atajos de teclado» (`Configuracion.dc.html`). */
+export const SHORTCUTS_SECTION_TITLE = "Atajos de teclado";
+export const SHORTCUTS_SECTION_SUBTITLE = "Los atajos que ya tiene Anonly, con sus teclas.";
+export const SHORTCUTS_SECTION_BUTTON = "Ver atajos…";
+
 /** ADR-195 §3: subtítulo de la sección «Actualizaciones». */
 export const UPDATE_SECTION_SUBTITLE = "Elegí qué hace Anonly con las versiones nuevas.";
 

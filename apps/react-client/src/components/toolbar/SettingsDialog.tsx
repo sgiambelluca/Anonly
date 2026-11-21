@@ -42,6 +42,7 @@ import {
   GaugeIcon,
   GlobeIcon,
   InfoIcon,
+  KeyboardIcon,
   RefreshCwIcon,
   SunMoonIcon,
   TriangleAlertIcon,
@@ -97,6 +98,9 @@ import {
   PERFORMANCE_PRESET_ORDER,
   resolveOcrLanguagesSlot,
   resolveSaveErrorSlot,
+  SHORTCUTS_SECTION_BUTTON,
+  SHORTCUTS_SECTION_SUBTITLE,
+  SHORTCUTS_SECTION_TITLE,
   THEME_LABEL,
   THEME_ORDER,
   UPDATE_MODE_LABEL,
@@ -107,6 +111,7 @@ import {
   UPDATE_SECTION_SUBTITLE,
   updateModeDescription,
 } from "./settingsCopy.js";
+import { ShortcutsDialog } from "./ShortcutsDialog.js";
 import { transitionManualUpdateCheck, type ManualUpdateCheckState } from "./updateCheckState.js";
 import {
   syncAutomaticChecksPreference,
@@ -184,6 +189,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
   const [shellUpdater] = useState(() => getShellUpdater());
   const [platform] = useState(() => readShellPlatform());
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [manualUpdateCheck, setManualUpdateCheck] = useState<ManualUpdateCheckState>("idle");
@@ -210,6 +216,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
     setUpdateMode(current.updateMode);
     setTheme(current.theme);
     setSaveError(null);
+    setShortcutsOpen(false);
     manualUpdateCheckRef.current = "idle";
     setManualUpdateCheck("idle");
   }, [open]);
@@ -553,6 +560,21 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
           </Section>
 
           {/*
+            ADR-229 §8: la ayuda de atajos vive acá y no en la barra (los atajos
+            no tienen relación con el documento abierto). Con o sin documento.
+          */}
+          <Section
+            icon={<KeyboardIcon className="h-5 w-5" aria-hidden />}
+            title={SHORTCUTS_SECTION_TITLE}
+            subtitle={SHORTCUTS_SECTION_SUBTITLE}
+            aside={
+              <Button variant="secondary" onClick={() => setShortcutsOpen(true)}>
+                {SHORTCUTS_SECTION_BUTTON}
+              </Button>
+            }
+          />
+
+          {/*
             Solo dentro del contenedor de escritorio: en un navegador no hay
             actualizador y mostrar el control sería ofrecer algo que no existe.
           */}
@@ -667,6 +689,13 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
         >
           {saveErrorSlot.text}
         </p>
+
+        {/* Anidado, como los diálogos de `ExportDialog`: al cerrarse vuelve a Configuración. */}
+        <ShortcutsDialog
+          open={shortcutsOpen}
+          onClose={() => setShortcutsOpen(false)}
+          platform={platform === "macos" ? "mac" : "other"}
+        />
       </Dialog>
 
       <ConfirmDialog

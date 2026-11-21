@@ -56,6 +56,7 @@ import { isUserFormat } from "../../store/detectionState.js";
 import { useEntitiesStore, type EntitySortOrder } from "../../store/entities.store.js";
 import { dismissHint, useSettingsStore } from "../../store/settings.store.js";
 import { UserTypeDialog } from "../formats/UserTypeDialog.js";
+import { matchesShortcut } from "../toolbar/shortcuts.js";
 
 import { AddEntityDialog } from "./AddEntityDialog.js";
 import { applyEnabled } from "./applyEdits.js";
@@ -135,7 +136,7 @@ export function EntitiesPanel() {
   // `Cmd/Ctrl+F`: la tabla de atajos de `UX_Guidelines.md` §9 ya lo prometía.
   useEffect(() => {
     function onKeydown(event: KeyboardEvent): void {
-      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "f") return;
+      if (!matchesShortcut("search", event)) return;
       event.preventDefault();
       searchRef.current?.focus();
       searchRef.current?.select();
