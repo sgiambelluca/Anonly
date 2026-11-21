@@ -23,6 +23,10 @@ export function FormatSubgroup({ name, count, children }: FormatSubgroupProps) {
         <span className="min-w-0 flex-1 truncate">
           Formato: <b className="font-semibold text-text-primary">{name}</b>
         </span>
+        {/* El subnivel es siempre de un formato del usuario (ADR-226 §2). */}
+        <span className="shrink-0 rounded-full border border-accent/40 bg-accent/10 px-2 text-xs font-medium text-accent">
+          tuyo
+        </span>
         <span className="shrink-0 tabular-nums">{count}</span>
       </div>
       {children}

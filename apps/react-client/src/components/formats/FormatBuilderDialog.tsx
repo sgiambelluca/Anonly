@@ -18,7 +18,7 @@
  */
 
 import type { EntityTypeId } from "@anonly/anonymization-core";
-import { FlaskConicalIcon, TriangleAlertIcon } from "lucide-react";
+import { FlaskConicalIcon, PlusIcon, Trash2Icon, TriangleAlertIcon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import type { DetectionChange, DetectionState } from "../../store/detectionState.js";
@@ -85,7 +85,7 @@ export const BUILDER_TEXTS = {
   nameHelp: "Así lo vas a ver en tu lista de formatos",
   namePlaceholder: "Por ejemplo, «Legajo»",
   typeLabel: "Es un…",
-  addVariant: "+ Variante",
+  addVariant: "Variante",
   addVariantHint: "Otra forma de escribir el mismo dato",
   deleteVariant: "Borrar variante",
   readsLabel: "Se lee",
@@ -236,9 +236,10 @@ function BuilderForm({ setup, state, onSubmit, onClose }: FormProps) {
         }}
         headerActions={
           <Button
-            variant="ghost"
+            variant="secondary"
             size="sm"
             aria-pressed={testOpen}
+            className={testOpen ? "!border-accent !bg-accent/10 !text-accent" : ""}
             onClick={() => setTestOpen((current) => !current)}
           >
             <span className="flex items-center gap-1.5">
@@ -248,13 +249,22 @@ function BuilderForm({ setup, state, onSubmit, onClose }: FormProps) {
           </Button>
         }
         footer={
-          <div className="flex justify-end gap-2">
-            <Button variant="secondary" onClick={requestClose}>
-              {BUILDER_TEXTS.cancel}
-            </Button>
-            <Button variant="primary" disabled={!evaluation.status.canSubmit} onClick={submit}>
-              {setup.submitLabel}
-            </Button>
+          <div className="flex flex-col gap-3">
+            {/* La caja de estado va fija entre el cuerpo y los botones: no scrollea (ADR-228 §7). */}
+            <FormatStatusBox status={evaluation.status} />
+            <div className="flex justify-end gap-2">
+              <Button variant="secondary" onClick={requestClose}>
+                {BUILDER_TEXTS.cancel}
+              </Button>
+              <Button
+                variant="primary"
+                className="min-w-[8.75rem]"
+                disabled={!evaluation.status.canSubmit}
+                onClick={submit}
+              >
+                {setup.submitLabel}
+              </Button>
+            </div>
           </div>
         }
       >
@@ -299,7 +309,7 @@ function BuilderForm({ setup, state, onSubmit, onClose }: FormProps) {
 
           <div className="flex flex-col gap-2">
             <div
-              className="flex flex-wrap items-center gap-1.5"
+              className="flex items-end gap-0.5 border-b border-border"
               role="tablist"
               aria-label="Variantes"
             >
@@ -310,10 +320,10 @@ function BuilderForm({ setup, state, onSubmit, onClose }: FormProps) {
                   role="tab"
                   aria-selected={index === variantIndex}
                   onClick={() => selectVariant(index)}
-                  className={`flex items-center gap-1.5 rounded-md border px-3 py-1 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+                  className={`-mb-px flex h-9 items-center gap-1.5 border-b-2 px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
                     index === variantIndex
-                      ? "border-accent bg-accent/10 font-semibold text-text-primary"
-                      : "border-border text-text-secondary hover:bg-bg-secondary"
+                      ? "border-accent font-semibold text-text-primary"
+                      : "border-transparent text-text-secondary hover:text-text-primary"
                   }`}
                 >
                   Variante {index + 1}
@@ -322,34 +332,40 @@ function BuilderForm({ setup, state, onSubmit, onClose }: FormProps) {
                       data-variant-issue
                       role="img"
                       aria-label="Tiene un problema"
-                      className="h-2 w-2 rounded-full bg-error"
+                      className="h-1.5 w-1.5 rounded-full bg-error"
                     />
                   ) : null}
                 </button>
               ))}
-              <Button
-                variant="ghost"
-                size="sm"
+              <button
+                type="button"
                 disabled={variants.atLimit}
                 title={BUILDER_TEXTS.addVariantHint}
                 onClick={() => {
                   setDraft({ ...draft, variants: addVariant(draft.variants) });
                   selectVariant(draft.variants.length);
                 }}
+                className="-mb-px flex h-9 items-center gap-1.5 border-b-2 border-transparent px-3 text-sm font-semibold text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50"
               >
+                <PlusIcon className="h-4 w-4" aria-hidden />
                 {BUILDER_TEXTS.addVariant}
-              </Button>
+              </button>
+              <span className="flex-1" />
+              <span className="self-center pb-1 text-xs text-text-secondary">
+                {variants.visible ? variants.text : ""}
+              </span>
               <Button
                 variant="ghost"
                 size="sm"
+                className="mb-1 ml-2 !text-error hover:!bg-error/10"
                 disabled={draft.variants.length <= 1}
                 onClick={() => setDeleteIndex(variantIndex)}
               >
-                {BUILDER_TEXTS.deleteVariant}
+                <span className="flex items-center gap-1.5">
+                  <Trash2Icon className="h-4 w-4" aria-hidden />
+                  {BUILDER_TEXTS.deleteVariant}
+                </span>
               </Button>
-              <span className="ml-auto text-xs text-text-secondary">
-                {variants.visible ? variants.text : ""}
-              </span>
             </div>
 
             <PieceStrip
@@ -365,14 +381,19 @@ function BuilderForm({ setup, state, onSubmit, onClose }: FormProps) {
             </div>
           </div>
 
-          <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
-            <dt className="font-semibold text-text-primary">{BUILDER_TEXTS.readsLabel}</dt>
-            <dd className="text-text-secondary">{describeVariant(variant, draft.context)}</dd>
-            <dt className="font-semibold text-text-primary">{BUILDER_TEXTS.exampleLabel}</dt>
-            <dd className="font-mono text-text-primary">
-              {exampleOfVariant(variant, definition) || "—"}
-            </dd>
-          </dl>
+          {/* Alto fijo: «Se lee» va en una línea con elipsis y el texto completo en `title`. */}
+          <div className="flex h-11 shrink-0 flex-col justify-center gap-0.5 text-sm">
+            <span className="truncate" title={describeVariant(variant, draft.context)}>
+              <b className="font-semibold text-text-primary">{BUILDER_TEXTS.readsLabel}:</b>{" "}
+              <span className="text-text-secondary">{describeVariant(variant, draft.context)}</span>
+            </span>
+            <span className="truncate">
+              <b className="font-semibold text-text-primary">{BUILDER_TEXTS.exampleLabel}:</b>{" "}
+              <span className="font-mono text-text-primary">
+                {exampleOfVariant(variant, definition) || "—"}
+              </span>
+            </span>
+          </div>
 
           <PieceInspector
             piece={piece}
@@ -397,8 +418,6 @@ function BuilderForm({ setup, state, onSubmit, onClose }: FormProps) {
             words={draft.context}
             onChange={(context) => setDraft({ ...draft, context })}
           />
-
-          <FormatStatusBox status={evaluation.status} />
         </div>
 
         {testOpen ? (

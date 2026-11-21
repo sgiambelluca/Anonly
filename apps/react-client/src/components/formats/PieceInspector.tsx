@@ -14,6 +14,8 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
   HashIcon,
+  MinusIcon,
+  PlusIcon,
   TypeIcon,
 } from "lucide-react";
 import type { ReactNode } from "react";
@@ -25,17 +27,17 @@ import {
   charsKindOf,
   isExactly,
   OPTIONAL_INNER_MENU,
-  parseCount,
   pieceHeading,
   BUILDER_COPY,
   SEPARATOR_OPTIONS,
+  stepExactly,
+  stepMax,
+  stepMin,
   toExactMode,
   toggleSeparator,
   toRangeMode,
   withCharsCase,
   withCharsKind,
-  withExactly,
-  withRange,
   type CharsKind,
   type CharsPiece,
   type PieceClassId,
@@ -96,9 +98,6 @@ const CASE_OPTIONS: ReadonlyArray<{
   { value: "lower", label: "Solo minúsculas" },
 ];
 
-const INPUT_CLASS =
-  "w-16 rounded-md border border-border bg-bg-primary px-2 py-1 text-sm text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent";
-
 function RadioCard({
   checked,
   onSelect,
@@ -123,6 +122,91 @@ function RadioCard({
   );
 }
 
+/** Una fila del ajuste: la etiqueta a la izquierda y los controles a su derecha. */
+function InspectorRow({
+  label,
+  children,
+}: {
+  readonly label: string;
+  readonly children: ReactNode;
+}) {
+  return (
+    <div className="flex min-h-8 items-center gap-3">
+      <span className="w-16 shrink-0 text-xs font-semibold text-text-secondary">{label}</span>
+      {children}
+    </div>
+  );
+}
+
+/** Dos o tres opciones excluyentes en una tira (`role="group"` + `aria-pressed`). */
+function Segmented({
+  label,
+  options,
+}: {
+  readonly label: string;
+  readonly options: ReadonlyArray<{
+    readonly key: string;
+    readonly label: string;
+    readonly on: boolean;
+    readonly onPick: () => void;
+  }>;
+}) {
+  return (
+    <div
+      role="group"
+      aria-label={label}
+      className="flex shrink-0 rounded-lg border border-border bg-bg-tertiary p-0.5"
+    >
+      {options.map((option) => (
+        <button
+          key={option.key}
+          type="button"
+          aria-pressed={option.on}
+          onClick={option.onPick}
+          className={`h-7 rounded-md px-2.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+            option.on
+              ? "bg-bg-primary font-semibold text-text-primary shadow-sm"
+              : "text-text-secondary hover:text-text-primary"
+          }`}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** Un número con sus botones − y +. */
+function Stepper({
+  value,
+  minusLabel,
+  plusLabel,
+  onMinus,
+  onPlus,
+}: {
+  readonly value: number;
+  readonly minusLabel: string;
+  readonly plusLabel: string;
+  readonly onMinus: () => void;
+  readonly onPlus: () => void;
+}) {
+  const buttonClass =
+    "flex h-8 w-8 items-center justify-center text-text-secondary hover:bg-bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent";
+  return (
+    <span className="flex shrink-0 items-center overflow-hidden rounded-lg border border-border">
+      <button type="button" aria-label={minusLabel} onClick={onMinus} className={buttonClass}>
+        <MinusIcon className="h-4 w-4" aria-hidden />
+      </button>
+      <span className="w-8 text-center text-sm font-semibold tabular-nums text-text-primary">
+        {value}
+      </span>
+      <button type="button" aria-label={plusLabel} onClick={onPlus} className={buttonClass}>
+        <PlusIcon className="h-4 w-4" aria-hidden />
+      </button>
+    </span>
+  );
+}
+
 function CharsEditor({
   piece,
   onChange,
@@ -133,10 +217,9 @@ function CharsEditor({
   const kind = charsKindOf(piece.charClass);
   const exactly = isExactly(piece);
   return (
-    <div className="grid grid-cols-[1.6fr_1.2fr_1fr] gap-4">
-      <fieldset className="flex flex-col gap-1">
-        <legend className="mb-1 text-xs font-semibold text-text-secondary">Qué va</legend>
-        <div role="radiogroup" aria-label="Qué va" className="flex flex-col gap-1">
+    <div className="flex flex-col gap-1">
+      <InspectorRow label="Qué va">
+        <div role="radiogroup" aria-label="Qué va" className="grid flex-1 grid-cols-3 gap-2">
           {KIND_OPTIONS.map((option) => (
             <RadioCard
               key={option.kind}
@@ -145,99 +228,76 @@ function CharsEditor({
             >
               <span className="text-text-secondary">{option.icon}</span>
               <span className="flex min-w-0 flex-col">
-                <span className="text-sm font-medium text-text-primary">{option.label}</span>
+                <span className="truncate text-sm font-medium text-text-primary">
+                  {option.label}
+                </span>
                 <span className="truncate text-xs text-text-secondary">{option.hint}</span>
               </span>
             </RadioCard>
           ))}
         </div>
-      </fieldset>
+      </InspectorRow>
 
-      <fieldset className="flex flex-col gap-1.5">
-        <legend className="mb-1 text-xs font-semibold text-text-secondary">Cuántos</legend>
-        <div role="radiogroup" aria-label="Cuántos" className="flex flex-col gap-1.5">
-          <label className="flex items-center gap-2 text-sm text-text-primary">
-            <input
-              type="radio"
-              name="format-count-mode"
-              checked={exactly}
-              onChange={() => onChange(toExactMode(piece))}
-            />
-            Exactamente
-            {exactly ? (
-              <input
-                type="number"
-                min={1}
-                max={FORMAT_MAX_REPEAT}
-                aria-label="Cantidad exacta"
-                value={piece.min}
-                onChange={(event) => onChange(withExactly(piece, parseCount(event.target.value)))}
-                className={INPUT_CLASS}
-              />
-            ) : null}
-          </label>
-          <label className="flex items-center gap-2 text-sm text-text-primary">
-            <input
-              type="radio"
-              name="format-count-mode"
-              checked={!exactly}
-              onChange={() => onChange(toRangeMode(piece, FORMAT_MAX_REPEAT))}
-            />
-            Entre
-          </label>
-          {exactly ? null : (
-            <div className="flex items-center gap-2 pl-6 text-sm text-text-secondary">
-              <input
-                type="number"
-                min={1}
-                max={FORMAT_MAX_REPEAT}
-                aria-label="Mínimo"
-                value={piece.min}
-                onChange={(event) =>
-                  onChange(withRange(piece, parseCount(event.target.value), piece.max))
-                }
-                className={INPUT_CLASS}
-              />
-              y
-              <input
-                type="number"
-                min={1}
-                max={FORMAT_MAX_REPEAT}
-                aria-label="Máximo"
-                value={piece.max}
-                onChange={(event) =>
-                  onChange(withRange(piece, piece.min, parseCount(event.target.value)))
-                }
-                className={INPUT_CLASS}
-              />
-            </div>
-          )}
-        </div>
-      </fieldset>
-
-      <fieldset className="flex flex-col gap-1">
-        {kind === "letter" ? (
+      <InspectorRow label="Cuántos">
+        <Segmented
+          label="Cantidad"
+          options={[
+            {
+              key: "exactly",
+              label: "Exactamente",
+              on: exactly,
+              onPick: () => onChange(toExactMode(piece)),
+            },
+            {
+              key: "range",
+              label: "Entre",
+              on: !exactly,
+              onPick: () => onChange(toRangeMode(piece, FORMAT_MAX_REPEAT)),
+            },
+          ]}
+        />
+        {exactly ? (
+          <Stepper
+            value={piece.max}
+            minusLabel="Uno menos"
+            plusLabel="Uno más"
+            onMinus={() => onChange(stepExactly(piece, -1, FORMAT_MAX_REPEAT))}
+            onPlus={() => onChange(stepExactly(piece, 1, FORMAT_MAX_REPEAT))}
+          />
+        ) : (
           <>
-            <legend className="mb-1 text-xs font-semibold text-text-secondary">Escritas</legend>
-            <div role="radiogroup" aria-label="Escritas" className="flex flex-col gap-1">
-              {CASE_OPTIONS.map((option) => (
-                <label
-                  key={option.value}
-                  className="flex items-center gap-2 text-sm text-text-primary"
-                >
-                  <input
-                    type="radio"
-                    name="format-case"
-                    checked={piece.charClass === option.value}
-                    onChange={() => onChange(withCharsCase(piece, option.value))}
-                  />
-                  {option.label}
-                </label>
-              ))}
-            </div>
+            <Stepper
+              value={piece.min}
+              minusLabel="Mínimo, uno menos"
+              plusLabel="Mínimo, uno más"
+              onMinus={() => onChange(stepMin(piece, -1))}
+              onPlus={() => onChange(stepMin(piece, 1))}
+            />
+            <span className="text-sm text-text-secondary">y</span>
+            <Stepper
+              value={piece.max}
+              minusLabel="Máximo, uno menos"
+              plusLabel="Máximo, uno más"
+              onMinus={() => onChange(stepMax(piece, -1, FORMAT_MAX_REPEAT))}
+              onPlus={() => onChange(stepMax(piece, 1, FORMAT_MAX_REPEAT))}
+            />
           </>
-        ) : null}
-      </fieldset>
+        )}
+      </InspectorRow>
+
+      {kind === "letter" ? (
+        <InspectorRow label="Escritas">
+          <Segmented
+            label="Mayúsculas o minúsculas"
+            options={CASE_OPTIONS.map((option) => ({
+              key: option.value,
+              label: option.label,
+              on: piece.charClass === option.value,
+              onPick: () => onChange(withCharsCase(piece, option.value)),
+            }))}
+          />
+        </InspectorRow>
+      ) : null}
     </div>
   );
 }
@@ -257,10 +317,10 @@ export function PieceInspector({
   return (
     <section
       aria-label="Ajuste de la pieza"
-      className="flex h-56 shrink-0 flex-col gap-3 overflow-y-auto rounded-lg border border-border p-3"
+      className="flex h-[12.25rem] shrink-0 flex-col gap-3 overflow-y-auto rounded-lg border border-border p-3"
     >
       {piece === null || path === null ? (
-        <p className="m-auto text-sm text-text-secondary">{BUILDER_COPY.noPieceSelected}</p>
+        <p className="text-sm text-text-secondary">{BUILDER_COPY.noPieceSelected}</p>
       ) : (
         <>
           <div className="flex items-center justify-between gap-2">
@@ -287,7 +347,12 @@ export function PieceInspector({
               >
                 <ChevronRightIcon className="h-4 w-4" aria-hidden />
               </Button>
-              <Button variant="ghost" size="sm" onClick={onDelete}>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="!text-error hover:!bg-error/10"
+                onClick={onDelete}
+              >
                 Borrar pieza
               </Button>
             </div>

@@ -14,15 +14,16 @@
  */
 
 import type { UserEntityTypeId } from "@anonly/anonymization-core";
-import { InfoIcon } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { CheckIcon, InfoIcon, MinusIcon } from "lucide-react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import type { DetectionState } from "../../store/detectionState.js";
 import { Button } from "../common/Button.js";
-import { Checkbox } from "../common/Checkbox.js";
 import { Dialog } from "../common/Dialog.js";
+import { TypeDot, UserTypeDot } from "../entities/TypeDot.js";
 
 import { downloadTextFile } from "./downloadFile.js";
+import { buildFormatExample } from "./formatExamples.js";
 import {
   allSelectable,
   buildExportLists,
@@ -84,87 +85,92 @@ export function ExportFormatsDialog({
       description="Elegí qué tipos y formatos tuyos van en el archivo."
       size="lg"
       footer={
-        <div className="flex flex-col gap-2">
-          <p className="flex items-start gap-1.5 text-sm text-text-secondary">
-            <InfoIcon className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
-            No viajan el país ni qué formatos del catálogo están prendidos.
-          </p>
-          <div className="flex items-center gap-2">
-            <span className="min-w-0 flex-1 truncate text-sm text-text-secondary">
-              {summary === null ? "Elegí al menos un formato" : `Se exportan ${summary}`}
-            </span>
-            <Button variant="secondary" onClick={onClose}>
-              Cancelar
-            </Button>
-            <Button variant="primary" disabled={summary === null} onClick={exportFile}>
-              Exportar archivo
-            </Button>
-          </div>
+        <div className="flex items-center gap-2">
+          <span className="min-w-0 flex-1 truncate text-sm text-text-secondary">
+            {summary === null ? "Elegí al menos un formato" : `Se exportan ${summary}`}
+          </span>
+          <Button variant="secondary" onClick={onClose}>
+            Cancelar
+          </Button>
+          <Button variant="primary" disabled={summary === null} onClick={exportFile}>
+            Exportar archivo
+          </Button>
         </div>
       }
     >
       <div className="flex flex-col gap-3.5">
-        <div className="flex gap-2">
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={empty}
-            onClick={() => setSelection(allSelectable(lists))}
-          >
-            Elegir todo
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={empty}
-            onClick={() => setSelection(new Set())}
-          >
-            Nada
-          </Button>
-        </div>
-
         <section aria-label="Tus tipos" className="flex flex-col gap-2">
-          <h3 className="text-sm font-semibold text-text-primary">
-            Tus tipos{" "}
-            <span className="font-normal text-text-secondary">· viajan con todos sus formatos</span>
-          </h3>
+          <div className="flex items-center gap-3">
+            <h3 className="flex-1 text-sm font-semibold text-text-primary">
+              Tus tipos{" "}
+              <span className="font-normal text-text-secondary">
+                · viajan con todos sus formatos
+              </span>
+            </h3>
+            <button
+              type="button"
+              disabled={empty}
+              onClick={() => setSelection(allSelectable(lists))}
+              className={LINK_CLASS}
+            >
+              Elegir todo
+            </button>
+            <button
+              type="button"
+              disabled={empty}
+              onClick={() => setSelection(new Set())}
+              className={LINK_CLASS}
+            >
+              Nada
+            </button>
+          </div>
           {lists.ownTypes.length === 0 ? (
             <p className="text-sm text-text-secondary">Todavía no creaste ningún tipo.</p>
           ) : (
-            lists.ownTypes.map((entry) => (
-              <div key={entry.type.id} className="flex flex-col gap-1.5">
-                <Checkbox
-                  id={`export-type-${entry.type.id}`}
-                  checked={typeCheckState(entry, selection)}
-                  onCheckedChange={(on) => setSelection(toggleType(selection, entry, on))}
-                  label={
-                    <span>
-                      <span className="font-medium">{entry.type.name}</span>
-                      {typeCheckState(entry, selection) === "indeterminate" ? (
-                        <span className="text-text-secondary">
-                          {" · "}
-                          {partialTypeNote(
-                            entry.formats.filter((format) => selection.has(format.id)).length,
-                            entry.formats.length,
-                          )}
-                        </span>
-                      ) : null}
-                    </span>
-                  }
-                />
-                <div className="ml-6 flex flex-col gap-1.5">
-                  {entry.formats.map((format) => (
-                    <Checkbox
-                      key={format.id}
-                      id={`export-format-${format.id}`}
-                      checked={selection.has(format.id)}
-                      onCheckedChange={(on) => setSelection(toggleFormat(selection, format.id, on))}
-                      label={format.name}
+            <div className="flex flex-col overflow-hidden rounded-lg border border-border">
+              {lists.ownTypes.map((entry, entryIndex) => {
+                const state = typeCheckState(entry, selection);
+                return (
+                  <div
+                    key={entry.type.id}
+                    className={entryIndex === 0 ? "" : "border-t border-border"}
+                  >
+                    <ExportRow
+                      id={`export-type-${entry.type.id}`}
+                      checked={state}
+                      onToggle={() => setSelection(toggleType(selection, entry, state !== true))}
+                      lead={<UserTypeDot />}
+                      name={entry.type.name}
+                      aside={
+                        state === "indeterminate"
+                          ? partialTypeNote(
+                              entry.formats.filter((format) => selection.has(format.id)).length,
+                              entry.formats.length,
+                            )
+                          : ""
+                      }
+                      strong
                     />
-                  ))}
-                </div>
-              </div>
-            ))
+                    {entry.formats.map((format) => (
+                      <ExportRow
+                        key={format.id}
+                        id={`export-format-${format.id}`}
+                        checked={selection.has(format.id)}
+                        onToggle={() =>
+                          setSelection(
+                            toggleFormat(selection, format.id, !selection.has(format.id)),
+                          )
+                        }
+                        name={format.name}
+                        aside={buildFormatExample(format)}
+                        mono
+                        indented
+                      />
+                    ))}
+                  </div>
+                );
+              })}
+            </div>
           )}
         </section>
 
@@ -178,22 +184,103 @@ export function ExportFormatsDialog({
               No tenés formatos propios en tipos del catálogo.
             </p>
           ) : (
-            lists.catalogFormats.map(({ format, typeName }) => (
-              <Checkbox
-                key={format.id}
-                id={`export-format-${format.id}`}
-                checked={selection.has(format.id)}
-                onCheckedChange={(on) => setSelection(toggleFormat(selection, format.id, on))}
-                label={
-                  <span>
-                    {format.name} <span className="text-text-secondary">· {typeName}</span>
-                  </span>
-                }
-              />
-            ))
+            <div className="flex flex-col overflow-hidden rounded-lg border border-border">
+              {lists.catalogFormats.map(({ format, typeName }, index) => (
+                <div key={format.id} className={index === 0 ? "" : "border-t border-border"}>
+                  <ExportRow
+                    id={`export-format-${format.id}`}
+                    checked={selection.has(format.id)}
+                    onToggle={() =>
+                      setSelection(toggleFormat(selection, format.id, !selection.has(format.id)))
+                    }
+                    lead={<TypeDot type={format.entityType} />}
+                    prefix={`${typeName} ›`}
+                    name={format.name}
+                    aside={buildFormatExample(format)}
+                    mono
+                  />
+                </div>
+              ))}
+            </div>
           )}
         </section>
+
+        {/* La aclaración va al final del cuerpo, con su ícono. */}
+        <p className="flex items-start gap-2 text-sm text-text-secondary">
+          <InfoIcon className="mt-0.5 h-4 w-4 shrink-0 text-accent" aria-hidden />
+          No viajan el país ni qué formatos del catálogo están prendidos.
+        </p>
       </div>
     </Dialog>
+  );
+}
+
+const LINK_CLASS =
+  "rounded-md px-1 text-sm font-semibold text-accent hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-50";
+
+interface ExportRowProps {
+  readonly id: string;
+  readonly checked: boolean | "indeterminate";
+  readonly onToggle: () => void;
+  readonly name: string;
+  readonly lead?: ReactNode;
+  readonly prefix?: string;
+  /** Lo que va a la derecha: el ejemplo (monoespaciado) o la nota de selección parcial. */
+  readonly aside: string;
+  readonly mono?: boolean;
+  readonly strong?: boolean;
+  /** Los formatos de un tipo quedan sangrados bajo él. */
+  readonly indented?: boolean;
+}
+
+/** Una fila-tarjeta clicable en todo su ancho, con la casilla a la izquierda. */
+function ExportRow({
+  id,
+  checked,
+  onToggle,
+  name,
+  lead,
+  prefix,
+  aside,
+  mono = false,
+  strong = false,
+  indented = false,
+}: ExportRowProps) {
+  const on = checked !== false;
+  return (
+    <button
+      id={id}
+      type="button"
+      role="checkbox"
+      aria-checked={checked === "indeterminate" ? "mixed" : checked}
+      onClick={onToggle}
+      className={`flex min-h-10 w-full items-center gap-3 py-2 pr-3 text-left text-sm hover:bg-bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent ${
+        indented ? "pl-9" : "pl-3"
+      }`}
+    >
+      <span
+        aria-hidden
+        className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
+          on ? "border-accent bg-accent text-white" : "border-border-strong bg-bg-primary"
+        }`}
+      >
+        {checked === true ? <CheckIcon className="h-3 w-3" strokeWidth={3} /> : null}
+        {checked === "indeterminate" ? <MinusIcon className="h-3 w-3" strokeWidth={3} /> : null}
+      </span>
+      <span className="flex min-w-0 flex-1 items-center gap-2">
+        {lead}
+        {prefix === undefined ? null : (
+          <span className="shrink-0 text-text-secondary">{prefix}</span>
+        )}
+        <span className={`truncate text-text-primary ${strong ? "font-semibold" : "font-medium"}`}>
+          {name}
+        </span>
+      </span>
+      <span
+        className={`max-w-[45%] shrink-0 truncate text-xs text-text-secondary ${mono ? "font-mono" : ""}`}
+      >
+        {aside}
+      </span>
+    </button>
   );
 }

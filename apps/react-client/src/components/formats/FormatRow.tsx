@@ -9,6 +9,8 @@
  * apagar o ganar un menú no mueve nada (UX-10).
  */
 
+import { PencilIcon, ShieldCheckIcon } from "lucide-react";
+
 import { Checkbox } from "../common/Checkbox.js";
 
 import { ActionsMenu, type ActionsMenuItem } from "./ActionsMenu.js";
@@ -56,11 +58,14 @@ export function FormatRow({ row, onToggle, onEdit, menuItems }: FormatRowProps) 
         {row.example}
       </span>
       <span
-        className={`w-24 shrink-0 rounded-full border px-2 py-0.5 text-center text-xs font-medium ${TAG_CLASS[row.tag]}`}
+        className={`inline-flex w-28 shrink-0 items-center justify-center gap-1 whitespace-nowrap rounded-full border px-2 py-0.5 text-xs font-medium ${TAG_CLASS[row.tag]}`}
       >
+        {row.tag === "Con control" ? (
+          <ShieldCheckIcon className="h-3 w-3 shrink-0" aria-hidden />
+        ) : null}
         {row.tag}
       </span>
-      <div className="w-16 shrink-0">
+      <div className="w-20 shrink-0">
         {row.canEdit ? (
           // «Editar» va sin borde: «Nuevo formato» pesa más (`UX_Guidelines.md` §11b.3).
           <button
@@ -68,8 +73,9 @@ export function FormatRow({ row, onToggle, onEdit, menuItems }: FormatRowProps) 
             onClick={onEdit}
             aria-label={`Editar ${row.name}`}
             title={row.source === "base" ? EDIT_BASE_TOOLTIP : EDIT_OWN_TOOLTIP}
-            className="rounded-md px-2 py-1 text-sm font-medium text-accent hover:bg-accent/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-sm font-medium text-accent hover:bg-accent/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
           >
+            <PencilIcon className="h-3.5 w-3.5" aria-hidden />
             Editar
           </button>
         ) : null}
