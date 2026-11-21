@@ -26,6 +26,11 @@ export const NEW_TYPE_HINT_ID = "new-type-hint";
 /** El estado del campo en línea; `null` en el picker es «sin campo» (la celda punteada). */
 export interface NewTypeDraft {
   readonly name: string;
+  /**
+   * «Guardarlo», tildada: al confirmar, el tipo también se guarda para los
+   * próximos documentos (ADR-225 §5, precisión del 2026-11-21).
+   */
+  readonly save?: boolean;
 }
 
 /**

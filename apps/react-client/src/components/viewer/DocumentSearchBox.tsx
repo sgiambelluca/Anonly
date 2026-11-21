@@ -397,6 +397,7 @@ function AddPopover({
     const feedback = await addManualEntityWithFeedback(
       { value, entityType: resolved.entityType },
       resolved.newType,
+      resolved.saveNewType === true,
     );
     setSubmitting(false);
     if (feedback === "not-found") {

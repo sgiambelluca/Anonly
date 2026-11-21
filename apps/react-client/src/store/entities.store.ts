@@ -29,6 +29,8 @@ import { reconcileDocumentTypes, type DocumentTypesPort } from "./documentTypes.
 export type ReviewFilter = "disabled" | "conflict" | "manual";
 
 export interface EntityFilters {
+  /** «Tipos»: de base o propios (ADR-229 §5, precisión del 2026-11-21). */
+  readonly types: ReadonlySet<EntityTypeId>;
   /** «Tus formatos»: solo ids de formatos del usuario (ADR-226 §3). */
   readonly formatIds: ReadonlySet<string>;
   /** «Modo de reemplazo». */
@@ -38,6 +40,7 @@ export interface EntityFilters {
 }
 
 export const NO_FILTERS: EntityFilters = {
+  types: new Set(),
   formatIds: new Set(),
   modes: new Set(),
   review: new Set(),

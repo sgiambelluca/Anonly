@@ -3,7 +3,7 @@
  * ADR-229 §5): cómo se combinan, qué entra en cada uno y las opciones del popover.
  */
 
-import { DetectionSource, ReplacementMode } from "@anonly/anonymization-core";
+import { DetectionSource, EntityType, ReplacementMode } from "@anonly/anonymization-core";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -19,6 +19,7 @@ import {
   modeCounts,
   REVIEW_FILTER_OPTIONS,
   toggleInSet,
+  typeFilterOptions,
   userFormatNameOf,
 } from "../components/entities/entityFilters.js";
 import { isUserFormat, DEFAULT_DETECTION_STATE } from "../store/detectionState.js";
@@ -197,6 +198,34 @@ describe("opciones del popover", () => {
     ]);
   });
 
+  it("un formato que es la única fuente de su tipo no se ofrece: daría lo mismo que «Tipos»", () => {
+    // ADR-226 §3, precisión del 2026-11-21: la regla del subnivel del árbol.
+    const legajo = userType(7, "legajo");
+    const itba = userFormat(8, "legajo itba", legajo.id);
+    const withLegajo = stateWith({ userTypes: [legajo], userFormats: [itba] });
+    const groups = [
+      makeGroup({ id: "a", type: legajo.id, formatId: itba.id }),
+      makeGroup({ id: "b", type: EntityType.Person }),
+    ];
+    expect(formatFilterOptions(groups, userFormatNameOf(withLegajo))).toEqual([]);
+  });
+
+  it("dos formatos del usuario en un mismo tipo se ofrecen los dos", () => {
+    const legajo = userType(7, "legajo");
+    const itba = userFormat(8, "legajo itba", legajo.id);
+    const uba = userFormat(9, "legajo uba", legajo.id);
+    const withTwo = stateWith({ userTypes: [legajo], userFormats: [itba, uba] });
+    const groups = [
+      makeGroup({ id: "a", type: legajo.id, formatId: itba.id }),
+      makeGroup({ id: "b", type: legajo.id, formatId: uba.id }),
+      makeGroup({ id: "c", type: legajo.id, formatId: uba.id }),
+    ];
+    expect(formatFilterOptions(groups, userFormatNameOf(withTwo))).toEqual([
+      { formatId: itba.id, name: "legajo itba", count: 1 },
+      { formatId: uba.id, name: "legajo uba", count: 2 },
+    ]);
+  });
+
   it("sin ningún formato del usuario en el documento, la sección no tiene opciones", () => {
     const groups = [makeGroup({ id: "a", formatId: "fmt:base:dni-ar" }), makeGroup({ id: "b" })];
     expect(formatFilterOptions(groups, userFormatNameOf(state))).toEqual([]);
@@ -242,5 +271,52 @@ describe("opciones del popover", () => {
     expect(
       userFormatNameOf(stateWith({ userTypes: [userType(0, "Legajo")] }))(mine.id),
     ).toBeUndefined();
+  });
+});
+
+describe("«Tipos» (ADR-229 §5, precisión del 2026-11-21)", () => {
+  const dni = makeGroup({ id: "dni", type: EntityType.DNI });
+  const person = makeGroup({ id: "person", type: EntityType.Person });
+
+  it("deja solo los grupos de los tipos elegidos, de base o propios", () => {
+    const result = applyEntityFilters(
+      [dni, person],
+      filters({ types: new Set([EntityType.Person]) }),
+      none,
+    );
+    expect(result).toEqual([person]);
+  });
+
+  it("se combina con los otros filtros: hay que cumplir todos", () => {
+    const off = makeGroup({ id: "off", type: EntityType.Person, enabled: false });
+    const result = applyEntityFilters(
+      [dni, person, off],
+      filters({ types: new Set([EntityType.Person]), review: new Set(["disabled"]) }),
+      none,
+    );
+    expect(result).toEqual([off]);
+  });
+
+  it("cuenta en el botón «Filtros»", () => {
+    const active = filters({ types: new Set([EntityType.DNI, EntityType.Person]) });
+    expect(hasActiveFilters(active)).toBe(true);
+    expect(activeFilterCount(active)).toBe(2);
+  });
+
+  it("ofrece los tipos con entidades en el orden de la lista, y los elegidos aunque queden vacíos", () => {
+    const entries = [
+      [EntityType.Person, [person]],
+      [EntityType.Address, []],
+      [EntityType.DNI, [dni, dni]],
+    ] as const;
+    expect(typeFilterOptions(entries, new Set())).toEqual([
+      { type: EntityType.Person, count: 1 },
+      { type: EntityType.DNI, count: 2 },
+    ]);
+    expect(
+      typeFilterOptions(entries, new Set([EntityType.Address, EntityType.Email])).map(
+        (option) => option.type,
+      ),
+    ).toEqual([EntityType.Person, EntityType.Address, EntityType.DNI, EntityType.Email]);
   });
 });

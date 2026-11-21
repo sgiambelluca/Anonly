@@ -74,7 +74,16 @@ export function ChangeTypeDialog({ group, open, onClose }: ChangeTypeDialogProps
     if (!canApply) return;
     const resolved = choice.resolve();
     if (resolved === null) return;
-    if (!applyTypeChange(group, resolved.entityType, preview?.groups[0], resolved.newType)) return;
+    if (
+      !applyTypeChange(
+        group,
+        resolved.entityType,
+        preview?.groups[0],
+        resolved.newType,
+        resolved.saveNewType === true,
+      )
+    )
+      return;
     onClose();
   }
 
@@ -85,6 +94,8 @@ export function ChangeTypeDialog({ group, open, onClose }: ChangeTypeDialogProps
       title="Cambiar tipo"
       description="Si el análisis clasificó mal un dato, elegí qué es en realidad."
       size="lg"
+      // Alto: a 1366 × 700 scrolleaba por 33 px (UX_Guidelines.md §11b.18).
+      tall
       footer={
         <div className="flex justify-end gap-2">
           <Button variant="secondary" onClick={onClose}>
@@ -140,7 +151,9 @@ export function ChangeTypeDialog({ group, open, onClose }: ChangeTypeDialogProps
               >
                 {choice.error ??
                   (choice.state.newType !== null && choice.canConfirm
-                    ? `Se crea el tipo «${choice.state.newType.name.trim()}» solo para este documento y la entidad pasa a ser ${previewOfNewType(choice.state.newType)}. ${NEW_TYPE_CHANGE_FOOTNOTE}`
+                    ? choice.state.newType.save === true
+                      ? `Se crea el tipo «${choice.state.newType.name.trim()}», queda guardado para los próximos documentos, y la entidad pasa a ser ${previewOfNewType(choice.state.newType)}.`
+                      : `Se crea el tipo «${choice.state.newType.name.trim()}» solo para este documento y la entidad pasa a ser ${previewOfNewType(choice.state.newType)}. ${NEW_TYPE_CHANGE_FOOTNOTE}`
                     : "Escribí el nombre del tipo nuevo.")}
               </span>
               <span className="h-5 text-text-secondary">

@@ -25,8 +25,8 @@ import { Checkbox } from "../common/Checkbox.js";
 
 import {
   charsKindOf,
+  describeOptionalContent,
   isExactly,
-  OPTIONAL_INNER_MENU,
   pieceHeading,
   BUILDER_COPY,
   SEPARATOR_OPTIONS,
@@ -40,7 +40,6 @@ import {
   withCharsKind,
   type CharsKind,
   type CharsPiece,
-  type PieceClassId,
   type PiecePath,
 } from "./formatBuilderModel.js";
 
@@ -57,10 +56,6 @@ export interface PieceInspectorProps {
   readonly onMove: (direction: -1 | 1) => void;
   readonly onDelete: () => void;
   readonly onChange: (piece: FormatPiece) => void;
-  /** Una parte opcional: suma una pieza adentro. */
-  readonly onAddInside: (id: PieceClassId) => void;
-  /** Con el tope de piezas, los botones de sumar están apagados. */
-  readonly addDisabled: boolean;
 }
 
 const KIND_OPTIONS: ReadonlyArray<{
@@ -311,17 +306,14 @@ export function PieceInspector({
   onMove,
   onDelete,
   onChange,
-  onAddInside,
-  addDisabled,
 }: PieceInspectorProps) {
   return (
     <section
       aria-label="Ajuste de la pieza"
-      className={`flex shrink-0 flex-col gap-3 rounded-lg border border-border p-3 ${
-        // Mide lo que su contenido, con tope: un alto fijo dejaba hueco en las
-        // piezas cortas (separador, texto fijo) y obligaba a scrollear el diálogo.
-        piece === null || path === null ? "" : "max-h-[12.25rem] overflow-y-auto"
-      }`}
+      // Mide lo que su contenido, sin scroll propio (`UX_Guidelines.md` §11b.18): un
+      // tope con scroll adentro dejaba dos barras anidadas por unos píxeles en
+      // «Letras». Si no entra, scrollea el cuerpo del diálogo.
+      className="flex shrink-0 flex-col gap-2.5 rounded-lg border border-border px-3 py-2.5"
     >
       {piece === null || path === null ? (
         <p className="text-sm text-text-secondary">{BUILDER_COPY.noPieceSelected}</p>
@@ -431,27 +423,11 @@ export function PieceInspector({
           ) : null}
 
           {piece.kind === "optional" ? (
-            <div className="flex flex-col gap-2">
-              <span className="text-sm text-text-secondary">
-                {piece.pieces.length === 1
-                  ? "Tiene 1 pieza."
-                  : `Tiene ${piece.pieces.length} piezas.`}{" "}
-                Arrastrá piezas adentro de la caja, o sumale:
-              </span>
-              <div className="flex flex-wrap gap-2">
-                {OPTIONAL_INNER_MENU.map((entry) => (
-                  <Button
-                    key={entry.id}
-                    variant="secondary"
-                    size="sm"
-                    disabled={addDisabled}
-                    onClick={() => onAddInside(entry.id)}
-                  >
-                    + {entry.label}
-                  </Button>
-                ))}
-              </div>
-            </div>
+            // Se suma con el «+» de adentro de la caja, en la tira (pasada de UI de
+            // la 1.1): ahí se ve dónde cae la pieza. Antes eran botones sueltos acá.
+            <span className="text-sm text-text-secondary">
+              {describeOptionalContent(piece.pieces.length)}
+            </span>
           ) : null}
         </>
       )}

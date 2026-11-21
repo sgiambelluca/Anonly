@@ -159,14 +159,20 @@ export function EntityTypeGroup({
             ownType?.caption != null ? "flex-col justify-center" : "items-center gap-2"
           }`}
         >
-          {/* El nombre va primero y entero; la leyenda y el contador pasan a la segunda línea de la franja. */}
-          <span className="truncate text-sm font-bold uppercase tracking-wide text-text-primary">
-            {label}
-          </span>
           {ownType?.caption != null ? (
-            <span className="flex min-w-0 items-center gap-1.5">
-              <span className="shrink-0 rounded-full border border-border bg-bg-primary px-1.5 text-xs font-semibold leading-4 text-text-primary">
-                {groups.length}
+            <>
+              {/*
+                Nombre y contador en el primer renglón, como en cualquier otra
+                franja; la leyenda sola en el segundo. Antes el contador bajaba
+                con la leyenda y la franja se leía distinta a las demás.
+              */}
+              <span className="flex min-w-0 items-center gap-1.5">
+                <span className="truncate text-sm font-bold uppercase leading-5 tracking-wide text-text-primary">
+                  {label}
+                </span>
+                <span className="shrink-0 rounded-full border border-border bg-bg-primary px-1.5 text-xs font-semibold leading-4 text-text-primary">
+                  {groups.length}
+                </span>
               </span>
               <span
                 title={ownType.caption === SAVED_CAPTION ? SAVED_CAPTION_TOOLTIP : ownType.caption}
@@ -174,11 +180,16 @@ export function EntityTypeGroup({
               >
                 {ownType.caption}
               </span>
-            </span>
+            </>
           ) : (
-            <span className="shrink-0 rounded-full border border-border bg-bg-primary px-2 text-sm font-semibold text-text-primary">
-              {groups.length}
-            </span>
+            <>
+              <span className="truncate text-sm font-bold uppercase tracking-wide text-text-primary">
+                {label}
+              </span>
+              <span className="shrink-0 rounded-full border border-border bg-bg-primary px-2 text-sm font-semibold text-text-primary">
+                {groups.length}
+              </span>
+            </>
           )}
         </button>
         {/* Nivel tipo de los tres de `UX_Guidelines.md` §3.4 (ADR-087 §3). */}

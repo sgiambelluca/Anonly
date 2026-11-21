@@ -9,8 +9,11 @@
  *   grupo tuvo algún conflicto, **resuelto o no** (los de detección nacen
  *   resueltos, ADR-222 §3); «manual» = un miembro es de un agregado a mano o el
  *   reemplazo lo escribió el usuario.
+ * - **«Tipos»** lista los tipos con entidades en el documento, de base y propios,
+ *   en el orden de la lista (ADR-229 §5, precisión del 2026-11-21).
  * - **«Tus formatos»** lista solo formatos del usuario que detectaron algo en el
- *   documento (ADR-226 §3); si no hay ninguno, la sección no se muestra.
+ *   documento y que separan algo dentro de su tipo, con la regla del subnivel del
+ *   árbol (ADR-226 §2 y §3); si no queda ninguno, la sección no se muestra.
  *
  * Módulo puro: los tests de `apps/react-client` corren en Node sin jsdom.
  */
@@ -21,20 +24,27 @@ import {
   ReplacementMode,
   type Conflict,
   type EntityGroup,
+  type EntityTypeId,
 } from "@anonly/anonymization-core";
 
 import type { DetectionState } from "../../store/detectionState.js";
 import type { EntityFilters, ReviewFilter } from "../../store/entities.store.js";
 
+import { splitByFormat } from "./entityTree.js";
 import { REPLACEMENT_MODE_ORDER } from "./replacementModeOptions.js";
 
 export function hasActiveFilters(filters: EntityFilters): boolean {
-  return filters.formatIds.size > 0 || filters.modes.size > 0 || filters.review.size > 0;
+  return (
+    filters.types.size > 0 ||
+    filters.formatIds.size > 0 ||
+    filters.modes.size > 0 ||
+    filters.review.size > 0
+  );
 }
 
 /** Cuántas opciones hay marcadas: es el número que lleva el botón «Filtros». */
 export function activeFilterCount(filters: EntityFilters): number {
-  return filters.formatIds.size + filters.modes.size + filters.review.size;
+  return filters.types.size + filters.formatIds.size + filters.modes.size + filters.review.size;
 }
 
 /** Los ids de grupo que tuvieron algún conflicto, resuelto o no. */
@@ -67,6 +77,7 @@ export function groupMatchesFilters(
   filters: EntityFilters,
   withConflict: ReadonlySet<string>,
 ): boolean {
+  if (filters.types.size > 0 && !filters.types.has(group.type)) return false;
   if (
     filters.formatIds.size > 0 &&
     (group.formatId === undefined || !filters.formatIds.has(group.formatId))
@@ -86,6 +97,31 @@ export function applyEntityFilters(
   return groups.filter((group) => groupMatchesFilters(group, filters, withConflict));
 }
 
+/** Una opción de «Tipos»: un tipo y cuántas entidades tiene en el documento. */
+export interface TypeFilterOption {
+  readonly type: EntityTypeId;
+  readonly count: number;
+}
+
+/**
+ * Las opciones de «Tipos», en el orden de la lista (`entries` es el de
+ * `visibleTypeEntries`): los tipos con al menos una entidad, y los ya elegidos
+ * que se quedaron sin ninguna, para poder destildarlos.
+ */
+export function typeFilterOptions(
+  entries: ReadonlyArray<readonly [EntityTypeId, ReadonlyArray<EntityGroup>]>,
+  selected: ReadonlySet<EntityTypeId>,
+): ReadonlyArray<TypeFilterOption> {
+  const options = entries
+    .filter(([type, groups]) => groups.length > 0 || selected.has(type))
+    .map(([type, groups]) => ({ type, count: groups.length }));
+  const listed = new Set(options.map((option) => option.type));
+  for (const type of selected) {
+    if (!listed.has(type)) options.push({ type, count: 0 });
+  }
+  return options;
+}
+
 /** Una opción de «Tus formatos»: un formato del usuario y cuántas entidades detectó. */
 export interface FormatFilterOption {
   readonly formatId: string;
@@ -94,18 +130,45 @@ export interface FormatFilterOption {
 }
 
 /**
+ * Los formatos del usuario que separan algo dentro de algún tipo: la misma regla
+ * que el subnivel del árbol (`splitByFormat`, ADR-226 §2). Un tipo cuyo
+ * contenido sale todo de un único formato del usuario no aporta ninguno.
+ */
+function separatingFormats(
+  groups: ReadonlyArray<EntityGroup>,
+  isUserFormat: (formatId: string) => boolean,
+): ReadonlySet<string> {
+  const byType = new Map<EntityTypeId, EntityGroup[]>();
+  for (const group of groups) {
+    const bucket = byType.get(group.type);
+    if (bucket === undefined) byType.set(group.type, [group]);
+    else bucket.push(group);
+  }
+  const separating = new Set<string>();
+  for (const typeGroups of byType.values()) {
+    for (const subgroup of splitByFormat(typeGroups, isUserFormat).subgroups) {
+      separating.add(subgroup.formatId);
+    }
+  }
+  return separating;
+}
+
+/**
  * Las opciones de «Tus formatos»: los formatos del usuario que tienen al menos
- * un grupo en el documento, en el orden de su primer grupo. `nameOf` devuelve el
- * nombre de un formato del usuario, o `undefined` si el id no es de uno (ADR-226
- * §1: los del catálogo no se pueden filtrar).
+ * un grupo en el documento **y separan algo dentro de su tipo** (ADR-226 §3,
+ * precisión del 2026-11-21: si no, filtrar por el formato da lo mismo que por el
+ * tipo), en el orden de su primer grupo. `nameOf` devuelve el nombre de un
+ * formato del usuario, o `undefined` si el id no es de uno (ADR-226 §1: los del
+ * catálogo no se pueden filtrar).
  */
 export function formatFilterOptions(
   groups: ReadonlyArray<EntityGroup>,
   nameOf: (formatId: string) => string | undefined,
 ): ReadonlyArray<FormatFilterOption> {
+  const separating = separatingFormats(groups, (formatId) => nameOf(formatId) !== undefined);
   const counts = new Map<string, number>();
   for (const group of groups) {
-    if (group.formatId === undefined) continue;
+    if (group.formatId === undefined || !separating.has(group.formatId)) continue;
     counts.set(group.formatId, (counts.get(group.formatId) ?? 0) + 1);
   }
   const options: FormatFilterOption[] = [];

@@ -140,6 +140,7 @@ export function applyTypeChange(
   type: EntityTypeId,
   next: EditPreviewGroup | undefined,
   newType?: UserEntityTypeDefinition,
+  saveNewType = false,
 ): boolean {
   const text = typeChangeToastText(
     group.canonicalValue,
@@ -155,6 +156,8 @@ export function applyTypeChange(
       showToast({ title: TYPE_ACTION_FAILED_TOAST, tone: "error" });
       return false;
     }
+    // «Guardarlo», tildada en el campo «Nuevo tipo» (ADR-225 §5, precisión del 2026-11-21).
+    if (saveNewType) actions.saveDocumentType(newType.id);
   }
   actions.updateGroup(group.id, { type });
   // Con un tipo nuevo el Core no previsualizó el cambio (el tipo todavía no

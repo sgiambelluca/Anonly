@@ -1,8 +1,10 @@
 /**
  * `FormatStatusBox` — la caja de estado del generador (`Components.md` §13b.5,
- * ADR-228 §7). Va fija al final del cuerpo, arriba del pie, y **mide siempre lo
- * mismo**: verde, amarilla o roja, el layout no se mueve cuando aparece un
- * error (`UX_Guidelines.md` §11b.8).
+ * ADR-228 §7). Va en el pie, a la izquierda de los botones (precisión del
+ * 2026-11-21), y **mide siempre lo mismo**: verde, amarilla o roja, el layout no
+ * se mueve cuando aparece un error (`UX_Guidelines.md` §11b.8). Tiene lugar para
+ * tres renglones de 13 px; un texto más largo termina en «…» y se lee entero en
+ * su `title`.
  */
 
 import { CircleCheckIcon, TriangleAlertIcon, XCircleIcon } from "lucide-react";
@@ -32,12 +34,12 @@ export function FormatStatusBox({ status }: FormatStatusBoxProps) {
     <div
       role={status.tone === "error" ? "alert" : "status"}
       data-status-tone={status.tone}
-      className={`flex h-12 shrink-0 items-start gap-2 rounded-lg border px-3 py-2 text-sm leading-snug text-text-primary ${TONE_CLASS[status.tone]}`}
+      className={`flex h-[3.75rem] min-w-0 flex-1 items-center gap-2 rounded-lg border px-3 py-1 text-[13px] leading-[1.25] text-text-primary ${TONE_CLASS[status.tone]}`}
     >
-      <span className="mt-0.5 shrink-0">
+      <span className="shrink-0">
         <ToneIcon tone={status.tone} />
       </span>
-      <span className="line-clamp-2" title={status.text}>
+      <span className="line-clamp-3" title={status.text}>
         {status.headline === undefined ? (
           status.text
         ) : (

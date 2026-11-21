@@ -62,7 +62,8 @@ export function ImportNameConflictsDialog({
         </div>
       }
     >
-      <div className="flex flex-col gap-3">
+      {/* `gap-4` y `pb-4`: el segundo renglón de un error largo (`FieldHint`) tiene dónde ir. */}
+      <div className="flex flex-col gap-4 pb-4">
         {(entries ?? []).map((entry) => (
           <div key={entry.index} className="flex flex-col gap-1">
             <input

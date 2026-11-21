@@ -46,6 +46,9 @@
   /* ADR-169 §2: cuánto color del tipo lleva la franja (6 % en claro, 7 % en oscuro). */
   --anonly-band-tint: 0.06;
   --anonly-mark: rgb(250 204 21 / 0.5);
+  /* «Ver en la lista» (`Components.md` §10.3): cuánto acento lleva la fila al iluminarse. */
+  --anonly-flash-alpha: 0.18;
+  --anonly-flash-ring: 0;
   /*
    * `#dc2626` y no el `#ef4444` de siempre (ADR-087 §3.1, mismo criterio que
    * `warning-strong`). El anterior fallaba el 4.5:1 de `UX_Guidelines.md` §9 en
@@ -81,6 +84,9 @@
     --color-space: 251 146 60; /* #fb923c — 6.49:1 sobre la superficie */
     --anonly-band-tint: 0.07;
     --anonly-mark: rgb(250 204 21 / 0.35);
+    /* Sobre fondo oscuro el 18 % casi no se ve: más acento y un borde interior. */
+    --anonly-flash-alpha: 0.4;
+    --anonly-flash-ring: 0.75;
     --color-error: 248 113 113; /* #f87171 */
     --color-error-foreground: 17 24 39; /* #111827 */
   }
@@ -105,6 +111,8 @@
   --color-space: 251 146 60; /* #fb923c */
   --anonly-band-tint: 0.07;
   --anonly-mark: rgb(250 204 21 / 0.35);
+  --anonly-flash-alpha: 0.4;
+  --anonly-flash-ring: 0.75;
   --color-error: 248 113 113; /* #f87171 */
   --color-error-foreground: 17 24 39; /* #111827 */
 }
@@ -119,6 +127,48 @@
 
   body {
     @apply bg-bg-secondary text-text-primary font-sans antialiased;
+  }
+
+  /*
+   * La barra de scroll de la aplicación (`UX_Guidelines.md` §11b.18,
+   * `Components.md` §10.3): angosta, redondeada, sin flechas, sobre un riel
+   * transparente. El color sale de los tokens, así que sigue al tema.
+   *
+   * Va con `::-webkit-scrollbar` (Chromium, el de Electron) y **sin**
+   * `scrollbar-width`/`scrollbar-color` para Chromium: desde la 121, si esas dos
+   * están definidas, ganan y los pseudo-elementos se ignoran.
+   */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track,
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-button {
+    display: none;
+  }
+  ::-webkit-scrollbar-thumb {
+    min-height: 32px;
+    border: 2px solid transparent;
+    border-radius: 9999px;
+    background-clip: padding-box;
+    background-color: rgb(var(--color-text-secondary) / 0.4);
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: rgb(var(--color-text-secondary) / 0.65);
+  }
+  ::-webkit-scrollbar-thumb:active {
+    background-color: rgb(var(--color-accent) / 0.8);
+  }
+
+  /* Sin `::-webkit-scrollbar` (Firefox): lo más parecido con lo estándar. */
+  @supports not selector(::-webkit-scrollbar) {
+    * {
+      scrollbar-width: thin;
+      scrollbar-color: rgb(var(--color-text-secondary) / 0.4) transparent;
+    }
   }
 }
 
@@ -644,10 +694,12 @@
   /* "Ver en la lista": la fila se ilumina y se apaga. */
   @keyframes anonly-flash {
     0% {
-      background-color: rgb(var(--color-accent) / 0.18);
+      background-color: rgb(var(--color-accent) / var(--anonly-flash-alpha));
+      box-shadow: inset 0 0 0 1.5px rgb(var(--color-accent) / var(--anonly-flash-ring));
     }
     100% {
       background-color: transparent;
+      box-shadow: inset 0 0 0 1.5px transparent;
     }
   }
   .anonly-flash {

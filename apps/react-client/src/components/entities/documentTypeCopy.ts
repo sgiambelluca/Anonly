@@ -29,6 +29,11 @@ export const SAVED_CAPTION_TOOLTIP =
 export const NEW_TYPE_CHANGE_FOOTNOTE = "Después lo editás o lo guardás desde ⋯ en el panel.";
 /** El pie de «Agregar entidad» con «Nuevo tipo» elegido y sin error. */
 export const NEW_TYPE_ADD_FOOTNOTE = `Tipo nuevo, solo de este documento. ${NEW_TYPE_CHANGE_FOOTNOTE}`;
+/** El mismo pie con «Guardarlo» tildada (ADR-225 §5, precisión del 2026-11-21). */
+export const NEW_TYPE_SAVED_FOOTNOTE = "Tipo nuevo: queda guardado para los próximos documentos.";
+/** El texto de la casilla del campo «Nuevo tipo», y su `title`. */
+export const NEW_TYPE_SAVE_LABEL = "Guardarlo";
+export const NEW_TYPE_SAVE_TITLE = "Guardarlo también para los próximos documentos";
 
 export const EMPTY_TYPE_TEXT =
   "Todavía no tiene entidades. Seleccioná el texto en el PDF o agregalo desde acá.";
@@ -122,6 +127,10 @@ export const CREATED_TYPE_HINT =
   "Ahora seleccioná en el PDF lo que es de este tipo, o usá «Agregar entidad».";
 
 /** El subtítulo del aviso de guardar un tipo del documento. */
+/** El detalle del aviso de creado cuando también se guardó (ADR-225 §5, precisión del 2026-11-21). */
+export const CREATED_AND_SAVED_TYPE_HINT =
+  "También quedó guardado para los próximos documentos. Ahora seleccioná en el PDF lo que es de este tipo.";
+
 export const SAVED_TYPE_HINT =
   "Va a estar en los próximos documentos. Desde ahora se edita en «Formatos de detección».";
 

@@ -27,9 +27,9 @@ export function EmptyPanelNewType() {
         mode="create"
         existing={userTypes}
         country={country}
-        onSubmit={(definition) => {
+        onSubmit={(definition, save) => {
           setOpen(false);
-          applyCreateDocumentType(definition);
+          applyCreateDocumentType(definition, save);
         }}
         onClose={() => setOpen(false)}
       />

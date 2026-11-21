@@ -35,16 +35,19 @@ import {
   type PreviewInteractionGeometry,
   type Word,
 } from "@anonly/anonymization-core";
-import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 
 import { actions } from "../../core-adapter/actions.js";
 import { useDetectionStore } from "../../store/detection.store.js";
+import { useEntitiesStore } from "../../store/entities.store.js";
+import { useSettingsStore } from "../../store/settings.store.js";
 import { Button } from "../common/Button.js";
 import { addManualEntityWithFeedback } from "../entities/addManualEntity.js";
 import { EntityTypePicker } from "../entities/EntityTypePicker.js";
 import { useTypeChoice } from "../entities/useTypeChoice.js";
 import { useUserTypes } from "../entities/useUserTypes.js";
 
+import { entityHighlightsOnPage, HIGHLIGHT_PAD_PX, highlightStyle } from "./entityHighlights.js";
 import { clickConsumesSelection, isClickGesture } from "./entityHover.js";
 import { EntityTooltip } from "./EntityTooltip.js";
 import { buildEntityTooltip } from "./entityTooltipContent.js";
@@ -135,6 +138,20 @@ export function WordSelectionOverlay({
   });
   const userTypes = useUserTypes();
   const detection = useDetectionStore((state) => state.saved);
+  // UX_Guidelines.md §5.2: el resaltado de las entidades, solo en el original,
+  // con la página mostrando su propia imagen (ADR-213 §6) y si el usuario no lo
+  // apagó en Configuración (Components.md §13b.8).
+  const groupsByType = useEntitiesStore((state) => state.groupsByType);
+  const highlightsOn = useSettingsStore((state) => state.highlightEntities);
+  // El grupo que se acaba de elegir con un clic queda marcado mientras su fila se ilumina.
+  const flashGroupId = useEntitiesStore((state) => state.flashGroupId);
+  const entityHighlights = useMemo(
+    () =>
+      kind === "original" && !inert && highlightsOn
+        ? entityHighlightsOnPage([...groupsByType.values()].flat(), pageIndex)
+        : [],
+    [kind, inert, highlightsOn, groupsByType, pageIndex],
+  );
 
   function pointFromEvent(event: PointerEvent<HTMLDivElement>): Point {
     const rect = event.currentTarget.getBoundingClientRect();
@@ -282,7 +299,10 @@ export function WordSelectionOverlay({
   }
 
   const pageSize =
-    (activeMatchBboxes?.length ?? 0) > 0 || selection !== null || hover.hovered !== null
+    (activeMatchBboxes?.length ?? 0) > 0 ||
+    selection !== null ||
+    hover.hovered !== null ||
+    entityHighlights.length > 0
       ? actions.getPageSize(pageIndex)
       : null;
   const toScreen = (box: BoundingBox) =>
@@ -330,6 +350,29 @@ export function WordSelectionOverlay({
       onPointerLeave={hover.onPointerLeave}
       onPointerUp={handlePointerUp}
     >
+      {/* Debajo de todo lo demás: la lupa, el arrastre y la selección se ven encima. */}
+      {entityHighlights.map((highlight) => {
+        const rect = toScreen(highlight.box);
+        if (rect === null) return null;
+        return (
+          <div
+            key={highlight.key}
+            aria-hidden
+            className="pointer-events-none absolute rounded-[2px] border-[1.5px]"
+            style={{
+              left: rect.left - HIGHLIGHT_PAD_PX.x,
+              top: rect.top - HIGHLIGHT_PAD_PX.y,
+              width: rect.width + HIGHLIGHT_PAD_PX.x * 2,
+              height: rect.height + HIGHLIGHT_PAD_PX.y * 2,
+              ...highlightStyle(
+                highlight.type,
+                highlight.enabled,
+                hover.hovered?.group.id === highlight.groupId || flashGroupId === highlight.groupId,
+              ),
+            }}
+          />
+        );
+      })}
       {highlightRects.map((rect, index) => (
         <div
           key={index}
@@ -461,6 +504,7 @@ function SelectionPopover({
     const feedback = await addManualEntityWithFeedback(
       { value: currentValue, entityType: resolved.entityType },
       resolved.newType,
+      resolved.saveNewType === true,
     );
     setSubmitting(false);
     if (feedback === "not-found") {

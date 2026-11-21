@@ -24,10 +24,11 @@ import type {
   UserEntityTypeDefinition,
   UserEntityTypeId,
 } from "@anonly/anonymization-core";
-import { InfoIcon } from "lucide-react";
+import { InfoIcon, TriangleAlertIcon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { Button } from "../common/Button.js";
+import { Checkbox } from "../common/Checkbox.js";
 import { Dialog } from "../common/Dialog.js";
 import { FieldHint } from "../common/FieldHint.js";
 import { fieldBorderClass } from "../common/fieldHintText.js";
@@ -58,7 +59,12 @@ export interface UserTypeDialogProps {
   readonly country: CountryCode;
   /** Cuántos formatos tiene el tipo que se edita (`saved`): para «Sus N formatos no cambian». */
   readonly formatCount?: number;
-  readonly onSubmit: (definition: UserEntityTypeDefinition) => void;
+  /**
+   * : al crear un tipo del documento, si se tildó «Guardarlo también para
+   * los próximos documentos» (ADR-225 §5, precisión del 2026-11-21). En los
+   * otros casos, siempre .
+   */
+  readonly onSubmit: (definition: UserEntityTypeDefinition, save: boolean) => void;
   readonly onClose: () => void;
 }
 
@@ -80,11 +86,13 @@ export function UserTypeDialog({
   const [fields, setFields] = useState<UserTypeFields>(() => fieldsOf(initial));
   // Un id por apertura: crear dos tipos seguidos no repite id.
   const [freshId, setFreshId] = useState<UserEntityTypeId>(newTypeId);
+  const [save, setSave] = useState(false);
 
   useEffect(() => {
     if (!open) return;
     setFields(fieldsOf(initial));
     setFreshId(newTypeId());
+    setSave(false);
   }, [open, initial]);
 
   const id = initial?.id ?? freshId;
@@ -94,6 +102,8 @@ export function UserTypeDialog({
   );
   const ladder = replacementLadder(fields);
   const editing = mode === "edit";
+  // La casilla de guardar solo existe al crear un tipo del documento.
+  const offersSave = scope === "document" && !editing;
   const errorText = result.slot.kind === "error" ? result.slot.text : null;
   const nameError = result.errorField === "name" ? errorText : null;
   const shortError = result.errorField === "short" ? errorText : null;
@@ -104,7 +114,7 @@ export function UserTypeDialog({
 
   function submit(): void {
     if (!result.canSubmit) return;
-    onSubmit(result.definition);
+    onSubmit(result.definition, offersSave && save);
   }
 
   return (
@@ -114,6 +124,8 @@ export function UserTypeDialog({
       title={editing ? TYPE_FORM_COPY.editTitle : TYPE_FORM_COPY.createTitle}
       description={typeFormLead(scope, mode, formatCount)}
       size="lg"
+      // Alto: con la casilla de guardar, a 1366 × 700 scrolleaba por 3 px (§11b.18).
+      tall
       footer={
         <div className="flex justify-end gap-2">
           <Button variant="secondary" onClick={onClose}>
@@ -125,8 +137,9 @@ export function UserTypeDialog({
         </div>
       }
     >
+      {/* `gap-4`: el segundo renglón de un error largo (`FieldHint`) entra en el espacio entre bloques. */}
       <form
-        className="flex flex-col gap-3.5"
+        className="flex flex-col gap-4"
         onSubmit={(event) => {
           event.preventDefault();
           submit();
@@ -207,10 +220,50 @@ export function UserTypeDialog({
           <InfoIcon className="mt-0.5 h-4 w-4 shrink-0 text-accent" aria-hidden />
           <span>{TYPE_FORM_COPY.replacementInfo}</span>
         </p>
-        <p className="flex items-start gap-2 text-sm text-text-secondary">
-          <InfoIcon className="mt-0.5 h-4 w-4 shrink-0 text-accent" aria-hidden />
-          <span>{typeFormNote(scope, mode)}</span>
-        </p>
+        {offersSave ? (
+          // Un tipo del documento se pierde al cerrarlo: es lo único de este diálogo
+          // que puede costarle trabajo al usuario. El aviso trae cómo evitarlo, en
+          // el momento de crearlo (ADR-225 §5, precisión del 2026-11-21). Las dos
+          // versiones miden lo mismo: dos renglones y la casilla (UX-10).
+          <div
+            className={`flex flex-col gap-2 rounded-lg border px-3 py-2.5 text-sm text-text-primary ${
+              save ? "border-accent/35 bg-accent/10" : "border-warning-strong bg-warning/15"
+            }`}
+          >
+            <p className="flex min-h-10 items-start gap-2">
+              {save ? (
+                <InfoIcon className="mt-0.5 h-4 w-4 shrink-0 text-accent" aria-hidden />
+              ) : (
+                <TriangleAlertIcon
+                  className="mt-0.5 h-4 w-4 shrink-0 text-warning-strong"
+                  aria-hidden
+                />
+              )}
+              <span className="line-clamp-2">{typeFormNote(scope, mode, save)}</span>
+            </p>
+            <div className="pl-6">
+              <Checkbox
+                id="user-type-save"
+                checked={save}
+                onCheckedChange={setSave}
+                label={<span className="font-medium">{TYPE_FORM_COPY.saveForLater}</span>}
+              />
+            </div>
+          </div>
+        ) : scope === "document" ? (
+          <p className="flex items-start gap-2 rounded-lg border border-warning-strong bg-warning/15 px-3 py-2 text-sm text-text-primary">
+            <TriangleAlertIcon
+              className="mt-0.5 h-4 w-4 shrink-0 text-warning-strong"
+              aria-hidden
+            />
+            <span>{typeFormNote(scope, mode)}</span>
+          </p>
+        ) : (
+          <p className="flex items-start gap-2 text-sm text-text-secondary">
+            <InfoIcon className="mt-0.5 h-4 w-4 shrink-0 text-accent" aria-hidden />
+            <span>{typeFormNote(scope, mode)}</span>
+          </p>
+        )}
         {/* Enter dentro de un campo envía el formulario; el botón del pie es el visible. */}
         <button type="submit" className="hidden" aria-hidden tabIndex={-1} />
       </form>

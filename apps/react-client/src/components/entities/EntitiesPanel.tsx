@@ -406,7 +406,7 @@ export function EntitiesPanel() {
               className="h-8 w-full rounded-md border border-border bg-bg-primary pl-8 pr-2 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent"
             />
           </div>
-          <EntityFiltersPopover groups={allGroups} />
+          <EntityFiltersPopover groups={allGroups} typeEntries={entries} />
           <div
             role="group"
             aria-label="Ordenar entidades"
@@ -566,10 +566,10 @@ export function EntitiesPanel() {
         {...(editingDefinition !== undefined ? { initial: editingDefinition } : {})}
         existing={userTypes.filter((definition) => definition.id !== editingDefinition?.id)}
         country={detection.country}
-        onSubmit={(definition) => {
+        onSubmit={(definition, save) => {
           setTypeDialog(null);
           if (typeDialog?.kind === "edit") void applyUpdateDocumentType(definition);
-          else applyCreateDocumentType(definition);
+          else applyCreateDocumentType(definition, save);
         }}
         onClose={() => setTypeDialog(null)}
       />

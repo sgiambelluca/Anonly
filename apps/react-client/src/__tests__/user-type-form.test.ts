@@ -112,8 +112,11 @@ describe("userTypeForm", () => {
     expect(typeFormNote("saved")).toBe(TYPE_FORM_COPY.noteSaved);
     expect(typeFormNote("saved")).toContain("próximos documentos");
     expect(typeFormNote("document")).toBe(
-      "Es solo de este documento: se pierde al cerrarlo. Para tenerlo siempre y que se detecte solo, crealo en la pantalla de inicio y sumale un formato.",
+      "Es solo de este documento: se pierde al cerrarlo. Si lo vas a volver a usar, guardalo también para los próximos documentos.",
     );
+    // Con «Guardarlo también…» tildada (ADR-225 §5, precisión del 2026-11-21).
+    expect(typeFormNote("document", "create", true)).toBe(TYPE_FORM_COPY.noteDocumentSaved);
+    expect(typeFormNote("document", "edit", true)).toBe(TYPE_FORM_COPY.noteDocumentEdit);
     expect(typeFormNote("saved", "edit")).toBe(
       "El cambio se aplica al próximo documento que abras. Lo que ya exportaste queda como estaba.",
     );
@@ -137,8 +140,9 @@ describe("userTypeForm", () => {
   });
 
   it("la ayuda del nombre trae el contador y cómo queda (§11b.17)", () => {
-    expect(typeNameHelp(fields(""))).toBe("0/40");
-    expect(typeNameHelp(fields("Legajo"))).toBe("6/40 · Así se ve: [LEGAJO 01]");
+    // No repite el reemplazo: «Cómo se reemplaza» ya lo muestra justo abajo (§11b.17).
+    expect(typeNameHelp(fields(""))).toBe("0/40 · Letras, números, espacios y guiones");
+    expect(typeNameHelp(fields("Legajo"))).toBe("6/40 · Letras, números, espacios y guiones");
     expect(SHORT_LABEL_HELP).toContain("8");
   });
 

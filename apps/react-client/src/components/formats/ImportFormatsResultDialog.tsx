@@ -14,6 +14,7 @@
  * «Guardar». Los textos del rechazo salen de `formatTexts.ts` (§11b.16).
  */
 
+import { isUserEntityType, type EntityTypeId } from "@anonly/anonymization-core";
 import {
   CheckIcon,
   CircleAlertIcon,
@@ -27,6 +28,7 @@ import type { ReactNode } from "react";
 
 import { Button } from "../common/Button.js";
 import { Dialog } from "../common/Dialog.js";
+import { typeDotStyle, userDotStyle } from "../entities/entityTypeColors.js";
 
 import {
   describeImportedItems,
@@ -154,6 +156,7 @@ export function ImportFormatsResultDialog({
             <Row
               key={`${item.kind}-${item.name}`}
               dot={importRowDot(item, ownTypeNames)}
+              {...(item.typeId !== undefined ? { typeId: item.typeId } : {})}
               name={item.name}
               detail={
                 item.typeName !== undefined
@@ -238,25 +241,35 @@ export function ImportFormatsResultDialog({
   );
 }
 
-/** Una fila de un grupo: el punto del tipo, el nombre y el detalle. */
+/**
+ * Una fila de un grupo: el punto del tipo, el nombre y el detalle. El punto sigue
+ * la regla de `Components.md` §9: aro lleno para un tipo propio guardado (lo
+ * importado se guarda; el punteado es de «solo en este documento») y el color
+ * del catálogo para un formato que entró a un tipo del catálogo.
+ */
 function Row({
   dot,
+  typeId,
   name,
   detail,
 }: {
   readonly dot: "own" | "other";
+  readonly typeId?: EntityTypeId;
   readonly name: string;
   readonly detail: string;
 }) {
+  const style =
+    dot === "own"
+      ? userDotStyle(false)
+      : typeId !== undefined && !isUserEntityType(typeId)
+        ? typeDotStyle(typeId)
+        : null;
   return (
     <li className="flex items-center gap-2 px-3 py-2 text-sm">
       <span
         aria-hidden
-        className={`h-2.5 w-2.5 shrink-0 rounded-full ${
-          dot === "own"
-            ? "border-[1.5px] border-dashed border-text-secondary"
-            : "bg-text-secondary/60"
-        }`}
+        className={`h-2.5 w-2.5 shrink-0 rounded-full ${style === null ? "bg-text-secondary/60" : ""}`}
+        {...(style !== null ? { style } : {})}
       />
       <span className="shrink-0 font-semibold text-text-primary">{name}</span>
       <span className="min-w-0 flex-1 truncate text-text-secondary">{detail}</span>

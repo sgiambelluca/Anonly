@@ -72,6 +72,8 @@ const FORMAT_CODES: Readonly<Record<FormatIssueCode, true>> = {
   name_taken: true,
   no_variants: true,
   too_many_variants: true,
+  variant_name_too_long: true,
+  variant_names_mismatch: true,
   variant_empty: true,
   variant_without_chars: true,
   too_many_pieces: true,

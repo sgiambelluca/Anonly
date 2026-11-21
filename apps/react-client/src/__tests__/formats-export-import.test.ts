@@ -211,8 +211,9 @@ describe("importar un archivo", () => {
     );
     expect(plan.change?.types).toEqual([]);
     expect(plan.change?.formats[0]?.entityType).toBe(legajo.id);
+    // `typeId`: el punto de la fila sale del tipo, no del nombre (pasada de UI de la 1.1).
     expect(plan.summary.merged).toEqual([
-      { kind: "format", name: "Legajo nuevo", typeName: "Legajo" },
+      { kind: "format", name: "Legajo nuevo", typeName: "Legajo", typeId: legajo.id },
     ]);
     expect(plan.summary.imported).toEqual([]);
   });

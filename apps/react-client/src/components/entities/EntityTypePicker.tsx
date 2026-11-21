@@ -30,9 +30,13 @@ import type { EntityTypeId } from "@anonly/anonymization-core";
 import { PlusIcon, XIcon } from "lucide-react";
 import { useRef, type KeyboardEvent } from "react";
 
+import { Checkbox } from "../common/Checkbox.js";
+
 import {
   DOCUMENT_ONLY_TOOLTIP,
   NEW_TYPE_BAND_LABEL,
+  NEW_TYPE_SAVE_LABEL,
+  NEW_TYPE_SAVE_TITLE,
   SAVED_TYPE_TOOLTIP,
 } from "./documentTypeCopy.js";
 import { PICKER_TYPE_ORDER, typeSingular } from "./entityTypeLabels.js";
@@ -89,8 +93,13 @@ export function EntityTypePicker({
   const focusType = value !== "new" && selectable.includes(value) ? value : selectable[0];
 
   function handleKeyDown(event: KeyboardEvent<HTMLDivElement>): void {
-    // Dentro del campo del nombre las flechas mueven el cursor, no la elección.
-    if (event.target instanceof HTMLInputElement) return;
+    // Dentro del campo del nombre (y su casilla «Guardarlo») las flechas no mueven la elección.
+    if (
+      event.target instanceof Element &&
+      event.target.closest('[data-new-type="field"]') !== null
+    ) {
+      return;
+    }
     const step =
       event.key === "ArrowRight" || event.key === "ArrowDown"
         ? 1
@@ -143,7 +152,8 @@ export function EntityTypePicker({
           <span
             aria-hidden
             className={`h-3.5 w-3.5 shrink-0 rounded-full ${
-              checked ? "border-4 border-accent" : "border-[1.5px] border-border"
+              // `text-secondary`: el círculo vacío tiene que verse (3:1, `Components.md` §8.4).
+              checked ? "border-4 border-accent" : "border-[1.5px] border-text-secondary/70"
             }`}
           />
         )}
@@ -177,7 +187,7 @@ export function EntityTypePicker({
         aria-label="Nombre del tipo nuevo"
         aria-invalid={newTypeError !== null}
         aria-describedby={NEW_TYPE_HINT_ID}
-        onChange={(event) => onNewTypeChange({ name: event.target.value })}
+        onChange={(event) => onNewTypeChange({ ...newType, name: event.target.value })}
         onKeyDown={(event) => {
           if (event.key === "Enter") {
             event.preventDefault();
@@ -194,9 +204,18 @@ export function EntityTypePicker({
       <span
         aria-live="polite"
         title="Así se va a reemplazar"
-        className="max-w-[45%] shrink-0 truncate font-mono text-text-secondary"
+        className="min-w-0 max-w-[35%] shrink truncate font-mono text-text-secondary"
       >
         {previewOfNewType(newType)}
+      </span>
+      {/* Guardarlo al crearlo, no solo desde el ⋯ (ADR-225 §5, precisión del 2026-11-21). */}
+      <span title={NEW_TYPE_SAVE_TITLE} className="flex shrink-0 items-center">
+        <Checkbox
+          id="new-type-save"
+          checked={newType.save === true}
+          onCheckedChange={(save) => onNewTypeChange({ ...newType, save })}
+          label={<span className="whitespace-nowrap">{NEW_TYPE_SAVE_LABEL}</span>}
+        />
       </span>
       <button
         type="button"

@@ -101,8 +101,11 @@ function union(boxes: ReadonlyArray<BoundingBox>): BoundingBox | null {
   return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
 }
 
-/** Las cajas de texto de una aparición: sus fragmentos si cruza renglones, o su caja. */
-function sourceBoxes(member: OccurrenceRef): ReadonlyArray<BoundingBox> {
+/**
+ * Las cajas de texto de una aparición: sus fragmentos si cruza renglones, o su caja.
+ * También las usa el resaltado de la vista Original (`entityHighlights.ts`).
+ */
+export function sourceBoxes(member: OccurrenceRef): ReadonlyArray<BoundingBox> {
   return member.fragments !== undefined && member.fragments.length > 0
     ? member.fragments
     : [member.bbox];

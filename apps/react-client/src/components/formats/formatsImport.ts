@@ -30,6 +30,7 @@ import {
   userTypeLabel,
   validateFormat,
   type CatalogFormatRef,
+  type EntityTypeId,
   type FormatDefinition,
   type FormatsFileContent,
   type UserEntityTypeDefinition,
@@ -49,6 +50,8 @@ export interface ImportedItem {
   readonly name: string;
   /** Solo un formato: el tipo en el que quedó. */
   readonly typeName?: string;
+  /** Solo un formato: el id de ese tipo, para pintar su punto con el color del catálogo. */
+  readonly typeId?: EntityTypeId;
   /** Formatos con los que comparte textos: el aviso amarillo. */
   readonly overlapsWith?: ReadonlyArray<string>;
   /** El texto más corto que comparte con cada formato de `overlapsWith`, en el mismo orden. */
@@ -240,6 +243,7 @@ export function planFormatsImport(
       kind: "format",
       name: candidate.name,
       typeName,
+      typeId: mappedType,
       ...(overlapsWith.length > 0
         ? { overlapsWith, overlapExamples: comparison.overlaps.map((overlap) => overlap.example) }
         : {}),
