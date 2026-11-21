@@ -53,6 +53,19 @@ function compose(text: { readonly why: string; readonly todo: string }): string 
   return `${text.why}. ${text.todo}`;
 }
 
+/** Cuántos caracteres de un valor escrito por el usuario entran entre « » en un mensaje de falla. */
+export const QUOTED_VALUE_MAX = 10;
+
+/**
+ * Acorta un valor que escribió el usuario para meterlo entre «» en una línea de
+ * ayuda de una sola línea: hasta `max` caracteres y «…». Lo que se corta es el
+ * valor, no la explicación que lo rodea.
+ */
+export function shortenQuoted(value: string, max: number = QUOTED_VALUE_MAX): string {
+  const chars = Array.from(value);
+  return chars.length <= max ? value : `${chars.slice(0, max).join("")}…`;
+}
+
 /** «el nombre…» a partir de «El nombre…»: el motivo de §11b.16, en minúscula y sin el «qué hacer». */
 function asReason(why: string): string {
   return why.charAt(0).toLowerCase() + why.slice(1);
@@ -107,7 +120,7 @@ const TYPE_ISSUE_TEXTS: Readonly<Record<UserEntityTypeIssueCode, IssueText<TypeI
   },
   short_label_invalid: {
     why: (params) =>
-      `La versión corta «${firstInvalidShortLabel(params)}» tiene que tener de 1 a ${USER_TYPE_SHORT_LABEL_MAX} letras o números, sin espacios ni signos`,
+      `La versión corta «${shortenQuoted(firstInvalidShortLabel(params))}» tiene que tener de 1 a ${USER_TYPE_SHORT_LABEL_MAX} letras o números, sin espacios ni signos`,
     todo: "Corregila, o dejala vacía para usar la automática.",
   },
   label_taken: {
@@ -245,7 +258,7 @@ const FORMAT_ISSUE_TEXTS: Readonly<Record<FormatIssueCode, IssueText<FormatIssue
     todo: "Acortalo.",
   },
   name_taken: {
-    why: ({ definition }) => `Ya tenés un formato llamado «${definition.name}»`,
+    why: ({ definition }) => `Ya tenés un formato llamado «${shortenQuoted(definition.name)}»`,
     todo: "Elegí otro nombre para distinguirlos en la lista.",
   },
   no_variants: {
@@ -313,7 +326,7 @@ const FORMAT_ISSUE_TEXTS: Readonly<Record<FormatIssueCode, IssueText<FormatIssue
   context_too_long: {
     why: (params) => {
       const word = longContextWord(params);
-      return `La palabra de contexto «${word}» tiene ${word.length} caracteres y el máximo es ${FORMAT_MAX_TEXT}`;
+      return `La palabra de contexto «${shortenQuoted(word)}» tiene ${word.length} caracteres y el máximo es ${FORMAT_MAX_TEXT}`;
     },
     todo: "Acortala.",
   },
@@ -328,12 +341,12 @@ const FORMAT_ISSUE_TEXTS: Readonly<Record<FormatIssueCode, IssueText<FormatIssue
   },
   type_unknown: {
     why: ({ definition, userTypes }) =>
-      `El tipo «${entityTypeName(definition.entityType, userTypes)}» ya no existe`,
+      `El tipo «${shortenQuoted(entityTypeName(definition.entityType, userTypes))}» ya no existe`,
     todo: "Elegí otro en «Es un…».",
   },
   type_not_admitted: {
     why: ({ definition, userTypes }) =>
-      `A «${entityTypeName(definition.entityType, userTypes)}» no se le pueden sumar formatos propios`,
+      `A «${shortenQuoted(entityTypeName(definition.entityType, userTypes))}» no se le pueden sumar formatos propios`,
     // El resto de la oración lleva `{TIPOS ADMITIDOS}`: se arma en `formatIssueTodo`.
     todo: "",
   },

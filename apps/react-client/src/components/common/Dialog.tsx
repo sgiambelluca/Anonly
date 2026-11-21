@@ -93,6 +93,8 @@ export interface DialogProps {
    * panel de prueba flotante primero, `UX_Guidelines.md` §11b.7).
    */
   readonly onEscapeKeyDown?: (event: KeyboardEvent) => void;
+  /** Usa hasta el 92 % del alto de la ventana en vez del 85 % (el generador de formatos). */
+  readonly tall?: boolean;
 }
 
 const SIZE_CLASS: Readonly<Record<NonNullable<DialogProps["size"]>, string>> = {
@@ -117,6 +119,7 @@ export function Dialog({
   role,
   headerActions,
   onEscapeKeyDown,
+  tall = false,
 }: DialogProps) {
   const [selectOpen, setSelectOpen] = useState(false);
   const zIndex = dialogZIndex(useDialogLayer(open));
@@ -167,7 +170,7 @@ export function Dialog({
               zIndex: zIndex.content,
               ...(selectOpen ? { pointerEvents: "auto" as const } : {}),
             }}
-            className={`fixed left-1/2 top-1/2 flex max-h-[85vh] w-[calc(100%-2rem)] ${SIZE_CLASS[size]} -translate-x-1/2 -translate-y-1/2 flex-col rounded-lg bg-bg-primary p-5 shadow-md focus:outline-none`}
+            className={`fixed left-1/2 top-1/2 flex ${tall ? "max-h-[92vh]" : "max-h-[85vh]"} w-[calc(100%-2rem)] ${SIZE_CLASS[size]} -translate-x-1/2 -translate-y-1/2 flex-col rounded-lg bg-bg-primary p-5 shadow-md focus:outline-none`}
           >
             {icon !== undefined ? (
               // ADR-215 §3: con ícono, el título y la descripción van en una

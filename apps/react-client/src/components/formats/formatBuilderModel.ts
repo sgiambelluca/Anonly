@@ -187,28 +187,48 @@ export interface PieceMenuEntry {
   readonly id: PieceClassId;
   readonly label: string;
   readonly description: string;
+  /** La ficha monoespaciada a la izquierda de la opción del menú «+ Pieza». */
+  readonly glyph: string;
 }
 
 /** Las seis clases del menú, con la línea de ADR-228 §3. */
 export const PIECE_MENU: ReadonlyArray<PieceMenuEntry> = [
-  { id: "digits", label: "Dígitos", description: "Solo números, del 0 al 9. Ejemplo: 48213" },
-  { id: "letters", label: "Letras", description: "Solo letras, con o sin tilde. Ejemplo: Gómez" },
+  {
+    id: "digits",
+    label: "Dígitos",
+    description: "Solo números, del 0 al 9. Ejemplo: 48213",
+    glyph: "0–9",
+  },
+  {
+    id: "letters",
+    label: "Letras",
+    description: "Solo letras, con o sin tilde. Ejemplo: Gómez",
+    glyph: "Aa",
+  },
   {
     id: "alnum",
     label: "Letras o dígitos",
     description: "Cualquiera de los dos, mezclados. Ejemplo: A1B2C3",
+    glyph: "A1",
   },
   {
     id: "separator",
     label: "Separador",
     description: "Espacio, guion, punto o barra entre dos bloques",
+    glyph: "- /",
   },
   {
     id: "text",
     label: "Texto fijo",
     description: "Siempre el mismo texto, como «HC-». Se tapa con el dato",
+    glyph: "«»",
   },
-  { id: "optional", label: "Parte opcional", description: "Un tramo que puede estar o no" },
+  {
+    id: "optional",
+    label: "Parte opcional",
+    description: "Un tramo que puede estar o no",
+    glyph: "( )",
+  },
 ];
 
 /** Las cuatro clases que se pueden sumar adentro de una parte opcional (ADR-228 §4). */

@@ -227,6 +227,7 @@ function BuilderForm({ setup, state, onSubmit, onClose }: FormProps) {
         title={setup.title}
         description={BUILDER_COPY.line}
         size="xl"
+        tall
         onEscapeKeyDown={(event) => {
           // `Esc` cierra primero el panel de prueba (`UX_Guidelines.md` §11b.7).
           if (testOpen) {
@@ -268,7 +269,7 @@ function BuilderForm({ setup, state, onSubmit, onClose }: FormProps) {
           </div>
         }
       >
-        <div className="flex flex-col gap-3.5 pb-1">
+        <div className="flex flex-col gap-3">
           {setup.notice !== null ? <Banner variant="info">{setup.notice}</Banner> : null}
 
           <div className="grid grid-cols-[1fr_14rem] gap-3">
@@ -376,9 +377,6 @@ function BuilderForm({ setup, state, onSubmit, onClose }: FormProps) {
               onMoved={(next, path) => setVariant(next, path)}
               onAdd={(id) => add(id, null)}
             />
-            <div className="h-4 text-right text-xs text-text-secondary">
-              {pieces.visible ? pieces.text : ""}
-            </div>
           </div>
 
           {/* Alto fijo: «Se lee» va en una línea con elipsis y el texto completo en `title`. */}
@@ -387,12 +385,18 @@ function BuilderForm({ setup, state, onSubmit, onClose }: FormProps) {
               <b className="font-semibold text-text-primary">{BUILDER_TEXTS.readsLabel}:</b>{" "}
               <span className="text-text-secondary">{describeVariant(variant, draft.context)}</span>
             </span>
-            <span className="truncate">
-              <b className="font-semibold text-text-primary">{BUILDER_TEXTS.exampleLabel}:</b>{" "}
-              <span className="font-mono text-text-primary">
-                {exampleOfVariant(variant, definition) || "—"}
+            <div className="flex items-baseline justify-between gap-3">
+              <span className="min-w-0 truncate">
+                <b className="font-semibold text-text-primary">{BUILDER_TEXTS.exampleLabel}:</b>{" "}
+                <span className="font-mono text-text-primary">
+                  {exampleOfVariant(variant, definition) || "—"}
+                </span>
               </span>
-            </span>
+              {/* El contador de piezas vive en este renglón fijo: no deja un hueco bajo la tira. */}
+              <span className="shrink-0 text-xs text-text-secondary">
+                {pieces.visible ? pieces.text : ""}
+              </span>
+            </div>
           </div>
 
           <PieceInspector
