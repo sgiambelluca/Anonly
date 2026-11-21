@@ -126,10 +126,14 @@ function PieceChip({
       onDragEnd={onDragEnd}
       onDragOver={onDragOver}
       onDrop={onDrop}
-      className={`flex h-[4.5rem] w-28 shrink-0 cursor-grab flex-col justify-center gap-0.5 rounded-lg border bg-bg-primary px-2.5 py-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+      className={`relative flex h-[4.5rem] min-w-[5.5rem] max-w-[11rem] shrink-0 cursor-grab flex-col justify-center gap-0.5 rounded-lg border bg-bg-primary py-1.5 pl-2.5 pr-5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
         selected ? "border-accent ring-2 ring-accent/40" : "border-border-strong"
       }`}
     >
+      <GripVerticalIcon
+        className="pointer-events-none absolute right-1 top-1.5 h-3 w-3 text-text-secondary"
+        aria-hidden
+      />
       <span className="truncate text-sm font-semibold text-text-primary">{card.title}</span>
       <span className="truncate text-xs text-text-secondary">{card.detail}</span>
       <span className="truncate font-mono text-xs text-text-primary" title={card.example}>
@@ -341,7 +345,7 @@ export function PieceStrip({
       ref={rowRef}
       role="group"
       aria-label="Piezas de la variante"
-      className="flex min-h-[8rem] flex-wrap content-start items-center gap-y-4 rounded-lg border border-border bg-bg-secondary p-3"
+      className="flex min-h-[6.5rem] flex-wrap content-start items-center gap-y-4 rounded-lg border border-border bg-bg-secondary p-3"
     >
       {variant.map((piece, index) => {
         const path: PiecePath = [index];

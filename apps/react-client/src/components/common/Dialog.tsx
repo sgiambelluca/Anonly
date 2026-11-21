@@ -78,7 +78,7 @@ export interface DialogProps {
    * Ancho máximo. `md` es el de siempre; `lg` es para diálogos con contenido
    * en columnas (`AboutDialog`, los diálogos de edición de ADR-169 §10).
    */
-  readonly size?: "md" | "lg" | "xl";
+  readonly size?: "md" | "lg" | "xl" | "2xl";
   /**
    * `alertdialog` para una confirmación que interrumpe (rechazo de una
    * importación, borrar un tipo con sus formatos). Radix lo deja en `dialog` por
@@ -99,6 +99,8 @@ const SIZE_CLASS: Readonly<Record<NonNullable<DialogProps["size"]>, string>> = {
   md: "max-w-md",
   lg: "max-w-xl",
   xl: "max-w-3xl",
+  // 1140 px, el ancho del tablero de Formatos; con `w-[calc(100%-2rem)]` entra en 1280.
+  "2xl": "max-w-[71.25rem]",
 };
 
 export function Dialog({
@@ -195,8 +197,14 @@ export function Dialog({
                     {titleNode}
                     {titleAside}
                   </div>
-                  {headerActions}
-                  {hideCloseButton ? null : closeButton}
+                  {/* Las acciones van pegadas a la X, no repartidas por `justify-between`. */}
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    {headerActions}
+                    {headerActions !== undefined && !hideCloseButton ? (
+                      <span aria-hidden className="mx-1 h-7 w-px bg-border" />
+                    ) : null}
+                    {hideCloseButton ? null : closeButton}
+                  </div>
                 </div>
                 {description ? (
                   <RadixDialog.Description className="mb-3 shrink-0 text-sm text-text-secondary">

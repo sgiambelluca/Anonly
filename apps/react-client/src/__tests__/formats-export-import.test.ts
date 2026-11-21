@@ -25,6 +25,7 @@ import {
 import {
   describeImportedItems,
   describeOverlapWarning,
+  importRowDot,
   limitRejectionMessages,
   MAX_REJECTION_MESSAGES,
   planFormatsImport,
@@ -412,5 +413,19 @@ describe("importar un archivo", () => {
     expect(limited.shown).toHaveLength(MAX_REJECTION_MESSAGES);
     expect(limited.hidden).toBe(3);
     expect(limitRejectionMessages(["solo"])).toEqual({ shown: ["solo"], hidden: 0 });
+  });
+});
+
+describe("el punto de una fila del resultado", () => {
+  const own = new Set(["Legajo"]);
+
+  it("un tipo propio y un formato que quedó en uno llevan el punto punteado", () => {
+    expect(importRowDot({ kind: "type" }, own)).toBe("own");
+    expect(importRowDot({ kind: "format", typeName: "Legajo" }, own)).toBe("own");
+  });
+
+  it("un formato en otro tipo lleva el punto común", () => {
+    expect(importRowDot({ kind: "format", typeName: "Teléfono" }, own)).toBe("other");
+    expect(importRowDot({ kind: "format" }, own)).toBe("other");
   });
 });

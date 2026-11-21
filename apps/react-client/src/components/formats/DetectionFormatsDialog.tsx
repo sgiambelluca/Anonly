@@ -28,9 +28,9 @@ import {
   ChevronDownIcon,
   ChevronRightIcon,
   DownloadIcon,
-  LockIcon,
   PlusIcon,
   SearchIcon,
+  ShieldCheckIcon,
   TriangleAlertIcon,
   UploadIcon,
 } from "lucide-react";
@@ -80,7 +80,8 @@ export const DETECTION_DIALOG_COPY = {
   newTypeHint: "Para un dato que el catálogo no conoce, como un legajo o una historia clínica.",
   emptyOwnType:
     "Todavía no tiene formatos: no detecta nada solo. Igual podés usarlo al agregar una entidad a mano.",
-  footerNote: "Se aplica al próximo documento que abras · Se guarda en este equipo, sin cifrar",
+  footerTitle: "Se aplica al próximo documento que abras",
+  footerDetail: "Se guarda en este equipo, sin cifrar",
   discardTitle: (count: number) =>
     count === 1 ? "¿Descartar 1 cambio sin guardar?" : `¿Descartar ${count} cambios sin guardar?`,
   discardLine: "Lo que cambiaste en esta lista no se guarda.",
@@ -370,7 +371,7 @@ export function DetectionFormatsDialog({ open, onClose, onSaved }: DetectionForm
         onClose={requestClose}
         title={DETECTION_DIALOG_COPY.title}
         description={DETECTION_DIALOG_COPY.description}
-        size="xl"
+        size="2xl"
         headerActions={
           <div className="flex items-center gap-1.5">
             <Button variant="secondary" size="sm" onClick={() => fileInputRef.current?.click()}>
@@ -405,9 +406,14 @@ export function DetectionFormatsDialog({ open, onClose, onSaved }: DetectionForm
               ) : null}
             </p>
             <div className="flex items-center gap-3">
-              <p className="flex min-w-0 flex-1 items-center gap-1.5 text-sm text-text-secondary">
-                <LockIcon className="h-4 w-4 shrink-0" aria-hidden />
-                <span className="truncate">{DETECTION_DIALOG_COPY.footerNote}</span>
+              <p className="flex min-w-0 flex-1 items-center gap-2.5 text-sm text-text-secondary">
+                <ShieldCheckIcon className="h-4 w-4 shrink-0" aria-hidden />
+                <span className="flex min-w-0 flex-col gap-0.5">
+                  <span className="truncate font-semibold text-text-primary">
+                    {DETECTION_DIALOG_COPY.footerTitle}
+                  </span>
+                  <span className="truncate">{DETECTION_DIALOG_COPY.footerDetail}</span>
+                </span>
               </p>
               <span
                 aria-live="polite"

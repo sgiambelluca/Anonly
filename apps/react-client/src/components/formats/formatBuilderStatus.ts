@@ -281,10 +281,14 @@ export const TEST_PANEL_SIZE: PanelSize = { width: 320, height: 400 };
 const PANEL_GAP = 12;
 const PANEL_MARGIN = 8;
 
+/** Lo que mide la cabecera del diálogo (título, descripción y sus botones): el panel nunca la tapa. */
+export const DIALOG_HEADER_CLEARANCE = 88;
+
 /**
  * Dónde se abre el panel, como desplazamiento respecto de la esquina superior
- * izquierda del diálogo: a su derecha si hay lugar (ADR-228 §6); si no,
- * encima de su borde derecho.
+ * izquierda del diálogo: a su derecha si hay lugar (ADR-228 §6); si no, adentro
+ * del diálogo, contra su borde derecho y **debajo de la cabecera**: nunca encima
+ * del botón que lo abre ni de la X.
  */
 export function initialPanelOffset(
   dialog: BoxRect,
@@ -293,8 +297,11 @@ export function initialPanelOffset(
 ): PanelPoint {
   const right = dialog.left + dialog.width;
   const fitsRight = right + PANEL_GAP + size.width + PANEL_MARGIN <= viewport.width;
-  const left = fitsRight ? right + PANEL_GAP : right - size.width / 2;
-  return clampPanelOffset({ x: left - dialog.left, y: 0 }, dialog, viewport, size);
+  if (fitsRight) {
+    return clampPanelOffset({ x: right + PANEL_GAP - dialog.left, y: 0 }, dialog, viewport, size);
+  }
+  const x = dialog.width - size.width - PANEL_GAP;
+  return clampPanelOffset({ x, y: DIALOG_HEADER_CLEARANCE }, dialog, viewport, size);
 }
 
 /** Mantiene el panel entero dentro de la ventana mientras se arrastra. */

@@ -37,6 +37,9 @@ import {
   sameSlot,
   slotAfter,
   slotBefore,
+  stepExactly,
+  stepMax,
+  stepMin,
   submitChange,
   toExactMode,
   toggleSeparator,
@@ -515,5 +518,32 @@ describe("textos del ajuste de pieza (pasada de textos F7)", () => {
 
   it("el verde dice que no se pisa con nada", () => {
     expect(BUILDER_COPY.readyDetail).toBe("No se pisa con ningún formato prendido.");
+  });
+});
+
+describe("los botones − y + de la cantidad", () => {
+  const digits = (min: number, max: number): CharsPiece => ({
+    kind: "chars",
+    charClass: "digit",
+    min,
+    max,
+  });
+
+  it("«Exactamente» mueve los dos extremos juntos y respeta 1 y el tope", () => {
+    expect(stepExactly(digits(3, 3), 1, 8)).toEqual(digits(4, 4));
+    expect(stepExactly(digits(1, 1), -1, 8)).toEqual(digits(1, 1));
+    expect(stepExactly(digits(8, 8), 1, 8)).toEqual(digits(8, 8));
+  });
+
+  it("el mínimo de «Entre» no pasa al máximo ni baja de 1", () => {
+    expect(stepMin(digits(2, 4), 1)).toEqual(digits(3, 4));
+    expect(stepMin(digits(4, 4), 1)).toEqual(digits(4, 4));
+    expect(stepMin(digits(1, 4), -1)).toEqual(digits(1, 4));
+  });
+
+  it("el máximo de «Entre» no baja del mínimo ni pasa el tope", () => {
+    expect(stepMax(digits(2, 4), -1, 8)).toEqual(digits(2, 3));
+    expect(stepMax(digits(2, 2), -1, 8)).toEqual(digits(2, 2));
+    expect(stepMax(digits(2, 8), 1, 8)).toEqual(digits(2, 8));
   });
 });

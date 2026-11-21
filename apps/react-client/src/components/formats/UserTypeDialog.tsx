@@ -24,6 +24,7 @@ import type {
   UserEntityTypeDefinition,
   UserEntityTypeId,
 } from "@anonly/anonymization-core";
+import { InfoIcon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import { Button } from "../common/Button.js";
@@ -150,14 +151,14 @@ export function UserTypeDialog({
           <FieldHint id="user-type-name-hint" help={typeNameHelp(fields)} error={nameError} />
         </div>
 
-        <div className="flex flex-col gap-2 rounded-lg border border-border p-3">
-          <span className="text-sm font-semibold text-text-primary">
+        <div className="flex flex-col gap-2">
+          <span className="text-xs font-semibold uppercase tracking-wide text-accent">
             {TYPE_FORM_COPY.ladderTitle}
           </span>
           <ul className="grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1fr)] items-start gap-2.5">
             {replacementTokens(ladder).map((token, index) => (
               <li key={index} className="flex min-w-0 flex-col gap-1">
-                <span className="truncate whitespace-nowrap rounded-md border border-border bg-bg-primary px-2 py-1 font-mono text-sm text-text-primary">
+                <span className="truncate whitespace-nowrap rounded-md border border-border bg-bg-secondary px-2 py-1 font-mono text-sm font-semibold text-text-primary">
                   {token}
                 </span>
                 <span className="text-sm text-text-secondary">
@@ -166,13 +167,16 @@ export function UserTypeDialog({
               </li>
             ))}
           </ul>
+        </div>
+
+        <div className="flex flex-col gap-2">
           <span className="text-sm font-semibold text-text-primary">
             {TYPE_FORM_COPY.shortLabelsTitle}{" "}
             <span className="font-normal text-text-secondary">{TYPE_FORM_COPY.optional}</span>
           </span>
-          <div className="grid grid-cols-2 gap-2">
-            <label className="flex flex-col gap-1 text-sm text-text-secondary">
-              {TYPE_FORM_COPY.shortLevel1Label}
+          <div className="grid grid-cols-2 gap-3">
+            <label className="flex items-center gap-2 text-sm text-text-secondary">
+              <span className="w-14 shrink-0">{TYPE_FORM_COPY.shortLevel1Label}</span>
               <input
                 type="text"
                 value={fields.level1}
@@ -180,11 +184,11 @@ export function UserTypeDialog({
                 onChange={(event) => update({ level1: event.target.value })}
                 aria-invalid={shortError !== null}
                 aria-describedby="user-type-short-hint"
-                className={`rounded-lg border ${fieldBorderClass(shortError !== null)} bg-bg-primary px-3 py-1.5 text-sm text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent`}
+                className={`min-w-0 flex-1 rounded-lg border ${fieldBorderClass(shortError !== null)} bg-bg-primary px-3 py-1.5 font-mono text-sm text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent`}
               />
             </label>
-            <label className="flex flex-col gap-1 text-sm text-text-secondary">
-              {TYPE_FORM_COPY.shortLevel2Label}
+            <label className="flex items-center gap-2 text-sm text-text-secondary">
+              <span className="w-14 shrink-0">{TYPE_FORM_COPY.shortLevel2Label}</span>
               <input
                 type="text"
                 value={fields.level2}
@@ -192,15 +196,21 @@ export function UserTypeDialog({
                 onChange={(event) => update({ level2: event.target.value })}
                 aria-invalid={shortError !== null}
                 aria-describedby="user-type-short-hint"
-                className={`rounded-lg border ${fieldBorderClass(shortError !== null)} bg-bg-primary px-3 py-1.5 text-sm text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent`}
+                className={`min-w-0 flex-1 rounded-lg border ${fieldBorderClass(shortError !== null)} bg-bg-primary px-3 py-1.5 font-mono text-sm text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent`}
               />
             </label>
           </div>
           <FieldHint id="user-type-short-hint" help={SHORT_LABEL_HELP} error={shortError} />
         </div>
 
-        <p className="text-sm text-text-secondary">{TYPE_FORM_COPY.replacementInfo}</p>
-        <p className="text-sm text-text-secondary">{typeFormNote(scope, mode)}</p>
+        <p className="flex items-start gap-2 text-sm text-text-secondary">
+          <InfoIcon className="mt-0.5 h-4 w-4 shrink-0 text-accent" aria-hidden />
+          <span>{TYPE_FORM_COPY.replacementInfo}</span>
+        </p>
+        <p className="flex items-start gap-2 text-sm text-text-secondary">
+          <InfoIcon className="mt-0.5 h-4 w-4 shrink-0 text-accent" aria-hidden />
+          <span>{typeFormNote(scope, mode)}</span>
+        </p>
         {/* Enter dentro de un campo envía el formulario; el botón del pie es el visible. */}
         <button type="submit" className="hidden" aria-hidden tabIndex={-1} />
       </form>

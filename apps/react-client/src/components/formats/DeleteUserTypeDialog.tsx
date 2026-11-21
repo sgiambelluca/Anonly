@@ -14,6 +14,8 @@ import { Trash2Icon } from "lucide-react";
 import { Button } from "../common/Button.js";
 import { Dialog } from "../common/Dialog.js";
 
+import { buildFormatExample } from "./formatExamples.js";
+
 export interface DeleteUserTypeDialogProps {
   readonly open: boolean;
   readonly type: UserEntityTypeDefinition | null;
@@ -68,10 +70,16 @@ export function DeleteUserTypeDialog({
       <div className="flex flex-col gap-2">
         <p className="text-sm text-text-secondary">{describeTypeDeletion(formats.length)}</p>
         {formats.length > 0 ? (
-          <ul className="flex max-h-48 flex-col gap-1 overflow-y-auto rounded-lg border border-border bg-bg-secondary p-2 text-sm text-text-primary">
-            {formats.map((format) => (
-              <li key={format.id} className="truncate">
-                {format.name}
+          <ul className="flex max-h-48 flex-col overflow-y-auto rounded-lg border border-border bg-bg-secondary text-sm text-text-primary">
+            {formats.map((format, index) => (
+              <li
+                key={format.id}
+                className={`flex items-center gap-3 px-3 py-2 ${index === 0 ? "" : "border-t border-border"}`}
+              >
+                <span className="min-w-0 flex-1 truncate">{format.name}</span>
+                <span className="max-w-[45%] shrink-0 truncate font-mono text-xs text-text-secondary">
+                  {buildFormatExample(format)}
+                </span>
               </li>
             ))}
           </ul>

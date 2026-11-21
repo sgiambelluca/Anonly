@@ -14,7 +14,15 @@
  * «Guardar». Los textos del rechazo salen de `formatTexts.ts` (§11b.16).
  */
 
-import { CircleAlertIcon, FileCheckIcon, TriangleAlertIcon } from "lucide-react";
+import {
+  CheckIcon,
+  CircleAlertIcon,
+  CornerDownRightIcon,
+  FileCheckIcon,
+  PencilIcon,
+  TriangleAlertIcon,
+  XIcon,
+} from "lucide-react";
 import type { ReactNode } from "react";
 
 import { Button } from "../common/Button.js";
@@ -23,6 +31,7 @@ import { Dialog } from "../common/Dialog.js";
 import {
   describeImportedItems,
   describeOverlapWarning,
+  importRowDot,
   limitRejectionMessages,
   type ImportSummary,
 } from "./formatsImport.js";
@@ -106,6 +115,9 @@ export function ImportFormatsResultDialog({
   }
 
   const { imported, merged, skipped, renamed } = result.summary;
+  const ownTypeNames = new Set(
+    [...imported, ...merged].filter((item) => item.kind === "type").map((item) => item.name),
+  );
   const warnings = [...imported, ...merged].filter((item) => item.overlapsWith !== undefined);
   return (
     <Dialog
@@ -134,61 +146,44 @@ export function ImportFormatsResultDialog({
         <Group
           title="Se importó"
           count={describeImportedItems(imported)}
+          number={imported.length}
+          icon={<CheckIcon className="h-3.5 w-3.5" aria-hidden />}
           empty={imported.length === 0}
         >
           {imported.map((item) => (
-            <li key={`${item.kind}-${item.name}`}>
-              {item.name}
-              {item.typeName !== undefined ? (
-                <span className="text-text-secondary"> · {item.typeName}</span>
-              ) : (
-                <span className="text-text-secondary">
-                  {" · "}
-                  {importedTypeDetail(
-                    imported.filter(
-                      (other) => other.kind === "format" && other.typeName === item.name,
-                    ).length,
-                  )}
-                </span>
-              )}
-            </li>
+            <Row
+              key={`${item.kind}-${item.name}`}
+              dot={importRowDot(item, ownTypeNames)}
+              name={item.name}
+              detail={
+                item.typeName !== undefined
+                  ? item.typeName
+                  : importedTypeDetail(
+                      imported.filter(
+                        (other) => other.kind === "format" && other.typeName === item.name,
+                      ).length,
+                    )
+              }
+            />
           ))}
         </Group>
         <Group
           title="Se sumó a un tipo que ya tenías"
           count={describeImportedItems(merged)}
+          number={merged.length}
+          icon={<CornerDownRightIcon className="h-3.5 w-3.5" aria-hidden />}
           empty={merged.length === 0}
         >
           {merged.map((item) => (
-            <li key={`merged-${item.name}`}>
-              <span className="font-medium">{item.typeName}</span>
-              <span className="text-text-secondary"> · {mergedFormatDetail(item.name)}</span>
-            </li>
+            <Row
+              key={`merged-${item.name}`}
+              dot="own"
+              name={item.typeName ?? item.name}
+              detail={mergedFormatDetail(item.name)}
+            />
           ))}
         </Group>
-        <Group
-          title="No se importó"
-          count={skipped.length === 0 ? "" : String(skipped.length)}
-          empty={skipped.length === 0}
-        >
-          {skipped.map((item) => (
-            <li key={`${item.name}-${item.reason}`}>
-              <span className="font-medium">{item.name}</span>
-              <span className="text-text-secondary"> · {item.reason}</span>
-            </li>
-          ))}
-        </Group>
-        {renamed.length > 0 ? (
-          <Group title="Se renombraron" count={String(renamed.length)} empty={false}>
-            {renamed.map((item) => (
-              <li key={`${item.from}-${item.to}`}>
-                {item.from}
-                <span className="text-text-secondary"> → </span>
-                {item.to}
-              </li>
-            ))}
-          </Group>
-        ) : null}
+        {/* El aviso de choque va entre lo que entró y lo que no (tablero Importar). */}
         {warnings.map((item) => (
           <p
             key={`warn-${item.name}`}
@@ -202,32 +197,107 @@ export function ImportFormatsResultDialog({
             <span>{describeOverlapWarning(item)}</span>
           </p>
         ))}
+        <Group
+          title="No se importó"
+          count=""
+          number={skipped.length}
+          icon={<XIcon className="h-3.5 w-3.5" aria-hidden />}
+          empty={skipped.length === 0}
+        >
+          {skipped.map((item) => (
+            <Row
+              key={`${item.name}-${item.reason}`}
+              dot="other"
+              name={item.name}
+              detail={item.reason}
+            />
+          ))}
+        </Group>
+        {renamed.length > 0 ? (
+          <Group
+            title="Se renombraron"
+            count=""
+            number={renamed.length}
+            icon={<PencilIcon className="h-3.5 w-3.5" aria-hidden />}
+            empty={false}
+          >
+            {renamed.map((item) => (
+              <li
+                key={`${item.from}-${item.to}`}
+                className="flex items-center gap-2 px-3 py-2 text-sm text-text-primary"
+              >
+                {item.from}
+                <span className="text-text-secondary"> → </span>
+                {item.to}
+              </li>
+            ))}
+          </Group>
+        ) : null}
       </div>
     </Dialog>
+  );
+}
+
+/** Una fila de un grupo: el punto del tipo, el nombre y el detalle. */
+function Row({
+  dot,
+  name,
+  detail,
+}: {
+  readonly dot: "own" | "other";
+  readonly name: string;
+  readonly detail: string;
+}) {
+  return (
+    <li className="flex items-center gap-2 px-3 py-2 text-sm">
+      <span
+        aria-hidden
+        className={`h-2.5 w-2.5 shrink-0 rounded-full ${
+          dot === "own"
+            ? "border-[1.5px] border-dashed border-text-secondary"
+            : "bg-text-secondary/60"
+        }`}
+      />
+      <span className="shrink-0 font-semibold text-text-primary">{name}</span>
+      <span className="min-w-0 flex-1 truncate text-text-secondary">{detail}</span>
+    </li>
   );
 }
 
 function Group({
   title,
   count,
+  number,
+  icon,
   empty,
   children,
 }: {
   readonly title: string;
   readonly count: string;
+  readonly number: number;
+  readonly icon: ReactNode;
   readonly empty: boolean;
   readonly children: ReactNode;
 }) {
   return (
-    <section aria-label={title} className="flex flex-col gap-1.5">
-      <h3 className="text-sm font-semibold text-text-primary">
+    <section
+      aria-label={title}
+      className="flex flex-col overflow-hidden rounded-lg border border-border"
+    >
+      <h3 className="flex items-center gap-2 bg-bg-secondary px-3 py-2 text-sm font-semibold text-text-primary">
+        <span className="flex h-5 w-5 items-center justify-center rounded-full bg-bg-tertiary text-text-secondary">
+          {icon}
+        </span>
         {title}
-        {count !== "" ? <span className="font-normal text-text-secondary"> · {count}</span> : null}
+        {count !== "" ? <span className="font-normal text-text-secondary">· {count}</span> : null}
+        <span className="ml-auto rounded-full bg-bg-tertiary px-2 text-xs font-semibold tabular-nums text-text-secondary">
+          {number}
+        </span>
       </h3>
       {empty ? (
-        <p className="text-sm text-text-secondary">Ninguno.</p>
+        <p className="px-3 py-2 text-sm text-text-secondary">Ninguno.</p>
       ) : (
-        <ul className="flex flex-col gap-1 text-sm text-text-primary">{children}</ul>
+        <ul className="flex flex-col divide-y divide-border">{children}</ul>
       )}
     </section>
   );

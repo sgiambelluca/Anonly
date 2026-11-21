@@ -9,6 +9,7 @@ import {
   buildSegments,
   clampPanelOffset,
   contextRanges,
+  DIALOG_HEADER_CLEARANCE,
   evaluateBuilder,
   identicalParts,
   initialPanelOffset,
@@ -267,12 +268,13 @@ describe("el panel flotante", () => {
     expect(initialPanelOffset(dialog, viewport)).toEqual({ x: 712, y: 0 });
   });
 
-  it("si no hay lugar, queda encima de su borde derecho", () => {
+  it("si no hay lugar, queda adentro del diálogo y debajo de su cabecera", () => {
     const dialog = { left: 300, top: 100, width: 900, height: 600 };
     const offset = initialPanelOffset(dialog, viewport);
+    expect(offset.y).toBeGreaterThanOrEqual(DIALOG_HEADER_CLEARANCE);
     const left = dialog.left + offset.x;
-    expect(left).toBe(1200 - TEST_PANEL_SIZE.width / 2);
-    expect(left + TEST_PANEL_SIZE.width).toBeLessThanOrEqual(viewport.width);
+    expect(left + TEST_PANEL_SIZE.width).toBeLessThanOrEqual(dialog.left + dialog.width);
+    expect(left).toBeGreaterThanOrEqual(dialog.left);
   });
 
   it("se mantiene dentro de la ventana al arrastrarlo", () => {

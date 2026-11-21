@@ -32,12 +32,12 @@ export function FormatStatusBox({ status }: FormatStatusBoxProps) {
     <div
       role={status.tone === "error" ? "alert" : "status"}
       data-status-tone={status.tone}
-      className={`flex h-[4.5rem] shrink-0 items-start gap-2 rounded-lg border px-3 py-2 text-sm leading-snug text-text-primary ${TONE_CLASS[status.tone]}`}
+      className={`flex h-12 shrink-0 items-start gap-2 rounded-lg border px-3 py-2 text-sm leading-snug text-text-primary ${TONE_CLASS[status.tone]}`}
     >
       <span className="mt-0.5 shrink-0">
         <ToneIcon tone={status.tone} />
       </span>
-      <span className="line-clamp-3" title={status.text}>
+      <span className="line-clamp-2" title={status.text}>
         {status.headline === undefined ? (
           status.text
         ) : (

@@ -317,3 +317,16 @@ export function describeOverlapWarning(item: ImportedItem): string {
     }),
   );
 }
+
+/**
+ * El punto de una fila del resultado: «own» (punteado) para un tipo propio o un
+ * formato que quedó en uno (el nombre del tipo está entre los propios del
+ * resumen), «other» para el resto, de quien el archivo no dice si es del catálogo.
+ */
+export function importRowDot(
+  item: { readonly kind?: "type" | "format"; readonly typeName?: string },
+  ownTypeNames: ReadonlySet<string>,
+): "own" | "other" {
+  if (item.kind === "type") return "own";
+  return item.typeName !== undefined && ownTypeNames.has(item.typeName) ? "own" : "other";
+}

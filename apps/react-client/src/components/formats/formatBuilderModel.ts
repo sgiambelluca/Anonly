@@ -297,6 +297,23 @@ export function isExactly(piece: CharsPiece): boolean {
   return piece.min === piece.max;
 }
 
+/**
+ * Los botones −/+ del ajuste de cantidad. «Exactamente» mueve los dos extremos
+ * juntos; «Entre» mueve cada uno sin cruzar al otro. Todo dentro de 1..`repeatCap`.
+ */
+export function stepExactly(piece: CharsPiece, delta: number, repeatCap: number): CharsPiece {
+  const next = Math.min(repeatCap, Math.max(1, piece.min + delta));
+  return { ...piece, min: next, max: next };
+}
+
+export function stepMin(piece: CharsPiece, delta: number): CharsPiece {
+  return { ...piece, min: Math.min(piece.max, Math.max(1, piece.min + delta)) };
+}
+
+export function stepMax(piece: CharsPiece, delta: number, repeatCap: number): CharsPiece {
+  return { ...piece, max: Math.min(repeatCap, Math.max(piece.min, piece.max + delta)) };
+}
+
 /** Lo que escribe el usuario en un campo numérico: sin número, 0 (el Core lo marca inválido). */
 export function parseCount(text: string): number {
   const value = Number.parseInt(text, 10);
