@@ -1231,6 +1231,23 @@ muestra para cada tipo, para que la lista no quede vieja.
 
 ---
 
+### 11b.17 Errores de campo y fondo de los diálogos (decisión del mantenedor, 2026-11-21)
+
+Vale para toda la aplicación, no solo para la detección a medida.
+
+- **El error de un campo va en su línea de ayuda.** Debajo de cada campo que puede dar un error hay
+  una sola línea chica (12 px, alto fijo de una línea) que **siempre** dice algo útil: el contador
+  (`6/40`), una pista o cómo va a quedar (`Así se ve: [LEGAJO 01]`). Cuando hay un error, esa
+  misma línea pasa a rojo con el texto del error y el campo se marca con borde rojo. **No hay hueco
+  vacío reservado** bajo un campo, y nada se mueve al aparecer o irse el error.
+  - Si el error no entra en una línea, se corta con «…» y el texto completo queda en `title` y en
+    `aria-describedby` del campo.
+  - Esto reemplaza las ranuras vacías de alto fijo bajo los campos; las cajas de estado de alto fijo
+    que siempre muestran algo (la del generador, §11b.8) no cambian.
+- **Un diálogo desenfoca lo de atrás.** El fondo de todo diálogo modal lleva, además del velo oscuro,
+  un desenfoque leve (`backdrop-filter: blur` de unos 3 px). Un diálogo abierto encima de otro
+  desenfoca también al de abajo, para que se vea claro cuál está al frente.
+
 ## 12. Referencias
 
 - `adr/ADR-087-La-Herramienta-Tiene-Tres-Momentos-No-Cuatro-Paneles.md` — reescribe §1, §2, §3, §4, §5, §7, §8 y §11
