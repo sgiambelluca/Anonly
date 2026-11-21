@@ -5,6 +5,8 @@
 - **Estado**: Aceptado por el mantenedor el 2026-11-16. ADR de interfaz del generador de
   formatos.
 - **Fecha**: 2026-11-16.
+- **Precisión del 2026-11-21** (mantenedor): «Es un…» no ofrece «Nuevo
+  tipo…» (§1, punto 2).
 - **Decidido por**: el mantenedor, sobre el lienzo «Anonly 1.1 — UI final»,
   tableros *Generador de formatos* y *Generador · validación y comparación*
   (2026-11-15 y 2026-11-16).
@@ -44,8 +46,11 @@ De arriba abajo:
    forma del dato con piezas, de izquierda a derecha.». A la derecha,
    «Probar con un texto» (§6) y cerrar.
 2. **Nombre del formato** y **«Es un…»**, el tipo al que pertenece. El
-   selector lista los tipos del usuario, los del catálogo que admiten
-   formatos (ADR-220 §5) y «Nuevo tipo…».
+   selector lista los tipos del usuario y los del catálogo que admiten
+   formatos (ADR-220 §5). No ofrece «Nuevo tipo…»: primero va el tipo y
+   después sus formatos, así que un tipo nuevo se crea antes, con la banda
+   «Nuevo tipo» de «Tus tipos» (ADR-227). Precisión del mantenedor,
+   2026-11-21.
 3. **Las variantes**, en pestañas (§2).
 4. **La tira de piezas** de la variante elegida (§3).
 5. **«Se lee»** y **«Ejemplo»**: la variante dicha en palabras, y un texto
