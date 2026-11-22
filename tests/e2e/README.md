@@ -2,9 +2,20 @@
 
 # Tests E2E (Playwright)
 
-Suite de extremo a extremo sobre la app real en Chromium. Es el único nivel de la pirámide donde `pdfjs-dist`, `tesseract.js` y `@huggingface/transformers`/`onnxruntime-web` corren **de verdad**: todos los tests unit/contract/edge de los motores mockean esas fronteras (ADR-021 §5). Por eso esta suite destapa bugs que ningún otro gate puede ver — los siete del PR10 del Hito 10 son el precedente.
+Suite de extremo a extremo sobre la app Electron empaquetada. Es el único nivel de la pirámide donde `pdfjs-dist`, `tesseract.js` y `@huggingface/transformers`/`onnxruntime-web` corren **de verdad**: todos los tests unit/contract/edge de los motores mockean esas fronteras (ADR-021 §5). Por eso esta suite destapa bugs que ningún otro gate puede ver — los siete del PR10 del Hito 10 son el precedente.
 
-Los escenarios son los de `docs/architecture/07_Performance_Strategy.md` §11.3, uno por archivo (`scenario-N-<slug>.spec.ts`).
+Los escenarios son los de `docs/architecture/07_Performance_Strategy.md` §11.3, uno por archivo (`scenario-N-<slug>.spec.ts`, del 1 al 12). El resto de los specs de la carpeta son regresiones puntuales, cada una con su caso en el comentario de cabecera. Las familias principales (la tabla no es exhaustiva):
+
+| Familia | Specs |
+|---|---|
+| Recuperación de texto y OSD (ADR-190) | `adr190-*.spec.ts` |
+| Archivo exportado (ADR-148) | `export-verification.spec.ts`, `scanned-rotated-export.spec.ts`, `line-repaint-pixels.spec.ts`, `export-version-lifecycle.spec.ts` |
+| Menús y globos dentro del área visible (ADR-207) | `group-context-menu-placement.spec.ts`, `mode-menu-opens-upward.spec.ts`, `selection-popover-placement.spec.ts`, `search-popover-placement.spec.ts` |
+| Visor | `viewer-*.spec.ts`, `anonymized-interaction-geometry.spec.ts`, `search-box-narrow-window.spec.ts` |
+| La 1.1 de punta a punta: tipo y formato propios, detección, export y OCR independiente | `v1-1-user-format-end-to-end.spec.ts` |
+| Shell y seguridad | `protocol-headers.spec.ts`, `security-gates.spec.ts`, `update-check-feedback.spec.ts` |
+
+Fuera de la tabla quedan specs sueltos, como `dark-mode-contrast`, `toast-interaction` o `settings-before-scan`; `t5-orientation-pixel` solo corre con `ANONLY_T5_E2E=1`. El listado de la carpeta es la fuente de verdad. Esta tabla orienta y puede quedar atrás.
 
 ## Prerequisito obligatorio: `pnpm assets:mirror`
 
@@ -16,7 +27,7 @@ pnpm assets:mirror
 
 | Directorio | Qué es | Por qué rompe todo si falta |
 |---|---|---|
-| `apps/react-client/src/assets/onnxruntime/` | glue `.mjs` de onnxruntime-web | Se importa con `?url` desde `core-adapter/index.ts` (ADR-039 §3). Vite **rechaza el id** al construir, así que el dev server que levanta Playwright no sirve una app funcional. |
+| `apps/react-client/src/assets/onnxruntime/` | glue `.mjs` de onnxruntime-web | Se importa con `?url` desde `core-adapter/index.ts` (ADR-039 §3). Vite **rechaza el id** al construir, así que el build del renderer que corre `test:e2e` falla. |
 | `apps/react-client/public/wasm/` | binarios wasm + tesseract | OCR (Escenario 2). |
 | `apps/react-client/public/models/` | modelo NER (~178 MB) | Detección NER (Escenarios 1, 5, 9). |
 
@@ -30,7 +41,7 @@ En CI lo hace el job `test-e2e` de `.github/workflows/ci.yml`, con `actions/cach
 pnpm test:e2e
 ```
 
-Levanta el dev server solo (`webServer` de `playwright.config.ts`, reusa uno ya corriendo fuera de CI) y corre los 12 specs en Chromium.
+Construye el renderer (con `VITE_E2E=1`) y el shell, y corre todos los specs de la carpeta sobre la app Electron (`playwright.electron.config.ts`, un worker).
 
 Un escenario suelto:
 
@@ -95,8 +106,8 @@ Estos escenarios localizan por rol accesible (`getByRole`), no por clase ni por
 `data-testid`. Es deliberado —un test que se rompe cuando la accesibilidad se
 rompe es una red gratis— pero tiene una consecuencia que hay que tener presente:
 
-**`pnpm test` no corre esta suite.** El subset pre-PR de `CLAUDE.md` (`lint`,
-`typecheck`, `test`, `test:contract`) puede quedar entero en verde con la UI
+**`pnpm test` no corre esta suite.** El subset pre-PR de `CLAUDE.md` (`pnpm gates`:
+`lint`, `typecheck`, `test`, `test:contract`, `format:check`) puede quedar entero en verde con la UI
 rota para el usuario de lector de pantalla y para estos tests a la vez.
 
 Ya pasó: retirar `role="menuitem"` de `GroupContextMenu` —un cambio correcto,
