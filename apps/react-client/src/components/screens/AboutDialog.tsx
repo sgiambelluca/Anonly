@@ -19,12 +19,24 @@
  * están los textos completos de las licencias. Es contenido estático: nada
  * aparece ni desaparece, así que no mueve el diseño (UX-10).
  *
+ * **Quién lo hace** (ADR-234) va arriba de «Código fuente»: quién es el
+ * mantenedor y dos vías de contacto, el `mailto:` y «Copiar correo».
+ *
  * Cada bloque es un `<section>` con encabezado visible; los enlaces son `<a>`
  * nativos `target="_blank" rel="noopener noreferrer"` a las únicas URLs
  * externas del producto (`externalLinks.ts`).
  */
 
-import { ArrowUpRightIcon, BugIcon, DatabaseIcon, GithubIcon } from "lucide-react";
+import {
+  ArrowUpRightIcon,
+  BugIcon,
+  CheckIcon,
+  CopyIcon,
+  DatabaseIcon,
+  GithubIcon,
+  MailIcon,
+} from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 
 import { Button } from "../common/Button.js";
 import { Dialog } from "../common/Dialog.js";
@@ -36,7 +48,8 @@ import {
 } from "../toolbar/thirdPartySoftware.js";
 
 import {
-  PRODUCT_LICENSE,
+  CONTACT_EMAIL,
+  contactMailtoUrl,
   REPORT_ISSUE_URL,
   REPOSITORY_LABEL,
   REPOSITORY_URL,
@@ -49,13 +62,68 @@ export interface AboutDialogProps {
 
 const EXTERNAL = { target: "_blank", rel: "noopener noreferrer" } as const;
 
+/** Cuánto dura el rótulo «Copiado» después de copiar el correo (ADR-234 §2). */
+const COPIED_FEEDBACK_MS = 2_000;
+
+/**
+ * «Copiar correo» (ADR-234 §2): cubre al usuario sin programa de correo, para
+ * quien el `mailto:` no hace nada visible.
+ *
+ * Los dos rótulos se apilan en la misma celda de grilla y el que no corresponde
+ * queda `invisible`: el botón siempre mide lo que el más ancho, así que pasar a
+ * «Copiado» no mueve nada (ADR-169 §1). Si el portapapeles rechaza la escritura
+ * el botón no cambia; la dirección sigue visible y seleccionable al lado.
+ */
+function CopyEmailButton() {
+  const [copied, setCopied] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(
+    () => () => {
+      if (timer.current !== null) clearTimeout(timer.current);
+    },
+    [],
+  );
+
+  const copy = (): void => {
+    navigator.clipboard.writeText(CONTACT_EMAIL).then(
+      () => {
+        setCopied(true);
+        if (timer.current !== null) clearTimeout(timer.current);
+        timer.current = setTimeout(() => setCopied(false), COPIED_FEEDBACK_MS);
+      },
+      () => undefined,
+    );
+  };
+
+  return (
+    <Button variant="secondary" onClick={copy} className="min-h-11">
+      <span className="grid">
+        <span
+          className={`col-start-1 row-start-1 inline-flex items-center gap-2 ${copied ? "invisible" : ""}`}
+          aria-hidden={copied}
+        >
+          <CopyIcon className="h-4 w-4" aria-hidden />
+          Copiar correo
+        </span>
+        <span
+          className={`col-start-1 row-start-1 inline-flex items-center gap-2 ${copied ? "" : "invisible"}`}
+          aria-hidden={!copied}
+        >
+          <CheckIcon className="h-4 w-4" aria-hidden />
+          Copiado
+        </span>
+      </span>
+    </Button>
+  );
+}
+
 export function AboutDialog({ open, onClose }: AboutDialogProps) {
   return (
     <Dialog
       open={open}
       onClose={onClose}
       title="Acerca de Anonly"
-      description={`Versión ${__ANONLY_VERSION__} · Licencia ${PRODUCT_LICENSE}`}
       size="lg"
       footer={
         <div className="flex items-center justify-between gap-3">
@@ -79,6 +147,54 @@ export function AboutDialog({ open, onClose }: AboutDialogProps) {
           auditable es parte de la promesa: podés ir a mirar exactamente qué hace con tus
           documentos.
         </p>
+
+        <section aria-labelledby="about-author-title" className="flex flex-col gap-2">
+          <h3
+            id="about-author-title"
+            className="text-sm font-semibold uppercase tracking-wide text-text-secondary"
+          >
+            Quién lo hace
+          </h3>
+          <div className="flex flex-col gap-4 rounded-xl border border-border bg-bg-secondary p-4">
+            <div className="flex items-center gap-3.5">
+              <span
+                aria-hidden
+                className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-accent text-xl font-semibold text-accent-foreground"
+              >
+                SG
+              </span>
+              <span className="flex min-w-0 flex-col gap-0.5">
+                <span className="text-base font-semibold text-text-primary">
+                  Santino Giambelluca
+                </span>
+                <span className="text-sm text-text-secondary">
+                  Estudiante de Ingeniería Informática en el ITBA
+                </span>
+                <span className="text-sm text-text-secondary">Buenos Aires, Argentina</span>
+              </span>
+            </div>
+            <p className="text-sm leading-relaxed text-text-primary">
+              Mientras estudio, aprovecho mis ratos libres para desarrollar, que es lo que me
+              apasiona. Si tenés una idea para que Anonly sea una mejor herramienta, o algo no
+              funcionó como esperabas, escribime: contame cómo la usás y qué te gustaría que
+              hiciera. No adjuntes documentos con datos reales; con que me cuentes el caso alcanza.
+            </p>
+            <div className="flex flex-wrap items-center gap-2.5 border-t border-border pt-3.5">
+              <a
+                href={contactMailtoUrl(__ANONLY_VERSION__)}
+                {...EXTERNAL}
+                className="anonly-button-primary min-h-11 px-4 font-semibold"
+              >
+                <MailIcon className="h-4 w-4" aria-hidden />
+                Escribirme por mail
+              </a>
+              <CopyEmailButton />
+              <span className="select-text break-all font-mono text-sm text-text-secondary">
+                {CONTACT_EMAIL}
+              </span>
+            </div>
+          </div>
+        </section>
 
         <section aria-labelledby="about-source-title" className="flex flex-col gap-2">
           <h3
