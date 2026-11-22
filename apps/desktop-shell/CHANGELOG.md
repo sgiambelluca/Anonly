@@ -1,5 +1,12 @@
 # @anonly/desktop-shell
 
+## 1.1.0
+
+### Patch Changes
+
+- - Electron sube a 44.11 por alertas de seguridad.
+  - El enlace de correo de «Acerca de» abre el programa de correo del sistema (ADR-234).
+
 ## 1.0.2
 
 ## 1.0.1
