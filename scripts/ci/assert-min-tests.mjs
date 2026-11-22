@@ -4,8 +4,9 @@
  * agujero que motivó el ADR — un job de CI que sale verde con `has_tests=false`
  * cuando el directorio no existe o cuando Vitest saltea todos los tests — leyendo
  * el reporte JSON real del runner y comparando contra un mínimo explícito.
- * Vitest lo usa `test:cancel` (ronda A); Playwright lo usan Performance, Leak y
- * Stress (ronda C: `PLAYWRIGHT_JSON_OUTPUT_NAME` hace que su config escriba el JSON).
+ * Vitest lo usa `test:cancel` (ronda A); Playwright lo usan Performance y Stress
+ * (ronda C: `PLAYWRIGHT_JSON_OUTPUT_NAME` hace que su config escriba el JSON).
+ * Leak también lo usaba hasta que salió de CI (ADR-235).
  *
  * Falla (`process.exitCode = 1`) si:
  *   - el archivo de reporte no existe o no es JSON válido ("inconcluso" — el
@@ -54,7 +55,7 @@ function countsFromVitestReport(report) {
 /**
  * Playwright `--reporter=json`: `stats.expected`/`unexpected`/`flaky` son
  * ejecutados (corrieron de verdad, hayan pasado o no); `stats.skipped` no.
- * Cableado a Performance, Leak y Stress. Verificado contra un reporte real de
+ * Cableado a Performance y Stress. Verificado contra un reporte real de
  * Playwright: `stats` trae `expected`, `unexpected`, `flaky` y `skipped`.
  * @param {unknown} report
  * @returns {Counts}
