@@ -35,7 +35,15 @@ import {
   type PreviewInteractionGeometry,
   type Word,
 } from "@anonly/anonymization-core";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent,
+  type RefObject,
+} from "react";
 
 import { actions } from "../../core-adapter/actions.js";
 import { useDetectionStore } from "../../store/detection.store.js";
@@ -45,6 +53,7 @@ import { Button } from "../common/Button.js";
 import { FieldHint } from "../common/FieldHint.js";
 import { addManualEntityWithFeedback } from "../entities/addManualEntity.js";
 import { EntityTypePicker } from "../entities/EntityTypePicker.js";
+import { observeMenuLayout, type MenuLayout } from "../entities/menuPlacement.js";
 import { NEW_TYPE_HINT_ID } from "../entities/newTypeInline.js";
 import { useTypeChoice } from "../entities/useTypeChoice.js";
 import { useUserTypes } from "../entities/useUserTypes.js";
@@ -69,6 +78,9 @@ import {
   pageRectToScreenRect,
   pointerSelectionToPageRect,
 } from "./wordSelectionRect.js";
+
+/** Separación entre el recuadro de la selección y su globo: la de siempre (10 px desde la palabra). */
+const SELECTION_POPOVER_GAP_PX = 8;
 
 /** Lo señalado en el original: palabras de un renglón de una página. */
 export interface PageSelection {
@@ -126,6 +138,7 @@ export function WordSelectionOverlay({
   const [dragStart, setDragStart] = useState<Point | null>(null);
   const [dragCurrent, setDragCurrent] = useState<Point | null>(null);
   const dragRevisionRef = useRef<number | null>(null);
+  const selectionBoxRef = useRef<HTMLDivElement>(null);
   // ADR-226 §4: el tooltip de la entidad bajo el puntero, con los mismos eventos
   // que ya atiende esta capa. Flota; no mueve nada.
   const hover = useEntityHover({
@@ -398,6 +411,7 @@ export function WordSelectionOverlay({
       {selection !== null && !inert && selectionRect !== null ? (
         <>
           <div
+            ref={selectionBoxRef}
             aria-hidden
             className="anonly-selection pointer-events-none absolute rounded-sm"
             style={{
@@ -411,7 +425,8 @@ export function WordSelectionOverlay({
             key={selection.words.map((word) => word.text).join(" ")}
             value={selection.words.map((word) => word.text).join(" ")}
             left={selectionRect.left}
-            top={selectionRect.top + selectionRect.height + 10}
+            anchorRef={selectionBoxRef}
+            anchorTop={selectionRect.top - 2}
             pageIndex={pageIndex}
             wordIndexes={selection.wordIndexes}
             interactionRevision={selection.interactionRevision}
@@ -433,7 +448,8 @@ export function WordSelectionOverlay({
 function SelectionPopover({
   value,
   left,
-  top,
+  anchorRef,
+  anchorTop,
   pageIndex,
   wordIndexes,
   interactionRevision,
@@ -443,7 +459,10 @@ function SelectionPopover({
 }: {
   readonly value: string;
   readonly left: number;
-  readonly top: number;
+  /** El recuadro de la selección: el globo se ancla a él como un menú (ADR-207). */
+  readonly anchorRef: RefObject<HTMLDivElement | null>;
+  /** Borde superior del recuadro, en las coordenadas de la capa. */
+  readonly anchorTop: number;
   readonly pageIndex: number;
   readonly wordIndexes: ReadonlyArray<number>;
   readonly interactionRevision: number | null;
@@ -467,6 +486,29 @@ function SelectionPopover({
     const next = shiftIntoWindow(rect.left - shiftX, rect.right - shiftX, window.innerWidth);
     if (next !== shiftX) setShiftX(next);
   }, [left, shiftX]);
+  // ADR-207: abajo si entra, arriba si entra ahí; si no, lo mínimo para quedar
+  // entero dentro del visor, y con scroll propio si es más alto que lo visible.
+  // Sin esto, en una ventana baja los botones quedaban fuera y había que mover
+  // el documento para llegar a «Agregar».
+  const [layout, setLayout] = useState<MenuLayout>({ placement: "bottom", top: 0, maxHeight: 0 });
+  useLayoutEffect(() => {
+    const anchor = anchorRef.current;
+    const popover = ref.current;
+    if (anchor === null || popover === null) return;
+    return observeMenuLayout(
+      anchor,
+      popover,
+      (next) =>
+        setLayout((previous) =>
+          previous.placement === next.placement &&
+          previous.top === next.top &&
+          previous.maxHeight === next.maxHeight
+            ? previous
+            : next,
+        ),
+      { gap: SELECTION_POPOVER_GAP_PX },
+    );
+  }, [anchorRef, anchorTop]);
 
   useEffect(() => {
     function handleKeydown(event: KeyboardEvent): void {
@@ -524,8 +566,15 @@ function SelectionPopover({
       role="dialog"
       aria-label="Agregar la selección como entidad"
       ref={ref}
-      className="absolute z-20 flex w-[22.5rem] max-w-[calc(100%-1rem)] flex-col gap-2.5 rounded-xl border border-border bg-bg-primary p-3.5 text-sm text-text-primary shadow-md"
-      style={{ left: Math.max(8, left - 40) + shiftX, top }}
+      data-placement={layout.placement}
+      // `[&>*]:shrink-0`: con alto máximo, el flex achicaría la línea con `truncate`
+      // hasta cero y la medida intrínseca del globo saldría corta.
+      className="absolute z-20 flex w-[22.5rem] max-w-[calc(100%-1rem)] flex-col gap-2.5 overflow-y-auto [&>*]:shrink-0 overscroll-contain rounded-xl border border-border bg-bg-primary p-3.5 text-sm text-text-primary shadow-md"
+      style={{
+        left: Math.max(8, left - 40) + shiftX,
+        top: anchorTop + layout.top,
+        maxHeight: layout.maxHeight,
+      }}
       // El globo vive dentro de la capa que arma la selección: sin esto,
       // cualquier click adentro arrancaría un arrastre nuevo.
       onPointerDown={(event) => event.stopPropagation()}
