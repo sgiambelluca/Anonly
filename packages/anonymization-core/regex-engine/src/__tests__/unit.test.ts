@@ -2311,6 +2311,18 @@ describe("RegexEngine — unit tests", () => {
         validateFormat({ ...twoVariants, variantNames: ["Con guiones", "Con guiones"] }, context),
       ).toEqual({ ok: true, issues: [] });
       expect(validateFormat({ ...twoVariants, variantNames: ["", "   "] }, context).ok).toBe(true);
+      // En blanco, de cualquier largo, es el automático: no se mide (revisión de ADR-233).
+      expect(
+        validateFormat(
+          { ...twoVariants, variantNames: [" ".repeat(FORMAT_MAX_TEXT + 1), " ".repeat(41)] },
+          context,
+        ).ok,
+      ).toBe(true);
+      // Los que sobran no se miden: alcanza con variant_names_mismatch.
+      expect(
+        validateFormat({ ...twoVariants, variantNames: ["a", "b", "x".repeat(41)] }, context)
+          .issues,
+      ).toEqual([{ code: "variant_names_mismatch" }]);
       expect(
         validateFormat(
           { ...twoVariants, variantNames: ["a", "x".repeat(FORMAT_MAX_TEXT + 1)] },
