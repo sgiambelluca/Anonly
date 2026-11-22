@@ -121,8 +121,11 @@ function checkContext(definition: FormatDefinition, issues: FormatIssue[]): void
 }
 
 /*
- * ADR-233: el nombre de cada variante. Se revisa cada nombre presente aunque el
- * largo de la lista no coincida; vacío o solo espacios y repetidos se admiten.
+ * ADR-233: el nombre de cada variante (`Contracts.md` §5.2). Se miden solo los
+ * de variantes que existen: los que sobran ya dan `variant_names_mismatch`. Un
+ * nombre en blanco, de cualquier largo, es el automático y no se mide, como el
+ * nombre del formato (que vacío da `name_empty` y nunca `name_too_long`).
+ * Los repetidos se admiten.
  */
 function checkVariantNames(definition: FormatDefinition, issues: FormatIssue[]): void {
   const names = definition.variantNames;
@@ -130,8 +133,8 @@ function checkVariantNames(definition: FormatDefinition, issues: FormatIssue[]):
   if (names.length !== definition.variants.length) {
     issues.push({ code: "variant_names_mismatch" });
   }
-  names.forEach((name, variantIndex) => {
-    if (lengthInCharacters(name) > FORMAT_MAX_TEXT) {
+  names.slice(0, definition.variants.length).forEach((name, variantIndex) => {
+    if (name.trim() !== "" && lengthInCharacters(name) > FORMAT_MAX_TEXT) {
       issues.push({ code: "variant_name_too_long", variantIndex });
     }
   });
@@ -204,7 +207,8 @@ export function validateFormat(
 
 /**
  * `true` si `validateFormat` daría algún código de la forma del formato, es
- * decir, alguno fuera de los que no cambian qué se reconoce (nombre, tipo e id).
+ * decir, alguno fuera de los que no cambian qué se reconoce (nombre, nombres de
+ * variante, tipo e id).
  */
 export function hasShapeIssue(definition: FormatDefinition): boolean {
   const { issues } = validateFormat(definition, { userTypes: [], existingFormats: [] });
