@@ -30,7 +30,7 @@
 
 import { EntityType, type TextMatch, type Word } from "@anonly/anonymization-core";
 import { CheckIcon, PlusIcon, SearchIcon, XIcon } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 
 import { actions } from "../../core-adapter/actions.js";
 import { useEntitiesStore } from "../../store/entities.store.js";
@@ -40,6 +40,7 @@ import { FieldHint } from "../common/FieldHint.js";
 import { addManualEntityWithFeedback } from "../entities/addManualEntity.js";
 import { describeEntityNumber } from "../entities/entityTypeLabels.js";
 import { EntityTypePicker } from "../entities/EntityTypePicker.js";
+import { observeMenuLayout, type MenuLayout } from "../entities/menuPlacement.js";
 import { NEW_TYPE_HINT_ID } from "../entities/newTypeInline.js";
 import { TypeDot } from "../entities/TypeDot.js";
 import { useTypeChoice } from "../entities/useTypeChoice.js";
@@ -68,6 +69,9 @@ interface ResultRow {
 /** A quién se agrega: la consulta entera ("+ Agregar") o un resultado. */
 type AddTarget = { readonly kind: "query" } | { readonly kind: "result"; readonly index: number };
 
+/** Separación entre el globo y lo que lo ancla (el campo o la lista). */
+const ADD_POPOVER_GAP_PX = 8;
+
 export function DocumentSearchBox({ onActiveMatchChange }: DocumentSearchBoxProps) {
   const query = useViewerStore((state) => state.searchQuery);
   const groupsByType = useEntitiesStore((state) => state.groupsByType);
@@ -77,6 +81,7 @@ export function DocumentSearchBox({ onActiveMatchChange }: DocumentSearchBoxProp
   const [addTarget, setAddTarget] = useState<AddTarget | null>(null);
   const debouncerRef = useRef(createSearchDebouncer());
   const containerRef = useRef<HTMLDivElement>(null);
+  const resultsRef = useRef<HTMLDivElement>(null);
 
   const onActiveMatchChangeRef = useRef(onActiveMatchChange);
   useEffect(() => {
@@ -225,13 +230,15 @@ export function DocumentSearchBox({ onActiveMatchChange }: DocumentSearchBoxProp
         <AddPopover
           value={query.trim()}
           count={matches.length}
-          className="left-0 top-full mt-2"
+          anchorRef={containerRef}
+          className="left-0"
           onClose={() => setAddTarget(null)}
         />
       ) : null}
 
       {panelOpen && hasQuery && addTarget?.kind !== "query" ? (
         <div
+          ref={resultsRef}
           role="region"
           aria-label="Resultados de la búsqueda"
           className="absolute left-0 top-full z-30 mt-2 flex w-[29rem] max-w-[calc(100vw-2rem)] flex-col rounded-xl border border-border bg-bg-primary shadow-md"
@@ -294,7 +301,8 @@ export function DocumentSearchBox({ onActiveMatchChange }: DocumentSearchBoxProp
               key={addTarget.index}
               value={rows[addTarget.index]?.context.match ?? ""}
               count={null}
-              className="right-2 top-full mt-2"
+              anchorRef={resultsRef}
+              className="right-2"
               onClose={() => setAddTarget(null)}
             />
           ) : null}
@@ -378,15 +386,49 @@ function ResultItem({
 function AddPopover({
   value,
   count,
+  anchorRef,
   className,
   onClose,
 }: {
   readonly value: string;
   /** Resultados de la lupa, si se sabe; `null` lo calcula (el valor exacto puede diferir). */
   readonly count: number | null;
+  /**
+   * Lo que ancla el globo: el campo de búsqueda o la lista de resultados. Es
+   * también su contenedor posicionado, así que el `top` del layout es directo.
+   */
+  readonly anchorRef: RefObject<HTMLDivElement | null>;
+  /** Solo la posición horizontal: la vertical la decide ADR-207. */
   readonly className: string;
   readonly onClose: () => void;
 }) {
+  const ref = useRef<HTMLDivElement>(null);
+  // ADR-207: abajo si entra, arriba si entra ahí; si no, lo mínimo para quedar
+  // entero en la ventana, y con scroll propio si es más alto. Sin esto, en una
+  // ventana baja los botones del globo de un resultado quedaban afuera.
+  const [layout, setLayout] = useState<MenuLayout>({ placement: "bottom", top: 0, maxHeight: 0 });
+  useLayoutEffect(() => {
+    const anchor = anchorRef.current;
+    const popover = ref.current;
+    if (anchor === null || popover === null) return;
+    return observeMenuLayout(
+      anchor,
+      popover,
+      (measured) => {
+        // El `top` de un hijo absoluto se cuenta desde adentro del borde del
+        // ancla (la lista tiene 1 px), y el layout, desde su borde exterior.
+        const next = { ...measured, top: measured.top - anchor.clientTop };
+        setLayout((previous) =>
+          previous.placement === next.placement &&
+          previous.top === next.top &&
+          previous.maxHeight === next.maxHeight
+            ? previous
+            : next,
+        );
+      },
+      { gap: ADD_POPOVER_GAP_PX },
+    );
+  }, [anchorRef]);
   const choice = useTypeChoice(EntityType.Person);
   const [notFound, setNotFound] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -416,7 +458,12 @@ function AddPopover({
     <div
       role="dialog"
       aria-label="Agregar la búsqueda como entidad"
-      className={`absolute z-40 flex w-[22.5rem] max-w-[calc(100vw-2rem)] flex-col gap-2.5 rounded-xl border border-border bg-bg-primary p-3.5 text-sm text-text-primary shadow-md ${className}`}
+      ref={ref}
+      data-placement={layout.placement}
+      // `[&>*]:shrink-0`: con alto máximo, el flex achicaría la línea con `truncate`
+      // hasta cero y la medida intrínseca del globo saldría corta.
+      className={`absolute z-40 flex w-[22.5rem] max-w-[calc(100vw-2rem)] flex-col gap-2.5 overflow-y-auto [&>*]:shrink-0 overscroll-contain rounded-xl border border-border bg-bg-primary p-3.5 text-sm text-text-primary shadow-md ${className}`}
+      style={{ top: layout.top, maxHeight: layout.maxHeight }}
     >
       <p className="truncate">
         Agregar <b className="font-semibold">«{value}»</b> como…
