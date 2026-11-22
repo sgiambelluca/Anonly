@@ -19,6 +19,7 @@ import {
   evaluateChoice,
   initialChoice,
   resolveChoice,
+  typeByArrow,
 } from "../components/entities/typeChoice.js";
 
 import { userType, uuid } from "./helpers/detectionFixtures.js";
@@ -77,6 +78,26 @@ describe("confirmLabel", () => {
     expect(confirmLabel("Agregar", false, "agregar")).toBe("Agregar");
     expect(confirmLabel("Agregar", true, "agregar")).toBe("Crear y agregar");
     expect(confirmLabel("Cambiar tipo", true, "cambiar")).toBe("Crear y cambiar");
+  });
+});
+
+describe("las flechas del selector de tipo", () => {
+  const list = [EntityType.Person, EntityType.Organization, EntityType.Address];
+
+  it("avanzan y retroceden en ronda desde el elegido", () => {
+    expect(typeByArrow(list, EntityType.Organization, 1)).toBe(EntityType.Address);
+    expect(typeByArrow(list, EntityType.Organization, -1)).toBe(EntityType.Person);
+    expect(typeByArrow(list, EntityType.Address, 1)).toBe(EntityType.Person);
+    expect(typeByArrow(list, EntityType.Person, -1)).toBe(EntityType.Address);
+  });
+
+  it("con «Nuevo tipo» abierto, → va al primero y ← al último", () => {
+    expect(typeByArrow(list, "new", 1)).toBe(EntityType.Person);
+    expect(typeByArrow(list, "new", -1)).toBe(EntityType.Address);
+  });
+
+  it("sin tipos elegibles no llevan a ninguno", () => {
+    expect(typeByArrow([], "new", 1)).toBeUndefined();
   });
 });
 

@@ -36,9 +36,11 @@ import { actions } from "../../core-adapter/actions.js";
 import { useEntitiesStore } from "../../store/entities.store.js";
 import { useViewerStore } from "../../store/viewer.store.js";
 import { Button } from "../common/Button.js";
+import { FieldHint } from "../common/FieldHint.js";
 import { addManualEntityWithFeedback } from "../entities/addManualEntity.js";
 import { describeEntityNumber } from "../entities/entityTypeLabels.js";
 import { EntityTypePicker } from "../entities/EntityTypePicker.js";
+import { NEW_TYPE_HINT_ID } from "../entities/newTypeInline.js";
 import { TypeDot } from "../entities/TypeDot.js";
 import { useTypeChoice } from "../entities/useTypeChoice.js";
 import { useUserTypes } from "../entities/useUserTypes.js";
@@ -424,19 +426,22 @@ function AddPopover({
         onNewTypeSubmit={() => void handleAdd()}
         aria-label="Tipo de entidad"
       />
-      {/* La línea de pie: el error del nombre del tipo nuevo ocupa su lugar (ADR-229 §2). */}
-      <p
-        aria-live="polite"
-        className={`h-5 truncate ${notFound || choice.error !== null ? "text-error" : "text-text-secondary"}`}
-      >
-        {choice.error !== null
-          ? choice.error
-          : notFound
-            ? "No se encontró ese texto exacto en el documento."
-            : estimated === 1
+      {/* La línea de pie: el error del nombre del tipo nuevo ocupa su lugar (ADR-229 §2).
+          Es una línea de ayuda (UX_Guidelines.md §11b.17, Components.md §13b.7): su segundo
+          renglón usa los 18 px que hay hasta los botones, y el campo la nombra con su id. */}
+      <div className="mb-2">
+        <FieldHint
+          id={NEW_TYPE_HINT_ID}
+          help={
+            estimated === 1
               ? "Se va a ocultar su única aparición en el documento."
-              : `Se van a ocultar sus ${estimated} apariciones en el documento.`}
-      </p>
+              : `Se van a ocultar sus ${estimated} apariciones en el documento.`
+          }
+          error={
+            choice.error ?? (notFound ? "No se encontró ese texto exacto en el documento." : null)
+          }
+        />
+      </div>
       <div className="flex justify-end gap-2">
         <Button variant="secondary" onClick={onClose} disabled={submitting}>
           Cancelar

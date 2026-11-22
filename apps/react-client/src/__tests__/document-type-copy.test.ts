@@ -11,6 +11,8 @@ import {
   createdTypeToast,
   CREATED_TYPE_HINT,
   NEW_TYPE_ADD_FOOTNOTE,
+  NEW_TYPE_SAVED_FOOTNOTE,
+  newTypeToastNote,
   removedTypeHint,
   removeTypeLead,
   SAVED_CAPTION_TOOLTIP,
@@ -159,6 +161,14 @@ describe("avisos de las acciones y estado vacío", () => {
     );
     expect(NEW_TYPE_ADD_FOOTNOTE).toBe(
       "Tipo nuevo, solo de este documento. Después lo editás o lo guardás desde ⋯ en el panel.",
+    );
+  });
+
+  it("el aviso de «Crear y cambiar» dice si el tipo nuevo quedó guardado (Components.md §3.8)", () => {
+    expect(newTypeToastNote(false)).toBe("Tipo nuevo, solo de este documento.");
+    expect(newTypeToastNote(true)).toBe(NEW_TYPE_SAVED_FOOTNOTE);
+    expect(NEW_TYPE_SAVED_FOOTNOTE).toBe(
+      "Tipo nuevo: queda guardado para los próximos documentos.",
     );
   });
 

@@ -41,6 +41,7 @@ import {
 } from "./documentTypeCopy.js";
 import { PICKER_TYPE_ORDER, typeSingular } from "./entityTypeLabels.js";
 import { NEW_TYPE_HINT_ID, previewOfNewType, type NewTypeDraft } from "./newTypeInline.js";
+import { typeByArrow } from "./typeChoice.js";
 import { TypeDot } from "./TypeDot.js";
 import { userTypeDefinitions, type KnownUserType } from "./userTypes.js";
 
@@ -108,8 +109,7 @@ export function EntityTypePicker({
           : 0;
     if (step === 0) return;
     event.preventDefault();
-    const index = value === "new" ? -1 : selectable.indexOf(value);
-    const next = selectable[(index + step + selectable.length) % selectable.length];
+    const next = typeByArrow(selectable, value, step);
     if (next === undefined) return;
     onChange(next);
     containerRef.current?.querySelector<HTMLButtonElement>(`[data-entity-type="${next}"]`)?.focus();

@@ -147,6 +147,8 @@ export function ChangeTypeDialog({ group, open, onClose }: ChangeTypeDialogProps
             <>
               <span
                 id={NEW_TYPE_HINT_ID}
+                // Si no entra en sus renglones, el texto completo queda en `title` (UX §11b.17).
+                title={choice.error ?? undefined}
                 className={`line-clamp-3 ${choice.error !== null ? "text-error" : "text-text-secondary"}`}
               >
                 {choice.error ??

@@ -27,7 +27,7 @@ import { useEntitiesStore } from "../../store/entities.store.js";
 import { showToast } from "../common/toast.js";
 import { removedGroupOverlapReveal } from "../conflicts/conflictResolution.js";
 
-import { TYPE_ACTION_FAILED_TOAST } from "./documentTypeCopy.js";
+import { newTypeToastNote, TYPE_ACTION_FAILED_TOAST } from "./documentTypeCopy.js";
 import { discardLastEdit, editToast, recordEdit } from "./editHistory.js";
 import { typeChangeToastText } from "./editPreviews.js";
 import { typeSingular } from "./entityTypeLabels.js";
@@ -161,9 +161,10 @@ export function applyTypeChange(
   }
   actions.updateGroup(group.id, { type });
   // Con un tipo nuevo el Core no previsualizó el cambio (el tipo todavía no
-  // existía): el toast nombra el tipo desde la definición recién creada.
+  // existía): el toast nombra el tipo desde la definición recién creada y dice
+  // si quedó guardado, como el pie del selector (`Components.md` §3.8 y §13b.7).
   const description =
-    newType !== undefined ? { ...text, description: "Tipo nuevo, solo de este documento." } : text;
+    newType !== undefined ? { ...text, description: newTypeToastNote(saveNewType) } : text;
   showToast(editToast(description, recorded));
   return true;
 }
@@ -232,7 +233,7 @@ export function applyRemove(group: EntityGroup): void {
  *
  * **Confirma con un toast con «Deshacer»** cuando el tipo elegido cambia el del
  * grupo (`currentType`): «{valor}» ahora es {Tipo} · Se reemplaza como {token}
- * (`Conflicto.dc.html`, `Components.md` §3.11). El token sale de la vista previa
+ * (`Conflicto.dc.html`, `Components.md` §6.2). El token sale de la vista previa
  * del Core, pedida **antes** de resolver. Sin `currentType` o sin cambio de tipo
  * no hay toast: no cambió nada que avisar.
  */

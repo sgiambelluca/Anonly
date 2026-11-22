@@ -21,6 +21,23 @@ import {
   type NewTypeEvaluation,
 } from "./newTypeInline.js";
 
+/**
+ * A qué tipo llevan las flechas del `EntityTypePicker`: el siguiente o el
+ * anterior de `selectable`, en ronda. Sin un elegido de la lista (con «Nuevo
+ * tipo» abierto), → va al primero y ← al último. Las flechas nunca abren
+ * «Nuevo tipo»: no está en `selectable`.
+ */
+export function typeByArrow(
+  selectable: ReadonlyArray<EntityTypeId>,
+  value: EntityTypeId | "new",
+  step: 1 | -1,
+): EntityTypeId | undefined {
+  if (selectable.length === 0) return undefined;
+  const at = value === "new" ? -1 : selectable.indexOf(value);
+  if (at === -1) return step === 1 ? selectable[0] : selectable[selectable.length - 1];
+  return selectable[(at + step + selectable.length) % selectable.length];
+}
+
 export interface TypeChoiceState {
   readonly value: EntityTypeId | "new";
   /** El campo en línea; `null` = la celda punteada. */
