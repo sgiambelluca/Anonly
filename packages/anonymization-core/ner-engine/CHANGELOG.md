@@ -1,5 +1,12 @@
 # @anonly/ner-engine
 
+## 1.1.0
+
+### Patch Changes
+
+- Updated dependencies
+  - @anonly/shared@1.1.0
+
 ## 1.0.2
 
 ### Patch Changes
