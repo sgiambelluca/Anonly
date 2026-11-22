@@ -588,10 +588,10 @@ Los tests de contract/unit/edge mockean los motores (interfaces de `Contracts.md
 
 - [x] 34. (ADR-145 §1, §3) `LruCache`: la expulsión se detiene antes de la entrada recién insertada; `set` rechaza `bytes` no finito o negativo con `InvalidInputError`; test que fuerza el guard de `handleOcrPageFinished` con una caché mínima.
 
-- [ ] 36. (1.1, frente F4 — **ADR-223 §2**) `detection` en `createCore`: default, filtro de tipos propios inválidos con `warn` y reparto por `ctx.config`; fuera de `ReanalyzeConfigPatch`. Caso 47.
-- [ ] 37. (1.1, F4 — **ADR-219 §5 y §6**) `defineDocumentEntityType` y `getDocumentEntityTypes`; validación del tipo en `addManualEntity`; `userTypes` en `ExportEngineInput`; `renderLegend` sobre `renderLegendPages`. Casos 48 a 50. La delegación en `renderLegendPages` y un `userTypes: []` provisional llegan antes, como adaptación mecánica del commit de contrato de F4b (`Plan_1.1.md` §7); F4 llena `userTypes` con los guardados y los del documento.
-- [ ] 38. (1.1, F4 — **ADR-220 §3, ADR-223 §6**) Reexportar las funciones puras e implementar `validateFormatsFile` en `src/formats-file.ts`. Casos 51 y 52.
-- [ ] 39. (1.1, F4 — **ADR-225**) `updateDocumentEntityType` y `removeDocumentEntityType`: precondición de etapa, delegación en Grouping y descarte de los literales retenidos del tipo borrado. Casos 53 y 54.
+- [x] 36. (1.1, frente F4 — **ADR-223 §2**) `detection` en `createCore`: default, filtro de tipos propios inválidos con `warn` y reparto por `ctx.config`; fuera de `ReanalyzeConfigPatch`. Caso 47.
+- [x] 37. (1.1, F4 — **ADR-219 §5 y §6**) `defineDocumentEntityType` y `getDocumentEntityTypes`; validación del tipo en `addManualEntity`; `userTypes` en `ExportEngineInput`; `renderLegend` sobre `renderLegendPages`. Casos 48 a 50. La delegación en `renderLegendPages` y un `userTypes: []` provisional llegan antes, como adaptación mecánica del commit de contrato de F4b (`Plan_1.1.md` §7); F4 llena `userTypes` con los guardados y los del documento.
+- [x] 38. (1.1, F4 — **ADR-220 §3, ADR-223 §6**) Reexportar las funciones puras e implementar `validateFormatsFile` en `src/formats-file.ts`. Casos 51 y 52.
+- [x] 39. (1.1, F4 — **ADR-225**) `updateDocumentEntityType` y `removeDocumentEntityType`: precondición de etapa, delegación en Grouping y descarte de los literales retenidos del tipo borrado. Casos 53 y 54.
 
 - [x] 35. (ADR-189 §3) `prewarmFirstPagePreview` solo en el primer `Ready` de cada documento; marca en el estado del documento, borrada por `closeDocument`. Test de §14 (caso 32).
 

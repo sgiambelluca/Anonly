@@ -797,7 +797,7 @@ Fixtures: `tests/fixtures/text-10p.pdf` (con DNIs, CUITs, emails, teléfonos con
 - [x] 23. (1.0.x, Confianza — **ADR-211**) Segunda búsqueda del email default para la forma con `Q` del caso 35: solo sobre palabras de OCR, forma estricta en minúsculas, hasta dos tramos «nombre. », descarte ante un email con `@` superpuesto, `value` como se leyó y `normalizedValue` restituido, costo lineal anclado en cada `Q`, y sin tocar la búsqueda de ADR-181 ni los patrones custom. Los ocho tests de §14 con sus nombres exactos (el de peores casos vive en `tests/perf` y va en su propio commit). Cobertura del módulo ≥ 85 %.
 - [ ] 24. (1.0.x, cierre de Confianza — **ADR-217**) Patrón `address-keyword-ar` del caso 36 en la tabla de defaults: palabra clave de vía dentro del match o de domicilio en lookbehind, nombre perezoso de una a seis palabras con la regla de mayúscula inicial, altura con la forma del caso 34 de `NER_Engine.md`, `normalizeEntityValue` de `@anonly/shared` como normalizador y `maskFormat` de ADR-012. Sin tocar los demás patrones, la guarda de corrida ni la prioridad del match más largo. Los trece tests de §14 con sus nombres exactos (el de peores casos vive en `tests/perf` y va en su propio commit). Si `snapshot.test.ts` cambia, se reporta qué ocurrencias entran antes de actualizarlo. Cobertura del módulo ≥ 85 %.
 
-- [ ] 25. (1.1, frente F1 — **ADR-220**, ADR-221 §2) **Generador.**
+- [x] 25. (1.1, frente F1 — **ADR-220**, ADR-221 §2) **Generador.**
     - Compilar `FormatDefinition` a autómata (Thompson), con `FORMAT_MAX_STATES`.
     - Recorrido más a la izquierda y más largo, con bordes y contexto integrados.
     - `validateFormat`, `testFormat` y `compareFormat`: forma canónica, producto de autómatas y ejemplos contra los `control`.
@@ -811,12 +811,12 @@ Fixtures: `tests/fixtures/text-10p.pdf` (con DNIs, CUITs, emails, teléfonos con
     - Casos 40 a 45, 47 sin `skippedFormats`, y 49. El test de `getCatalog`.
     - Los arneses opt-in del caso 43 y de 10/50/200 formatos van en su propio commit.
     - Cobertura del módulo ≥ 85 %.
-- [ ] 26. (1.1, frente F2 — **ADR-221**, ADR-223 §2) **Catálogo.**
+- [x] 26. (1.1, frente F2 — **ADR-221**, ADR-223 §2) **Catálogo.**
     - `init` arma la lista entera que corre (§6): base sin los apagados ni los reemplazados por una copia válida, después las referencias y después los formatos. Una copia inválida no reemplaza al original.
     - Casos 37 a 39, 50 y 51. La parte del caso 50 sobre la línea de base de calidad vive en `tests/quality` y va en su propio commit.
     - Si `snapshot.test.ts` cambia por algo más que `formatId` y `formatOrigin`, se para y se reporta.
-- [ ] 27. (1.1, frente F2 — **ADR-222**) **Colisiones.** `formatId` y `formatOrigin` en cada `Occurrence` de los formatos base y de las referencias (los del generador los llevan desde el ítem 25), y la resolución de solapamientos de §6 (origen en el orden y `emitirAmbos`). Casos 46 y 52. Con el origen en el orden, el test del caso 40 vuelve a los literales del spec: en F1 usa otros largos, porque `"20 12345678"` empata con `phone-mobile-ar` y `digit 8..8` con `dni-ar`, y con la resolución de siempre gana el base.
-- [ ] 28. (1.1, frente F2 — **ADR-220 §6**) **Fallos.** Fallo por página (solo formatos del generador) y por definición: saltear el formato, `warn` sin texto (§11) y `REGEX_FINISHED.skippedFormats`, armado en `process` como dice §6 (ausente si no hay). El caso 47 completo, con su `skippedFormats`, y el 48.
+- [x] 27. (1.1, frente F2 — **ADR-222**) **Colisiones.** `formatId` y `formatOrigin` en cada `Occurrence` de los formatos base y de las referencias (los del generador los llevan desde el ítem 25), y la resolución de solapamientos de §6 (origen en el orden y `emitirAmbos`). Casos 46 y 52. Con el origen en el orden, el test del caso 40 vuelve a los literales del spec: en F1 usa otros largos, porque `"20 12345678"` empata con `phone-mobile-ar` y `digit 8..8` con `dni-ar`, y con la resolución de siempre gana el base.
+- [x] 28. (1.1, frente F2 — **ADR-220 §6**) **Fallos.** Fallo por página (solo formatos del generador) y por definición: saltear el formato, `warn` sin texto (§11) y `REGEX_FINISHED.skippedFormats`, armado en `process` como dice §6 (ausente si no hay). El caso 47 completo, con su `skippedFormats`, y el 48.
 
 > **Estado Hito 4**: items 1–18 implementados, incluyendo el comportamiento funcional de cancelación
 > cooperativa (chequeo de `abortSignal` entre páginas) y de timeout por patrón custom (1000 ms).

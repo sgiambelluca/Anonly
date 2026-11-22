@@ -20,6 +20,13 @@ los frentes de los que depende.
 implementados y revisados. El mantenedor sumó tres precisiones (§3.5 y
 §3.8), y una de ellas pide escribir los textos de falla antes de F7 (§6).
 
+**Estado (2026-11-22):** todos los frentes de la 1.1 están commiteados y
+revisados por bloque: F0 a F5, F7 y F8. F6 sale en la 1.1.1. F7 sumó
+ADR-233 (una variante puede tener nombre). F8 dio la línea de base de
+calidad sin regresiones, el E2E de punta a punta y la suite pesada en verde.
+La branch está rebaseada sobre develop, con la pasada final de Opus
+aprobada.
+
 Reemplaza a `Plan_Funcional_1.1.md`, el borrador del 2026-10-13, que no
 llegó a commitearse.
 
