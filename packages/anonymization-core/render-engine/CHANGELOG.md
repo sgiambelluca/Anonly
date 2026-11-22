@@ -1,5 +1,21 @@
 # @anonly/render-engine
 
+## 1.1.0
+
+### Minor Changes
+
+- - Tipos de entidad del usuario, guardados o del documento, con su etiqueta, sus versiones cortas y su modo (ADR-219, ADR-225).
+  - Formatos armados con piezas y recorridos en tiempo lineal; el catálogo de Argentina sale de un catálogo por país (ADR-220, ADR-221).
+  - Dos formatos que se pisan van al panel de conflicto, que nace resuelto (ADR-222).
+  - `DetectionConfig`, y exportar e importar formatos con `validateFormatsFile` (ADR-223).
+  - La hoja de referencia del export se pagina y nombra los tipos propios. Un formato que falla no frena el análisis y se avisa en `skippedFormats`.
+
+### Patch Changes
+
+- - Baja el pico de memoria del segundo escaneo: el parseo suelta las imágenes de cada página, el kernel de Render suelta la página al terminar y el Orchestrator da de baja el pool ocioso de NER al empezar el OCR (ADR-230 a ADR-232).
+- Updated dependencies
+  - @anonly/shared@1.1.0
+
 ## 1.0.2
 
 ### Patch Changes
