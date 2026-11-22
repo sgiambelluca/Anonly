@@ -649,6 +649,7 @@ interface DetectionState {
 interface DetectionSlice {
   readonly saved: DetectionState;          // lo último guardado: es lo que alimenta al Core
   readonly draft: DetectionState | null;   // copia de trabajo de DetectionFormatsDialog; null = cerrado
+  readonly draftHistory: ReadonlyArray<DetectionState>;   // borradores anteriores, uno por cambio: lo que deshace undoLastDraftChange
   readonly pendingChanges: number;         // cambios aplicados al borrador y no deshechos
   openDraft(): void;                       // draft = saved
   applyToDraft(change: DetectionChange): void;
@@ -724,19 +725,26 @@ refreshDocumentTypes(): void;
 
 | Acción | Qué hace |
 |---|---|
-| `defineDocumentType(def)` | `history.record` → `orchestrator.defineDocumentEntityType` → `refreshDocumentTypes` |
-| `updateDocumentType(def)` | `history.record` → `await orchestrator.updateDocumentEntityType` → `refreshDocumentTypes` |
-| `removeDocumentType(id)` | `history.record` → borra las reglas de ese tipo y de sus grupos, como al eliminar una entidad (ADR-171 §5) → `await orchestrator.removeDocumentEntityType` → `refreshDocumentTypes` |
+| `defineDocumentType(def)` | `orchestrator.defineDocumentEntityType` → `refreshDocumentTypes` |
+| `updateDocumentType(def)` | `await orchestrator.updateDocumentEntityType` → `refreshDocumentTypes` |
+| `removeDocumentType(id)` | borra las reglas de ese tipo y de sus grupos, como al eliminar una entidad (ADR-171 §5) → `await orchestrator.removeDocumentEntityType` → `refreshDocumentTypes` |
 | `saveDocumentType(id)` | busca la definición de `id` en `documentTypes`, `detection.saveDocumentType(def)` y suma el id a `savedDuringDocument`. **Sin** `history.record`: no es una edición del documento |
 | `unsaveDocumentType(id)` | lo inverso; es el «Deshacer» del aviso de guardar |
 
+- **El `history.record` lo hace quien llama**, antes de la acción, y no la acción por dentro: así
+  «Crear y agregar» y «Crear y cambiar» son una sola entrada (ver abajo). Si la acción falla, quien
+  llama retira esa entrada. Crear, editar y borrar un tipo desde el panel registran su entrada de
+  la misma forma.
 - **«Crear y agregar» y «Crear y cambiar»** (`EntityTypePicker`, ADR-229 §2): **un solo**
   `history.record`, después `defineDocumentEntityType`, después el agregado o el cambio de tipo.
-- **El Core se recrea al cerrar el documento si hace falta.** `closeDocument()` y todo
-  `importDocument()` comparan `detectionToEngineConfig(detection.saved)` con el override con que
-  se creó el Core vigente. Si difieren —el usuario guardó un tipo durante el documento—, recrean
-  el Core **antes** de aceptar el documento siguiente: `LoadScreen` no habilita su `DropZone`
-  hasta que termina (ADR-125 §3 explica por qué no puede haber una ventana sin Core).
+- **El Core se recrea al cerrar el documento si hace falta.** `closeDocument()` compara
+  `detectionToEngineConfig(detection.saved)` con el override con que se creó el Core vigente. Si
+  difieren —el usuario guardó un tipo durante el documento—, recrea el Core **antes** de aceptar el
+  documento siguiente: `importDocument()` espera esa recreación (`getCoreWhenReady()`) y
+  `LoadScreen` no habilita su `DropZone` hasta que termina (ADR-125 §3 explica por qué no puede
+  haber una ventana sin Core). Alcanza con `closeDocument()` porque es el único camino a otro
+  documento: `ImportButton` solo se monta sin documento (`Components.md` §2.1) y el Core no acepta
+  un segundo documento sin cerrar el primero.
 - **`savedDuringDocument` y `documentTypes` se vacían** en `reset()`, con el resto del store.
 
 ### 3.10 Filtros del panel (ADR-224 §3, ADR-226 §3, ADR-229 §5)
@@ -770,6 +778,9 @@ clearFilters(): void;
   resolverse.
 - **`"manual"`**: el grupo tiene un miembro con `source: Manual` o `replacementValueUserSet`.
 - **Duran lo que dura el documento**: `reset()` los vacía. No se persisten.
+- **«Ver en la lista» los quita si esconden el grupo.** Cuando el panel va a un grupo (el toast de
+  un alta, un clic en el visor) y los filtros lo esconden, el panel llama a `clearFilters()`, como ya
+  hacía con el buscador. Son de la interfaz: quitarlos no pierde nada.
 - **Un formato es «del usuario»** (ADR-226 §1) si su id está en `detection.saved.userFormats` o en
   `catalogRefs`. Es un selector puro, `isUserFormat(formatId)`, y lo usan el subnivel del árbol, el
   filtro y el tooltip.

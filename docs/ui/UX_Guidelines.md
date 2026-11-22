@@ -1173,6 +1173,16 @@ Textos aprobados por el mantenedor (`label_taken` y los demás el 2026-11-20). `
 completa la interfaz; los números son los límites de `Contracts.md` §6 y salen de sus constantes,
 no se escriben a mano.
 
+- **Un valor largo que escribió el usuario se cita acortado** (decisión del mantenedor,
+  2026-11-21): entre « » van hasta 10 caracteres y «…», así el «qué hacer» del final entra en la
+  línea de ayuda (§11b.17) o en la caja de estado aunque el nombre sea largo. Por ejemplo, «Ya
+  tenés un formato llamado «Legajo del…». Elegí otro nombre…». Se corta el valor, nunca la
+  explicación, y un carácter fuera del plano básico (un emoji) cuenta como uno.
+  - Se acortan {TEXTO} de `short_label_invalid`, {NOMBRE} de `name_taken`, {N} cuando es el nombre
+    de una variante, {PALABRA} y {TIPO}.
+  - No se acortan {CARÁCTER}, que es uno solo, {ETIQUETA}, ni los valores de los textos de
+    «Importar un archivo», que van en un diálogo y no en una línea.
+
 **Tipos propios** (`UserEntityTypeIssueCode`, ranura del formulario, `Components.md` §13b.3):
 
 | Código | Texto |

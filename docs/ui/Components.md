@@ -499,9 +499,11 @@ apps/react-client/src/components/
      con el texto resaltado. Sin coincidencias, la misma caja dice *"No aparece en el documento"*
      **antes** de confirmar. Vacío (< 2 caracteres), un texto neutro.
   2. *¿Qué es?* — `EntityTypePicker` (§8.10) con los 13 tipos, en su caja gris.
-  Debajo, en una caja azul distinta, la advertencia de alcance (ver abajo). Pie: *"También podés
-  seleccionarlo en el PDF original"*, "Cancelar" y el botón **"Agregar N apariciones"** con ancho
-  mínimo fijo, deshabilitado sin coincidencias.
+  La advertencia de alcance (ver abajo) va **dentro de la caja de resultados**, en su estado de
+  antes de escribir, con un ícono de información; ya no tiene un recuadro azul propio. La caja
+  mide 128 px de alto en sus tres estados (UX §11b.18, pasada de UI de la 1.1, 2026-11-21). Pie:
+  *"También podés seleccionarlo en el PDF original"*, "Cancelar" y el botón **"Agregar N
+  apariciones"** con ancho mínimo fijo, deshabilitado sin coincidencias.
 - **Qué decir** (ADR-174, **ADR-175 §3**), en este orden y solo con el resultado del Core —sin buscar el grupo por texto (`findAddedGroup`/`foldForLookup` se retiran, U-3)—: `heldConflictIds` no vacío → **no** hay toast de alta, se abre `ManualOverlapDialog` (§6.3) con **todos** esos ids; si no, `groupIds` no vacío → toast de alta nombrando el primer grupo del tipo pedido (o el primero); si no, `occurrenceCount === 0` → "no se encontró"; el resto rompe el invariante del Core → toast de error *"No se pudo agregar «X»."*, se retira la entrada de deshacer y se loguea.
 - **Si no encontró nada o no cambió nada** (`not-found` / `no-op`): la entrada de deshacer registrada antes de agregar se retira de `history.store` (ADR-174 §4).
 - **Tras agregar**: se cierra y muestra el toast de ADR-169 §7 (*"Agregaste «X» · Persona N.º 06 · N
@@ -624,7 +626,8 @@ Marca los grupos que **el detector sugirió sin estar seguro**: nacen con `enabl
 
 - **Props**: `groupId`, `currentType`, `canonicalValue`.
 - **Render** (ADR-169 §10): la entidad arriba (punto de color, nombre, "Persona N.º 06 · N apariciones"); `EntityTypePicker` (§8.10) con el tipo actual marcado "Actual" y no seleccionable; una caja **"Cómo queda"** de alto fijo con el token antes → después (**`[PERSONA 06]` → `[ORGANIZACION 03]`**, calculado por el Core con `previewEdit({ kind: "type", … })`, ADR-170) y, si deja de ser `Person`, *"El género se borra: solo se usa para personas"*. Botón "Cambiar tipo" (ancho fijo).
-- **Acción**: `actions.updateGroup(groupId, { type })`. Un tipo igual al vigente es no-op (el motor no emite nada, ADR-082 §1) y el diálogo además se ahorra el viaje. Confirmar cierra y muestra toast con "Deshacer" (ADR-172).
+- **Acción**: `actions.updateGroup(groupId, { type })`. Un tipo igual al vigente es no-op (el motor no emite nada, ADR-082 §1) y el diálogo además se ahorra el viaje. Confirmar cierra y muestra toast con "Deshacer" (ADR-172): título *«{valor}» ahora es {Tipo}* y detalle *«Se reemplaza como {token}.»*, con el token de la vista previa del Core (lienzo de la 1.1). Con un tipo nuevo creado en el mismo paso (§13b.7) el Core no lo pudo previsualizar, y el detalle dice si el tipo es solo de este documento o quedó guardado.
+- **Las ranuras de la caja "Cómo queda"** (alto fijo, UX-10): el género que se borra y, debajo, qué pasa con «Dato falso»: *"Sigue en «Dato falso»."* si el tipo destino lo admite y la entidad lo usaba, o el aviso de que pasa a «Etiquetar» si el destino es un tipo propio (ADR-229 §3). Vacías cuando no aplican.
 - **Por qué existe**: el tipo no es una etiqueta suelta — gobierna el token del documento anonimizado, su numeración por tipo, qué regla de scope `type` aplica y de qué pool sortea el sintetizador. Un tipo equivocado produce un documento que **afirma algo falso** sobre el dato que ocultó.
 
 ### 3.6 `MergeDialog`
@@ -884,6 +887,7 @@ hay nada que sincronizar: se retira junto con `SideBySideViewer` y `scrollSyncCo
 - **Stores**: `entities.conflicts`.
 - **Render** (ADR-083 §6): el valor en disputa + los **tipos de entidad** candidatos como radios, con el de mayor `confidence` preseleccionado. **No nombra a Regex ni a NER** ni muestra números de confidence: son detalles de implementación del pipeline, y la pregunta útil es una sola — ¿esto es una organización o una dirección?
 - **Acción**: `actions.resolveConflict(conflictId, entityType?)`. Aplicar **reclasifica el grupo** por la vía de ADR-082 §2 y marca el conflicto resuelto. Sin tipo elegido, el motor aplica su default (mayor confidence), que coincide con la clasificación ya vigente: confirmar no cambia datos.
+- **Aviso al cambiar el tipo** (lienzo de la 1.1): si el tipo elegido no es el que el grupo ya tenía, aplicar muestra el mismo toast que «Cambiar tipo…» (§3.8), con «Deshacer». El token sale de la vista previa del Core pedida **antes** de resolver. Sin cambio de tipo no hay toast: no cambió nada que avisar.
 - **`ambiguous_canonical`: se elige la escritura** (ADR-106). El diálogo ofrece los `value` de los candidatos empatados como radios, con el `canonicalValue` vigente preseleccionado, y aplicar emite `actions.updateGroup(groupId, { canonicalValue })` + `actions.resolveConflict(conflictId)`. La pregunta es la que el usuario tiene: *¿cuál de estas dos escrituras usamos?* El botón dice **"Aplicar"** (ADR-193 §4). **Revisa ADR-083 §6**, que metía este caso junto a `low_confidence` bajo "no hay elección": era cierto sobre el eje del **tipo** —todos los candidatos comparten tipo— pero no comparten **valor**, y sobre ese eje la elección existe y está bien definida. Sin contrato nuevo: `canonicalValue` ya estaba en `GroupUpdateRequested.patch` y los `value` ya venían en el conflicto.
 - **Cuando no hay elección**: `low_confidence` no ofrece radios y el botón dice "Descartar" — con **un** candidato por debajo del umbral no hay nada entre qué elegir, y ADR-094 ya le dio a ese caso su propio camino (el grupo sugerido, apagado y visible).
 - **Qué cambió y por qué** (ADR-083): hasta este ADR el diálogo pedía un `ReplacementMode`, que **no resolvía el desacuerdo** — `applyConflictResolve` no tocaba el `entityType`, así que el usuario aplicaba y la discrepancia quedaba igual. El modo de reemplazo se sigue eligiendo donde siempre: el `ReplacementModeSelect` de la fila del grupo (§3.4).
@@ -977,7 +981,22 @@ hay nada que sincronizar: se retira junto con `SideBySideViewer` y `scrollSyncCo
 ### 8.2 `Dialog`
 
 - Wrapper sobre Radix `Dialog` con focus trap, escape para cerrar, backdrop.
-- Props: `open`, `onClose`, `title`, `children`.
+- Props: `open`, `onClose`, `title`, `children`. Opcionales:
+  - `description` y `descriptionInline` (la descripción en la columna del título, sin renglón
+    propio: el generador);
+  - `titleAside` (a la derecha del título, como el «5/9» de §6.2) y `icon` (ver abajo);
+  - `headerActions` (acciones del encabezado, antes del cierre) y `footer` (acciones fijas al pie,
+    que no scrollean con el cuerpo);
+  - `hideCloseButton`;
+  - `size`: `md` (el de siempre), `lg`, `xl` o `2xl`;
+  - `tall`: hasta el 92 % del alto de la ventana en vez del 85 % (UX §11b.18);
+  - `role="alertdialog"` para una confirmación que interrumpe;
+  - `onEscapeKeyDown`, que puede frenar el cierre con `preventDefault()` (UX §11b.7).
+- **Pila de diálogos** (UX §11b.17): cada diálogo abierto encima de otro toma la capa siguiente, y
+  su velo con desenfoque queda por encima del diálogo de abajo. El velo arranca en z 40 y el
+  contenido en z 50, y suben de a 20 por capa, hasta tres diálogos apilados (el primero y dos
+  encima). Uno más adentro reusa la capa del tercero. `Select` y `Tooltip` van en z 95, por encima de la pila, y los avisos en z 100. La cuenta
+  es pura, en `common/dialogLayers.ts`.
 - **El título se lee como título** (pasada de UI de la 1.1, 2026-11-21): 16 px semibold. Los
   rótulos de los campos van en 14 px; con el título del mismo tamaño, «Nuevo tipo» y «Nombre del
   tipo» se leían iguales. El resto del encabezado no cambia: fondo blanco, sin línea bajo el
@@ -1118,6 +1137,15 @@ Paleta accesible (contrast ≥ 3:1 con fondo blanco), diferenciada también por 
 
 El patrón de borde (sólido/punteado/doble) permite distinguir tipos incluso para usuarios con visión monocromática o daltonismo.
 
+**El punto de un tipo propio** (ADR-219, ADR-229 §2; lienzo de la 1.1, clase `.udot`): un tipo
+propio no tiene color en esta tabla. Su punto es un **aro** de 9 px sin relleno, con borde de
+2,2 px en `--color-user` (§10). Guardado, el aro es continuo; solo de este documento, **punteado**.
+El punteado se dibuja como un `<svg>` (círculo de radio 3,4 con trazos de 2,4 y huecos de 1,6),
+porque un `border: dashed` del navegador sale con muy pocos trazos a ese tamaño. Es un solo
+componente, `TypeDot`, en todos los lugares donde aparece el punto de un tipo: el panel, el
+selector de tipo, el tooltip, «Formatos de detección», exportar e importar. Es decorativo
+(`aria-hidden`).
+
 ---
 
 ## 10. Tokens de diseño
@@ -1145,6 +1173,7 @@ sale sólido y nada avisa.
 --color-warning-strong: #b45309; /* ADR-087 §3.1: bordes, iconos y texto de precaución */
 --color-border-strong: #374151;  /* ADR-169 §11: bordes de la franja de tipo */
 --color-space: #c2410c;          /* ADR-169 §11: aviso "espacio justo" — 5.18:1 sobre blanco */
+--color-user: #64748b;           /* aro del punto de un tipo propio (§9) */
 --color-error: #dc2626;      /* 4.83:1 — era #ef4444, que fallaba en sus tres usos */
 --radius-sm: 4px;
 --radius-md: 8px;
@@ -1174,6 +1203,7 @@ dark` cuando el usuario no eligió explícitamente. La preferencia vive en
 --color-warning: #fbbf24;
 --color-border-strong: #9ca3af;     /* ADR-169 §11: bordes de la franja de tipo */
 --color-space: #fb923c;             /* ADR-169 §11: aviso "espacio justo" — 6.49:1 sobre la superficie */
+--color-user: #94a3b8;              /* aro del punto de un tipo propio (§9) */
 --color-warning-strong: #fbbf24;    /* 8.79:1 */
 --color-error: #f87171;             /* 5.31:1 como texto */
 --color-error-foreground: #111827;  /* 6.41:1 sobre el relleno error */
@@ -1452,7 +1482,7 @@ apps/react-client/src/components/
   - Campos: nombre (hasta `USER_TYPE_NAME_MAX`), la caja «Cómo se reemplaza» con los tres largos
     de la escalera, y las dos versiones cortas, opcionales (hasta `USER_TYPE_SHORT_LABEL_MAX`),
     con la automática de marcador de posición.
-  - Validación en vivo con `validateUserEntityType`, en una **ranura de alto fijo**. Con error, el
+  - Validación en vivo con `validateUserEntityType`, en la **línea de ayuda** de cada campo (`UX_Guidelines.md` §11b.17). Con error, el
     botón principal se apaga, y la ranura muestra el texto del código, que dice por qué y qué hacer
     (`UX_Guidelines.md` §11b.16).
   - Nota al pie del cuerpo: para `saved`, que se guarda en el equipo y aplica a los próximos
@@ -1462,8 +1492,8 @@ apps/react-client/src/components/
     Pasada de UI de la 1.1, 2026-11-21.
   - **Al crear un tipo del documento, el aviso lleva la casilla «Guardarlo también para los
     próximos documentos»** (ADR-225 §5, precisión del 2026-11-21), destildada. Tildada, el aviso
-    deja de ser ámbar y pasa a nota: «Queda en «Tus tipos», en la pantalla de inicio. Para que se
-    detecte solo, sumale un formato desde ahí.». Al crear, hace lo mismo que «Guardar para los
+    deja de ser ámbar y pasa a nota: «Se guarda en este equipo y queda en «Tus tipos», en la
+    pantalla de inicio. Para que se detecte solo, sumale un formato desde ahí.». Al crear, hace lo mismo que «Guardar para los
     próximos documentos» del ⋯, y el aviso de creado lo dice. Las dos versiones del aviso miden lo
     mismo (UX-10). Al editar no está: un tipo del documento ya creado se guarda desde el ⋯.
   - Botón: «Crear tipo» o «Guardar».
@@ -1548,7 +1578,7 @@ apps/react-client/src/components/
 - **`ContextWords`**: arranca plegada en una fila si no hay palabras, y abierta si hay. **El
   encabezado la pliega y la despliega siempre**; plegada con palabras, la fila las nombra («Solo si
   antes dice «legajo» o «leg.»») con el contador. Abierta: las palabras como etiquetas con borde
-  (`rounded-md`, fondo `bg-primary`, una X cada una), en la misma fila que el campo y «Agregar», y
+  (`rounded-md`, fondo `bg-tertiary`, borde `border-strong` al 40 %, una X cada una), en la misma fila que el campo y «Agregar», y
   debajo el mismo aviso de guardado que el texto fijo (`UX_Guidelines.md` §11b.9). El subrayado
   punteado queda solo en `FormatTestPanel` (ADR-228 §5, precisión del 2026-11-21).
 - **`FormatTestPanel`**: panel **flotante** que se mueve por su encabezado. Texto de prueba,
@@ -1619,6 +1649,14 @@ apps/react-client/src/components/
   deshacer.
 - **El error de nombre** se muestra en la línea de pie del contenedor, que ya existe; no agrega
   altura.
+  - Esa línea tiene el `id` al que apunta el `aria-describedby` del campo (`new-type-hint`), así
+    que se lee el texto entero. Si no entra en sus renglones, se corta con «…» y el texto completo
+    queda en `title` (UX §11b.17).
+  - En los globos de la selección y de la lupa (`WordSelectionOverlay`, `DocumentSearchBox`), la
+    línea de pie es una línea de ayuda de 12 px (`FieldHint`, UX §11b.17), en rojo con su ícono
+    cuando hay error o el texto no se encontró. Su segundo renglón ocupa el espacio que hay hasta
+    los botones, así que el «qué hacer» del final se lee sin mover nada. Revisión de F7,
+    2026-11-21.
 - **`ChangeTypeDialog`**: si el tipo elegido es propio y la entidad estaba en «Dato falso», la caja
   «Cómo queda» avisa que pasa a «Etiquetar».
 
@@ -1635,7 +1673,8 @@ apps/react-client/src/components/
   incompleto. Nombra el formato y las páginas, con «Ir a la página N».
 - **`ExportDialog`**: suma el mismo aviso, una fila por formato con «Ir a la página N». No bloquea.
 - **`ConflictDialog`** entre dos formatos (ADR-229 §6): cada opción con tipo, formato y origen; el
-  texto de que nació resuelto.
+  texto de que nació resuelto. Como ya nació resuelto, mientras la elección sea la vigente el botón
+  dice «Listo» y solo cierra; si se elige la otra, dice «Aplicar».
 - **`SettingsDialog`**: sección nueva «Atajos de teclado» con «Ver atajos…», que abre
   **`ShortcutsDialog`**. La tabla sale de la misma fuente que declara los atajos (ADR-224 §5), y la
   barra **no** tiene ícono de atajos.

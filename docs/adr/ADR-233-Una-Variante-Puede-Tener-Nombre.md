@@ -69,7 +69,10 @@ export type FormatIssueCode =
 ```
 
 - `variant_name_too_long`: el nombre de la variante `variantIndex` pasa de
-  `FORMAT_MAX_TEXT` caracteres (contados como el nombre del formato).
+  `FORMAT_MAX_TEXT` caracteres (contados como el nombre del formato). Un
+  nombre en blanco no se mide, sea del largo que sea: es el automático. Los
+  nombres que sobran después de la última variante tampoco: ya dan
+  `variant_names_mismatch`. Precisión del 2026-11-21, tras la revisión.
 - `variant_names_mismatch`: `variantNames` está y su largo no es el de
   `variants`. La interfaz los mantiene juntos, así que solo puede venir de un
   archivo armado a mano o dañado.
