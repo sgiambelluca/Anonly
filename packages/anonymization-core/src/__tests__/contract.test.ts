@@ -1209,7 +1209,7 @@ describe("Orchestrator — contract tests", () => {
       renderPageProvider: RenderPageProvider;
       userTypes: ReadonlyArray<unknown>;
     };
-    // Provisional hasta F4 (Plan_1.1.md §7).
+    // Sin tipos propios guardados ni del documento, el export no recibe ninguno.
     expect(exportCall.userTypes).toEqual([]);
 
     const rows = [{ prefixes: "DNI", typeName: "DNI", countLabel: "1 marcador" }];
