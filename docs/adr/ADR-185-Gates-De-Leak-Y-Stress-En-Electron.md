@@ -124,6 +124,10 @@ antes de convertir el perfil en un gate; no se cambia el objetivo contractual.
    salteado (ADR-149 §1). `pnpm test:leak` en local sigue corriendo los
    tres en fila.
 
+   **Modificado por ADR-235 (2026-11-22):** `test:leak` sale de CI y corre
+   solo en local. Los jobs de los tres casos y el check «Memory leak» ya no
+   existen. `test:stress` sigue como dice esta sección.
+
 6. **Desviación acotada de R-11/P-8:** `playwright.leak.config.ts` y
    `playwright.stress.config.ts` exportan por defecto el objeto de configuración
    que carga Playwright, siguiendo los cuatro `playwright*.config.ts`

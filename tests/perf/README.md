@@ -1160,8 +1160,9 @@ observado. RSS nativo y presión del sistema se conservan con sus límites.
 ## ADR-185 — Gates `test:leak` y `test:stress`
 
 Los gates corren sobre el shell Electron empaquetado, con `VITE_E2E=1`, build
-fresco y assets first-party de `assets.lock.json` espejados. En CI usan jobs
-macOS seriales separados; localmente se lanzan con:
+fresco y assets first-party de `assets.lock.json` espejados. `test:stress`
+corre en CI en un job macOS propio; `test:leak` corre solo en local desde
+ADR-235. Localmente se lanzan con:
 
 ```sh
 pnpm test:leak
