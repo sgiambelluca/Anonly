@@ -259,7 +259,7 @@ specs de interfaz (`Components.md` §13b.3 y §13b.6, `UX_Guidelines.md`
 1. ~~Los textos de falla, antes de F7~~. **Hecho el 2026-11-20:** el
    mantenedor aprobó un texto por cada código de `UserEntityTypeIssueCode`,
    `FormatIssueCode` y `FormatsFileIssueCode`, en `UX_Guidelines.md` §11b.16.
-2. **El frente F6** (Chile y Uruguay, para la 1.1.1) tiene su propia aprobación de tablas antes de escribir sus filas (ADR-221 §6). Su investigación no necesita código y puede arrancar en paralelo.
+2. **El frente F6** (para la 1.1.1) tiene su propia aprobación de tablas antes de escribir sus filas (ADR-221 §6). Su investigación no necesita código y puede arrancar en paralelo. ADR-236 lo amplió el 2026-11-22 a diecinueve países, en seis tandas; sigue en [`Plan_1.1.1.md`](./Plan_1.1.1.md).
 
 ## 7. Frentes de implementación
 
@@ -275,7 +275,7 @@ un hito, y cada commit toca un solo módulo (R-1).
 | F4 | `DetectionConfig` en `createCore`, `defineDocumentEntityType`, `getDocumentEntityTypes`, `updateDocumentEntityType` y `removeDocumentEntityType` (ADR-225), validar el tipo del agregado manual, `userTypes` del export, reexportar las funciones puras y `validateFormatsFile` | façade | F1, F3, F4b |
 | F4b | Hoja de referencia paginada: los tipos (`RenderLegendPayload.startRow`, `RenderLegendPageResult`, `ExportSavePayload.legendImages`), `renderLegendPages` en Render y varias páginas de leyenda en Export (ADR-219 §6) | `shared` (contrato), `render-engine`, `export-engine` (un commit cada uno) | F0 |
 | F5 | Sintetizador por país, con Argentina idéntica | `shared` | F0 |
-| F6 (1.1.1) | Chile y Uruguay: investigación, corpus sintético, medición, tablas aprobadas, y después filas de catálogo, etiquetas y generadores. Muestra el selector de país y «agregar desde otro país» | `regex-engine`, `grouping-engine`, `shared`, `react-client` | F2, F3, F5; la investigación, de nada |
+| F6 (1.1.1) | Chile y Uruguay, ampliado a diecinueve países por ADR-236 (`Plan_1.1.1.md`): investigación, corpus sintético, medición, tablas aprobadas, y después filas de catálogo, etiquetas y generadores. Muestra el selector de país y «agregar desde otro país» | `regex-engine`, `grouping-engine`, `shared`, `react-client` | F2, F3, F5; la investigación, de nada |
 | F7 | Aplicación: guardado, generador, exportar e importar, subnivel, filtros, tooltip, ayuda de atajos, «Nuevo tipo», tipos del documento y el aviso de `skippedFormats`. Specs: `Components.md` §13b, `UX_Guidelines.md` §11b y `React_Client.md` §3b | `react-client` | F4. El diseño está cerrado (2026-11-16) |
 | F8 | Verificación: línea de base de calidad idéntica con Argentina y sin formatos propios, E2E de punta a punta y la suite pesada de una versión menor | `tests/` | Todo lo anterior |
 
@@ -401,6 +401,8 @@ una vez por bloque.
 - Modo sintético para tipos propios (`Future_Ideas.md` §5.5 sigue abierto).
 - Cifrar los formatos guardados.
 - Plantillas de reglas reutilizables (`Future_Ideas.md` §4.2).
-- Chile y Uruguay: salen en la 1.1.1 (frente F6). En la 1.1 el selector de
-  país y «agregar desde otro país» quedan ocultos, porque hay un solo país.
-- Otros países además de Argentina, Chile y Uruguay.
+- Los demás países: salen en la 1.1.1 (frente F6, ampliado por ADR-236 a
+  los países hispanohablantes de Latinoamérica, España y Estados Unidos;
+  sigue en
+  [`Plan_1.1.1.md`](./Plan_1.1.1.md)). En la 1.1 el selector de país y
+  «agregar desde otro país» quedan ocultos, porque hay un solo país.

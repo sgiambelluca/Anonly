@@ -5,6 +5,10 @@
 - **Estado**: Aceptado por el mantenedor el 2026-10-19, con los detalles
   técnicos del planificador (`Plan_1.1.md` §4). El contenido de los catálogos de Chile y Uruguay se decide
   después, con su medición (§6), para la 1.1.1 (§7).
+  **Ampliado por ADR-236** (2026-11-22): la 1.1.1 trae diecinueve países, no
+  solo Chile y Uruguay, con tablas aprobadas por tandas, y Estados Unidos
+  reemplaza universales por sus variantes en inglés. §1, §2, §6 y §7 se leen
+  con ese ADR.
 - **Fecha**: 2026-10-19.
 - **Decidido por**: el mantenedor (2026-10-13 y 2026-10-19), a propuesta del
   planificador.
