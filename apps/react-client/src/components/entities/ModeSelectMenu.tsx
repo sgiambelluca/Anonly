@@ -27,12 +27,13 @@
  * flechas que no está implementada).
  */
 
-import type { ReplacementMode, ReplacementPreviews } from "@anonly/anonymization-core";
+import { ReplacementMode, type ReplacementPreviews } from "@anonly/anonymization-core";
 import { CheckIcon } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
 import { observeMenuLayout, type MenuLayout } from "./menuPlacement.js";
 import {
+  NO_SYNTHETIC_NOTE,
   REPLACEMENT_MODE_DESCRIPTION,
   REPLACEMENT_MODE_LABEL,
   REPLACEMENT_MODE_ORDER,
@@ -58,6 +59,8 @@ export interface ModeSelectMenuProps {
   readonly align?: "left" | "right";
   /** Clases del contenedor, para que el nivel decida si puede encoger. */
   readonly className?: string;
+  /** Los modos que se ofrecen; ausente = los cuatro. Un tipo propio no ofrece «Dato falso» (ADR-229 §4). */
+  readonly modes?: ReadonlyArray<ReplacementMode>;
 }
 
 export function ModeSelectMenu({
@@ -69,6 +72,7 @@ export function ModeSelectMenu({
   onOpenChange,
   align = "left",
   className = "",
+  modes = REPLACEMENT_MODE_ORDER,
 }: ModeSelectMenuProps) {
   const [open, setOpenState] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -139,7 +143,7 @@ export function ModeSelectMenu({
           <p className="truncate px-2.5 pb-2 pt-1.5 text-sm text-text-secondary">
             Cómo reemplazar <b className="font-semibold text-text-primary">«{subject}»</b>
           </p>
-          {REPLACEMENT_MODE_ORDER.map((mode) => {
+          {modes.map((mode) => {
             const preview = resolveModePreview(mode, previews);
             return (
               <button
@@ -183,6 +187,9 @@ export function ModeSelectMenu({
               </button>
             );
           })}
+          {modes.includes(ReplacementMode.Synthetic) ? null : (
+            <p className="px-2.5 pb-1 pt-1.5 text-sm text-text-secondary">{NO_SYNTHETIC_NOTE}</p>
+          )}
         </div>
       ) : null}
     </div>

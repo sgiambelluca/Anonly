@@ -1,5 +1,26 @@
 # @anonly/react-client
 
+## 1.1.0
+
+### Minor Changes
+
+- - «Formatos de detección» desde la pantalla de inicio: árbol de tipos y formatos, generador de piezas con prueba en vivo, y exportar e importar formatos (ADR-227, ADR-228).
+  - Tipos del documento en el panel de entidades, «Nuevo tipo» en línea en los selectores, subnivel por formato y cuatro filtros (ADR-224 a ADR-226, ADR-229).
+  - El tooltip del visor nombra el formato del usuario, el aviso de formatos salteados llega también al exportar y Configuración lista los atajos (ADR-229).
+  - Un clic sobre una entidad del visor la selecciona en el panel. Los globos «Agregar como…» y los menús quedan enteros dentro del área visible (ADR-207).
+  - «Acerca de» dice quién hace Anonly y cómo escribirle (ADR-234).
+
+### Patch Changes
+
+- Updated dependencies
+- Updated dependencies
+  - @anonly/pdf-engine@1.1.0
+  - @anonly/render-engine@1.1.0
+  - @anonly/anonymization-core@1.1.0
+  - @anonly/export-engine@1.1.0
+  - @anonly/ner-engine@1.1.0
+  - @anonly/ocr-engine@1.1.0
+
 ## 1.0.2
 
 ### Patch Changes

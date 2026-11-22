@@ -13,7 +13,10 @@ import { describe, it, expect } from "vitest";
 import {
   AnnotationKind,
   AVG_GLYPH_ADVANCE_RATIO,
+  alphanumericKey,
   CancelledError,
+  ConflictReason,
+  DEFAULT_DETECTION_CONFIG,
   DEGRADED_FONT_RATIO,
   DetectionSource,
   EngineDisposedError,
@@ -25,8 +28,17 @@ import {
   EntityType,
   estimateTokenWidth,
   EventChannel,
+  FORMAT_ADMITTING_BASE_TYPES,
+  FORMAT_MAX_CONTEXT,
+  FORMAT_MAX_PIECES,
+  FORMAT_MAX_REPEAT,
+  FORMAT_MAX_STATES,
+  FORMAT_MAX_TEXT,
+  FORMAT_MAX_VARIANTS,
   InvalidInputError,
   isEngineErrorCode,
+  isUserEntityType,
+  maskByCharacters,
   WorkerCrashedError,
   makeTransferable,
   MAX_EDIT_CHECKPOINTS,
@@ -37,10 +49,43 @@ import {
   ReplacementMode,
   sharesVerticalBand,
   synthesize,
+  USER_TYPE_NAME_MAX,
+  USER_TYPE_SHORT_LABEL_MAX,
   wordsInRect,
 } from "../index.js";
 import { isTransferable } from "../index.js";
 import type {
+  BaseFormatSetting,
+  CatalogFormatInfo,
+  CatalogFormatKind,
+  CatalogFormatRef,
+  Conflict,
+  ConflictCandidate,
+  ConflictResolved,
+  ConflictResolveRequested,
+  EntityTypeId,
+  FormatCharClass,
+  FormatComparison,
+  FormatComparisonInput,
+  FormatDefinition,
+  FormatIssue,
+  FormatIssueCode,
+  FormatPiece,
+  FormatSeparator,
+  FormatsFileContent,
+  FormatsFileIssueCode,
+  FormatsFileValidation,
+  FormatTestMatch,
+  FormatValidation,
+  FormatValidationContext,
+  RegexFinished,
+  RuleTarget,
+  SyntheticRequest,
+  UserEntityTypeDefinition,
+  UserEntityTypeIssueCode,
+  UserEntityTypeValidation,
+  UserEntityTypeValidationContext,
+  UserEntityTypeId,
   Annotation,
   BoundingBox,
   CoreRuntimeOptions,
@@ -78,6 +123,7 @@ import type {
   PersonGenderChoice,
   PreviewUpdated,
   RenderLegendPayload,
+  RenderLegendPageResult,
   WorkerJob,
   WorkerJobPayload,
   RenderPagePayload,
@@ -1082,7 +1128,13 @@ describe("@anonly/shared — Contracts", () => {
     ];
 
     it("es determinista: mismo (type, groupId, seed) → mismo valor", () => {
-      const req = { type: EntityType.DNI, groupId: "g-1", seed: "seed-x", indexInType: 1 };
+      const req = {
+        type: EntityType.DNI,
+        groupId: "g-1",
+        seed: "seed-x",
+        indexInType: 1,
+        country: "AR" as const,
+      };
       expect(synthesize(req)).toBe(synthesize(req));
     });
 
@@ -1091,12 +1143,14 @@ describe("@anonly/shared — Contracts", () => {
         type: EntityType.DNI,
         groupId: "g-1",
         seed: "seed-a",
+        country: "AR",
         indexInType: 1,
       });
       const b = synthesize({
         type: EntityType.DNI,
         groupId: "g-1",
         seed: "seed-b",
+        country: "AR",
         indexInType: 1,
       });
       // No garantiza 100% colisión cero por espacio finito, pero para tests alcanzamos !=.
@@ -1108,12 +1162,14 @@ describe("@anonly/shared — Contracts", () => {
         type: EntityType.DNI,
         groupId: "g-1",
         seed: "seed-x",
+        country: "AR",
         indexInType: 1,
       });
       const b = synthesize({
         type: EntityType.DNI,
         groupId: "g-2",
         seed: "seed-x",
+        country: "AR",
         indexInType: 1,
       });
       expect(a).not.toBe(b);
@@ -1124,7 +1180,7 @@ describe("@anonly/shared — Contracts", () => {
     // a mano (ADR-061) cambiaba el nombre falso de una persona que nadie tocó.
     it("cambiar indexInType con el mismo groupId NO cambia el valor (ADR-072 §1)", () => {
       for (const type of DRAWN_TYPES) {
-        const base = { type, groupId: "g-estable", seed: "seed-072" };
+        const base = { type, groupId: "g-estable", seed: "seed-072", country: "AR" as const };
         const conIndice3 = synthesize({ ...base, indexInType: 3 });
         const conIndice4 = synthesize({ ...base, indexInType: 4 });
         expect(conIndice4, `${type} cambió al renumerarse`).toBe(conIndice3);
@@ -1133,7 +1189,12 @@ describe("@anonly/shared — Contracts", () => {
 
     // ADR-072 §3: la contracara declarada. Custom interpola el número.
     it("Custom SÍ sigue el indexInType (ADR-072 §3)", () => {
-      const base = { type: EntityType.Custom, groupId: "g-1", seed: "seed-x" };
+      const base = {
+        type: EntityType.Custom,
+        groupId: "g-1",
+        seed: "seed-x",
+        country: "AR" as const,
+      };
       expect(synthesize({ ...base, indexInType: 3 })).toBe("custom-3");
       expect(synthesize({ ...base, indexInType: 4 })).toBe("custom-4");
     });
@@ -1143,6 +1204,7 @@ describe("@anonly/shared — Contracts", () => {
         type: EntityType.DNI,
         groupId: "g-1",
         seed: "seed-dni",
+        country: "AR",
         indexInType: 1,
       });
       expect(v).toMatch(/^\d{2}\.\d{3}\.\d{3}$/);
@@ -1154,6 +1216,7 @@ describe("@anonly/shared — Contracts", () => {
         type: EntityType.CUIT,
         groupId: "g-1",
         seed: "seed-cuit",
+        country: "AR",
         indexInType: 1,
       });
       expect(v).toMatch(/^\d{2}-\d{8}-\d$/);
@@ -1166,6 +1229,7 @@ describe("@anonly/shared — Contracts", () => {
           type: EntityType.CUIT,
           groupId: `g-${i}`,
           seed: "seed-masivo",
+          country: "AR",
           indexInType: i,
         });
         expect(isValidCuit(v), `CUIT inválido en groupId g-${i}: ${v}`).toBe(true);
@@ -1177,6 +1241,7 @@ describe("@anonly/shared — Contracts", () => {
         type: EntityType.License,
         groupId: "g-1",
         seed: "seed-lic",
+        country: "AR",
         indexInType: 1,
       });
       expect(v).toMatch(/^\d{2}-\d{4}-\d{2}$/);
@@ -1187,6 +1252,7 @@ describe("@anonly/shared — Contracts", () => {
         type: EntityType.CreditCard,
         groupId: "g-1",
         seed: "seed-cc",
+        country: "AR",
         indexInType: 1,
       });
       const digits = v
@@ -1212,6 +1278,7 @@ describe("@anonly/shared — Contracts", () => {
         type: EntityType.Email,
         groupId: "g-1",
         seed: "seed-email",
+        country: "AR",
         indexInType: 1,
       });
       expect(v).toMatch(/^[^@\s]+@[^@\s]+\.[^@\s]+$/);
@@ -1222,6 +1289,7 @@ describe("@anonly/shared — Contracts", () => {
         type: EntityType.Person,
         groupId: "g-1",
         seed: "seed-person",
+        country: "AR",
         indexInType: 1,
       });
       // Soporta acentos (Fernández, María, etc.)
@@ -1232,7 +1300,12 @@ describe("@anonly/shared — Contracts", () => {
     // paso, esto falla si alguno quedara vacío (`pick` lanza).
     it("personGender filtra el pool de nombres de pila (ADR-071 §5)", () => {
       for (let i = 0; i < 40; i++) {
-        const base = { type: EntityType.Person, groupId: `g-${i}`, seed: "seed-genero" };
+        const base = {
+          type: EntityType.Person,
+          groupId: `g-${i}`,
+          seed: "seed-genero",
+          country: "AR" as const,
+        };
 
         const femenino = synthesize({ ...base, indexInType: 1, personGender: "f" });
         expect(FEMALE_NAMES, `femenino inesperado: ${femenino}`).toContain(
@@ -1260,6 +1333,7 @@ describe("@anonly/shared — Contracts", () => {
           type: EntityType.Person,
           groupId: `g-${i}`,
           seed: "seed-sin-genero",
+          country: "AR",
           indexInType: 1,
         });
         nombres.add(v.split(" ")[0] ?? "");
@@ -1273,6 +1347,7 @@ describe("@anonly/shared — Contracts", () => {
         type: EntityType.Person,
         groupId: "g-1",
         seed: "seed-x",
+        country: "AR",
         indexInType: 1,
         personGender: "f",
       } as const;
@@ -1286,6 +1361,7 @@ describe("@anonly/shared — Contracts", () => {
         type: EntityType.DNI,
         groupId: "g-1",
         seed: "seed-x",
+        country: "AR",
         indexInType: 1,
       } as const;
       expect(synthesize({ ...base, personGender: "f" })).toBe(synthesize(base));
@@ -1642,6 +1718,7 @@ describe("@anonly/shared — Contracts", () => {
       };
       const payload: RenderLegendPayload = {
         rows: [row],
+        startRow: 0,
         pageWidthPt: 595,
         pageHeightPt: 842,
       };
@@ -1649,9 +1726,31 @@ describe("@anonly/shared — Contracts", () => {
       expect("documentId" in payload).toBe(false);
     });
 
+    it("RenderLegendPayload.startRow es requerido y RenderLegendPageResult lleva imagen y filas dibujadas (ADR-219 §6)", () => {
+      const payload: RenderLegendPayload = {
+        rows: [],
+        startRow: 13,
+        pageWidthPt: 595,
+        pageHeightPt: 842,
+      };
+      const result: RenderLegendPageResult = {
+        image: {
+          bytes: new Uint8Array([1]).buffer,
+          format: "png",
+          widthPx: 595,
+          heightPx: 842,
+        },
+        rowsDrawn: 13,
+      };
+      expect(payload.startRow).toBe(13);
+      expect(result.rowsDrawn).toBe(13);
+      expect(result.image.format).toBe("png");
+    });
+
     it("RenderLegendPayload.imageFormat es opcional", () => {
       const payload: RenderLegendPayload = {
         rows: [],
+        startRow: 0,
         pageWidthPt: 595,
         pageHeightPt: 842,
         imageFormat: "png",
@@ -1661,7 +1760,7 @@ describe("@anonly/shared — Contracts", () => {
   });
 
   describe("ExportSavePayload extendido con la leyenda (ADR-059 §6)", () => {
-    it("legendImage/legendPageWidthPt/legendPageHeightPt son opcionales (caso sin leyenda)", () => {
+    it("legendImages/legendPageWidthPt/legendPageHeightPt son opcionales (caso sin leyenda)", () => {
       const payload: ExportSavePayload = {
         documentId: "d1",
         metadata: {
@@ -1670,12 +1769,12 @@ describe("@anonly/shared — Contracts", () => {
           creationDate: new Date(0),
         },
       };
-      expect(payload.legendImage).toBeUndefined();
+      expect(payload.legendImages).toBeUndefined();
       expect(payload.legendPageWidthPt).toBeUndefined();
       expect(payload.legendPageHeightPt).toBeUndefined();
     });
 
-    it("acepta legendImage ya rasterizada junto a sus dimensiones en puntos PDF", () => {
+    it("acepta legendImages ya rasterizadas, en orden, junto a sus dimensiones en puntos PDF", () => {
       const legendImage: EncodedPageImage = {
         bytes: new Uint8Array([9, 9]).buffer,
         format: "png",
@@ -1689,11 +1788,12 @@ describe("@anonly/shared — Contracts", () => {
           creator: "Anonly",
           creationDate: new Date(0),
         },
-        legendImage,
+        legendImages: [legendImage, legendImage],
         legendPageWidthPt: 595,
         legendPageHeightPt: 842,
       };
-      expect(payload.legendImage?.format).toBe("png");
+      expect(payload.legendImages).toHaveLength(2);
+      expect(payload.legendImages?.[0]?.format).toBe("png");
       expect(payload.legendPageWidthPt).toBe(595);
       expect(payload.legendPageHeightPt).toBe(842);
     });
@@ -1902,6 +2002,7 @@ describe("@anonly/shared — Contracts", () => {
           defaultImageFormat: "jpeg",
           defaultJpegQuality: 0.85,
         },
+        detection: DEFAULT_DETECTION_CONFIG,
       };
       expect(_check).toBeDefined();
     });
@@ -2023,6 +2124,359 @@ describe("@anonly/shared — Contracts", () => {
         timeoutMs: 1000,
       };
       expect(job.payload).toBe(payload);
+    });
+  });
+
+  describe("Tipos propios, formatos y catálogos (ADR-219 a ADR-224, Contracts.md §5.2)", () => {
+    const USER_ID: UserEntityTypeId = "user:6f1c2d3e-4a5b-4c6d-8e7f-0a1b2c3d4e5f";
+
+    describe("isUserEntityType (ADR-219 §1)", () => {
+      it("es true para un user:<uuid>", () => {
+        expect(isUserEntityType(USER_ID)).toBe(true);
+      });
+
+      it("es false para cada tipo base", () => {
+        for (const type of Object.values(EntityType)) {
+          expect(isUserEntityType(type), type).toBe(false);
+        }
+      });
+
+      it("estrecha el tipo a UserEntityTypeId", () => {
+        const id: EntityTypeId = USER_ID;
+        if (isUserEntityType(id)) {
+          const estrecho: UserEntityTypeId = id;
+          expect(estrecho).toBe(USER_ID);
+        } else {
+          throw new Error("debía ser un tipo propio");
+        }
+      });
+    });
+
+    describe("EntityTypeId en los campos ensanchados (ADR-219 §1)", () => {
+      it("acepta un tipo base y un tipo propio en Occurrence, EntityGroup, ConflictCandidate y Conflict", () => {
+        const bbox: BoundingBox = { x: 0, y: 0, width: 1, height: 1 };
+        const occ: Occurrence = {
+          id: "o-1",
+          value: "0170-0994 11",
+          normalizedValue: "0170099411",
+          bbox,
+          pageIndex: 0,
+          source: DetectionSource.Regex,
+          confidence: 1,
+          entityType: USER_ID,
+          formatId: "fmt:1",
+          formatOrigin: "user",
+        };
+        const ref: OccurrenceRef = {
+          occurrenceId: occ.id,
+          value: occ.value,
+          pageIndex: 0,
+          bbox,
+          source: DetectionSource.Regex,
+          formatId: "fmt:1",
+        };
+        const group: EntityGroup = {
+          id: "g-1",
+          type: USER_ID,
+          canonicalValue: occ.value,
+          members: [ref],
+          replacementMode: ReplacementMode.Mask,
+          replacementValue: "XXXX-XXXX XX",
+          indexInType: 1,
+          enabled: true,
+          aliases: [occ.value],
+          replacementValueUserSet: false,
+          needsReview: false,
+          replacementPreviews: {
+            placeholder: "[T 01]",
+            mask: "XXXX-XXXX XX",
+            synthetic: "",
+            placeholderLadder: ["[T 01]"],
+          },
+          formatId: "fmt:1",
+          createdAt: 0,
+          updatedAt: 0,
+        };
+        const candidate: ConflictCandidate = {
+          source: DetectionSource.Regex,
+          entityType: EntityType.DNI,
+          confidence: 1,
+          value: occ.value,
+          formatId: "dni-ar",
+        };
+        const conflict: Conflict = {
+          id: "c-1",
+          groupId: group.id,
+          reason: ConflictReason.Overlap,
+          candidates: [candidate],
+          resolved: true,
+          resolvedType: USER_ID,
+        };
+        expect(occ.entityType).toBe(USER_ID);
+        expect(group.type).toBe(USER_ID);
+        expect(conflict.resolvedType).toBe(USER_ID);
+        expect(candidate.entityType).toBe(EntityType.DNI);
+      });
+
+      it("acepta un tipo propio en RuleTarget, MarkerLegendEntry, ManualEntityRequest y las vistas previas", () => {
+        const target: RuleTarget = { kind: "type", entityType: USER_ID };
+        const entry: MarkerLegendEntry = { type: USER_ID, prefixes: ["T"], markerCount: 1 };
+        const manual: ManualEntityRequest = { value: "x", entityType: USER_ID };
+        const request: EditPreviewRequest = { kind: "type", groupId: "g", type: USER_ID };
+        const previewGroup: EditPreviewGroup = {
+          groupId: null,
+          type: USER_ID,
+          indexInType: 1,
+          canonicalValue: "x",
+          memberCount: 1,
+          replacementMode: ReplacementMode.Placeholder,
+          replacementValue: "[T 01]",
+        };
+        expect(target.entityType).toBe(USER_ID);
+        expect(entry.type).toBe(USER_ID);
+        expect(manual.entityType).toBe(USER_ID);
+        expect(request.kind === "type" && request.type).toBe(USER_ID);
+        expect(previewGroup.type).toBe(USER_ID);
+      });
+
+      it("acepta un tipo propio en los payloads ConflictResolved y ConflictResolveRequested", () => {
+        const resolved: ConflictResolved = {
+          documentId: "d",
+          conflictId: "c",
+          entityType: USER_ID,
+        };
+        const requested: ConflictResolveRequested = {
+          documentId: "d",
+          conflictId: "c",
+          entityType: USER_ID,
+        };
+        expect(resolved.entityType).toBe(USER_ID);
+        expect(requested.entityType).toBe(USER_ID);
+      });
+    });
+
+    describe("RegexFinished.skippedFormats (ADR-220 §6)", () => {
+      it("es opcional: ausente equivale a ninguno", () => {
+        const sin: RegexFinished = { documentId: "d", occurrenceCount: 0, durationMs: 1 };
+        const con: RegexFinished = {
+          ...sin,
+          skippedFormats: [{ formatId: "fmt:1", pageIndices: [0, 2] }],
+        };
+        expect(sin.skippedFormats).toBeUndefined();
+        expect(con.skippedFormats?.[0]?.pageIndices).toEqual([0, 2]);
+      });
+    });
+
+    describe("SyntheticRequest.country (ADR-221 §4)", () => {
+      it('acepta country "AR" y no mueve el valor al cambiar indexInType', () => {
+        const req: SyntheticRequest = {
+          type: EntityType.DNI,
+          groupId: "g-1",
+          seed: "seed-x",
+          indexInType: 1,
+          country: "AR",
+        };
+        expect(synthesize(req)).toBe(synthesize({ ...req, indexInType: 9 }));
+      });
+    });
+
+    describe("Formas de los tipos nuevos", () => {
+      it("UserEntityTypeDefinition lleva id, name y shortLabels opcionales", () => {
+        const minima: UserEntityTypeDefinition = { id: USER_ID, name: "Historia clínica" };
+        const completa: UserEntityTypeDefinition = {
+          ...minima,
+          shortLabels: { level1: "HCLI", level2: "HC" },
+        };
+        expect(minima.shortLabels).toBeUndefined();
+        expect(completa.shortLabels?.level2).toBe("HC");
+      });
+
+      it("FormatDefinition admite las cuatro piezas, variantes, contexto y basedOn", () => {
+        const piezas: ReadonlyArray<FormatPiece> = [
+          { kind: "chars", charClass: "digit", min: 4, max: 4 },
+          { kind: "separator", chars: ["-", " "], optional: true },
+          { kind: "text", value: "HC" },
+          { kind: "optional", pieces: [{ kind: "chars", charClass: "alnum", min: 1, max: 3 }] },
+        ];
+        const clases: ReadonlyArray<FormatCharClass> = [
+          "digit",
+          "letter",
+          "upper",
+          "lower",
+          "alnum",
+        ];
+        const separadores: ReadonlyArray<FormatSeparator> = [" ", "-", ".", "/"];
+        const def: FormatDefinition = {
+          id: "fmt:2",
+          name: "Historia",
+          entityType: USER_ID,
+          variants: [piezas],
+          contextBefore: ["historia"],
+          basedOn: "dni-ar",
+          enabled: true,
+        };
+        expect(def.variants[0]).toHaveLength(4);
+        expect(clases).toHaveLength(5);
+        expect(separadores).toHaveLength(4);
+      });
+
+      it("CatalogFormatInfo, CatalogFormatRef y BaseFormatSetting", () => {
+        const kinds: ReadonlyArray<CatalogFormatKind> = ["structure", "control"];
+        const info: CatalogFormatInfo = {
+          id: "dni-ar",
+          country: "universal",
+          name: "DNI",
+          entityType: EntityType.DNI,
+          kind: kinds[0] ?? "structure",
+        };
+        const ref: CatalogFormatRef = {
+          id: "ref:1",
+          country: "AR",
+          catalogFormatId: "dni-ar",
+          enabled: true,
+        };
+        const setting: BaseFormatSetting = { formatId: "dni-ar", enabled: false };
+        expect(info.definition).toBeUndefined();
+        expect(ref.enabled).toBe(true);
+        expect(setting.enabled).toBe(false);
+      });
+
+      it("las validaciones y comparaciones llevan ok/issues, tramos y ejemplos", () => {
+        const ctx: UserEntityTypeValidationContext = { country: "AR", existing: [] };
+        const valT: UserEntityTypeValidation = { ok: false, issues: [{ code: "name_empty" }] };
+        const fctx: FormatValidationContext = { userTypes: [], existingFormats: [] };
+        const valF: FormatValidation = {
+          ok: false,
+          issues: [{ code: "no_variants" }, { code: "variant_without_chars", variantIndex: 0 }],
+        };
+        const issue: FormatIssue = { code: "text_empty", variantIndex: 1, pieceIndex: 2 };
+        const match: FormatTestMatch = { start: 0, end: 3 };
+        const input: FormatComparisonInput = {
+          country: "AR",
+          baseFormats: [],
+          userFormats: [],
+          catalogRefs: [],
+        };
+        const cmp: FormatComparison = {
+          identicalTo: null,
+          overlaps: [{ formatId: "dni-ar", example: "12345678" }],
+        };
+        const codes: ReadonlyArray<UserEntityTypeIssueCode> = ["label_taken", "id_taken"];
+        const fcodes: ReadonlyArray<FormatIssueCode> = ["too_many_states", "id_invalid"];
+        expect(ctx.existing).toEqual([]);
+        expect(valT.ok).toBe(valT.issues.length === 0);
+        expect(fctx.userTypes).toEqual([]);
+        expect(valF.ok).toBe(valF.issues.length === 0);
+        expect(issue.pieceIndex).toBe(2);
+        expect(match.end).toBeGreaterThan(match.start);
+        expect(input.country).toBe("AR");
+        expect(cmp.identicalTo).toBeNull();
+        expect(codes).toHaveLength(2);
+        expect(fcodes).toHaveLength(2);
+      });
+
+      it("FormatsFileValidation es una unión discriminada por ok", () => {
+        const content: FormatsFileContent = {
+          kind: "anonly-formats",
+          version: 1,
+          types: [],
+          formats: [],
+          catalogRefs: [],
+        };
+        const ok: FormatsFileValidation = { ok: true, content };
+        const mal: FormatsFileValidation = {
+          ok: false,
+          issues: [{ code: "version_newer" }, { code: "format_invalid", path: "formats[0]" }],
+        };
+        const code: FormatsFileIssueCode = "not_json";
+        expect(ok.ok && ok.content.version).toBe(1);
+        expect(!mal.ok && mal.issues).toHaveLength(2);
+        expect(code).toBe("not_json");
+      });
+    });
+
+    describe("Constantes de la tabla de §6", () => {
+      it("los límites FORMAT_* y USER_TYPE_* tienen los valores del contrato", () => {
+        expect(FORMAT_MAX_VARIANTS).toBe(8);
+        expect(FORMAT_MAX_PIECES).toBe(16);
+        expect(FORMAT_MAX_REPEAT).toBe(64);
+        expect(FORMAT_MAX_TEXT).toBe(40);
+        expect(FORMAT_MAX_CONTEXT).toBe(5);
+        expect(FORMAT_MAX_STATES).toBe(1024);
+        expect(USER_TYPE_NAME_MAX).toBe(40);
+        expect(USER_TYPE_SHORT_LABEL_MAX).toBe(8);
+      });
+
+      it("FORMAT_ADMITTING_BASE_TYPES son exactamente DNI, CUIT, Phone, License y Plate", () => {
+        expect([...FORMAT_ADMITTING_BASE_TYPES].sort()).toEqual(
+          [
+            EntityType.DNI,
+            EntityType.CUIT,
+            EntityType.Phone,
+            EntityType.License,
+            EntityType.Plate,
+          ].sort(),
+        );
+        expect(FORMAT_ADMITTING_BASE_TYPES.has(EntityType.Person)).toBe(false);
+      });
+
+      it("DEFAULT_DETECTION_CONFIG es Argentina sin nada propio", () => {
+        expect(DEFAULT_DETECTION_CONFIG).toEqual({
+          country: "AR",
+          baseFormats: [],
+          userTypes: [],
+          userFormats: [],
+          catalogRefs: [],
+        });
+      });
+    });
+
+    describe("alphanumericKey (ADR-219 §4, ADR-220 §5)", () => {
+      it('ejemplo del contrato: "0170-0994 11" -> "0170099411"', () => {
+        expect(alphanumericKey("0170-0994 11")).toBe("0170099411");
+      });
+
+      it("quita diacríticos y pasa a minúsculas", () => {
+        expect(alphanumericKey("Historia Clínica Ñandú")).toBe("historiaclinicanandu");
+      });
+
+      it("normaliza a NFC antes de comparar: forma compuesta y descompuesta dan la misma clave", () => {
+        expect(alphanumericKey("é")).toBe(alphanumericKey("é"));
+        expect(alphanumericKey("é")).toBe("e");
+      });
+
+      it("cadena vacía y solo puntuación dan cadena vacía", () => {
+        expect(alphanumericKey("")).toBe("");
+        expect(alphanumericKey(" -./,;() ")).toBe("");
+      });
+
+      it("conserva letras no latinas", () => {
+        expect(alphanumericKey("Ж-12")).toBe("ж12");
+        expect(alphanumericKey("日本 語")).toBe("日本語");
+      });
+    });
+
+    describe("maskByCharacters (ADR-219 §3, ADR-220 §5)", () => {
+      it('ejemplo del contrato: "0170-0994 11" -> "XXXX-XXXX XX"', () => {
+        expect(maskByCharacters("0170-0994 11")).toBe("XXXX-XXXX XX");
+      });
+
+      it("las letras con diacríticos y en mayúscula o minúscula pasan a X", () => {
+        expect(maskByCharacters("Ñandú-Ab")).toBe("XXXXX-XX");
+      });
+
+      it("cadena vacía y solo puntuación quedan igual", () => {
+        expect(maskByCharacters("")).toBe("");
+        expect(maskByCharacters(" -./ ")).toBe(" -./ ");
+      });
+
+      it("letras no latinas pasan a X", () => {
+        expect(maskByCharacters("Ж-1")).toBe("X-X");
+      });
+
+      it("un carácter combinante suelto no es letra y queda", () => {
+        expect(maskByCharacters("é")).toBe("X́");
+      });
     });
   });
 });

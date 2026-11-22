@@ -241,6 +241,8 @@ describe("Cambiar tipo", () => {
       after: "[ORGANIZACION 03]",
       note: "Pasa a Organizaciones con el N.º 03, el próximo libre.",
       dropsGender: true,
+      keepsSynthetic: false,
+      becomesLabel: false,
     });
     expect(summarizeTypeChange(group(), null)).toBeNull();
   });
@@ -256,11 +258,15 @@ describe("Cambiar tipo", () => {
     expect(
       typeChangeToastText(
         "Banco Nación",
+        "Organización",
         previewGroup({ type: EntityType.Organization, indexInType: 3 }),
       ),
     ).toEqual({
-      title: "Cambiaste el tipo de «Banco Nación»",
-      description: "Ahora es Organización N.º 03",
+      title: "«Banco Nación» ahora es Organización",
+      description: expect.stringMatching(/^Se reemplaza como .+.$/),
+    });
+    expect(typeChangeToastText("Banco Nación", "Organización", undefined)).toEqual({
+      title: "«Banco Nación» ahora es Organización",
     });
   });
 });

@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=ux | dependencias=00_Project_Vision.md,ui/React_Client.md,ADR-011-Grouping-First.md,ADR-012-Replacement-Modes.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-150-La-Pantalla-De-Escaneo-Dura-Lo-Que-Dura-El-Escaneo.md,adr/ADR-151-La-Primera-Pagina-Ya-Esta-Dibujada-Cuando-Se-Abre-El-Panel.md,adr/ADR-152-La-Pantalla-De-Escaneo-Dice-En-Que-Pagina-Va.md,adr/ADR-168-Pantallas-De-Carga-Y-Escaneo-Tras-Pruebas-De-Usuario.md,adr/ADR-169-La-Pantalla-De-Trabajo-Tras-Pruebas-De-Usuario.md,adr/ADR-170-Las-Vistas-Previas-De-Edicion-Las-Calcula-El-Core.md,adr/ADR-171-El-Usuario-Puede-Eliminar-Una-Entidad.md,adr/ADR-172-Deshacer-Y-Rehacer-Exactos.md,adr/ADR-174-Un-Agregado-Manual-Que-Choca-Se-Resuelve-En-El-Momento.md,adr/ADR-175-Un-Choque-Manual-No-Queda-Colgado.md,adr/ADR-176-Un-Choque-Pendiente-Bloquea-El-Export.md,adr/ADR-177-Una-Entidad-Eliminada-No-Ocupa-Lugar.md,adr/ADR-178-Lo-Contenido-Se-Oculta-Solo-Si-Su-Contenedor-Se-Elimina.md | audiencia=IA-implementador-ui+humanos | fase=4 (§3.1 aclarado en fase 10, ADR-036 §9; §3.3/§5.4 en fase 10.5 por ADR-057 —tokens abreviados— y ADR-058 —el reemplazo no se derrama, marca de degradado—, §8.2 por ADR-059 —checkbox de referencia de marcadores—; §3.3/§5.4 en fase 10.6 por ADR-060 —género— y por ADR-071/ADR-072 —el control de género pasa a ser un botón de tres estados visible solo en `placeholder`/`synthetic`, con la marca de "sin determinar" fusionada adentro, y el sintético respeta el género y deja de cambiar solo—; §5.4b en fase 10.7 por ADR-061 —agregado manual de entidades—; §5.4 en fase 10.9 por ADR-076 —un texto de reemplazo escrito a mano se conserva, qué lo reemplaza y cómo se vuelve al automático— y ADR-074 §6 —la marca de degradado se enciende más seguido porque ahora mide contra el rectángulo real—; §1/§2/§3/§4/§5/§7/§8/§11 reescritos en el rediseño post-10.9 por **ADR-087** —tres momentos en vez de cuatro paneles: un solo visor con toggle, el modo de reemplazo en tres niveles del árbol, el panel de Reglas retirado, el export sin controles técnicos, y la pantalla de escaneo con piso y techo—; §7.2/§7.3 en fase 11 por ADR-150/ADR-151/ADR-152 — la pantalla de escaneo pierde el techo y suelta cuando el stage es terminal, precalienta la página 1 para no entrar a un panel vacío, y muestra progreso real por etapa incluido el OCR) -->
+<!-- CONTEXT: scope=ux | dependencias=adr/ADR-224-Lo-Que-La-1.1-Cambia-En-El-Panel-De-Entidades-Y-El-Visor.md,adr/ADR-225-Un-Tipo-Del-Documento-Se-Edita-Se-Borra-Y-Se-Guarda.md,adr/ADR-226-El-Formato-Se-Nombra-Solo-Cuando-Es-Del-Usuario.md,adr/ADR-227-Los-Formatos-De-Deteccion-Se-Abren-Desde-Inicio-Y-Se-Guardan-A-Pedido.md,adr/ADR-228-El-Generador-Se-Arma-Con-Piezas-Que-Se-Arrastran.md,adr/ADR-229-La-Pantalla-De-Trabajo-En-La-1.1.md,00_Project_Vision.md,ui/React_Client.md,ADR-011-Grouping-First.md,ADR-012-Replacement-Modes.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-150-La-Pantalla-De-Escaneo-Dura-Lo-Que-Dura-El-Escaneo.md,adr/ADR-151-La-Primera-Pagina-Ya-Esta-Dibujada-Cuando-Se-Abre-El-Panel.md,adr/ADR-152-La-Pantalla-De-Escaneo-Dice-En-Que-Pagina-Va.md,adr/ADR-168-Pantallas-De-Carga-Y-Escaneo-Tras-Pruebas-De-Usuario.md,adr/ADR-169-La-Pantalla-De-Trabajo-Tras-Pruebas-De-Usuario.md,adr/ADR-170-Las-Vistas-Previas-De-Edicion-Las-Calcula-El-Core.md,adr/ADR-171-El-Usuario-Puede-Eliminar-Una-Entidad.md,adr/ADR-172-Deshacer-Y-Rehacer-Exactos.md,adr/ADR-174-Un-Agregado-Manual-Que-Choca-Se-Resuelve-En-El-Momento.md,adr/ADR-175-Un-Choque-Manual-No-Queda-Colgado.md,adr/ADR-176-Un-Choque-Pendiente-Bloquea-El-Export.md,adr/ADR-177-Una-Entidad-Eliminada-No-Ocupa-Lugar.md,adr/ADR-178-Lo-Contenido-Se-Oculta-Solo-Si-Su-Contenedor-Se-Elimina.md | audiencia=IA-implementador-ui+humanos | fase=4 (§3.1 aclarado en fase 10, ADR-036 §9; §3.3/§5.4 en fase 10.5 por ADR-057 —tokens abreviados— y ADR-058 —el reemplazo no se derrama, marca de degradado—, §8.2 por ADR-059 —checkbox de referencia de marcadores—; §3.3/§5.4 en fase 10.6 por ADR-060 —género— y por ADR-071/ADR-072 —el control de género pasa a ser un botón de tres estados visible solo en `placeholder`/`synthetic`, con la marca de "sin determinar" fusionada adentro, y el sintético respeta el género y deja de cambiar solo—; §5.4b en fase 10.7 por ADR-061 —agregado manual de entidades—; §5.4 en fase 10.9 por ADR-076 —un texto de reemplazo escrito a mano se conserva, qué lo reemplaza y cómo se vuelve al automático— y ADR-074 §6 —la marca de degradado se enciende más seguido porque ahora mide contra el rectángulo real—; §1/§2/§3/§4/§5/§7/§8/§11 reescritos en el rediseño post-10.9 por **ADR-087** —tres momentos en vez de cuatro paneles: un solo visor con toggle, el modo de reemplazo en tres niveles del árbol, el panel de Reglas retirado, el export sin controles técnicos, y la pantalla de escaneo con piso y techo—; §7.2/§7.3 en fase 11 por ADR-150/ADR-151/ADR-152 — la pantalla de escaneo pierde el techo y suelta cuando el stage es terminal, precalienta la página 1 para no entrar a un panel vacío, y muestra progreso real por etapa incluido el OCR) -->
 
 # Anonly — UX Guidelines
 
@@ -44,6 +44,8 @@ existe para linealizar el trabajo —el usuario se queda en ②b, scrollea, edit
 sino para que los otros tres momentos dejen de robarle espacio.
 
 ### 2.1 ① Cargar
+
+> **1.1 (ADR-227 §1):** la fila de tres tarjetas pasa a ser una sola, «Detección automática», que abre «Formatos de detección», y las dos garantías van debajo de la zona de carga. Ver §11b y `Components.md` §13b.1.
 
 Pantalla completa. Sin panel de entidades ni de reglas montados. **Organizada en cajas**
 (ADR-168 §1), porque sin contenedores la pantalla se leía vacía:
@@ -136,6 +138,8 @@ ensanchar se vuelve sola al panel de trabajo, con el documento y las ediciones i
 ---
 
 ## 3. Árbol de entidades
+
+> **1.1 (ADR-225, ADR-226, ADR-229):** banda «Nuevo tipo», tipos solo de este documento, subnivel por formato del usuario y filtros. Ver §11b.
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
@@ -469,6 +473,8 @@ layout en vez de explicarse en un tooltip.
 
 ## 5. Visor PDF (uno solo, con toggle)
 
+> **1.1 (ADR-226 §4, ADR-229 §2):** tooltip sobre las entidades y «Nuevo tipo» en el selector de la selección. Ver §11b.3 y §11b.12.
+
 ### 5.1 Layout
 
 > **Reemplaza al lado a lado.** La versión anterior especificaba dos columnas con scroll
@@ -506,7 +512,18 @@ bajo ese rótulo es la peor clase de defecto posible en una herramienta de priva
 
 ### 5.2 Highlight en la vista Original
 
-- Cada ocurrencia de un grupo habilitado tiene un borde color sobre el bbox.
+- Cada ocurrencia de un grupo habilitado tiene un borde color sobre el bbox, con un relleno suave del
+  mismo color, para que se vea de un vistazo qué detectó el análisis.
+- Una ocurrencia de un grupo **desactivado** se marca con borde punteado gris y sin relleno: no se
+  va a tapar, y tiene que notarse.
+- Lo dibuja la capa de interacción, no la imagen (`Components.md` §5.4): desactivar un grupo o
+  cambiarle el tipo se ve al instante.
+- **Se puede apagar** desde Configuración › Apariencia, «Resaltar en el original lo que se
+  detectó» (prendido por defecto): a quien le molesta ver el documento marcado lo ve limpio, y el
+  tooltip y el clic siguen igual. Pasada de UI de la 1.1, 2026-11-21.
+- Después de un clic sobre una entidad, sus cajas quedan con el relleno fuerte mientras su fila se
+  ilumina en el panel. **La fila se ilumina más en el tema oscuro** (acento al 40 % y un borde
+  interior), porque el 18 % del tema claro casi no se ve sobre fondo oscuro.
 - Color por tipo: Personas=verde, DNI=azul, Direcciones=naranja, etc. (paleta accesible, ver §9).
 - Hover sobre un highlight: tooltip con tipo, valor canónico, modo de reemplazo, conteo de ocurrencias del grupo.
 - Click en un highlight: selecciona el grupo correspondiente en el árbol (scroll into view + resaltado).
@@ -601,6 +618,8 @@ Hay **tres vías**, y todas terminan en lo mismo — cambia de dónde sale el va
 ---
 
 ## 6. Panel de conflicto
+
+> **1.1 (ADR-222, ADR-229 §6):** un conflicto entre dos formatos nombra los dos y su origen. Ver §11b.2.
 
 Cuando el usuario click en un conflicto (desde el árbol o desde un highlight):
 
@@ -817,6 +836,8 @@ resultado equivocado con cara de éxito. La salida de ese error es reintentar, y
 
 ### 8.2 Diálogo de export (ADR-087 §5)
 
+> **1.1 (ADR-229 §7):** suma el aviso de formatos que no se aplicaron. Ver §11b.13.
+
 ```
 Exportar documento anonimizado
 ─────────────────────────────────────────
@@ -952,6 +973,8 @@ Atajos de teclado:
 | `Cmd/Ctrl+F` | buscar en entidades |
 | `Cmd/Ctrl+E` | exportar |
 | `Cmd/Ctrl+.` | cancelar pipeline |
+| `Cmd/Ctrl+Z` | deshacer (ADR-172); en «Formatos de detección», el último cambio del borrador (§11b.11) |
+| `Cmd/Ctrl+Y`, `Cmd/Ctrl+Shift+Z` | rehacer (ADR-172) |
 | `Cmd/Ctrl++/-/0` | zoom visores |
 | `↑/↓` | navegar grupos |
 | `Space` | toggle grupo seleccionado |
@@ -972,6 +995,8 @@ Atajos de teclado:
 
 ## 11. Estados vacíos
 
+> **1.1:** los estados vacíos nuevos están en §11b.15.
+
 | Estado | UI |
 |---|---|
 | App recién abierta, sin documento | **No es un estado vacío: es el momento ① de §2.1**, pantalla completa. El panel de entidades no está montado, así que no tiene estado vacío que mostrar. |
@@ -984,6 +1009,292 @@ Atajos de teclado:
 > §3.4 son controles siempre presentes con un valor vigente, así que no tienen estado vacío.
 
 ---
+
+## 11b. Detección a medida (1.1, ADR-225 a ADR-229)
+
+> Reglas de la interfaz de la 1.1. El detalle de cada componente está en `Components.md` §13b.
+> Fuente visual: el lienzo «Anonly 1.1 — UI final», aprobado por el mantenedor el 2026-11-16.
+
+### 11b.1 Vocabulario
+
+| Se dice | No se dice | Qué es |
+|---|---|---|
+| **Tipo** | «categoría», «entidad» para el tipo | Qué dato es: Teléfono, CBU |
+| **Formato** | «patrón», «regex», «regla» | Una forma en que ese dato aparece escrito |
+| **Tus tipos** | «tipos custom», «personalizados» | Los tipos propios, guardados y del documento |
+| **Solo en este documento** | «auxiliar», «temporal», «doc.» | El tipo propio creado con el PDF abierto |
+| **Tus formatos** | «formatos de usuario» | Los propios, las copias editadas y, desde la 1.1.1, los traídos de otro país |
+| **Formatos de detección** | «configuración de detección» | El diálogo del árbol |
+| **Nuevo formato** / **Nuevo tipo** | «Agregar», «+» solo | Las dos acciones de alta, siempre con su sustantivo |
+
+«Concreto» y «auxiliar» son nombres de la documentación (ADR-225, Contexto §3): **no aparecen
+en la interfaz**.
+
+### 11b.2 El formato se nombra solo cuando es del usuario (ADR-226)
+
+- En el panel, el subnivel por formato aparece **solo para formatos del usuario**, y solo si
+  separa algo. Lo que detecta el catálogo va directo bajo su tipo, igual que lo del modelo.
+- El filtro se llama «Tus formatos» y no aparece si no hay ninguno.
+- El tooltip del visor muestra «Formato» solo si es del usuario.
+- **Excepción**: el panel de conflicto entre dos formatos nombra los dos y de dónde sale cada uno.
+
+### 11b.3 Dar de alta: punteado
+
+- **Todo lo que crea un tipo es punteado**: la banda «Nuevo tipo» del panel de entidades, la banda
+  «Nuevo tipo» de «Tus tipos» en «Formatos de detección» y la celda «Nuevo tipo» del selector de
+  tipo. El punteado no se usa para otra cosa en estas pantallas, salvo la parte opcional del
+  generador.
+- **Crear un formato es un botón**, «Nuevo formato», en la banda del tipo. Pesa más que «Editar»:
+  uno lleva borde y texto de acento, el otro va sin borde.
+- **En un selector, «Nuevo tipo» es una opción más**: se convierte en un campo de nombre en el
+  mismo lugar, sin abrir un diálogo encima, y pide solo el nombre (ADR-229 §2).
+
+### 11b.4 Prender y apagar: casilla
+
+Un formato se prende y se apaga con una **casilla**, la misma que habilita una entidad en el
+panel. La aplicación **no usa interruptores deslizantes** (decisión del mantenedor, 2026-11-15).
+
+### 11b.5 Guardar a pedido, y no perder cambios
+
+- «Formatos de detección» junta los cambios y los guarda con **«Guardar»**, que muestra cuántos
+  hay y está apagado si no hay ninguno. Es distinto de Configuración, que guarda al cerrar: acá
+  guardar recrea el Core y aplica al próximo documento (ADR-227 §3).
+- **Cerrar con cambios sin guardar pide confirmación**, en el árbol y en el generador, también con
+  un clic fuera del diálogo. La confirmación tiene siempre la misma forma: ícono, pregunta, una
+  línea, y «Seguir editando» / «Descartar cambios».
+- **Borrar una variante del generador pide confirmación** y dice cuántas piezas se pierden.
+
+### 11b.6 Arrastrar tiene siempre otro camino
+
+- Las piezas del generador se reordenan arrastrando, y se meten y se sacan de una parte opcional
+  de la misma forma (ADR-228 §3).
+- **Nunca es el único camino**: la pieza elegida tiene botones «Mover a la izquierda» y «Mover a
+  la derecha».
+- Mientras se arrastra, una marca muestra dónde va a quedar la pieza.
+- Cuando una fila de piezas pasa a un segundo renglón, una flecha al final de un renglón y otra al
+  principio del siguiente dicen por dónde sigue.
+
+### 11b.7 Paneles flotantes
+
+- La prueba del generador («Probalo») y los filtros del panel son **flotantes**: se abren a
+  pedido, no empujan nada (UX-10) y se cierran con su botón o con `Esc`.
+- El panel de prueba además **se mueve**, arrastrándolo de su encabezado, y arranca cerrado.
+
+### 11b.8 El estado se dice en una caja fija
+
+El generador dice si el formato se puede crear en una caja al final del panel, arriba de los
+botones. Mide siempre lo mismo y está siempre: verde suave si está listo, amarilla si hay un aviso
+que deja crear, roja si hay un error. Con un error, el botón principal se apaga (ADR-228 §7).
+
+### 11b.9 Lo que se escribe y queda guardado se avisa donde se escribe
+
+El texto fijo de un formato y sus palabras de contexto quedan guardados en el equipo, en claro
+(ADR-223 §3). El aviso «no escribas datos de un caso» va **junto a cada uno de esos campos**, no
+en el pie del diálogo. El texto de prueba dice, en su panel, que no se guarda.
+
+### 11b.10 Borrar un tipo del documento destapa datos, y se dice
+
+La confirmación de «Borrar tipo…» sobre un tipo con entidades las lista y avisa: «Sus entidades
+quedan libres y descubiertas. Dejan de tener tipo y de ocultarse: se van a ver tal cual en el
+documento y en la copia que exportes.». Sugiere cambiarles el tipo antes (ADR-225 §4). Se deshace
+como cualquier edición.
+
+**Con choques sin resolver** (decisión del mantenedor, 2026-11-20). Si alguna entidad del tipo está
+en un choque sin resolver (un grupo del tipo con un conflicto, o un agregado a mano de ese tipo que
+espera que el usuario elija), la confirmación suma un aviso, antes de la lista:
+
+- «Hay N choque(s) sin resolver con entidades de este tipo. Si borrás el tipo, esas entidades
+  también se borran y sus choques se descartan: queda lo que se detectó. Conviene resolver los
+  choques antes de borrar.»
+- No bloquea: «Borrar tipo y entidad(es)» sigue disponible. Es una fricción, no una traba.
+- La interfaz cuenta los choques desde los conflictos sin resolver del snapshot: los de los grupos
+  del tipo, y los `heldManual` con un candidato de ese tipo. No hace falta un método nuevo.
+
+### 11b.11 Deshacer en la 1.1
+
+- Crear, editar y borrar un tipo del documento son ediciones: entran a la pila de §3.3b y su aviso
+  trae «Deshacer» con la pista `Ctrl+Z`.
+- «Crear y agregar» y «Crear y cambiar» son **una sola** entrada.
+- **«Guardar para los próximos documentos» no es una edición del documento**: su aviso tiene
+  «Deshacer», sin la pista `Ctrl+Z`, y `Ctrl+Z` no lo alcanza (ADR-225 §5).
+- Dentro de «Formatos de detección», las acciones de un menú ⋯ se deshacen desde su aviso hasta
+  que se guarda.
+- **Ahí `Ctrl+Z` también deshace el último cambio del borrador** (decisión del mantenedor,
+  2026-11-20). Es porque el diálogo atrapa el foco y el «Deshacer» del aviso no se alcanza con el
+  teclado. No actúa con el foco en un campo de texto, donde deshace lo escrito, ni con un
+  subdiálogo abierto. El aviso sigue igual de legible: trae «Deshacer» y la pista `Ctrl+Z`. La
+  ayuda de atajos lo lista.
+
+### 11b.12 El tooltip del visor
+
+Aparece a los ~400 ms de dejar el mouse quieto sobre una entidad, en las dos vistas; en la vista
+anonimizada, sobre el reemplazo. Se va al salir, con `Esc` o con un clic. No aparece mientras se
+arrastra para seleccionar, durante un zoom, ni con un menú o un diálogo abierto, y **no se ata al
+foco** (ADR-226 §4).
+
+### 11b.13 Avisos de formatos que no se aplicaron
+
+Un formato que falló en alguna página se avisa en la barra, en la ranura del aviso de análisis
+incompleto, y otra vez en el diálogo de exportar. Los dos nombran el formato y las páginas y
+ofrecen «Ir a la página N». **No bloquea la exportación** (ADR-229 §7).
+
+### 11b.14 La ayuda de atajos
+
+Está en Configuración, en la sección «Atajos de teclado». No hay ícono en la barra. Lista los
+atajos de la tabla de §9, que es la misma que los declara (ADR-224 §5, ADR-229 §8).
+
+### 11b.15 Estados vacíos nuevos
+
+| Estado | UI |
+|---|---|
+| «Formatos de detección» sin tipos propios | «Tus tipos» muestra solo la banda punteada «Nuevo tipo», con su aclaración |
+| Tipo propio sin formatos | «Todavía no tiene formatos: no detecta nada solo. Igual podés usarlo al agregar una entidad a mano.» |
+| Búsqueda del árbol sin resultados | «Ningún tipo ni formato coincide con «…».» y «Borrar la búsqueda» |
+| Documento sin entidades ni tipos del documento | La banda punteada «Nuevo tipo» arriba, en su ranura, y debajo el estado vacío del panel. Decisión del mantenedor, 2026-11-21 |
+| Tipo del documento sin entidades | La banda, con «Todavía no tiene entidades. Seleccioná el texto en el PDF o agregalo desde acá.» y «Agregar entidad» |
+| Filtros sin resultados | «Ninguna entidad cumple los filtros» y «Quitar filtros» |
+| Generador sin pieza elegida | «Elegí una pieza para ajustarla, o sumá una con «Pieza». Arrastralas para cambiarles el orden; con clic derecho, las movés o las borrás.» |
+
+### 11b.16 Cada falla dice por qué y qué hacer
+
+Decisión del mantenedor (2026-11-20). Crear tipos y formatos es personalizar la detección, y el
+usuario tiene que entender por qué algo no se puede.
+
+- **Todo código de falla que llega a la interfaz tiene un texto.** Son los de
+  `UserEntityTypeIssueCode`, `FormatIssueCode` y `FormatsFileIssueCode` (`Contracts.md` §5.2).
+- **Cada texto dice dos cosas:** por qué no se puede, con el dato concreto que choca, y qué hacer.
+  Nunca muestra el código ni un mensaje técnico.
+- **Va donde ya está previsto:** en la ranura de alto fijo del formulario del tipo (`Components.md`
+  §13b.3) o en la caja de estado del generador (§11b.8), sin mover el layout.
+- **Los textos salen de una tabla de textos de la aplicación**, como los ejemplos de los formatos
+  con control (ADR-227 §6).
+
+Textos aprobados por el mantenedor (`label_taken` y los demás el 2026-11-20). `{…}` es un dato que
+completa la interfaz; los números son los límites de `Contracts.md` §6 y salen de sus constantes,
+no se escriben a mano.
+
+- **Un valor largo que escribió el usuario se cita acortado** (decisión del mantenedor,
+  2026-11-21): entre « » van hasta 10 caracteres y «…», así el «qué hacer» del final entra en la
+  línea de ayuda (§11b.17) o en la caja de estado aunque el nombre sea largo. Por ejemplo, «Ya
+  tenés un formato llamado «Legajo del…». Elegí otro nombre…». Se corta el valor, nunca la
+  explicación, y un carácter fuera del plano básico (un emoji) cuenta como uno.
+  - Se acortan {TEXTO} de `short_label_invalid`, {NOMBRE} de `name_taken`, {N} cuando es el nombre
+    de una variante, {PALABRA} y {TIPO}.
+  - No se acortan {CARÁCTER}, que es uno solo, {ETIQUETA}, ni los valores de los textos de
+    «Importar un archivo», que van en un diálogo y no en una línea.
+
+**Tipos propios** (`UserEntityTypeIssueCode`, ranura del formulario, `Components.md` §13b.3):
+
+| Código | Texto |
+|---|---|
+| `name_empty` | «El tipo necesita un nombre. Escribí cómo querés llamarlo, por ejemplo «Historia clínica».» |
+| `name_too_long` | «El nombre tiene {N} caracteres y el máximo es 40. Acortalo.» |
+| `name_invalid_chars` | «El nombre tiene «{CARÁCTER}», y solo se admiten letras, números, espacios y guiones. Sacalo o cambialo.» |
+| `name_without_letter` | «El nombre necesita al menos una letra: con solo números o guiones no se entiende en el documento. Sumá una palabra.» |
+| `short_label_invalid` | «La versión corta «{TEXTO}» tiene que tener de 1 a 8 letras o números, sin espacios ni signos. Corregila, o dejala vacía para usar la automática.» |
+| `label_taken` | «Ya hay un tipo que se reemplaza como {ETIQUETA}, y en el documento no se distinguirían. Elegí otro nombre.» |
+| `id_invalid` | «Este tipo quedó dañado y no se puede guardar. Crealo de nuevo.» |
+| `id_taken` | «Este tipo choca con otro guardado y no se puede guardar. Crealo de nuevo.» |
+
+**Formatos** (`FormatIssueCode`, caja de estado del generador, §11b.8). {P} y {N} salen de
+`pieceIndex` y `variantIndex`, contados desde 1. Si la variante tiene nombre (ADR-233), {N} es
+su nombre entre comillas: «La variante «Con guiones» no tiene piezas.». En
+`variant_name_too_long` {N} es siempre el número, porque el nombre es lo que falla:
+
+| Código | Texto |
+|---|---|
+| `name_empty` | «El formato necesita un nombre. Escribí uno que te ayude a reconocerlo en la lista.» |
+| `name_too_long` | «El nombre tiene {N} caracteres y el máximo es 40. Acortalo.» |
+| `name_taken` | «Ya tenés un formato llamado «{NOMBRE}». Elegí otro nombre para distinguirlos en la lista.» |
+| `no_variants` | «El formato no tiene ninguna variante. Sumá una con «+ Variante».» |
+| `too_many_variants` | «Un formato admite hasta 8 variantes y este tiene {N}. Borrá alguna o creá otro formato.» |
+| `variant_name_too_long` | «El nombre de la variante {N} tiene {L} caracteres y el máximo es 40. Acortalo.» |
+| `variant_names_mismatch` | «Los nombres de las variantes de este formato quedaron dañados. Crealo de nuevo.» |
+| `variant_empty` | «La variante {N} no tiene piezas. Sumá una con «+ Pieza» o borrá la variante.» |
+| `variant_without_chars` | «La variante {N} tiene solo textos fijos y separadores, y así no reconoce ningún dato. Sumale un bloque de letras o números.» |
+| `too_many_pieces` | «La variante {N} tiene {M} piezas y el máximo es 16, contando las de las partes opcionales. Juntá bloques o borrá alguna.» |
+| `chars_range_invalid` | «En la pieza {P} de la variante {N}, «Cuántos» va de {MIN} a {MAX}: el mínimo tiene que ser 1 o más y no pasar del máximo. Corregí los números.» |
+| `chars_repeat_too_large` | «En la pieza {P} de la variante {N}, el máximo es {MAX} y un bloque admite hasta 64. Bajalo o partí el dato en dos bloques.» |
+| `text_empty` | «El texto fijo de la pieza {P} (variante {N}) está vacío. Escribilo o borrá la pieza.» |
+| `text_too_long` | «El texto fijo de la pieza {P} (variante {N}) tiene {L} caracteres y el máximo es 40. Acortalo.» |
+| `separator_empty` | «El separador de la pieza {P} (variante {N}) no tiene ningún carácter elegido. Elegí al menos uno o borrá la pieza.» |
+| `optional_empty` | «Hay una parte opcional vacía en la variante {N}. Arrastrale una pieza o borrala.» |
+| `optional_nested` | «Una parte opcional no puede ir dentro de otra (variante {N}). Sacala afuera.» |
+| `context_empty` | «Hay una palabra de contexto vacía. Escribila o sacala.» |
+| `context_too_long` | «La palabra de contexto «{PALABRA}» tiene {L} caracteres y el máximo es 40. Acortala.» |
+| `too_many_context_words` | «Un formato admite hasta 5 palabras de contexto y este tiene {N}. Sacá alguna.» |
+| `too_many_states` | «El formato es demasiado complejo para revisarlo rápido en cada página. Achicá los rangos de «Cuántos», sacá partes opcionales o partilo en dos formatos.» |
+| `type_unknown` | «El tipo «{TIPO}» ya no existe. Elegí otro en «Es un…».» |
+| `type_not_admitted` | «A «{TIPO}» no se le pueden sumar formatos propios. En «Es un…» elegí {TIPOS ADMITIDOS} o uno de tus tipos.» |
+| `id_invalid` | «Este formato quedó dañado y no se puede guardar. Crealo de nuevo.» |
+
+**{TIPOS ADMITIDOS}** se arma de `FORMAT_ADMITTING_BASE_TYPES`, con el nombre que la interfaz ya
+muestra para cada tipo, para que la lista no quede vieja.
+
+**Importar un archivo** (`FormatsFileIssueCode`, diálogo «No se importó nada», `Components.md`
+§13b.4):
+
+| Código | Texto |
+|---|---|
+| `not_json` | «No se pudo leer el archivo: está dañado o no es un archivo de formatos. Elegí otro archivo.» |
+| `wrong_kind` | «El archivo no es de formatos de Anonly. Elegí uno exportado desde «Exportar formatos».» |
+| `version_invalid` | «El archivo no dice de qué versión es, así que no se puede leer con seguridad. Exportalo de nuevo desde Anonly.» |
+| `version_newer` | «El archivo es de una versión más nueva de Anonly o trae formatos de un país que esta versión no tiene. Actualizá Anonly y volvé a importarlo.» |
+| `schema_invalid` | «El archivo está incompleto o se modificó a mano: {UBICACIÓN} no tiene la forma esperada. Exportalo de nuevo desde Anonly.» |
+| `type_invalid` | «El tipo «{NOMBRE}» del archivo no se puede crear: {MOTIVO}. Corregilo donde se creó y exportalo de nuevo.» |
+| `format_invalid` | «El formato «{NOMBRE}» del archivo tiene un problema: {MOTIVO}. Corregilo donde se creó y exportalo de nuevo.» |
+| `format_type_missing` | «El formato «{NOMBRE}» es de un tipo que no viene en el archivo. Exportalo de nuevo junto con su tipo.» |
+
+- **{MOTIVO}**: el issue del archivo dice solo qué elemento falló (`path`), no por qué. La
+  interfaz vuelve a validar ese tipo o formato con `validateUserEntityType` o `validateFormat`
+  (con el mismo contexto que `validateFormatsFile`) y usa el texto de su primer código de las
+  tablas de arriba, en minúscula y sin el «qué hacer», que ya lo dice esta fila.
+- **{UBICACIÓN}** dice el elemento en palabras («el tipo 2», «el formato 3»), nunca el `path`
+  crudo.
+- `id_invalid`, `id_taken` y `optional_nested` no salen del formulario: solo con datos guardados o
+  importados dañados. Tienen texto igual, porque todo código que llega a la interfaz lo tiene.
+
+---
+
+### 11b.17 Errores de campo y fondo de los diálogos (decisión del mantenedor, 2026-11-21)
+
+Vale para toda la aplicación, no solo para la detección a medida.
+
+- **El error de un campo va en su línea de ayuda.** Debajo de cada campo que puede dar un error hay
+  una sola línea chica (12 px, alto fijo de una línea) que **siempre** dice algo útil: el contador
+  (`6/40`), una pista o cómo va a quedar (`Así se ve: [LEGAJO 01]`). Cuando hay un error, esa
+  misma línea pasa a rojo con el texto del error y el campo se marca con borde rojo. **No hay hueco
+  vacío reservado** bajo un campo, y nada se mueve al aparecer o irse el error.
+  - Si el error no entra en una línea, **usa un segundo renglón** que ocupa el espacio que ya hay
+    entre ese bloque y el siguiente (16 px o más), así que tampoco mueve nada. Sin eso, el «qué
+    hacer» del error, que va al final (§11b.16), quedaba cortado. Si no entra en dos renglones, se
+    corta con «…» y el texto completo queda en `title` y en `aria-describedby` del campo. Pasada de
+    UI de la 1.1, 2026-11-21.
+  - La ayuda dice algo que el resto del diálogo no dice: si el diálogo ya muestra cómo queda (la
+    escalera de «Cómo se reemplaza» de un tipo), la línea da el contador y qué caracteres se
+    admiten, no repite el reemplazo.
+  - Esto reemplaza las ranuras vacías de alto fijo bajo los campos; las cajas de estado de alto fijo
+    que siempre muestran algo (la del generador, §11b.8) no cambian.
+- **Un diálogo desenfoca lo de atrás.** El fondo de todo diálogo modal lleva, además del velo oscuro,
+  un desenfoque leve (`backdrop-filter: blur` de unos 3 px). Un diálogo abierto encima de otro
+  desenfoca también al de abajo, para que se vea claro cuál está al frente.
+
+### 11b.18 Scroll solo cuando hace falta (pasada de UI de la 1.1, 2026-11-21)
+
+Vale para toda la aplicación.
+
+- **Un diálogo no scrollea por unos pocos píxeles.** Con su contenido de siempre —incluidos los
+  tipos propios en el selector y una pieza elegida en el generador—, cada diálogo entra sin scroll
+  en una ventana de 1280 × 800. Si sobra poco, se compacta: se juntan avisos que dicen lo mismo, un
+  aviso pasa a un lugar que ya existe (el pie, el estado vacío de una caja) o se achica una caja de
+  alto fijo. Scrollea lo que es largo de verdad: una lista, la configuración entera.
+- **Una caja dentro de un diálogo no tiene scroll propio** si su contenido es corto y de largo
+  conocido (el ajuste de una pieza): crece, y si hace falta scrollea el cuerpo del diálogo. Dos
+  barras de scroll anidadas para unos píxeles no se usan.
+- **La barra de scroll es de la aplicación**: angosta, redondeada, sin flechas, sobre un riel
+  transparente. El color sale de `text-secondary` con transparencia, más marcado al pasar el mouse,
+  así que acompaña al tema claro y al oscuro (`Components.md` §10.3). En un navegador que no admite
+  `::-webkit-scrollbar`, `scrollbar-width: thin` y `scrollbar-color` con los mismos colores.
 
 ## 12. Referencias
 

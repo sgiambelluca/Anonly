@@ -30,16 +30,21 @@
 
 import { EntityType, type TextMatch, type Word } from "@anonly/anonymization-core";
 import { CheckIcon, PlusIcon, SearchIcon, XIcon } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 
 import { actions } from "../../core-adapter/actions.js";
 import { useEntitiesStore } from "../../store/entities.store.js";
 import { useViewerStore } from "../../store/viewer.store.js";
 import { Button } from "../common/Button.js";
+import { FieldHint } from "../common/FieldHint.js";
 import { addManualEntityWithFeedback } from "../entities/addManualEntity.js";
-import { ENTITY_TYPE_COLOR } from "../entities/entityTypeColors.js";
 import { describeEntityNumber } from "../entities/entityTypeLabels.js";
 import { EntityTypePicker } from "../entities/EntityTypePicker.js";
+import { observeMenuLayout, type MenuLayout } from "../entities/menuPlacement.js";
+import { NEW_TYPE_HINT_ID } from "../entities/newTypeInline.js";
+import { TypeDot } from "../entities/TypeDot.js";
+import { useTypeChoice } from "../entities/useTypeChoice.js";
+import { useUserTypes } from "../entities/useUserTypes.js";
 
 import { createSearchDebouncer } from "./searchDebounce.js";
 import {
@@ -64,6 +69,9 @@ interface ResultRow {
 /** A quién se agrega: la consulta entera ("+ Agregar") o un resultado. */
 type AddTarget = { readonly kind: "query" } | { readonly kind: "result"; readonly index: number };
 
+/** Separación entre el globo y lo que lo ancla (el campo o la lista). */
+const ADD_POPOVER_GAP_PX = 8;
+
 export function DocumentSearchBox({ onActiveMatchChange }: DocumentSearchBoxProps) {
   const query = useViewerStore((state) => state.searchQuery);
   const groupsByType = useEntitiesStore((state) => state.groupsByType);
@@ -73,6 +81,7 @@ export function DocumentSearchBox({ onActiveMatchChange }: DocumentSearchBoxProp
   const [addTarget, setAddTarget] = useState<AddTarget | null>(null);
   const debouncerRef = useRef(createSearchDebouncer());
   const containerRef = useRef<HTMLDivElement>(null);
+  const resultsRef = useRef<HTMLDivElement>(null);
 
   const onActiveMatchChangeRef = useRef(onActiveMatchChange);
   useEffect(() => {
@@ -221,13 +230,15 @@ export function DocumentSearchBox({ onActiveMatchChange }: DocumentSearchBoxProp
         <AddPopover
           value={query.trim()}
           count={matches.length}
-          className="left-0 top-full mt-2"
+          anchorRef={containerRef}
+          className="left-0"
           onClose={() => setAddTarget(null)}
         />
       ) : null}
 
       {panelOpen && hasQuery && addTarget?.kind !== "query" ? (
         <div
+          ref={resultsRef}
           role="region"
           aria-label="Resultados de la búsqueda"
           className="absolute left-0 top-full z-30 mt-2 flex w-[29rem] max-w-[calc(100vw-2rem)] flex-col rounded-xl border border-border bg-bg-primary shadow-md"
@@ -290,7 +301,8 @@ export function DocumentSearchBox({ onActiveMatchChange }: DocumentSearchBoxProp
               key={addTarget.index}
               value={rows[addTarget.index]?.context.match ?? ""}
               count={null}
-              className="right-2 top-full mt-2"
+              anchorRef={resultsRef}
+              className="right-2"
               onClose={() => setAddTarget(null)}
             />
           ) : null}
@@ -312,6 +324,7 @@ function ResultItem({
   readonly onStartAdd: () => void;
 }) {
   const { match, context, status } = row;
+  const userTypes = useUserTypes();
   const hidden = status.kind === "hidden";
   return (
     <li
@@ -332,17 +345,13 @@ function ResultItem({
           <span className="flex-1" />
           {status.kind === "hidden" ? (
             <span className="inline-flex items-center gap-1.5 rounded-md bg-bg-tertiary px-2 py-0.5 text-sm font-medium text-text-primary">
-              <span
-                aria-hidden
-                className="h-2 w-2 rounded-full"
-                style={{ background: ENTITY_TYPE_COLOR[status.type] }}
-              />
-              Oculto como {describeEntityNumber(status.type, status.indexInType)}
+              <TypeDot type={status.type} />
+              Oculto como {describeEntityNumber(status.type, status.indexInType, userTypes)}
             </span>
           ) : (
             <span className="rounded-md bg-warning/15 px-2 py-0.5 text-sm font-medium text-warning-strong">
               {status.kind === "disabled"
-                ? `Sin ocultar · ${describeEntityNumber(status.type, status.indexInType)} desactivada`
+                ? `Sin ocultar · ${describeEntityNumber(status.type, status.indexInType, userTypes)} desactivada`
                 : "Sin ocultar"}
             </span>
           )}
@@ -377,23 +386,63 @@ function ResultItem({
 function AddPopover({
   value,
   count,
+  anchorRef,
   className,
   onClose,
 }: {
   readonly value: string;
   /** Resultados de la lupa, si se sabe; `null` lo calcula (el valor exacto puede diferir). */
   readonly count: number | null;
+  /**
+   * Lo que ancla el globo: el campo de búsqueda o la lista de resultados. Es
+   * también su contenedor posicionado, así que el `top` del layout es directo.
+   */
+  readonly anchorRef: RefObject<HTMLDivElement | null>;
+  /** Solo la posición horizontal: la vertical la decide ADR-207. */
   readonly className: string;
   readonly onClose: () => void;
 }) {
-  const [entityType, setEntityType] = useState<EntityType>(EntityType.Person);
+  const ref = useRef<HTMLDivElement>(null);
+  // ADR-207: abajo si entra, arriba si entra ahí; si no, lo mínimo para quedar
+  // entero en la ventana, y con scroll propio si es más alto. Sin esto, en una
+  // ventana baja los botones del globo de un resultado quedaban afuera.
+  const [layout, setLayout] = useState<MenuLayout>({ placement: "bottom", top: 0, maxHeight: 0 });
+  useLayoutEffect(() => {
+    const anchor = anchorRef.current;
+    const popover = ref.current;
+    if (anchor === null || popover === null) return;
+    return observeMenuLayout(
+      anchor,
+      popover,
+      (measured) => {
+        // El `top` de un hijo absoluto se cuenta desde adentro del borde del
+        // ancla (la lista tiene 1 px), y el layout, desde su borde exterior.
+        const next = { ...measured, top: measured.top - anchor.clientTop };
+        setLayout((previous) =>
+          previous.placement === next.placement &&
+          previous.top === next.top &&
+          previous.maxHeight === next.maxHeight
+            ? previous
+            : next,
+        );
+      },
+      { gap: ADD_POPOVER_GAP_PX },
+    );
+  }, [anchorRef]);
+  const choice = useTypeChoice(EntityType.Person);
   const [notFound, setNotFound] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [estimated] = useState(() => count ?? actions.findText(value).length);
 
   async function handleAdd(): Promise<void> {
+    const resolved = choice.resolve();
+    if (resolved === null) return;
     setSubmitting(true);
-    const feedback = await addManualEntityWithFeedback({ value, entityType });
+    const feedback = await addManualEntityWithFeedback(
+      { value, entityType: resolved.entityType },
+      resolved.newType,
+      resolved.saveNewType === true,
+    );
     setSubmitting(false);
     if (feedback === "not-found") {
       setNotFound(true);
@@ -409,28 +458,48 @@ function AddPopover({
     <div
       role="dialog"
       aria-label="Agregar la búsqueda como entidad"
-      className={`absolute z-40 flex w-[22.5rem] max-w-[calc(100vw-2rem)] flex-col gap-2.5 rounded-xl border border-border bg-bg-primary p-3.5 text-sm text-text-primary shadow-md ${className}`}
+      ref={ref}
+      data-placement={layout.placement}
+      // `[&>*]:shrink-0`: con alto máximo, el flex achicaría la línea con `truncate`
+      // hasta cero y la medida intrínseca del globo saldría corta.
+      className={`absolute z-40 flex w-[22.5rem] max-w-[calc(100vw-2rem)] flex-col gap-2.5 overflow-y-auto [&>*]:shrink-0 overscroll-contain rounded-xl border border-border bg-bg-primary p-3.5 text-sm text-text-primary shadow-md ${className}`}
+      style={{ top: layout.top, maxHeight: layout.maxHeight }}
     >
       <p className="truncate">
         Agregar <b className="font-semibold">«{value}»</b> como…
       </p>
-      <EntityTypePicker value={entityType} onChange={setEntityType} aria-label="Tipo de entidad" />
-      <p
-        aria-live="polite"
-        className={`h-5 truncate ${notFound ? "text-error" : "text-text-secondary"}`}
-      >
-        {notFound
-          ? "No se encontró ese texto exacto en el documento."
-          : estimated === 1
-            ? "Se va a ocultar su única aparición en el documento."
-            : `Se van a ocultar sus ${estimated} apariciones en el documento.`}
-      </p>
+      <EntityTypePicker
+        {...choice.pickerProps}
+        onNewTypeSubmit={() => void handleAdd()}
+        aria-label="Tipo de entidad"
+      />
+      {/* La línea de pie: el error del nombre del tipo nuevo ocupa su lugar (ADR-229 §2).
+          Es una línea de ayuda (UX_Guidelines.md §11b.17, Components.md §13b.7): su segundo
+          renglón usa los 18 px que hay hasta los botones, y el campo la nombra con su id. */}
+      <div className="mb-2">
+        <FieldHint
+          id={NEW_TYPE_HINT_ID}
+          help={
+            estimated === 1
+              ? "Se va a ocultar su única aparición en el documento."
+              : `Se van a ocultar sus ${estimated} apariciones en el documento.`
+          }
+          error={
+            choice.error ?? (notFound ? "No se encontró ese texto exacto en el documento." : null)
+          }
+        />
+      </div>
       <div className="flex justify-end gap-2">
         <Button variant="secondary" onClick={onClose} disabled={submitting}>
           Cancelar
         </Button>
-        <Button variant="primary" loading={submitting} onClick={() => void handleAdd()}>
-          Agregar
+        <Button
+          variant="primary"
+          loading={submitting}
+          disabled={!choice.canConfirm}
+          onClick={() => void handleAdd()}
+        >
+          {choice.creating ? "Crear y agregar" : "Agregar"}
         </Button>
       </div>
     </div>

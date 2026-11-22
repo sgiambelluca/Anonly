@@ -36,6 +36,7 @@ import { bootstrapAutomaticChecksPreference } from "./appStartup.js";
 import { ToastHost } from "./components/common/ToastHost.js";
 import { UpdateNotice } from "./components/common/UpdateNotice.js";
 import { ManualOverlapDialogHost } from "./components/conflicts/ManualOverlapDialogHost.js";
+import { EmptyPanelNewType } from "./components/entities/EmptyPanelNewType.js";
 import { EntitiesPanel } from "./components/entities/EntitiesPanel.js";
 import { hasAnyGroup } from "./components/entities/entityTree.js";
 import type { AppPhase } from "./components/screens/appPhase.js";
@@ -54,7 +55,8 @@ import { SelectionHintCard } from "./components/viewer/SelectionHintCard.js";
 import { ViewerModeToggle } from "./components/viewer/ViewerModeToggle.js";
 import { ZoomControls } from "./components/viewer/ZoomControls.js";
 import { initCore } from "./core-adapter/index.js";
-import { deriveEngineConfigOverrides } from "./core-adapter/settingsToEngineConfig.js";
+import { deriveCoreOverrides } from "./core-adapter/settingsToEngineConfig.js";
+import { useDetectionStore } from "./store/detection.store.js";
 import { useEntitiesStore } from "./store/entities.store.js";
 import {
   installsWithoutAsking,
@@ -90,7 +92,12 @@ export function App() {
     // Después de hidratar y antes del primer render con contenido: si se
     // aplicara más tarde, la app parpadearía en claro antes de pasar a oscuro.
     applyTheme(useSettingsStore.getState().theme);
-    const overrides = deriveEngineConfigOverrides(useSettingsStore.getState());
+    // ADR-223 §2: lo guardado en «Formatos de detección» entra al primer Core.
+    useDetectionStore.getState().load();
+    const overrides = deriveCoreOverrides(
+      useSettingsStore.getState(),
+      useDetectionStore.getState().saved,
+    );
     initCore(overrides).catch((error: unknown) => {
       // console.error es la única salida disponible acá sin ocultar el fallo
       // (no-console permite warn/error en apps/, Code_Standards.md §12). No
@@ -128,6 +135,8 @@ function renderPhase(phase: AppPhase): ReactNode {
     return (
       <div className="h-screen overflow-hidden">
         <LoadScreen />
+        {/* La pantalla de carga emite el aviso «Formatos guardados»: necesita su propio host. */}
+        <ToastHost />
       </div>
     );
   }
@@ -237,7 +246,10 @@ function LeftPanel() {
  * cajón (`drawer`) — el mismo árbol, en dos envases.
  */
 function SidebarContent() {
-  const hasGroups = useEntitiesStore((state) => hasAnyGroup(state.groupsByType));
+  // Un tipo del documento sin entidades también es contenido del panel (React_Client.md §3.9).
+  const hasGroups = useEntitiesStore(
+    (state) => hasAnyGroup(state.groupsByType) || state.documentTypes.length > 0,
+  );
 
   // El caso "sin documento" de `UX_Guidelines.md` §11 ya no llega acá: sin
   // documento la app está en `LoadScreen` y esta barra no se monta (ADR-087
@@ -249,6 +261,8 @@ function SidebarContent() {
   return (
     <>
       <PanelHeader title="Entidades" />
+      {/* UX_Guidelines.md §11b.15: la banda «Nuevo tipo» arriba, en su ranura fija. */}
+      <EmptyPanelNewType />
       <EmptyState
         icon={<FileTextIcon className="h-8 w-8" aria-hidden />}
         title="Todavía no hay datos detectados"

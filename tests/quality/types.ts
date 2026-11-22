@@ -7,7 +7,7 @@
  * `(entityType, value, pageIndex, source)` — el mismo shape, sin el campo que
  * no tiene sentido del otro lado.
  */
-import type { DetectionSource, EntityType } from "@anonly/shared";
+import type { DetectionSource, EntityType, EntityTypeId } from "@anonly/shared";
 
 export type TruthDetector = "regex" | "ner";
 
@@ -44,7 +44,7 @@ export interface ReferenceManifest {
  * (`DetectionSource.Regex` | `.NER` | `.Manual`).
  */
 export interface DetectedEntity {
-  readonly entityType: EntityType;
+  readonly entityType: EntityTypeId;
   readonly value: string;
   readonly pageIndex: number;
   readonly source: DetectionSource;

@@ -1,4 +1,5 @@
 import {
+  DEFAULT_DETECTION_CONFIG,
   DetectionSource,
   EngineDisposedError,
   EngineEvents,
@@ -15,9 +16,12 @@ import {
 } from "@anonly/shared";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
+import * as publicApi from "../index.js";
+import { DEFAULT_PATTERNS_AR } from "../patterns/default-ar.js";
 import { RegexEngine } from "../regex.engine.js";
 
 import {
+  createDetectionContext,
   createEngineContext,
   makeDocument,
   makePage,
@@ -170,35 +174,21 @@ describe("RegexEngine — contract tests", () => {
     expect(payload.durationMs).toBe(output.durationMs);
   });
 
-  it("addPattern adds a custom pattern that process() picks up", async () => {
-    await engine.init(ctx);
-    engine.addPattern({
-      id: "custom-code",
-      entityType: EntityType.Custom,
-      pattern: /\bCODE-\d{4}\b/g,
-      normalizer: (v: string) => v.toUpperCase(),
-      maskFormat: "CODE-XXXX",
-    });
-
-    const document = makeSinglePageDocument("doc-custom", ["Referencia", "CODE-1234"]);
-    const output = await engine.process({ document }, ctx);
-    expect(output.occurrenceCount).toBe(1);
-  });
-
-  it("removePattern stops applying a previously added custom pattern", async () => {
-    await engine.init(ctx);
-    engine.addPattern({
-      id: "custom-code",
-      entityType: EntityType.Custom,
-      pattern: /\bCODE-\d{4}\b/g,
-      normalizer: (v: string) => v.toUpperCase(),
-      maskFormat: "CODE-XXXX",
-    });
-    engine.removePattern("custom-code");
-
-    const document = makeSinglePageDocument("doc-custom-removed", ["CODE-1234"]);
-    const output = await engine.process({ document }, ctx);
-    expect(output.occurrenceCount).toBe(0);
+  it("index exports only the public API of §6 and the custom-pattern API is retired", () => {
+    expect(Object.keys(publicApi).sort()).toEqual([
+      "BASE_CATALOG",
+      "DEFAULT_PATTERNS_AR",
+      "RegexEngine",
+      "RegexInvalidPatternError",
+      "compareFormat",
+      "getCatalog",
+      "testFormat",
+      "validateFormat",
+    ]);
+    // ADR-220 §7: los patrones del usuario con `RegExp` ya no existen.
+    for (const retired of ["addPattern", "removePattern"]) {
+      expect(retired in engine).toBe(false);
+    }
   });
 
   it("dispose() clears state", async () => {
@@ -314,7 +304,7 @@ describe("RegexEngine — contract tests", () => {
       await engine.init(ctx);
       const busEmitSpy = vi.spyOn(ctx.bus, "emit");
       const document = makeSinglePageDocument("doc-find-literal-no-finish", ["María", "López"]);
-      const activePatternsBefore = engine["activePatterns"];
+      const planBefore = engine["plan"];
 
       await engine.findLiteral(
         { document, value: "María López", entityType: EntityType.Person },
@@ -325,11 +315,9 @@ describe("RegexEngine — contract tests", () => {
         ([, event]) => event === EngineEvents.REGEX_FINISHED,
       );
       expect(finishedCalls).toHaveLength(0);
-      // Misma referencia: recompileActivePatterns() (que reasigna un array
-      // nuevo) nunca se llamó. addPattern/removePattern son la única vía de
-      // mutar el registro (§1: findLiteral no la usa).
-      expect(engine["activePatterns"]).toBe(activePatternsBefore);
-      expect(engine["customPatterns"]).toEqual([]);
+      // Misma referencia: findLiteral no reasigna la lista que corre ni los
+      // formatos que init compiló (§1: no es una corrida de detección).
+      expect(engine["plan"]).toBe(planBefore);
     });
 
     it("findLiteral before init() throws EngineNotInitializedError", async () => {
@@ -370,16 +358,15 @@ describe("RegexEngine — contract tests", () => {
     it("searchText does not touch the pattern registry or any engine state", async () => {
       await engine.init(ctx);
       const document = makeSinglePageDocument("doc-search-text-no-state", ["María", "López"]);
-      const activePatternsBefore = engine["activePatterns"];
+      const planBefore = engine["plan"];
 
       const first = engine.searchText({ document, query: "María López" });
       const second = engine.searchText({ document, query: "María López" });
 
       expect(second).toEqual(first);
-      // Misma referencia: recompileActivePatterns() (que reasigna un array
-      // nuevo) nunca se llamó — searchText no toca el registro de patrones.
-      expect(engine["activePatterns"]).toBe(activePatternsBefore);
-      expect(engine["customPatterns"]).toEqual([]);
+      // Misma referencia: searchText no reasigna la lista que corre ni los
+      // formatos que init compiló.
+      expect(engine["plan"]).toBe(planBefore);
     });
   });
   // Caso 35 (ADR-211): la segunda búsqueda no toca los emails con `@`.
@@ -490,5 +477,115 @@ describe("RegexEngine — contract tests", () => {
     );
     expect(occurrences[0]?.value).toBe("Av. Corrientes 1980");
     expect(occurrences[0]?.normalizedValue).toBe("av. corrientes 1980");
+  });
+
+  // ─── 1.1, F2: catálogo y colisiones (ADR-221, ADR-222) ───
+
+  // Las páginas del snapshot de text-10p.pdf, que es la salida de la v1.16.
+  const v116Pages = (): ReadonlyArray<ReadonlyArray<string>> => [
+    "Contrato de servicios. Titular: Juan Pérez, DNI 34.567.891, CUIT 20-34567891-4.".split(" "),
+    "Contacto: juan.perez@example.com o al +54 11 1234-5678.".split(" "),
+    "Matrícula profesional MP-12345-6, patente ABC 123, vence 15/03/2030.".split(" "),
+  ];
+  const runPages = async (
+    runCtx: EngineContext,
+    pages: ReadonlyArray<ReadonlyArray<string>>,
+  ): Promise<{
+    readonly occurrences: ReadonlyArray<Occurrence>;
+    readonly finished: RegexFinished | undefined;
+  }> => {
+    const runEngine = new RegexEngine();
+    await runEngine.init(runCtx);
+    const emitSpy = vi.spyOn(runCtx.bus, "emit");
+    emitSpy.mockClear();
+    await runEngine.process(
+      {
+        document: makeDocument(
+          "doc-f2",
+          pages.map((tokens, i) => makePage(i, tokens)),
+        ),
+      },
+      runCtx,
+    );
+    await runEngine.dispose();
+    return {
+      occurrences: emitSpy.mock.calls
+        .filter(([, event]) => event === EngineEvents.ENTITY_FOUND)
+        .map(([, , payload]) => (payload as EntityFound).occurrence),
+      finished: emitSpy.mock.calls
+        .filter(([, event]) => event === EngineEvents.REGEX_FINISHED)
+        .map(([, , payload]) => payload as RegexFinished)[0],
+    };
+  };
+
+  // Caso 37.
+  it("default detection config emits the same occurrences as v1.16 plus base format ids", async () => {
+    // La lista que corre es exactamente la de la v1.16: los mismos quince
+    // patrones, los mismos objetos y en el mismo orden.
+    await engine.init(createDetectionContext(DEFAULT_DETECTION_CONFIG));
+    const plan = engine["plan"];
+    expect(plan.basePatterns).toHaveLength(DEFAULT_PATTERNS_AR.length);
+    plan.basePatterns.forEach((pattern, index) => {
+      expect(pattern).toBe(DEFAULT_PATTERNS_AR[index]);
+    });
+    expect(plan.userFormats).toEqual([]);
+    expect(plan.skippedRefIds).toEqual([]);
+
+    // Mismos spans, valores y eventos que el snapshot de la v1.16, más el id del patrón.
+    const { occurrences, finished } = await runPages(
+      createDetectionContext(DEFAULT_DETECTION_CONFIG),
+      v116Pages(),
+    );
+    expect(
+      occurrences.map((o) => [o.pageIndex, o.value, o.entityType, o.formatId, o.formatOrigin]),
+    ).toEqual([
+      [0, "34.567.891", EntityType.DNI, "dni-ar", "base"],
+      [0, "20-34567891-4", EntityType.CUIT, "cuit-ar", "base"],
+      [1, "juan.perez@example.com", EntityType.Email, "email", "base"],
+      [1, "+54 11 1234-5678", EntityType.Phone, "phone-mobile-ar", "base"],
+      [2, "MP-12345-6", EntityType.License, "license-ar", "base"],
+      [2, "ABC 123", EntityType.Plate, "plate-vieja-ar", "base"],
+      [2, "15/03/2030", EntityType.Date, "date-ar", "base"],
+    ]);
+    expect(finished?.occurrenceCount).toBe(7);
+  });
+
+  // Caso 52.
+  it("every process occurrence carries formatId and formatOrigin, findLiteral none", async () => {
+    const detectionCtx = createDetectionContext(DEFAULT_DETECTION_CONFIG);
+    const { occurrences } = await runPages(detectionCtx, v116Pages());
+    expect(occurrences.length).toBeGreaterThan(0);
+    const patternIds = new Set(DEFAULT_PATTERNS_AR.map((p) => p.id));
+    for (const occurrence of occurrences) {
+      expect(occurrence.formatId !== undefined && patternIds.has(occurrence.formatId)).toBe(true);
+      expect(occurrence.formatOrigin).toBe("base");
+    }
+
+    await engine.init(ctx);
+    const literalEmit = vi.spyOn(ctx.bus, "emit");
+    await engine.findLiteral(
+      {
+        document: makeSinglePageDocument("doc-literal-ids", ["Ana", "Gómez"]),
+        value: "Ana Gómez",
+        entityType: EntityType.Person,
+      },
+      ctx,
+    );
+    const manual = literalEmit.mock.calls
+      .filter(([, event]) => event === EngineEvents.ENTITY_FOUND)
+      .map(([, , payload]) => (payload as EntityFound).occurrence);
+    expect(manual).toHaveLength(1);
+    expect(manual[0]).not.toHaveProperty("formatId");
+    expect(manual[0]).not.toHaveProperty("formatOrigin");
+  });
+
+  it("REGEX_FINISHED omits skippedFormats when every format ran", async () => {
+    const { finished } = await runPages(
+      createDetectionContext(DEFAULT_DETECTION_CONFIG),
+      v116Pages(),
+    );
+    expect(finished).toBeDefined();
+    // Ausente, no vacío (ausente ≡ ninguno).
+    expect(finished).not.toHaveProperty("skippedFormats");
   });
 });

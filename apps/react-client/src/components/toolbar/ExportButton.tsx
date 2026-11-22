@@ -48,6 +48,7 @@ import { ExportDialog } from "../export/ExportDialog.js";
 
 import { exportBlockReason, pendingConflictIdsInTreeOrder } from "./exportBlockReason.js";
 import { isExportTriggerVisible, shouldMountExportButton } from "./exportButtonVisibility.js";
+import { matchesShortcut } from "./shortcuts.js";
 
 export function ExportButton() {
   const stage = usePipelineStore((state) => state.stage);
@@ -63,7 +64,7 @@ export function ExportButton() {
   useEffect(() => {
     if (!visible) return;
     function onKeydown(event: KeyboardEvent): void {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "e") {
+      if (matchesShortcut("export", event)) {
         if (blockReason !== null) return;
         event.preventDefault();
         setOpen(true);

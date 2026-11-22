@@ -20,6 +20,10 @@
  *
  * El globo "Agregar «X» como…" es flotante y usa `EntityTypePicker`.
  *
+ * **Tooltip de la entidad bajo el puntero** (ADR-226 §4): `useEntityHover` toma los
+ * mismos eventos del puntero y `EntityTooltip` flota sobre la página; ver
+ * `entityHover.ts` para qué es «bajo el puntero» en cada vista.
+ *
  * También pinta el resaltado del resultado activo de la lupa
  * (`activeMatchBbox`) — mismo mecanismo, sentido inverso.
  */
@@ -31,13 +35,33 @@ import {
   type PreviewInteractionGeometry,
   type Word,
 } from "@anonly/anonymization-core";
-import { useEffect, useRef, useState, type PointerEvent } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent,
+  type RefObject,
+} from "react";
 
 import { actions } from "../../core-adapter/actions.js";
+import { useDetectionStore } from "../../store/detection.store.js";
+import { useEntitiesStore } from "../../store/entities.store.js";
+import { useSettingsStore } from "../../store/settings.store.js";
 import { Button } from "../common/Button.js";
+import { FieldHint } from "../common/FieldHint.js";
 import { addManualEntityWithFeedback } from "../entities/addManualEntity.js";
 import { EntityTypePicker } from "../entities/EntityTypePicker.js";
+import { observeMenuLayout, type MenuLayout } from "../entities/menuPlacement.js";
+import { NEW_TYPE_HINT_ID } from "../entities/newTypeInline.js";
+import { useTypeChoice } from "../entities/useTypeChoice.js";
+import { useUserTypes } from "../entities/useUserTypes.js";
 
+import { entityHighlightsOnPage, HIGHLIGHT_PAD_PX, highlightStyle } from "./entityHighlights.js";
+import { clickConsumesSelection, isClickGesture } from "./entityHover.js";
+import { EntityTooltip } from "./EntityTooltip.js";
+import { buildEntityTooltip } from "./entityTooltipContent.js";
 import {
   blankStartAnchorIndex,
   pointIsCovered,
@@ -45,9 +69,18 @@ import {
   selectVisibleSpan,
   selectionDirection,
 } from "./interactionProjection.js";
+import { shiftIntoWindow } from "./popoverShift.js";
 import { dominantLineWords } from "./selectionLine.js";
+import { useEntityHover } from "./useEntityHover.js";
 import { wordsBoundingBox } from "./viewerGestures.js";
-import { pageRectToScreenRect, pointerSelectionToPageRect } from "./wordSelectionRect.js";
+import {
+  CLICK_TOLERANCE_PX,
+  pageRectToScreenRect,
+  pointerSelectionToPageRect,
+} from "./wordSelectionRect.js";
+
+/** Separación entre el recuadro de la selección y su globo: la de siempre (10 px desde la palabra). */
+const SELECTION_POPOVER_GAP_PX = 8;
 
 /** Lo señalado en el original: palabras de un renglón de una página. */
 export interface PageSelection {
@@ -105,6 +138,35 @@ export function WordSelectionOverlay({
   const [dragStart, setDragStart] = useState<Point | null>(null);
   const [dragCurrent, setDragCurrent] = useState<Point | null>(null);
   const dragRevisionRef = useRef<number | null>(null);
+  const selectionBoxRef = useRef<HTMLDivElement>(null);
+  // ADR-226 §4: el tooltip de la entidad bajo el puntero, con los mismos eventos
+  // que ya atiende esta capa. Flota; no mueve nada.
+  const hover = useEntityHover({
+    pageIndex,
+    kind,
+    displayWidth,
+    displayHeight,
+    interactionGeometry,
+    inert,
+    dragging: dragStart !== null,
+    hasSelection: selection !== null,
+  });
+  const userTypes = useUserTypes();
+  const detection = useDetectionStore((state) => state.saved);
+  // UX_Guidelines.md §5.2: el resaltado de las entidades, solo en el original,
+  // con la página mostrando su propia imagen (ADR-213 §6) y si el usuario no lo
+  // apagó en Configuración (Components.md §13b.8).
+  const groupsByType = useEntitiesStore((state) => state.groupsByType);
+  const highlightsOn = useSettingsStore((state) => state.highlightEntities);
+  // El grupo que se acaba de elegir con un clic queda marcado mientras su fila se ilumina.
+  const flashGroupId = useEntitiesStore((state) => state.flashGroupId);
+  const entityHighlights = useMemo(
+    () =>
+      kind === "original" && !inert && highlightsOn
+        ? entityHighlightsOnPage([...groupsByType.values()].flat(), pageIndex)
+        : [],
+    [kind, inert, highlightsOn, groupsByType, pageIndex],
+  );
 
   function pointFromEvent(event: PointerEvent<HTMLDivElement>): Point {
     const rect = event.currentTarget.getBoundingClientRect();
@@ -144,6 +206,13 @@ export function WordSelectionOverlay({
     const end = pointFromEvent(event);
     setDragStart(null);
     setDragCurrent(null);
+    // ADR-226 §4: un clic sin arrastre sobre una entidad activa la selecciona en la lista.
+    // Y no sigue como selección de texto (no abre el globo de agregar).
+    const isClick = isClickGesture(dragStart, end, CLICK_TOLERANCE_PX);
+    if (clickConsumesSelection(isClick, isClick && hover.onClick(end))) {
+      dragRevisionRef.current = null;
+      return;
+    }
     if (dragRevisionRef.current !== actions.getPreviewInteractionRevision(pageIndex)) {
       dragRevisionRef.current = null;
       return;
@@ -245,7 +314,10 @@ export function WordSelectionOverlay({
   }
 
   const pageSize =
-    (activeMatchBboxes?.length ?? 0) > 0 || selection !== null
+    (activeMatchBboxes?.length ?? 0) > 0 ||
+    selection !== null ||
+    hover.hovered !== null ||
+    entityHighlights.length > 0
       ? actions.getPageSize(pageIndex)
       : null;
   const toScreen = (box: BoundingBox) =>
@@ -267,6 +339,8 @@ export function WordSelectionOverlay({
   const selectionBox = selection !== null && !inert ? wordsBoundingBox(selection.words) : null;
   const selectionRect = selectionBox !== null ? toScreen(selectionBox) : null;
 
+  const tooltipRect = hover.hovered !== null ? toScreen(hover.hovered.anchor) : null;
+
   const dragRect =
     dragStart && dragCurrent
       ? {
@@ -280,10 +354,40 @@ export function WordSelectionOverlay({
   return (
     <div
       className={`absolute inset-0 select-none ${!inert && (kind === "original" || interactionGeometry !== undefined) ? "cursor-crosshair" : "pointer-events-none"}`}
-      onPointerDown={handlePointerDown}
-      onPointerMove={handlePointerMove}
+      onPointerDown={(event) => {
+        hover.onPointerDown();
+        handlePointerDown(event);
+      }}
+      onPointerMove={(event) => {
+        handlePointerMove(event);
+        hover.onPointerMove(event);
+      }}
+      onPointerLeave={hover.onPointerLeave}
       onPointerUp={handlePointerUp}
     >
+      {/* Debajo de todo lo demás: la lupa, el arrastre y la selección se ven encima. */}
+      {entityHighlights.map((highlight) => {
+        const rect = toScreen(highlight.box);
+        if (rect === null) return null;
+        return (
+          <div
+            key={highlight.key}
+            aria-hidden
+            className="pointer-events-none absolute rounded-[2px] border-[1.5px]"
+            style={{
+              left: rect.left - HIGHLIGHT_PAD_PX.x,
+              top: rect.top - HIGHLIGHT_PAD_PX.y,
+              width: rect.width + HIGHLIGHT_PAD_PX.x * 2,
+              height: rect.height + HIGHLIGHT_PAD_PX.y * 2,
+              ...highlightStyle(
+                highlight.type,
+                highlight.enabled,
+                hover.hovered?.group.id === highlight.groupId || flashGroupId === highlight.groupId,
+              ),
+            }}
+          />
+        );
+      })}
       {highlightRects.map((rect, index) => (
         <div
           key={index}
@@ -297,9 +401,17 @@ export function WordSelectionOverlay({
           style={dragRect}
         />
       ) : null}
+      {hover.hovered !== null && tooltipRect !== null ? (
+        <EntityTooltip
+          rect={tooltipRect}
+          type={hover.hovered.group.type}
+          content={buildEntityTooltip(hover.hovered.group, userTypes, detection)}
+        />
+      ) : null}
       {selection !== null && !inert && selectionRect !== null ? (
         <>
           <div
+            ref={selectionBoxRef}
             aria-hidden
             className="anonly-selection pointer-events-none absolute rounded-sm"
             style={{
@@ -313,7 +425,8 @@ export function WordSelectionOverlay({
             key={selection.words.map((word) => word.text).join(" ")}
             value={selection.words.map((word) => word.text).join(" ")}
             left={selectionRect.left}
-            top={selectionRect.top + selectionRect.height + 10}
+            anchorRef={selectionBoxRef}
+            anchorTop={selectionRect.top - 2}
             pageIndex={pageIndex}
             wordIndexes={selection.wordIndexes}
             interactionRevision={selection.interactionRevision}
@@ -335,7 +448,8 @@ export function WordSelectionOverlay({
 function SelectionPopover({
   value,
   left,
-  top,
+  anchorRef,
+  anchorTop,
   pageIndex,
   wordIndexes,
   interactionRevision,
@@ -345,7 +459,10 @@ function SelectionPopover({
 }: {
   readonly value: string;
   readonly left: number;
-  readonly top: number;
+  /** El recuadro de la selección: el globo se ancla a él como un menú (ADR-207). */
+  readonly anchorRef: RefObject<HTMLDivElement | null>;
+  /** Borde superior del recuadro, en las coordenadas de la capa. */
+  readonly anchorTop: number;
   readonly pageIndex: number;
   readonly wordIndexes: ReadonlyArray<number>;
   readonly interactionRevision: number | null;
@@ -353,12 +470,45 @@ function SelectionPopover({
   readonly interactionGeometry?: PreviewInteractionGeometry;
   readonly onClose: () => void;
 }) {
-  const [entityType, setEntityType] = useState<EntityType>(EntityType.Person);
+  const choice = useTypeChoice(EntityType.Person);
   const [notFound, setNotFound] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   // Cuántas veces aparece: la misma búsqueda literal que la lupa. Es una
   // estimación para el texto; lo que cuenta es el `occurrenceCount` real.
   const [count] = useState(() => actions.findText(value).length);
+  // Que el globo quede entero dentro de la ventana (no se corta por la derecha).
+  const ref = useRef<HTMLDivElement>(null);
+  const [shiftX, setShiftX] = useState(0);
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (element === null) return;
+    const rect = element.getBoundingClientRect();
+    const next = shiftIntoWindow(rect.left - shiftX, rect.right - shiftX, window.innerWidth);
+    if (next !== shiftX) setShiftX(next);
+  }, [left, shiftX]);
+  // ADR-207: abajo si entra, arriba si entra ahí; si no, lo mínimo para quedar
+  // entero dentro del visor, y con scroll propio si es más alto que lo visible.
+  // Sin esto, en una ventana baja los botones quedaban fuera y había que mover
+  // el documento para llegar a «Agregar».
+  const [layout, setLayout] = useState<MenuLayout>({ placement: "bottom", top: 0, maxHeight: 0 });
+  useLayoutEffect(() => {
+    const anchor = anchorRef.current;
+    const popover = ref.current;
+    if (anchor === null || popover === null) return;
+    return observeMenuLayout(
+      anchor,
+      popover,
+      (next) =>
+        setLayout((previous) =>
+          previous.placement === next.placement &&
+          previous.top === next.top &&
+          previous.maxHeight === next.maxHeight
+            ? previous
+            : next,
+        ),
+      { gap: SELECTION_POPOVER_GAP_PX },
+    );
+  }, [anchorRef, anchorTop]);
 
   useEffect(() => {
     function handleKeydown(event: KeyboardEvent): void {
@@ -369,6 +519,8 @@ function SelectionPopover({
   }, [onClose]);
 
   async function handleConfirm(): Promise<void> {
+    const resolved = choice.resolve();
+    if (resolved === null) return;
     setSubmitting(true);
     if (
       interactionRevision !== null &&
@@ -393,7 +545,11 @@ function SelectionPopover({
     const currentValue = selected.map((item) => item?.word.text ?? "").join(" ");
     // ADR-114 §2: se espera el resultado — "no se encontró" y "se agregaron
     // 18" no pueden verse igual. Con éxito, el toast de ADR-169 §7.
-    const feedback = await addManualEntityWithFeedback({ value: currentValue, entityType });
+    const feedback = await addManualEntityWithFeedback(
+      { value: currentValue, entityType: resolved.entityType },
+      resolved.newType,
+      resolved.saveNewType === true,
+    );
     setSubmitting(false);
     if (feedback === "not-found") {
       setNotFound(true);
@@ -409,8 +565,16 @@ function SelectionPopover({
     <div
       role="dialog"
       aria-label="Agregar la selección como entidad"
-      className="absolute z-20 flex w-[22.5rem] max-w-[calc(100%-1rem)] flex-col gap-2.5 rounded-xl border border-border bg-bg-primary p-3.5 text-sm text-text-primary shadow-md"
-      style={{ left: Math.max(8, left - 40), top }}
+      ref={ref}
+      data-placement={layout.placement}
+      // `[&>*]:shrink-0`: con alto máximo, el flex achicaría la línea con `truncate`
+      // hasta cero y la medida intrínseca del globo saldría corta.
+      className="absolute z-20 flex w-[22.5rem] max-w-[calc(100%-1rem)] flex-col gap-2.5 overflow-y-auto [&>*]:shrink-0 overscroll-contain rounded-xl border border-border bg-bg-primary p-3.5 text-sm text-text-primary shadow-md"
+      style={{
+        left: Math.max(8, left - 40) + shiftX,
+        top: anchorTop + layout.top,
+        maxHeight: layout.maxHeight,
+      }}
       // El globo vive dentro de la capa que arma la selección: sin esto,
       // cualquier click adentro arrancaría un arrastre nuevo.
       onPointerDown={(event) => event.stopPropagation()}
@@ -418,23 +582,36 @@ function SelectionPopover({
       <p className="truncate">
         Agregar <b className="font-semibold">«{value}»</b> como…
       </p>
-      <EntityTypePicker value={entityType} onChange={setEntityType} aria-label="Tipo de entidad" />
-      <p
-        aria-live="polite"
-        className={`h-5 truncate ${notFound ? "text-error" : "text-text-secondary"}`}
-      >
-        {notFound
-          ? "No se encontró ese valor en el documento."
-          : count === 1
-            ? "Se va a ocultar su única aparición en el documento."
-            : `Se van a ocultar todas sus apariciones: ${count} en el documento.`}
-      </p>
+      <EntityTypePicker
+        {...choice.pickerProps}
+        onNewTypeSubmit={() => void handleConfirm()}
+        aria-label="Tipo de entidad"
+      />
+      {/* La línea de pie: el error del nombre del tipo nuevo ocupa su lugar (ADR-229 §2).
+          Es una línea de ayuda (UX_Guidelines.md §11b.17, Components.md §13b.7): su segundo
+          renglón usa los 18 px que hay hasta los botones, y el campo la nombra con su id. */}
+      <div className="mb-2">
+        <FieldHint
+          id={NEW_TYPE_HINT_ID}
+          help={
+            count === 1
+              ? "Se va a ocultar su única aparición en el documento."
+              : `Se van a ocultar todas sus apariciones: ${count} en el documento.`
+          }
+          error={choice.error ?? (notFound ? "No se encontró ese valor en el documento." : null)}
+        />
+      </div>
       <div className="flex justify-end gap-2">
         <Button variant="secondary" onClick={onClose} disabled={submitting}>
           Cancelar
         </Button>
-        <Button variant="primary" loading={submitting} onClick={() => void handleConfirm()}>
-          Agregar
+        <Button
+          variant="primary"
+          loading={submitting}
+          disabled={!choice.canConfirm}
+          onClick={() => void handleConfirm()}
+        >
+          {choice.creating ? "Crear y agregar" : "Agregar"}
         </Button>
       </div>
     </div>

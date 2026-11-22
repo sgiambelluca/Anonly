@@ -6,9 +6,16 @@
  * i18n de UI, igual que `settings.store.language`, `ui/React_Client.md` §3.7).
  */
 
-import { EntityType } from "@anonly/anonymization-core";
+import {
+  EntityType,
+  isUserEntityType,
+  type EntityTypeId,
+  type UserEntityTypeDefinition,
+} from "@anonly/anonymization-core";
 
 import type { SelectOption } from "../common/Select.js";
+
+import { findUserType, NO_USER_TYPES, UNKNOWN_USER_TYPE_NAME } from "./userTypes.js";
 
 export const ENTITY_TYPE_LABEL: Readonly<Record<EntityType, string>> = {
   [EntityType.Person]: "Personas",
@@ -81,7 +88,41 @@ export function formatIndexInType(indexInType: number): string {
   return String(indexInType).padStart(2, "0");
 }
 
+/**
+ * Los tipos del catálogo que ofrece el selector: los doce base, sin `Custom`
+ * (ADR-224 §6). `ENTITY_TYPE_ORDER` conserva los trece porque un grupo puede
+ * traer `Custom` y «Formatos de detección» lo ubica entre los tipos fijos.
+ */
+export const PICKER_TYPE_ORDER: ReadonlyArray<EntityType> = ENTITY_TYPE_ORDER.filter(
+  (type) => type !== EntityType.Custom,
+);
+
+/**
+ * El nombre de **una** entidad del tipo («Persona», «Historia clínica»). Un tipo
+ * propio se nombra como lo escribió el usuario (`UserEntityTypeDefinition.name`).
+ */
+export function typeSingular(
+  type: EntityTypeId,
+  userTypes: ReadonlyArray<UserEntityTypeDefinition> = NO_USER_TYPES,
+): string {
+  if (!isUserEntityType(type)) return ENTITY_TYPE_SINGULAR[type];
+  return findUserType(userTypes, type)?.name ?? UNKNOWN_USER_TYPE_NAME;
+}
+
+/** El nombre del tipo en la franja del árbol («Personas»; un tipo propio, tal cual). */
+export function typePlural(
+  type: EntityTypeId,
+  userTypes: ReadonlyArray<UserEntityTypeDefinition> = NO_USER_TYPES,
+): string {
+  if (!isUserEntityType(type)) return ENTITY_TYPE_LABEL[type];
+  return findUserType(userTypes, type)?.name ?? UNKNOWN_USER_TYPE_NAME;
+}
+
 /** "Persona N.º 06": cómo se nombra una entidad concreta fuera de la fila. */
-export function describeEntityNumber(type: EntityType, indexInType: number): string {
-  return `${ENTITY_TYPE_SINGULAR[type]} N.º ${formatIndexInType(indexInType)}`;
+export function describeEntityNumber(
+  type: EntityTypeId,
+  indexInType: number,
+  userTypes: ReadonlyArray<UserEntityTypeDefinition> = NO_USER_TYPES,
+): string {
+  return `${typeSingular(type, userTypes)} N.º ${formatIndexInType(indexInType)}`;
 }

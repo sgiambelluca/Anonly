@@ -19,6 +19,7 @@ import {
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ToastMessage } from "../components/common/toast.js";
+import { typeSingular } from "../components/entities/entityTypeLabels.js";
 import { useDocumentStore } from "../store/document.store.js";
 import { useEntitiesStore } from "../store/entities.store.js";
 
@@ -26,11 +27,13 @@ const emit = vi.fn();
 const createEditCheckpoint = vi.fn();
 const restoreEditCheckpoint = vi.fn();
 const discardEditCheckpoints = vi.fn();
+const previewEdit = vi.fn();
 
 vi.mock("../core-adapter/index.js", () => ({
   getCore: () => ({
     bus: { emit, on: vi.fn(), once: vi.fn(), off: vi.fn(), emitAsync: vi.fn() },
     orchestrator: {
+      previewEdit,
       createEditCheckpoint,
       restoreEditCheckpoint,
       discardEditCheckpoints,
@@ -105,6 +108,7 @@ describe("applyEdits", () => {
     createEditCheckpoint.mockReset();
     restoreEditCheckpoint.mockReset();
     discardEditCheckpoints.mockReset();
+    previewEdit.mockReset();
     createEditCheckpoint.mockReturnValue("cp-1");
     useDocumentStore.setState({ id: "doc-1", name: "a.pdf" });
     useHistoryStore.setState({ past: [], future: [], live: [], busy: false });
@@ -243,7 +247,7 @@ describe("applyEdits", () => {
       groupId: "g1",
       patch: { type: EntityType.Organization },
     });
-    expect(toasts.get()?.title).toBe("Cambiaste el tipo de «Juan Pérez»");
+    expect(toasts.get()?.title).toBe("«Juan Pérez» ahora es Organización");
     expect(toasts.get()?.description).toBeUndefined();
     toasts.unsubscribe();
   });
@@ -394,6 +398,114 @@ describe("applyEdits", () => {
     expect(emit).toHaveBeenCalledWith(EventChannel.UI, EngineEvents.CONFLICT_RESOLVE_REQUESTED, {
       documentId: "doc-1",
       conflictId: "conflict-1",
+    });
+  });
+
+  // `Conflicto.dc.html`: resolver un conflicto a otro tipo confirma con un toast
+  // con «Deshacer»: «{valor}» ahora es {Tipo} · Se reemplaza como {token}.
+  describe("applyConflictResolution: el toast al cambiar de tipo", () => {
+    const cuitPreview = {
+      groups: [
+        {
+          groupId: "g1",
+          type: EntityType.CUIT,
+          indexInType: 1,
+          canonicalValue: "20-12345678-9",
+          memberCount: 1,
+          replacementMode: ReplacementMode.Placeholder,
+          replacementValue: "[CUIT 01]",
+        },
+      ],
+    };
+
+    it("avisa el tipo nuevo y el token, con «Deshacer», con la vista previa del Core", () => {
+      previewEdit.mockReturnValue(cuitPreview);
+      const toasts = captureLastToast();
+
+      applyEdits.applyConflictResolution({
+        conflictId: "conflict-1",
+        groupId: "g1",
+        spelling: null,
+        entityType: EntityType.CUIT,
+        currentType: EntityType.DNI,
+        label: "20-12345678-9",
+      });
+
+      expect(previewEdit).toHaveBeenCalledWith("doc-1", {
+        kind: "type",
+        groupId: "g1",
+        type: EntityType.CUIT,
+      });
+      expect(toasts.get()?.title).toBe(`«20-12345678-9» ahora es ${typeSingular(EntityType.CUIT)}`);
+      expect(toasts.get()?.description).toContain("[CUIT 01]");
+      expect(toasts.get()?.actions?.map((action) => action.label)).toEqual(["Deshacer"]);
+      toasts.unsubscribe();
+    });
+
+    it("pide la vista previa antes de resolver, para que el token sea el de después", () => {
+      previewEdit.mockReturnValue(cuitPreview);
+      const order: string[] = [];
+      previewEdit.mockImplementation(() => {
+        order.push("preview");
+        return cuitPreview;
+      });
+      emit.mockImplementation(() => {
+        order.push("emit");
+      });
+
+      applyEdits.applyConflictResolution({
+        conflictId: "conflict-1",
+        groupId: "g1",
+        spelling: null,
+        entityType: EntityType.CUIT,
+        currentType: EntityType.DNI,
+        label: "x",
+      });
+
+      expect(order[0]).toBe("preview");
+      expect(order).toContain("emit");
+    });
+
+    it("sin vista previa del Core el toast igual nombra el tipo", () => {
+      previewEdit.mockReturnValue(null);
+      const toasts = captureLastToast();
+
+      applyEdits.applyConflictResolution({
+        conflictId: "conflict-1",
+        groupId: "g1",
+        spelling: null,
+        entityType: EntityType.CUIT,
+        currentType: EntityType.DNI,
+        label: "x",
+      });
+
+      expect(toasts.get()?.title).toContain("ahora es");
+      expect(toasts.get()?.description).toBeUndefined();
+      toasts.unsubscribe();
+    });
+
+    it("sin cambio de tipo, o sin saber el tipo actual, no hay toast", () => {
+      const toasts = captureLastToast();
+
+      applyEdits.applyConflictResolution({
+        conflictId: "conflict-1",
+        groupId: "g1",
+        spelling: null,
+        entityType: EntityType.DNI,
+        currentType: EntityType.DNI,
+        label: "x",
+      });
+      applyEdits.applyConflictResolution({
+        conflictId: "conflict-1",
+        groupId: "g1",
+        spelling: null,
+        entityType: EntityType.CUIT,
+        label: "x",
+      });
+
+      expect(toasts.get()).toBeNull();
+      expect(previewEdit).not.toHaveBeenCalled();
+      toasts.unsubscribe();
     });
   });
 

@@ -20,12 +20,14 @@ import { useEffect, useRef } from "react";
 import { actions } from "../../core-adapter/actions.js";
 import { Button } from "../common/Button.js";
 
+import { matchesShortcut } from "./shortcuts.js";
+
 export function ImportButton() {
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     function onKeydown(event: KeyboardEvent): void {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "o") {
+      if (matchesShortcut("open", event)) {
         event.preventDefault();
         inputRef.current?.click();
       }

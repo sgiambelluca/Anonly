@@ -90,3 +90,13 @@ export function headersFor(pathname: string): Record<string, string> {
   }
   return headers;
 }
+
+/**
+ * Qué URL de un `window.open` / `target="_blank"` se le pasa al sistema con
+ * `shell.openExternal`: las `https://` (repositorio, créditos, releases) y las
+ * `mailto:` («Escribirme por mail», ADR-234 §4). Todo lo demás se deniega sin
+ * abrir nada: `file:`, `javascript:`, `http:` y cualquier esquema propio.
+ */
+export function opensExternally(url: string): boolean {
+  return url.startsWith("https://") || url.startsWith("mailto:");
+}

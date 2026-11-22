@@ -20,7 +20,7 @@ import {
   type EditPreview,
   type EditPreviewRequest,
   type EntityGroup,
-  type EntityType,
+  type EntityTypeId,
   type ExportOptions,
   type ManualEntityRequest,
   type ManualEntityResult,
@@ -28,10 +28,13 @@ import {
   type ReanalyzeConfigPatch,
   type Rule,
   type TextMatch,
+  type UserEntityTypeDefinition,
+  type UserEntityTypeId,
   type Word,
 } from "@anonly/anonymization-core";
 
 import { useDegradedStore } from "../store/degraded.store.js";
+import { useDetectionStore } from "../store/detection.store.js";
 import { useDocumentStore } from "../store/document.store.js";
 import { useEntitiesStore } from "../store/entities.store.js";
 import { usePipelineStore } from "../store/pipeline.store.js";
@@ -40,8 +43,9 @@ import { useSettingsStore } from "../store/settings.store.js";
 import { useUnreadableInkStore } from "../store/unreadableInk.store.js";
 import { useViewerStore, type ViewerKind } from "../store/viewer.store.js";
 
+import { registerDocumentTypesPort } from "./documentTypesPort.js";
 import { useHistoryStore } from "./history.js";
-import { deriveEngineConfigOverrides } from "./settingsToEngineConfig.js";
+import { deriveCoreOverrides } from "./settingsToEngineConfig.js";
 
 import { getCore, getCoreWhenReady, recreateCoreIfOverridesChanged } from "./index.js";
 
@@ -53,6 +57,9 @@ import { getCore, getCoreWhenReady, recreateCoreIfOverridesChanged } from "./ind
 export type RenderRequestMode =
   | readonly [mode: "preview", scale: number]
   | readonly [mode: "full", scale?: number];
+
+// Los tipos del documento se releen por este puerto (`entities.store`, §3.9).
+registerDocumentTypesPort();
 
 /** `null` si no hay documento activo; las acciones que lo requieren no-opean en ese caso. */
 function activeDocumentId(): string | null {
@@ -186,7 +193,7 @@ export const actions = {
    */
   resolveConflict(
     conflictId: string,
-    options?: { readonly entityType?: EntityType; readonly winner?: "manual" | "detected" },
+    options?: { readonly entityType?: EntityTypeId; readonly winner?: "manual" | "detected" },
   ): void {
     const documentId = activeDocumentId();
     if (documentId === null) return;
@@ -359,6 +366,80 @@ export const actions = {
     }
   },
 
+  /**
+   * ADR-225 §3-§4, `React_Client.md` §3.9: los tipos del documento. El Core no
+   * emite eventos por las definiciones (ADR-225 §6), así que cada una termina
+   * con `refreshDocumentTypes()`. **No registran la pila de deshacer**: quien
+   * llama lo hace antes (`recordEdit`, que además retira el toast anterior) y
+   * así «Crear y agregar» y «Crear y cambiar» son una sola entrada.
+   * `defineDocumentType` lanza `InvalidInputError` si el Core lo rechaza.
+   */
+  defineDocumentType(definition: UserEntityTypeDefinition): void {
+    const documentId = activeDocumentId();
+    if (documentId === null) return;
+    getCore().orchestrator.defineDocumentEntityType(documentId, definition);
+    useEntitiesStore.getState().refreshDocumentTypes();
+  },
+
+  async updateDocumentType(definition: UserEntityTypeDefinition): Promise<void> {
+    const documentId = activeDocumentId();
+    if (documentId === null) return;
+    await getCore().orchestrator.updateDocumentEntityType(documentId, definition);
+    if (activeDocumentId() === documentId) useEntitiesStore.getState().refreshDocumentTypes();
+  },
+
+  /**
+   * Borra un tipo del documento. Antes borra las reglas del tipo y de sus grupos,
+   * como al eliminar una entidad (ADR-171 §5): una regla huérfana contaría en la
+   * franja «Todo el documento». El Core se ocupa de los grupos y de sus choques.
+   */
+  async removeDocumentType(typeId: UserEntityTypeId): Promise<void> {
+    const documentId = activeDocumentId();
+    if (documentId === null) return;
+    const groupIds = new Set(
+      (useEntitiesStore.getState().groupsByType.get(typeId) ?? []).map((group) => group.id),
+    );
+    const rules = useRulesStore.getState().rules.filter((rule) => {
+      if (rule.scope === "type") return rule.target.entityType === typeId;
+      return (
+        rule.scope === "group" &&
+        rule.target.groupId !== undefined &&
+        groupIds.has(rule.target.groupId)
+      );
+    });
+    for (const rule of rules) {
+      getCore().bus.emit(EventChannel.UI, EngineEvents.RULE_DELETED, {
+        documentId,
+        ruleId: rule.id,
+      });
+      useRulesStore.getState().removeRule(rule.id);
+    }
+    if (rules.length > 0) markExportContentChanged(documentId);
+    await getCore().orchestrator.removeDocumentEntityType(documentId, typeId);
+    if (activeDocumentId() === documentId) useEntitiesStore.getState().refreshDocumentTypes();
+  },
+
+  /**
+   * ADR-225 §5: guarda para los próximos documentos un tipo creado con el
+   * documento abierto. **Sin** `history.record`: no es una edición del
+   * documento. Devuelve `false` si el tipo no está entre los del documento.
+   */
+  saveDocumentType(typeId: UserEntityTypeId): boolean {
+    const definition = useEntitiesStore
+      .getState()
+      .documentTypes.find((candidate) => candidate.id === typeId);
+    if (definition === undefined) return false;
+    useDetectionStore.getState().saveDocumentType(definition);
+    useEntitiesStore.getState().markTypeSaved(typeId);
+    return true;
+  },
+
+  /** El «Deshacer» del aviso de guardar. */
+  unsaveDocumentType(typeId: UserEntityTypeId): void {
+    useDetectionStore.getState().unsaveDocumentType(typeId);
+    useEntitiesStore.getState().unmarkTypeSaved(typeId);
+  },
+
   // PDF_PASSWORD_REQUIRED → PasswordDialog → esta acción. La UI NUNCA llama a
   // engines.pdf.process (Orchestrator.md §6; errata corregida, ADR-036 §5).
   async retryWithPassword(password: string): Promise<void> {
@@ -411,6 +492,9 @@ export const actions = {
     // documento que se cierra, no debe sobrevivirlo.
     useUnreadableInkStore.getState().reset();
     // ADR-194 §9: un perfil elegido con el documento abierto rige desde acá.
-    recreateCoreIfOverridesChanged(deriveEngineConfigOverrides(useSettingsStore.getState()));
+    // También los formatos guardados con el documento abierto (ADR-225 §5).
+    recreateCoreIfOverridesChanged(
+      deriveCoreOverrides(useSettingsStore.getState(), useDetectionStore.getState().saved),
+    );
   },
 };

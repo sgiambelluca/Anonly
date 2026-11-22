@@ -13,22 +13,19 @@
 
 import { PipelineStage } from "@anonly/anonymization-core";
 
+import { matchesShortcut, type ShortcutKeyEvent } from "../toolbar/shortcuts.js";
+
 export type HistoryCommand = "undo" | "redo";
 
-export interface ShortcutKeyEvent {
-  readonly key: string;
-  readonly ctrlKey: boolean;
-  readonly metaKey: boolean;
-  readonly shiftKey: boolean;
-  readonly altKey: boolean;
-}
+export type { ShortcutKeyEvent };
 
-/** La combinación de teclas, sin mirar el contexto. */
+/**
+ * La combinación de teclas, sin mirar el contexto. Sale de la tabla de atajos
+ * (`toolbar/shortcuts.ts`), la misma que lista la ayuda.
+ */
 export function historyCommandFor(event: ShortcutKeyEvent): HistoryCommand | null {
-  if (!(event.ctrlKey || event.metaKey) || event.altKey) return null;
-  const key = event.key.toLowerCase();
-  if (key === "z") return event.shiftKey ? "redo" : "undo";
-  if (key === "y" && !event.shiftKey) return "redo";
+  if (matchesShortcut("undo", event)) return "undo";
+  if (matchesShortcut("redo", event)) return "redo";
   return null;
 }
 

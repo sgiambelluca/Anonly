@@ -14,7 +14,7 @@
  * es más código para el mismo resultado.
  */
 
-import { EntityType } from "@anonly/anonymization-core";
+import { EntityType, isUserEntityType, type EntityTypeId } from "@anonly/anonymization-core";
 
 export const ENTITY_TYPE_COLOR: Readonly<Record<EntityType, string>> = {
   [EntityType.Person]: "#10b981",
@@ -32,6 +32,18 @@ export const ENTITY_TYPE_COLOR: Readonly<Record<EntityType, string>> = {
   [EntityType.Custom]: "#64748b",
 };
 
+/**
+ * El color de un tipo propio: el de acento de la aplicación (el mismo que usa
+ * «Formatos de detección», `FormatTypeBand`). Los tipos propios se distinguen
+ * del catálogo por el punto hueco (`Components.md` §9), no por un color propio.
+ */
+export const USER_TYPE_COLOR = "rgb(var(--color-accent))";
+
+/** El color de cualquier tipo, base o propio. */
+export function typeColor(type: EntityTypeId): string {
+  return isUserEntityType(type) ? USER_TYPE_COLOR : ENTITY_TYPE_COLOR[type];
+}
+
 /** `"#10b981"` → `"16 185 129"`: canales para componer `rgb(… / alpha)`. */
 export function hexToRgbChannels(hex: string): string {
   const value = hex.replace("#", "");
@@ -42,13 +54,46 @@ export function hexToRgbChannels(hex: string): string {
 }
 
 /**
+ * Los canales del color de un tipo, para componer `rgb(… / alpha)`: los del
+ * catálogo salen de su hex; un tipo propio usa el acento, como su franja.
+ */
+export function typeColorChannels(type: EntityTypeId): string {
+  return isUserEntityType(type) ? "var(--color-accent)" : hexToRgbChannels(ENTITY_TYPE_COLOR[type]);
+}
+
+/**
  * ADR-169 §2: el fondo de la franja de tipo — el gris de `bg-tertiary` con
  * apenas el color del tipo encima. La opacidad la pone el tema
  * (`--anonly-band-tint`, `index.css`: 6 % en claro, 7 % en oscuro), así que
  * esto no necesita saber qué tema está activo.
  */
-export function typeBandTint(type: EntityType): string {
-  const channels = hexToRgbChannels(ENTITY_TYPE_COLOR[type]);
-  const tint = `rgb(${channels} / var(--anonly-band-tint))`;
+export function typeBandTint(type: EntityTypeId): string {
+  const tint = `rgb(${typeColorChannels(type)} / var(--anonly-band-tint))`;
   return `linear-gradient(${tint}, ${tint})`;
+}
+
+/**
+ * El estilo del punto de un tipo (`Components.md` §9): relleno con el color del
+ * tipo; **hueco** (solo el borde) para un tipo propio, y **punteado** si además
+ * es «solo de este documento» (ADR-229 §2).
+ */
+export function typeDotStyle(
+  type: EntityTypeId,
+  documentOnly = false,
+): { readonly background?: string; readonly border?: string } {
+  if (!isUserEntityType(type)) return { background: ENTITY_TYPE_COLOR[type] };
+  return userDotStyle(documentOnly);
+}
+
+/** El color del aro de un tipo propio: `--color-user` (#64748b en claro, #94a3b8 en oscuro). */
+export const USER_DOT_COLOR = "rgb(var(--color-user))";
+
+/** Ancho del borde del aro (lienzo `.udot`). */
+export const USER_DOT_BORDER_PX = 2.2;
+
+/** El aro de un tipo propio: sin relleno; punteado si es solo de este documento. */
+export function userDotStyle(documentOnly = false): { readonly border: string } {
+  return {
+    border: `${USER_DOT_BORDER_PX}px ${documentOnly ? "dashed" : "solid"} ${USER_DOT_COLOR}`,
+  };
 }

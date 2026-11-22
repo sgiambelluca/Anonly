@@ -24,6 +24,7 @@ import { useEffect } from "react";
 
 import { usePipelineStore } from "../../store/pipeline.store.js";
 import { useViewerStore, type ViewerKind } from "../../store/viewer.store.js";
+import { matchesShortcut } from "../toolbar/shortcuts.js";
 
 import { isAnonymizedAvailable } from "./anonymizedAvailability.js";
 
@@ -51,7 +52,7 @@ export function ViewerModeToggle() {
 
   useEffect(() => {
     function onKeydown(event: KeyboardEvent): void {
-      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "d") return;
+      if (!matchesShortcut("toggleView", event)) return;
       event.preventDefault();
       const state = useViewerStore.getState();
       if (state.mode === "anonymized") {

@@ -29,6 +29,10 @@
  * entera" **marcada por defecto**; lo que quede marcado al confirmar se junta
  * en `ExportOptions.coveredPages`.
  *
+ * **Formatos que no se aplicaron** (ADR-229 §7, `Components.md` §13b.8): debajo
+ * del nombre del documento, `SkippedFormatsExportNotice` repite el aviso de la
+ * barra, una fila por formato con «Ir a la página N». **No bloquea.**
+ *
  * Tras el submit, el diálogo transiciona a `ExportProgress`
  * (`exportPhase.ts#resolveExportPhase` decide la fase a partir del estado
  * local `submitted` + `pipeline.store`). `submitted` se resetea cada vez que
@@ -50,6 +54,7 @@ import { Button } from "../common/Button.js";
 import { Checkbox } from "../common/Checkbox.js";
 import { ConfirmDialog } from "../common/ConfirmDialog.js";
 import { Dialog } from "../common/Dialog.js";
+import { useSkippedFormatEntries } from "../toolbar/SkippedFormatsNotice.js";
 
 import { countGroups, needsNoEnabledGroupsConfirmation } from "./exportPreflight.js";
 import { ExportProgress } from "./ExportProgress.js";
@@ -58,6 +63,7 @@ import {
   buildExportOptions,
   normalizeExportFilename,
 } from "./exportValidation.js";
+import { SkippedFormatsExportNotice } from "./SkippedFormatsExportNotice.js";
 import {
   buildCoveredPages,
   computePendingPages,
@@ -74,6 +80,7 @@ export function ExportDialog({ open, onClose }: ExportDialogProps) {
   const documentName = useDocumentStore((state) => state.name);
   const groupsByType = useEntitiesStore((state) => state.groupsByType);
   const unreadableInkPages = useUnreadableInkStore((state) => state.pages);
+  const skippedEntries = useSkippedFormatEntries();
 
   const exportResult = usePipelineStore((state) => state.exportResult);
   const currentVersion = usePipelineStore((state) => state.currentVersion);
@@ -235,6 +242,9 @@ export function ExportDialog({ open, onClose }: ExportDialogProps) {
               <span className="text-text-secondary">Documento original</span>
             </span>
           </div>
+
+          {/* ADR-229 §7: no bloquea; «Ir a la página N» cierra el diálogo y lleva al visor. */}
+          <SkippedFormatsExportNotice entries={skippedEntries} onGoToPage={handleGoToPendingPage} />
 
           <div className="grid grid-cols-2 gap-3">
             <SummaryTile label="Entidades" value={`${counts.enabled} de ${counts.total}`}>

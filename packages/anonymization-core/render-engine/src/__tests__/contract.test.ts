@@ -289,6 +289,7 @@ describe("RenderEngine — contract tests", () => {
       pageCount: 1,
       pageFactory: () => ({
         getViewport: getViewportSpy,
+        cleanup: vi.fn(),
         render: vi.fn(() => ({ promise: Promise.resolve() })),
       }),
     });
@@ -378,36 +379,38 @@ describe("RenderEngine — contract tests", () => {
     expect(previewUpdates.some((update) => update.kind === "original")).toBe(false);
   });
 
-  // ─── ADR-059 §5 (Hito 10.5, PR 7): renderLegendPage ───
+  // ─── ADR-059 §5 (Hito 10.5, PR 7), ADR-219 §6: renderLegendPages ───
 
-  it("renderLegendPage returns EncodedPageImage with the requested dimensions", async () => {
+  it("renderLegendPages returns images with the requested dimensions", async () => {
     await engine.init(ctx);
 
-    const encoded = await engine.renderLegendPage([makeMarkerLegendRow()], 595, 842, ctx);
+    const pages = await engine.renderLegendPages([makeMarkerLegendRow()], 595, 842, ctx);
 
+    expect(pages).toHaveLength(1);
+    const encoded = pages[0]!;
     expect(encoded.widthPx).toBe(595);
     expect(encoded.heightPx).toBe(842);
     expect(encoded.format).toBe("png"); // default (kernel.ts: sin spec pixel-perfect, ver comentario)
     expect(encoded.bytes.byteLength).toBeGreaterThan(0);
   });
 
-  it("renderLegendPage works without a loaded document", async () => {
+  it("renderLegendPages works without a loaded document", async () => {
     // A diferencia de renderPage/rasterizePage/renderPages, NO hay
     // loadDocument acá: ni un documentId de por medio (ADR-059 §5, caso 29 —
     // la única excepción del motor a la precondición de loadDocument).
     await engine.init(ctx);
     expect(engine["documents"].size).toBe(0);
 
-    await expect(engine.renderLegendPage([makeMarkerLegendRow()], 400, 300, ctx)).resolves.toEqual(
-      expect.objectContaining({ widthPx: 400, heightPx: 300 }),
+    await expect(engine.renderLegendPages([makeMarkerLegendRow()], 400, 300, ctx)).resolves.toEqual(
+      [expect.objectContaining({ widthPx: 400, heightPx: 300 })],
     );
   });
 
-  it("renderLegendPage emits no events, does not touch the LRU cache nor supersede", async () => {
+  it("renderLegendPages emits no events, does not touch the LRU cache nor supersede", async () => {
     await engine.init(ctx);
     const emitSpy = vi.spyOn(ctx.bus, "emit");
 
-    await engine.renderLegendPage([makeMarkerLegendRow()], 500, 500, ctx);
+    await engine.renderLegendPages([makeMarkerLegendRow()], 500, 500, ctx);
 
     expect(emitSpy).not.toHaveBeenCalled();
     expect(engine["cache"].size).toBe(0);

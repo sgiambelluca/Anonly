@@ -176,8 +176,9 @@ export async function exportThroughRealEngines(
               readonly widthPx: number;
               readonly heightPx: number;
             }>;
-            renderLegend(): Promise<never>;
+            renderLegend(): Promise<ReadonlyArray<never>>;
           };
+          readonly userTypes: ReadonlyArray<never>;
         },
         context: EngineContext,
       ): Promise<{ readonly buffer: ArrayBuffer }>;
@@ -325,6 +326,7 @@ export async function exportThroughRealEngines(
               throw new Error("La leyenda está desactivada en este gate.");
             },
           },
+          userTypes: [],
         },
         { ...exportContext, abortSignal: abort.signal },
       );

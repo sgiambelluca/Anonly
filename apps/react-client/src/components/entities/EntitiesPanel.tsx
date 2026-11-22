@@ -36,7 +36,11 @@
  *    acá, cancelaba la activación nativa del botón y cambiaba otra fila.
  */
 
-import type { EntityGroup, EntityType } from "@anonly/anonymization-core";
+import type {
+  EntityGroup,
+  EntityTypeId,
+  UserEntityTypeDefinition,
+} from "@anonly/anonymization-core";
 import {
   ChevronsDownUpIcon,
   ChevronsUpDownIcon,
@@ -45,24 +49,50 @@ import {
   SearchIcon,
   XIcon,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
+import { useDetectionStore } from "../../store/detection.store.js";
+import { isUserFormat } from "../../store/detectionState.js";
 import { useEntitiesStore, type EntitySortOrder } from "../../store/entities.store.js";
 import { dismissHint, useSettingsStore } from "../../store/settings.store.js";
+import { UserTypeDialog } from "../formats/UserTypeDialog.js";
+import { matchesShortcut } from "../toolbar/shortcuts.js";
 
 import { AddEntityDialog } from "./AddEntityDialog.js";
 import { applyEnabled } from "./applyEdits.js";
 import { DocumentModeSelect } from "./DocumentModeSelect.js";
+import { DOCUMENT_ONLY_CAPTION, SAVED_CAPTION } from "./documentTypeCopy.js";
+import {
+  applyCreateDocumentType,
+  applySaveDocumentType,
+  applyUpdateDocumentType,
+} from "./documentTypeEdits.js";
+import {
+  applyEntityFilters,
+  describeFilteredCount,
+  groupIdsWithConflict,
+  groupMatchesFilters,
+  hasActiveFilters,
+  NO_FILTER_RESULTS_TEXT,
+  userFormatNameOf,
+} from "./entityFilters.js";
+import { EntityFiltersPopover } from "./EntityFiltersPopover.js";
 import { ENTITY_ROW_GRID, ENTITY_ROW_PADDING } from "./entityRowLayout.js";
 import {
   filterGroups,
   findGroupById,
+  levelsInOrder,
+  splitByFormat,
   summarizeEntities,
   visibleTypeEntries,
 } from "./entityTree.js";
-import { EntityTypeGroup } from "./EntityTypeGroup.js";
-import { ENTITY_TYPE_LABEL } from "./entityTypeLabels.js";
+import { EntityTypeGroup, type OwnTypeBand } from "./EntityTypeGroup.js";
+import { typePlural } from "./entityTypeLabels.js";
+import { NewTypeBand } from "./NewTypeBand.js";
+import { RemoveDocumentTypeDialog } from "./RemoveDocumentTypeDialog.js";
 import { groupNodeId, resolveTreeKey, typeNodeId, type TreeNode } from "./treeNavigation.js";
+import { userTypeDefinitions } from "./userTypes.js";
+import { useKnownUserTypes } from "./useUserTypes.js";
 
 const SORT_OPTIONS: ReadonlyArray<{ readonly value: EntitySortOrder; readonly label: string }> = [
   { value: "appearance", label: "Aparición" },
@@ -71,14 +101,28 @@ const SORT_OPTIONS: ReadonlyArray<{ readonly value: EntitySortOrder; readonly la
 
 export function EntitiesPanel() {
   const groupsByType = useEntitiesStore((state) => state.groupsByType);
+  const documentTypes = useEntitiesStore((state) => state.documentTypes);
+  const savedDuringDocument = useEntitiesStore((state) => state.savedDuringDocument);
+  const conflicts = useEntitiesStore((state) => state.conflicts);
+  const filters = useEntitiesStore((state) => state.filters);
+  const detection = useDetectionStore((state) => state.saved);
+  const knownUserTypes = useKnownUserTypes();
+  const userTypes = useMemo(() => userTypeDefinitions(knownUserTypes), [knownUserTypes]);
   const sortOrder = useEntitiesStore((state) => state.sortOrder);
   const flashGroupId = useEntitiesStore((state) => state.flashGroupId);
   const footerHintDismissed = useSettingsStore((state) =>
     state.dismissedHints.includes("panel-footer-hint"),
   );
   const [query, setQuery] = useState("");
-  const [collapsedTypes, setCollapsedTypes] = useState<ReadonlySet<EntityType>>(new Set());
+  const [collapsedTypes, setCollapsedTypes] = useState<ReadonlySet<EntityTypeId>>(new Set());
   const [addEntityOpen, setAddEntityOpen] = useState(false);
+  /** Tipo con el que abre «Agregar entidad» desde la fila de un tipo del documento vacío. */
+  const [addEntityType, setAddEntityType] = useState<EntityTypeId | undefined>(undefined);
+  /** «Nuevo tipo» (banda) o «Editar nombre y abreviaturas…» (menú ⋯) de un tipo del documento. */
+  const [typeDialog, setTypeDialog] = useState<
+    { readonly kind: "create" } | { readonly kind: "edit"; readonly id: string } | null
+  >(null);
+  const [removing, setRemoving] = useState<UserEntityTypeDefinition | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
   const treeRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -92,7 +136,7 @@ export function EntitiesPanel() {
   // `Cmd/Ctrl+F`: la tabla de atajos de `UX_Guidelines.md` §9 ya lo prometía.
   useEffect(() => {
     function onKeydown(event: KeyboardEvent): void {
-      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "f") return;
+      if (!matchesShortcut("search", event)) return;
       event.preventDefault();
       searchRef.current?.focus();
       searchRef.current?.select();
@@ -114,15 +158,65 @@ export function EntitiesPanel() {
       return next;
     });
     setQuery((previous) => (filterGroups([group], previous).length === 0 ? "" : previous));
+    // Los filtros también pueden esconderla: se quitan (son de la interfaz, no se pierde nada).
+    const state = useEntitiesStore.getState();
+    if (!groupMatchesFilters(group, state.filters, groupIdsWithConflict(state.conflicts))) {
+      state.clearFilters();
+    }
   }, [flashGroupId]);
 
-  const entries = visibleTypeEntries(groupsByType, sortOrder);
+  const entries = visibleTypeEntries(groupsByType, sortOrder, {
+    userTypeOrder: knownUserTypes.map((entry) => entry.definition.id),
+    alwaysShow: new Set(documentTypes.map((definition) => definition.id)),
+  });
+  const withConflict = useMemo(() => groupIdsWithConflict(conflicts), [conflicts]);
+  const filtersActive = hasActiveFilters(filters);
+  const filtering = filtersActive || query.trim() !== "";
+  // Un tipo del documento sin entidades se muestra, salvo que haya un filtro o una búsqueda: ahí
+  // «no cumple» y se esconde, como cualquier otro tipo.
   const filteredEntries = entries
-    .map(([type, groups]) => [type, filterGroups(groups, query)] as const)
-    .filter(([, groups]) => groups.length > 0);
-  const noSearchResults = query.trim() !== "" && filteredEntries.length === 0;
+    .map(
+      ([type, groups]) =>
+        [type, filterGroups(applyEntityFilters(groups, filters, withConflict), query)] as const,
+    )
+    .filter(([, groups]) => groups.length > 0 || (!filtering && groups.length === 0));
+  const totalGroups = entries.reduce((sum, [, groups]) => sum + groups.length, 0);
+  const shownGroups = filteredEntries.reduce((sum, [, groups]) => sum + groups.length, 0);
+  const allGroups = useMemo(() => Array.from(groupsByType.values()).flat(), [groupsByType]);
+  const noResults = filtering && shownGroups === 0;
+  // ADR-226 §2: el subnivel por formato del usuario, solo si separa algo.
+  const levelsByType = new Map(
+    filteredEntries.map(
+      ([type, groups]) =>
+        [type, splitByFormat(groups, (formatId) => isUserFormat(detection, formatId))] as const,
+    ),
+  );
+  const formatNameOf = userFormatNameOf(detection);
 
-  function toggleType(type: EntityType): void {
+  function ownTypeBand(type: EntityTypeId): OwnTypeBand | undefined {
+    const known = knownUserTypes.find((entry) => entry.definition.id === type);
+    if (known === undefined) return undefined;
+    const { definition, documentOnly } = known;
+    return {
+      definition,
+      documentOnly,
+      caption: documentOnly
+        ? DOCUMENT_ONLY_CAPTION
+        : savedDuringDocument.has(definition.id)
+          ? SAVED_CAPTION
+          : null,
+      onEdit: () => setTypeDialog({ kind: "edit", id: definition.id }),
+      onSave: () => applySaveDocumentType(definition),
+      onDelete: () => setRemoving(definition),
+    };
+  }
+
+  const editingDefinition =
+    typeDialog?.kind === "edit"
+      ? documentTypes.find((definition) => definition.id === typeDialog.id)
+      : undefined;
+
+  function toggleType(type: EntityTypeId): void {
     setCollapsedTypes((previous) => {
       const next = new Set(previous);
       if (next.has(type)) next.delete(type);
@@ -145,9 +239,12 @@ export function EntitiesPanel() {
     const expanded = !collapsedTypes.has(type);
     const typeNode: TreeNode = { kind: "type", id: typeNodeId(type), expanded };
     if (!expanded) return [typeNode];
+    // En el orden en que se dibujan: los directos y después cada subnivel.
+    const levels = levelsByType.get(type);
+    const ordered = levels === undefined ? groups : levelsInOrder(levels);
     return [
       typeNode,
-      ...groups.map(
+      ...ordered.map(
         (group): TreeNode => ({
           kind: "group",
           id: groupNodeId(group.id),
@@ -195,7 +292,7 @@ export function EntitiesPanel() {
 
   function typeEntryById(
     nodeId: string,
-  ): readonly [EntityType, ReadonlyArray<EntityGroup>] | undefined {
+  ): readonly [EntityTypeId, ReadonlyArray<EntityGroup>] | undefined {
     return filteredEntries.find(([type]) => typeNodeId(type) === nodeId);
   }
 
@@ -237,7 +334,7 @@ export function EntitiesPanel() {
         applyEnabled({
           groups: entry[1],
           next: !entry[1].some((group) => group.enabled),
-          label: ENTITY_TYPE_LABEL[entry[0]],
+          label: typePlural(entry[0], userTypes),
           isType: true,
         });
         return;
@@ -261,13 +358,30 @@ export function EntitiesPanel() {
         <div className="flex items-center justify-between gap-3">
           <div className="flex min-w-0 flex-col">
             <h2 className="text-base font-semibold text-text-primary">Entidades</h2>
-            <span className="truncate text-sm text-text-secondary">
-              {summarizeEntities(entries)}
-            </span>
+            {filtersActive ? (
+              // ADR-229 §5: con filtros, el resumen dice cuántas se ven y cómo quitarlos.
+              <span className="truncate text-sm text-text-secondary">
+                {describeFilteredCount(shownGroups, totalGroups)} ·{" "}
+                <button
+                  type="button"
+                  onClick={() => useEntitiesStore.getState().clearFilters()}
+                  className="rounded font-semibold text-accent hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                >
+                  Quitar filtros
+                </button>
+              </span>
+            ) : (
+              <span className="truncate text-sm text-text-secondary">
+                {summarizeEntities(entries)}
+              </span>
+            )}
           </div>
           <button
             type="button"
-            onClick={() => setAddEntityOpen(true)}
+            onClick={() => {
+              setAddEntityType(undefined);
+              setAddEntityOpen(true);
+            }}
             className="anonly-button-primary h-9 shrink-0 px-3.5"
           >
             <PlusIcon className="h-4 w-4" aria-hidden />
@@ -292,6 +406,7 @@ export function EntitiesPanel() {
               className="h-8 w-full rounded-md border border-border bg-bg-primary pl-8 pr-2 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent"
             />
           </div>
+          <EntityFiltersPopover groups={allGroups} typeEntries={entries} />
           <div
             role="group"
             aria-label="Ordenar entidades"
@@ -340,6 +455,9 @@ export function EntitiesPanel() {
         <DocumentModeSelect />
       </div>
 
+      {/* ADR-229 §1: la banda de alto fijo arriba de la lista; abre el formulario de un tipo del documento. */}
+      <NewTypeBand onClick={() => setTypeDialog({ kind: "create" })} />
+
       {/* Encabezado de columnas (ADR-169 §2): misma grilla que las filas. */}
       <div
         aria-hidden
@@ -366,22 +484,50 @@ export function EntitiesPanel() {
         onFocus={handleTreeFocus}
         className="min-h-0 flex-1 overflow-y-auto pb-3"
       >
-        {noSearchResults ? (
-          <p className="p-4 text-center text-sm text-text-secondary">
-            No se encontraron entidades para &quot;{query}&quot;.
-          </p>
+        {noResults ? (
+          filtersActive ? (
+            // UX_Guidelines.md §11b.15: «Filtros sin resultados».
+            <div className="flex flex-col items-center gap-2 p-4 text-center text-sm text-text-secondary">
+              <p>{NO_FILTER_RESULTS_TEXT}</p>
+              <button
+                type="button"
+                onClick={() => useEntitiesStore.getState().clearFilters()}
+                className="h-8 rounded-md border border-accent px-2.5 font-semibold text-accent hover:bg-accent/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              >
+                Quitar filtros
+              </button>
+            </div>
+          ) : (
+            <p className="p-4 text-center text-sm text-text-secondary">
+              No se encontraron entidades para &quot;{query}&quot;.
+            </p>
+          )
         ) : (
-          filteredEntries.map(([type, groups]) => (
-            <EntityTypeGroup
-              key={type}
-              type={type}
-              groups={groups}
-              expanded={!collapsedTypes.has(type)}
-              onToggleExpanded={() => toggleType(type)}
-              nodeId={typeNodeId(type)}
-              activeNodeId={effectiveActiveId}
-            />
-          ))
+          filteredEntries.map(([type, groups]) => {
+            const own = ownTypeBand(type);
+            return (
+              <EntityTypeGroup
+                key={type}
+                type={type}
+                groups={groups}
+                levels={levelsByType.get(type) ?? { direct: groups, subgroups: [] }}
+                formatName={(formatId) => formatNameOf(formatId) ?? formatId}
+                {...(own !== undefined ? { ownType: own } : {})}
+                {...(own?.documentOnly === true
+                  ? {
+                      onAddEntity: () => {
+                        setAddEntityType(type);
+                        setAddEntityOpen(true);
+                      },
+                    }
+                  : {})}
+                expanded={!collapsedTypes.has(type)}
+                onToggleExpanded={() => toggleType(type)}
+                nodeId={typeNodeId(type)}
+                activeNodeId={effectiveActiveId}
+              />
+            );
+          })
         )}
       </div>
 
@@ -407,7 +553,31 @@ export function EntitiesPanel() {
         </div>
       )}
 
-      <AddEntityDialog open={addEntityOpen} onClose={() => setAddEntityOpen(false)} />
+      <AddEntityDialog
+        open={addEntityOpen}
+        onClose={() => setAddEntityOpen(false)}
+        {...(addEntityType !== undefined ? { initialType: addEntityType } : {})}
+      />
+      {/* `UserTypeDialog` con scope «document»: el formulario de siempre (Components.md §13b.3). */}
+      <UserTypeDialog
+        open={typeDialog !== null}
+        scope="document"
+        mode={typeDialog?.kind === "edit" ? "edit" : "create"}
+        {...(editingDefinition !== undefined ? { initial: editingDefinition } : {})}
+        existing={userTypes.filter((definition) => definition.id !== editingDefinition?.id)}
+        country={detection.country}
+        onSubmit={(definition, save) => {
+          setTypeDialog(null);
+          if (typeDialog?.kind === "edit") void applyUpdateDocumentType(definition);
+          else applyCreateDocumentType(definition, save);
+        }}
+        onClose={() => setTypeDialog(null)}
+      />
+      <RemoveDocumentTypeDialog
+        type={removing}
+        open={removing !== null}
+        onClose={() => setRemoving(null)}
+      />
     </div>
   );
 }

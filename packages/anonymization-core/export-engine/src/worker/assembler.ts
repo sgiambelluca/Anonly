@@ -170,16 +170,17 @@ export async function appendPage(
 }
 
 /**
- * Embebe la página de leyenda dentro de `savePdf` (ADR-059 §6): mismas
- * cuatro llamadas de pdf-lib que `appendPage` (embed + `addPage` +
- * `drawImage`), pero SIN pasar por ella -- la leyenda no tiene `pageIndex`
- * del que ser idempotente (no es una página del documento, caso 18/21).
- * Revierte cualquier página agregada a mitad de ESTE intento antes de
- * relanzar, mismo criterio que `appendPage`.
+ * Embebe las páginas de leyenda dentro de `savePdf` (ADR-059 §6, ADR-219 §6):
+ * mismas cuatro llamadas de pdf-lib que `appendPage` por imagen (embed +
+ * `addPage` + `drawImage`), en el orden recibido, pero SIN pasar por ella --
+ * la leyenda no tiene `pageIndex` del que ser idempotente (no es una página
+ * del documento, caso 18/21). Revierte TODAS las páginas agregadas a mitad de
+ * ESTE intento antes de relanzar, mismo criterio que `appendPage`: o entran
+ * todas o ninguna.
  */
-async function embedLegendPage(
+async function embedLegendPages(
   pdfDoc: PDFDocument,
-  legendImage: EncodedPageImage,
+  legendImages: ReadonlyArray<EncodedPageImage>,
   pageWidthPt: number,
   pageHeightPt: number,
   abortSignal: AbortSignal,
@@ -187,18 +188,20 @@ async function embedLegendPage(
 ): Promise<void> {
   const pageCountBeforeAttempt = pdfDoc.getPageCount();
   try {
-    const embeddedImage: PDFImage = await raceAbort(
-      legendImage.format === "jpeg"
-        ? pdfDoc.embedJpg(legendImage.bytes)
-        : pdfDoc.embedPng(legendImage.bytes),
-      abortSignal,
-      documentId,
-    );
+    for (const legendImage of legendImages) {
+      const embeddedImage: PDFImage = await raceAbort(
+        legendImage.format === "jpeg"
+          ? pdfDoc.embedJpg(legendImage.bytes)
+          : pdfDoc.embedPng(legendImage.bytes),
+        abortSignal,
+        documentId,
+      );
 
-    if (abortSignal.aborted) throw new CancelledError(documentId);
+      if (abortSignal.aborted) throw new CancelledError(documentId);
 
-    const pdfPage = pdfDoc.addPage([pageWidthPt, pageHeightPt]);
-    pdfPage.drawImage(embeddedImage, { x: 0, y: 0, width: pageWidthPt, height: pageHeightPt });
+      const pdfPage = pdfDoc.addPage([pageWidthPt, pageHeightPt]);
+      pdfPage.drawImage(embeddedImage, { x: 0, y: 0, width: pageWidthPt, height: pageHeightPt });
+    }
   } catch (err: unknown) {
     while (pdfDoc.getPageCount() > pageCountBeforeAttempt) {
       pdfDoc.removePage(pdfDoc.getPageCount() - 1);
@@ -229,7 +232,7 @@ export async function savePdf(
   payload: ExportSavePayload,
   opts: AssemblerRunOptions,
 ): Promise<SavePdfResult> {
-  const { documentId, metadata, legendImage, legendPageWidthPt, legendPageHeightPt } = payload;
+  const { documentId, metadata, legendImages, legendPageWidthPt, legendPageHeightPt } = payload;
 
   if (opts.abortSignal.aborted) throw new CancelledError(documentId);
 
@@ -250,14 +253,14 @@ export async function savePdf(
   // documento (únicas, por pageIndex): más páginas que eso en el pdfDoc solo
   // puede ser la leyenda de un intento anterior.
   if (
-    legendImage !== undefined &&
+    legendImages !== undefined &&
     legendPageWidthPt !== undefined &&
     legendPageHeightPt !== undefined &&
     pdfDoc.getPageCount() === state.appendedPages.size
   ) {
-    await embedLegendPage(
+    await embedLegendPages(
       pdfDoc,
-      legendImage,
+      legendImages,
       legendPageWidthPt,
       legendPageHeightPt,
       opts.abortSignal,

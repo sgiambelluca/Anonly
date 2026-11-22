@@ -34,6 +34,10 @@ export const WARNING_TOOLTIP = {
     title: "Conflicto.",
     text: "Hay dos lecturas posibles de este dato. Hacé clic para decidir cuál vale.",
   },
+  resolvedConflict: {
+    title: "Conflicto resuelto.",
+    text: "Este dato tuvo dos lecturas posibles y ya se decidió. Hacé clic para ver cuál se aplicó.",
+  },
   tightSpace: {
     title: "Espacio justo.",
     text: "El reemplazo no entra en el lugar del original y se achicó. Hacé clic para ver opciones.",

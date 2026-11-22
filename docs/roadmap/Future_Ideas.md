@@ -242,6 +242,10 @@ Marketplace opcional de plantillas de reglas (ej. "Plantilla legal AR", "Plantil
 
 Entre usuarios de la misma organización.
 
+> **Tomado por la 1.1 (2026-10-19).** Los formatos propios se exportan a un
+> archivo y se importan en otra instalación (ADR-223 §5 y §6). No hay
+> servidor ni sincronización: el archivo lo pasa el usuario.
+
 ---
 
 ## 5. UX avanzada

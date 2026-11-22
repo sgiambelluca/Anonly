@@ -218,8 +218,13 @@ type OverrideType =
  * también falla (exceso de propiedades). `-?` incluye los campos opcionales,
  * como `ner.wasmPaths`.
  */
+// `detection` (ADR-223 §2) no viaja por este canal: es del arnés de medición y
+// el Core lo valida recién en F4 (Plan_1.1 §7). Excluida, el canal sigue
+// rechazándola como "sección desconocida", igual que antes de la 1.1.
 type OverrideFieldTypes = {
-  readonly [S in keyof EngineConfig]: { readonly [F in keyof EngineConfig[S]]-?: OverrideType };
+  readonly [S in Exclude<keyof EngineConfig, "detection">]: {
+    readonly [F in keyof EngineConfig[S]]-?: OverrideType;
+  };
 };
 
 const ENGINE_OVERRIDE_FIELDS = {
@@ -396,6 +401,9 @@ function mergeTestEngineOverrides(
     grouping: { ...config?.grouping, ...testOverrides.grouping },
     render: { ...config?.render, ...testOverrides.render },
     export: { ...config?.export, ...testOverrides.export },
+    // `detection` no viaja por el canal de medición (ADR-223 §2): lo guardado
+    // por el usuario pasa tal cual, sin que el merge lo descarte.
+    ...(config?.detection !== undefined ? { detection: config.detection } : {}),
   };
 }
 

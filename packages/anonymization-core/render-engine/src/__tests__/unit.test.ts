@@ -2697,7 +2697,7 @@ describe("RenderEngine — unit tests", () => {
   });
 
   // ─── ADR-059 §5 (Hito 10.5, PR 7): página de leyenda del export ───
-  describe("renderLegendPage — layout (ADR-059 §5)", () => {
+  describe("renderLegendPages — layout (ADR-059 §5)", () => {
     const LEGEND_TITLE_FOR_TEST = "Anonimizado con Anonly — Referencia de marcadores";
     function fillTextArgs(calls: ReadonlyArray<DrawCall>): ReadonlyArray<[string, number, number]> {
       return calls
@@ -2709,10 +2709,12 @@ describe("RenderEngine — unit tests", () => {
       const rows = makeMarkerLegendRows(13);
       await engine.init(ctx);
 
-      const encoded = await engine.renderLegendPage(rows, 595, 842, ctx);
+      const pages = await engine.renderLegendPages(rows, 595, 842, ctx);
+      const [encoded] = pages;
 
-      expect(encoded.widthPx).toBe(595);
-      expect(encoded.heightPx).toBe(842);
+      expect(pages).toHaveLength(1);
+      expect(encoded!.widthPx).toBe(595);
+      expect(encoded!.heightPx).toBe(842);
 
       const [canvas] = getCreatedCanvases();
       const textCalls = fillTextArgs(canvas!.calls);
@@ -2737,12 +2739,71 @@ describe("RenderEngine — unit tests", () => {
       }
 
       // y estrictamente incremental entre filas consecutivas, y todo el
-      // contenido entra dentro de la página pedida (sin paginación).
+      // contenido entra en una sola página del tamaño pedido.
       const rowYs = rowCalls.filter((_, idx) => idx % 3 === 0).map((c) => c[2]);
       for (let i = 1; i < rowYs.length; i++) {
         expect(rowYs[i]!).toBeGreaterThan(rowYs[i - 1]!);
       }
       expect(rowYs[rowYs.length - 1]!).toBeLessThan(842);
+    });
+
+    // ─── ADR-219 §6, caso 40: la hoja de referencia se pagina ───
+
+    it("renderLegendPages paginates rows that do not fit and draws each row exactly once", async () => {
+      const rows = makeMarkerLegendRows(100);
+      await engine.init(ctx);
+
+      const pages = await engine.renderLegendPages(rows, 595, 842, ctx);
+
+      // 100 filas no entran en una A4: son varias imágenes, todas del tamaño pedido.
+      expect(pages.length).toBeGreaterThan(1);
+      for (const page of pages) {
+        expect(page.widthPx).toBe(595);
+        expect(page.heightPx).toBe(842);
+      }
+
+      // Cada fila aparece exactamente una vez, entera y en el orden recibido:
+      // la columna de prefijos (x = margen) de todas las páginas, sin los
+      // títulos, reconstruye la lista de entrada.
+      // Cada página crea un canvas de dibujo y otro de codificación: solo el primero lleva texto.
+      const canvases = getCreatedCanvases().filter((canvas) =>
+        canvas.calls.some((call) => call.op === "fillText"),
+      );
+      expect(canvases).toHaveLength(pages.length);
+      const drawnPrefixes = canvases.flatMap((canvas) =>
+        fillTextArgs(canvas.calls)
+          .filter(([text, x]) => x === 40 && text !== LEGEND_TITLE_FOR_TEST)
+          .map(([text]) => text),
+      );
+      expect(drawnPrefixes).toEqual(rows.map((row) => row.prefixes));
+    });
+
+    it("every legend page repeats the title and draws at least one row", async () => {
+      // Página baja: entran dos filas por página, así que 5 filas son 3 páginas.
+      const rows = makeMarkerLegendRows(5);
+      await engine.init(ctx);
+
+      const pages = await engine.renderLegendPages(rows, 595, 150, ctx);
+
+      expect(pages).toHaveLength(3);
+      const canvases = getCreatedCanvases().filter((canvas) =>
+        canvas.calls.some((call) => call.op === "fillText"),
+      );
+      expect(canvases).toHaveLength(3);
+      for (const canvas of canvases) {
+        const texts = fillTextArgs(canvas.calls);
+        expect(texts.filter(([text]) => text === LEGEND_TITLE_FOR_TEST)).toHaveLength(1);
+        // Título + al menos una fila (tres celdas).
+        expect(texts.length).toBeGreaterThanOrEqual(1 + 3);
+      }
+    });
+
+    it("an empty rows array draws no page at all", async () => {
+      await engine.init(ctx);
+
+      await expect(engine.renderLegendPages([], 595, 300, ctx)).resolves.toEqual([]);
+
+      expect(getCreatedCanvases()).toHaveLength(0);
     });
 
     // El bug de la imagen que reportó el humano (2026-08-19): la celda de
@@ -2760,7 +2821,7 @@ describe("RenderEngine — unit tests", () => {
         countLabel: "7 marcadores",
       });
 
-      await engine.renderLegendPage([row], 595, 842, ctx);
+      await engine.renderLegendPages([row], 595, 842, ctx);
 
       const [canvas] = getCreatedCanvases();
       const textCalls = fillTextArgs(canvas!.calls);
@@ -2796,7 +2857,7 @@ describe("RenderEngine — unit tests", () => {
         }),
       ];
 
-      await engine.renderLegendPage(rows, 595, 842, ctx);
+      await engine.renderLegendPages(rows, 595, 842, ctx);
 
       const [canvas] = getCreatedCanvases();
       const rowCalls = fillTextArgs(canvas!.calls).slice(1);
@@ -2818,7 +2879,7 @@ describe("RenderEngine — unit tests", () => {
         countLabel: "3 marcadores",
       });
 
-      await engine.renderLegendPage([row], 595, 842, ctx);
+      await engine.renderLegendPages([row], 595, 842, ctx);
 
       const [canvas] = getCreatedCanvases();
       const textCalls = fillTextArgs(canvas!.calls);
@@ -2841,7 +2902,7 @@ describe("RenderEngine — unit tests", () => {
       });
 
       const narrowWidth = 400;
-      await engine.renderLegendPage([row], narrowWidth, 300, ctx);
+      await engine.renderLegendPages([row], narrowWidth, 300, ctx);
 
       const [canvas] = getCreatedCanvases();
       for (const [text, x, y] of fillTextArgs(canvas!.calls)) {
@@ -2852,19 +2913,6 @@ describe("RenderEngine — unit tests", () => {
         const font = text === LEGEND_TITLE_FOR_TEST ? "16px sans-serif" : "12px sans-serif";
         expect(x + measureStubTextWidth(text, font)).toBeLessThanOrEqual(narrowWidth);
       }
-    });
-
-    it("an empty rows array still draws the title, without throwing", async () => {
-      await engine.init(ctx);
-
-      // A4: el título entra en una línea. En una página más angosta se
-      // envuelve (ver el test de página angosta), así que fijar el conteo de
-      // líneas del título solo tiene sentido con un ancho donde entra.
-      const encoded = await engine.renderLegendPage([], 595, 300, ctx);
-
-      expect(encoded.widthPx).toBe(595);
-      const [canvas] = getCreatedCanvases();
-      expect(fillTextArgs(canvas!.calls)).toHaveLength(1); // solo el título
     });
   });
 
@@ -2954,6 +3002,7 @@ describe("RenderEngine — unit tests", () => {
       // kernel de por medio.
       const legendPayload: RenderLegendPayload = {
         rows: [{ prefixes: "DNI", typeName: "DNI", countLabel: "3 marcadores" }],
+        startRow: 0,
         pageWidthPt: 200,
         pageHeightPt: 100,
       };
@@ -2965,15 +3014,22 @@ describe("RenderEngine — unit tests", () => {
         payload: legendPayload,
       });
       await vi.waitFor(() => expect(outboundOfType(fakeSelf, "COMPLETED")).toBeDefined());
-      const legendResult = outboundOfType(fakeSelf, "COMPLETED")?.result as {
-        readonly bytes: ArrayBuffer;
-        readonly format: string;
-        readonly widthPx: number;
-        readonly heightPx: number;
+      const legendPageResult = outboundOfType(fakeSelf, "COMPLETED")?.result as {
+        readonly image: {
+          readonly bytes: ArrayBuffer;
+          readonly format: string;
+          readonly widthPx: number;
+          readonly heightPx: number;
+        };
+        readonly rowsDrawn: number;
       };
+      const legendResult = legendPageResult.image;
       expect(legendResult.widthPx).toBe(200);
       expect(legendResult.heightPx).toBe(100);
       expect(legendResult.format).toBe("png");
+      // ADR-219 §6: en una página tan baja ninguna fila entra, pero una página
+      // dibuja siempre al menos una.
+      expect(legendPageResult.rowsDrawn).toBe(1);
       expect("pageCount" in legendResult).toBe(false); // no se confundió con load
       expect("imageData" in legendResult).toBe(false); // no se confundió con render/rasterize
       fakeSelf.postMessage.mockClear();

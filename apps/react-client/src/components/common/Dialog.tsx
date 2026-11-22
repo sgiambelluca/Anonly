@@ -16,7 +16,37 @@
 
 import * as RadixDialog from "@radix-ui/react-dialog";
 import { XIcon } from "lucide-react";
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useState,
+  type ReactNode,
+} from "react";
+
+import { dialogLayerFor, dialogZIndex } from "./dialogLayers.js";
+
+/** Cuántos diálogos modales hay abiertos: el siguiente que abre toma esa capa. */
+let openDialogCount = 0;
+
+/**
+ * La capa del diálogo en la pila (§11b.17): un diálogo abierto sobre otro sube
+ * una capa, para que su fondo desenfoque también al de abajo.
+ */
+function useDialogLayer(open: boolean): number {
+  const [layer, setLayer] = useState(0);
+  useLayoutEffect(() => {
+    if (!open) return;
+    setLayer(dialogLayerFor(openDialogCount));
+    openDialogCount += 1;
+    return () => {
+      openDialogCount -= 1;
+    };
+  }, [open]);
+  return layer;
+}
 
 const DialogSelectOpenContext = createContext<(open: boolean) => void>(() => undefined);
 
@@ -48,12 +78,33 @@ export interface DialogProps {
    * Ancho máximo. `md` es el de siempre; `lg` es para diálogos con contenido
    * en columnas (`AboutDialog`, los diálogos de edición de ADR-169 §10).
    */
-  readonly size?: "md" | "lg";
+  readonly size?: "md" | "lg" | "xl" | "2xl";
+  /**
+   * `alertdialog` para una confirmación que interrumpe (rechazo de una
+   * importación, borrar un tipo con sus formatos). Radix lo deja en `dialog` por
+   * defecto; sin la prop, nada cambia.
+   */
+  readonly role?: "alertdialog";
+  /** Acciones del encabezado, a la izquierda del botón de cierre (p. ej. «Importar…» y «Exportar…»). */
+  readonly headerActions?: ReactNode;
+  /**
+   * `Esc` antes de cerrar: quien lo pasa puede frenar el cierre con
+   * `event.preventDefault()` (el generador de formatos lo usa para cerrar su
+   * panel de prueba flotante primero, `UX_Guidelines.md` §11b.7).
+   */
+  readonly onEscapeKeyDown?: (event: KeyboardEvent) => void;
+  /** Usa hasta el 92 % del alto de la ventana en vez del 85 % (el generador de formatos). */
+  readonly tall?: boolean;
+  /** La descripción va en la columna del título, sin un renglón propio debajo (el generador). */
+  readonly descriptionInline?: boolean;
 }
 
 const SIZE_CLASS: Readonly<Record<NonNullable<DialogProps["size"]>, string>> = {
   md: "max-w-md",
   lg: "max-w-xl",
+  xl: "max-w-3xl",
+  // 1140 px, el ancho del tablero de Formatos; con `w-[calc(100%-2rem)]` entra en 1280.
+  "2xl": "max-w-[71.25rem]",
 };
 
 export function Dialog({
@@ -67,8 +118,14 @@ export function Dialog({
   footer,
   hideCloseButton = false,
   size = "md",
+  role,
+  headerActions,
+  onEscapeKeyDown,
+  tall = false,
+  descriptionInline = false,
 }: DialogProps) {
   const [selectOpen, setSelectOpen] = useState(false);
+  const zIndex = dialogZIndex(useDialogLayer(open));
   const handleSelectOpenChange = useCallback((next: boolean) => setSelectOpen(next), []);
 
   useEffect(() => {
@@ -76,7 +133,8 @@ export function Dialog({
   }, [open]);
 
   const titleNode = (
-    <RadixDialog.Title className="text-sm font-semibold text-text-primary">
+    // 16 px: más que los rótulos de los campos (14 px), para que se lea como título (§8.2).
+    <RadixDialog.Title className="text-base font-semibold leading-snug text-text-primary">
       {title}
     </RadixDialog.Title>
   );
@@ -101,12 +159,22 @@ export function Dialog({
         }}
       >
         <RadixDialog.Portal>
-          <RadixDialog.Overlay onClick={onClose} className="fixed inset-0 z-40 bg-black/40" />
+          {/* Velo oscuro y desenfoque leve (§11b.17); el z-index sigue la pila de diálogos. */}
+          <RadixDialog.Overlay
+            onClick={onClose}
+            style={{ zIndex: zIndex.overlay }}
+            className="fixed inset-0 bg-black/40 backdrop-blur-[3px]"
+          />
           {/* Radix Select's modal portal disables outside pointer events. Re-enable
               them only over this Dialog while its own Select is open. */}
           <RadixDialog.Content
-            style={selectOpen ? { pointerEvents: "auto" } : undefined}
-            className={`fixed left-1/2 top-1/2 z-50 flex max-h-[85vh] w-[calc(100%-2rem)] ${SIZE_CLASS[size]} -translate-x-1/2 -translate-y-1/2 flex-col rounded-lg bg-bg-primary p-5 shadow-md focus:outline-none`}
+            {...(role !== undefined ? { role } : {})}
+            {...(onEscapeKeyDown !== undefined ? { onEscapeKeyDown } : {})}
+            style={{
+              zIndex: zIndex.content,
+              ...(selectOpen ? { pointerEvents: "auto" as const } : {}),
+            }}
+            className={`fixed left-1/2 top-1/2 flex ${tall ? "max-h-[92vh]" : "max-h-[85vh]"} w-[calc(100%-2rem)] ${SIZE_CLASS[size]} -translate-x-1/2 -translate-y-1/2 flex-col rounded-lg bg-bg-primary p-5 shadow-md focus:outline-none`}
           >
             {icon !== undefined ? (
               // ADR-215 §3: con ícono, el título y la descripción van en una
@@ -126,18 +194,33 @@ export function Dialog({
                     </RadixDialog.Description>
                   ) : null}
                 </div>
+                {headerActions}
                 {hideCloseButton ? null : closeButton}
               </div>
             ) : (
               <>
                 <div className="mb-3 flex shrink-0 items-start justify-between gap-4">
-                  <div className="flex min-w-0 items-baseline gap-2">
-                    {titleNode}
-                    {titleAside}
+                  <div className="flex min-w-0 flex-col">
+                    <div className="flex min-w-0 items-baseline gap-2">
+                      {titleNode}
+                      {titleAside}
+                    </div>
+                    {descriptionInline && description ? (
+                      <RadixDialog.Description className="text-sm text-text-secondary">
+                        {description}
+                      </RadixDialog.Description>
+                    ) : null}
                   </div>
-                  {hideCloseButton ? null : closeButton}
+                  {/* Las acciones van pegadas a la X, no repartidas por `justify-between`. */}
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    {headerActions}
+                    {headerActions !== undefined && !hideCloseButton ? (
+                      <span aria-hidden className="mx-1 h-7 w-px bg-border" />
+                    ) : null}
+                    {hideCloseButton ? null : closeButton}
+                  </div>
                 </div>
-                {description ? (
+                {description && !descriptionInline ? (
                   <RadixDialog.Description className="mb-3 shrink-0 text-sm text-text-secondary">
                     {description}
                   </RadixDialog.Description>

@@ -22,8 +22,15 @@
  * el override devuelto acá nunca la pisa: no incluye esa clave.
  */
 
-import type { EngineConfigOverrides, WorkerPoolConfig } from "@anonly/anonymization-core";
+import {
+  DEFAULT_DETECTION_CONFIG,
+  getCatalog,
+  type DetectionConfig,
+  type EngineConfigOverrides,
+  type WorkerPoolConfig,
+} from "@anonly/anonymization-core";
 
+import type { DetectionState } from "../store/detectionState.js";
 import type { SettingsSlice } from "../store/settings.store.js";
 
 export type BootstrapSettings = Pick<
@@ -153,6 +160,66 @@ export function deriveEngineConfigOverrides(
 }
 
 /**
+ * Deriva el `DetectionConfig` del Core de lo guardado (`React_Client.md` §3.8,
+ * ADR-223 §2). Función pura. Un formato base sin entrada está prendido, así que
+ * solo los apagados viajan; de las copias editadas, solo las que tienen
+ * `basedOn` en el catálogo del país activo.
+ */
+export function detectionToEngineConfig(saved: DetectionState): DetectionConfig {
+  const catalogIds = new Set(getCatalog(saved.country).map((info) => info.id));
+  return {
+    country: saved.country,
+    baseFormats: (saved.disabledBaseFormats[saved.country] ?? []).map((formatId) => ({
+      formatId,
+      enabled: false,
+    })),
+    userTypes: saved.userTypes,
+    userFormats: saved.userFormats.filter(
+      (format) => format.basedOn === undefined || catalogIds.has(format.basedOn),
+    ),
+    catalogRefs: saved.catalogRefs,
+  };
+}
+
+/**
+ * Los overrides completos para `initCore` y `recreateCore`: los de los settings
+ * más la sección `detection` de lo guardado (`React_Client.md` §3.8: se aplica
+ * en el bootstrap y en `commit()`).
+ */
+export function deriveCoreOverrides(
+  settings: BootstrapSettings,
+  detection: DetectionState,
+  signals: DeviceSignals = readDeviceSignals(),
+): EngineConfigOverrides {
+  return {
+    ...deriveEngineConfigOverrides(settings, signals),
+    detection: detectionToEngineConfig(detection),
+  };
+}
+
+/** Igualdad estructural de datos JSON, sin depender del orden de las claves. */
+function sameJson(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    return (
+      Array.isArray(a) &&
+      Array.isArray(b) &&
+      a.length === b.length &&
+      a.every((item, index) => sameJson(item, b[index]))
+    );
+  }
+  if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
+  const keysA = Object.keys(a).filter((key) => (a as Record<string, unknown>)[key] !== undefined);
+  const keysB = Object.keys(b).filter((key) => (b as Record<string, unknown>)[key] !== undefined);
+  return (
+    keysA.length === keysB.length &&
+    keysA.every((key) =>
+      sameJson((a as Record<string, unknown>)[key], (b as Record<string, unknown>)[key]),
+    )
+  );
+}
+
+/**
  * ¿Dos settings producen el mismo `EngineConfigOverrides`?
  *
  * ADR-125 §2: guardar settings sin documento abierto recrea el core, y
@@ -190,7 +257,12 @@ export function sameEngineConfigOverrides(
     return false;
   }
 
-  return true;
+  // `detection` ausente es la detección de la 1.0.2 (`DEFAULT_DETECTION_CONFIG`):
+  // un override sin la sección y uno con los defaults piden lo mismo al Core.
+  return sameJson(
+    { ...DEFAULT_DETECTION_CONFIG, ...a.detection },
+    { ...DEFAULT_DETECTION_CONFIG, ...b.detection },
+  );
 }
 
 /**

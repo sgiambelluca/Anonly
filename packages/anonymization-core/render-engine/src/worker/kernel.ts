@@ -49,6 +49,7 @@ import {
   type PreviewInteractionGeometry,
   type PreviewWordPosition,
   type RasterizePagePayload,
+  type RenderLegendPageResult,
   type RenderLegendPayload,
   type RenderPagePayload,
   type Replacement,
@@ -1558,6 +1559,11 @@ export async function kernelRenderPage(
       pageIndex,
       opts.timeoutMs,
     );
+    // ADR-232: solo en `mode: "full"` (export, una vez por página). El preview
+    // conserva lo que dibujó para que un zoom o un cambio de vista no vuelva
+    // a decodificar la imagen. Después de este punto la función no vuelve a
+    // usar `pageProxy` (el viewport ya está calculado).
+    if (mode === "full") pageProxy.cleanup();
   } catch (err: unknown) {
     throw toPageFailure(documentId, pageIndex, err);
   }
@@ -1757,6 +1763,12 @@ export async function kernelRasterizePage(
       pageIndex,
       opts.timeoutMs,
     );
+    // ADR-232: pdf.js deja en `pageProxy.objs` las imágenes decodificadas para
+    // dibujar, y `PDFDocumentProxy` retiene la página hasta `destroy()`. Se
+    // sueltan apenas el dibujo terminó, antes de recortar o codificar. Si el
+    // render falla o se cancela no se llega acá. No se vuelve a usar
+    // `pageProxy` después (viewport y `cropRect` ya están calculados).
+    pageProxy.cleanup();
   } catch (err: unknown) {
     throw toPageFailure(documentId, pageIndex, err);
   }
@@ -1794,9 +1806,9 @@ export async function kernelRasterizePage(
 const LEGEND_DOCUMENT_LABEL = "(legend)";
 const LEGEND_PAGE_LABEL = -1;
 
-// Layout (ADR-059 §5, Render_Engine.md §6/§13 caso 29): tabla de hasta 13
-// filas (cota de `EntityType`, ADR-059 §2) a `y` incremental con columnas a
-// `x` fijas, **con salto de línea dentro de cada celda** y sin paginación. El
+// Layout (ADR-059 §5, Render_Engine.md §6/§13 casos 29 y 40): tabla a `y`
+// incremental con columnas a `x` fijas, **con salto de línea dentro de cada
+// celda**, paginada por job desde `startRow` (ADR-219 §6). El
 // espaciado/tipografía exactos no están en el spec ("decisión de estilo
 // visual, sin spec pixel-perfect"): título en negrita, tres columnas fijas en
 // el mismo orden que el ejemplo de ADR-059 §2 (prefixes, tipo, conteo),
@@ -1878,9 +1890,10 @@ function wrapCellText(
 function paintLegendTable(
   context: OffscreenCanvasRenderingContext2D,
   rows: ReadonlyArray<MarkerLegendRow>,
+  startRow: number,
   pageWidthPt: number,
   pageHeightPt: number,
-): void {
+): number {
   context.fillStyle = LEGEND_BACKGROUND_COLOR;
   context.fillRect(0, 0, pageWidthPt, pageHeightPt);
 
@@ -1919,7 +1932,8 @@ function paintLegendTable(
   // La tabla arranca bajo la ÚLTIMA línea del título, no bajo la primera.
   let y = titleY - LEGEND_TITLE_LINE_HEIGHT_PT + LEGEND_TITLE_TO_TABLE_GAP_PT;
 
-  for (const row of rows) {
+  let rowsDrawn = 0;
+  for (const row of rows.slice(startRow)) {
     const cells = [
       { text: row.prefixes, offset: offsets.prefixes, width: columnWidths.prefixes },
       { text: row.typeName, offset: offsets.typeName, width: columnWidths.typeName },
@@ -1943,11 +1957,13 @@ function paintLegendTable(
     const rowLines = Math.max(...cells.map((cell) => cell.lines.length));
     const rowHeightPt = Math.max(LEGEND_ROW_HEIGHT_PT, rowLines * LEGEND_LINE_HEIGHT_PT);
 
-    // Sin paginación (ADR-059 §5): si la tabla no entra, se corta acá en vez
-    // de dibujar fuera de la página. Con 13 tipos (cota de ADR-059 §2) y los
-    // prefijos reales no se alcanza; queda como guarda, no como camino
-    // esperado.
-    if (y + rowHeightPt > bottomLimitPt) break;
+    // Paginación (ADR-219 §6): la fila que no entra entera abre la página
+    // siguiente, así que se corta acá y el host sigue desde `startRow +
+    // rowsDrawn`. Una página dibuja siempre al menos una fila: una más alta
+    // que la página entera va sola y se recorta contra el borde del canvas, y
+    // la que sigue arranca la página siguiente. Sin esta excepción el host no
+    // avanzaría nunca.
+    if (rowsDrawn > 0 && y + rowHeightPt > bottomLimitPt) break;
 
     for (const cell of cells) {
       let lineY = y;
@@ -1957,7 +1973,9 @@ function paintLegendTable(
       }
     }
     y += rowHeightPt;
+    rowsDrawn += 1;
   }
+  return rowsDrawn;
 }
 
 export interface KernelRenderLegendOptions {
@@ -1977,8 +1995,8 @@ export interface KernelRenderLegendOptions {
 export async function kernelRenderLegendPage(
   payload: RenderLegendPayload,
   opts: KernelRenderLegendOptions,
-): Promise<EncodedPageImage> {
-  const { rows, pageWidthPt, pageHeightPt } = payload;
+): Promise<RenderLegendPageResult> {
+  const { rows, startRow, pageWidthPt, pageHeightPt } = payload;
   // Default "png" (no está en el spec, que no expone `imageFormat` en la
   // firma pública §6): es texto sobre fondo blanco, sin degradado ni foto —
   // el caso exacto para el que PNG sin pérdida es la elección barata, mismo
@@ -1994,10 +2012,10 @@ export async function kernelRenderLegendPage(
   );
   const context = get2dContext(canvas, LEGEND_DOCUMENT_LABEL, LEGEND_PAGE_LABEL);
 
-  paintLegendTable(context, rows, pageWidthPt, pageHeightPt);
+  const rowsDrawn = paintLegendTable(context, rows, startRow, pageWidthPt, pageHeightPt);
 
   const imageData = context.getImageData(0, 0, pageWidthPt, pageHeightPt);
-  return encodeImageData(
+  const image = await encodeImageData(
     imageData,
     imageFormat,
     opts.jpegQuality,
@@ -2005,6 +2023,7 @@ export async function kernelRenderLegendPage(
     LEGEND_PAGE_LABEL,
     opts.onWarn,
   );
+  return { image, rowsDrawn };
 }
 
 /**

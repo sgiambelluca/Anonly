@@ -1,9 +1,11 @@
 import { getEventListeners } from "node:events";
 
+import { GroupingEngine } from "@anonly/grouping-engine";
 import { PdfPasswordRequiredError, PdfTimeoutError } from "@anonly/pdf-engine";
 import { RenderEngine } from "@anonly/render-engine";
 import {
   CancelledError,
+  DEFAULT_DETECTION_CONFIG,
   DetectionSource,
   EngineError,
   EngineErrorCode,
@@ -17,6 +19,8 @@ import {
   ReplacementMode,
   WorkerCrashedError,
   type EngineContext,
+  type FormatDefinition,
+  type UserEntityTypeId,
 } from "@anonly/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -28,14 +32,15 @@ vi.mock("@huggingface/transformers", () => ({
 }));
 
 import { LruCache, type PrefixDeletableCache } from "../cache.js";
-import { buildDefaultEngineConfig } from "../config.js";
+import { buildDefaultEngineConfig, sanitizeDetectionConfig } from "../config.js";
 import { OrchestratorDisposedError } from "../errors.js";
-import { createCore } from "../index.js";
+import { createCore, validateFormatsFile } from "../index.js";
 import { selectLineWords } from "../line-words.js";
 import { PipelineOrchestrator } from "../orchestrator.js";
 import { WorkerPool, WorkerPoolManager } from "../worker-pool.js";
 
 import {
+  createDeferred,
   createDocument,
   createEngineConfig,
   createEntityGroup,
@@ -51,6 +56,7 @@ import {
   createRealBus,
   createRenderPageOutput,
   createReplacement,
+  createUserTypeDefinition,
   createWord,
   makeOrchestratorWithRealDetection,
   recordNerModelEvents,
@@ -160,7 +166,7 @@ describe("Orchestrator — unit tests", () => {
     const bus = createRealBus();
     const engines = createMockEngines();
     wireHappyPathSpies(engines, bus);
-    const legendSpy = vi.spyOn(engines.render, "renderLegendPage");
+    const legendSpy = vi.spyOn(engines.render, "renderLegendPages");
     const orchestrator = new PipelineOrchestrator({
       bus,
       logger: createMockLogger(),
@@ -3309,6 +3315,103 @@ describe("PIPELINE_PROGRESS (Orchestrator.md §8, ADR-034 §4)", () => {
     );
   });
 
+  // ─── ADR-231: el pool de NER se da de baja al empezar runOcrStage ───
+
+  it("runOcrStage releases idle NER workers before dispatching OCR (ADR-231)", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    const pdfOutput = createPdfEngineOutput({
+      document: createDocument({
+        pageCount: 1,
+        pages: [createPage({ index: 0, requiresOCR: true })],
+      }),
+      textlessPages: [0],
+    });
+    wireHappyPathSpies(engines, bus, { pdfOutput });
+    const nerReleaseSpy = vi.spyOn(engines.ner, "releaseIdleWorkers").mockReturnValue(undefined);
+    const processSessionSpy = vi.spyOn(engines.ocr, "processSession");
+
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+
+    await orchestrator.importDocument(createImportInput());
+
+    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+    expect(nerReleaseSpy).toHaveBeenCalledTimes(1);
+    expect(processSessionSpy).toHaveBeenCalled();
+    expect(nerReleaseSpy.mock.invocationCallOrder[0]).toBeLessThan(
+      processSessionSpy.mock.invocationCallOrder[0] ?? Number.NEGATIVE_INFINITY,
+    );
+  });
+
+  it("a document without OCR pages does not release the NER pool (ADR-231)", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    const pdfOutput = createPdfEngineOutput({
+      document: createDocument({
+        pageCount: 1,
+        pages: [createPage({ index: 0, requiresOCR: false })],
+      }),
+      textlessPages: [],
+      ocrRegions: [],
+    });
+    wireHappyPathSpies(engines, bus, { pdfOutput });
+    const nerReleaseSpy = vi.spyOn(engines.ner, "releaseIdleWorkers").mockReturnValue(undefined);
+
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+
+    await orchestrator.importDocument(createImportInput());
+
+    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+    expect(nerReleaseSpy).not.toHaveBeenCalled();
+  });
+
+  it("reanalyze through OCR releases idle NER workers before its OCR stage (ADR-231)", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    const pdfOutput = createPdfEngineOutput({
+      document: createDocument({
+        pageCount: 1,
+        pages: [createPage({ index: 0, requiresOCR: true })],
+      }),
+      textlessPages: [0],
+    });
+    wireHappyPathSpies(engines, bus, { pdfOutput });
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+
+    await orchestrator.importDocument(createImportInput());
+    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+
+    const nerReleaseSpy = vi.spyOn(engines.ner, "releaseIdleWorkers").mockReturnValue(undefined);
+    const processSessionSpy = vi.spyOn(engines.ocr, "processSession");
+    processSessionSpy.mockClear();
+
+    await orchestrator.reanalyze("doc-1", { ocr: { languages: ["eng"] } });
+
+    expect(processSessionSpy).toHaveBeenCalledTimes(1);
+    expect(nerReleaseSpy).toHaveBeenCalledTimes(1);
+    expect(nerReleaseSpy.mock.invocationCallOrder[0]).toBeLessThan(
+      processSessionSpy.mock.invocationCallOrder[0] ?? Number.NEGATIVE_INFINITY,
+    );
+  });
+
   // ─── ADR-157: el pool de OCR se da de baja al terminar runOcrStage ───
 
   it("ADR-157: releases the OCR pool's idle workers after a successful OCR stage", async () => {
@@ -4258,5 +4361,463 @@ describe("selectLineWords — selección host-side de las palabras de línea (AD
     expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
 
     expect(() => orchestrator.findText("doc-unknown", "cualquier cosa")).toThrow(InvalidInputError);
+  });
+});
+
+// ─── 1.1, frente F4: detection, tipos del documento y archivo de formatos ───
+
+const JOSE_PEREZ_DOCUMENT = createDocument({
+  pageCount: 1,
+  pages: [
+    createPage({
+      index: 0,
+      text: "Jose Perez y Ana Gomez",
+      requiresOCR: true,
+      words: [
+        createWord({ text: "Jose", bbox: { x: 0, y: 0, width: 30, height: 12 } }),
+        createWord({ text: "Perez", bbox: { x: 35, y: 0, width: 35, height: 12 } }),
+        createWord({ text: "y", bbox: { x: 75, y: 0, width: 10, height: 12 } }),
+        createWord({ text: "Ana", bbox: { x: 90, y: 0, width: 25, height: 12 } }),
+        createWord({ text: "Gomez", bbox: { x: 120, y: 0, width: 40, height: 12 } }),
+      ],
+    }),
+  ],
+});
+
+const DNI_DOCUMENT = createDocument({
+  pageCount: 1,
+  pages: [
+    createPage({
+      index: 0,
+      text: "34567891",
+      requiresOCR: true,
+      words: [createWord({ text: "34567891", bbox: { x: 0, y: 0, width: 60, height: 12 } })],
+    }),
+  ],
+});
+
+function createValidFormat(
+  entityType: UserEntityTypeId,
+  name = "Numero de afiliado",
+): FormatDefinition {
+  return {
+    id: "fmt:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    name,
+    entityType,
+    variants: [
+      [
+        { kind: "chars", charClass: "digit", min: 3, max: 3 },
+        { kind: "separator", chars: ["-"], optional: false },
+        { kind: "chars", charClass: "digit", min: 4, max: 4 },
+      ],
+    ],
+    enabled: true,
+  };
+}
+
+describe("Orchestrator — 1.1 F4 (tipos propios y archivo de formatos)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  // Caso 47 (ADR-223 §2).
+  it("createCore merges the default detection config and drops invalid user types", async () => {
+    const valid = createUserTypeDefinition("Historia clínica", 1);
+    const repeated = createUserTypeDefinition("historia clinica", 2);
+    const blank = createUserTypeDefinition("   ", 3);
+
+    // El reparto: lo que recibe un motor por ctx.config.
+    const seen: Array<EngineContext["config"]["detection"]> = [];
+    vi.spyOn(GroupingEngine.prototype, "init").mockImplementation((ctx) => {
+      seen.push(ctx.config.detection);
+      return Promise.resolve();
+    });
+    const withoutOverride = await createCore();
+    await withoutOverride.dispose();
+    const withTypes = await createCore({ detection: { userTypes: [valid, repeated, blank] } });
+    await withTypes.dispose();
+    expect(seen[0]).toEqual(DEFAULT_DETECTION_CONFIG);
+    expect(seen[1]?.country).toBe("AR");
+    expect(seen[1]?.userTypes).toEqual([valid]);
+
+    // El `warn`: lleva el id y el código, nunca el nombre.
+    const logger = createMockLogger();
+    const config = createEngineConfig({
+      detection: { ...DEFAULT_DETECTION_CONFIG, userTypes: [valid, repeated, blank] },
+    });
+    const sanitized = sanitizeDetectionConfig(config, logger);
+    expect(sanitized.detection.userTypes).toEqual([valid]);
+    expect(logger.warn).toHaveBeenCalledTimes(2);
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ id: repeated.id, code: "label_taken" }),
+    );
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ id: blank.id, code: "name_empty" }),
+    );
+    expect(JSON.stringify(vi.mocked(logger.warn).mock.calls).toLowerCase()).not.toContain(
+      "historia",
+    );
+    // Sin nada que descartar, es la misma config.
+    const clean = createEngineConfig();
+    expect(sanitizeDetectionConfig(clean, logger)).toBe(clean);
+
+    // Un `reanalyze` no la cambia: la config efectiva la conserva tal cual.
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    wireHappyPathSpies(engines, bus, {
+      pdfOutput: createPdfEngineOutput({ document: JOSE_PEREZ_DOCUMENT, textlessPages: [0] }),
+    });
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: sanitized,
+      engines,
+    });
+    await orchestrator.importDocument(createImportInput());
+    await orchestrator.reanalyze("doc-1", { ocr: { languages: ["eng"] } });
+    const reanalyzeCtx = vi.mocked(engines.regex.process).mock.calls.at(-1)?.[1];
+    expect(reanalyzeCtx?.config.detection).toEqual(sanitized.detection);
+  });
+
+  // Caso 48 (ADR-219 §5).
+  it("document types delegate to grouping", async () => {
+    const { orchestrator, engines } =
+      await makeOrchestratorWithRealDetection(createPdfEngineOutput());
+    await orchestrator.importDocument(createImportInput());
+    const defineSpy = vi.spyOn(engines.grouping, "defineSessionType");
+    const getSpy = vi.spyOn(engines.grouping, "getSessionTypes");
+    const afiliado = createUserTypeDefinition("Afiliado", 1);
+
+    orchestrator.defineDocumentEntityType("doc-1", afiliado);
+    expect(defineSpy).toHaveBeenCalledWith("doc-1", afiliado);
+    expect(orchestrator.getDocumentEntityTypes("doc-1")).toEqual([afiliado]);
+    expect(getSpy).toHaveBeenCalledWith("doc-1");
+
+    // Sin sesión: el primero lanza el error del motor, el segundo devuelve [].
+    expect(() =>
+      orchestrator.defineDocumentEntityType("doc-sin-sesion", createUserTypeDefinition("Otro", 2)),
+    ).toThrow(InvalidInputError);
+    expect(orchestrator.getDocumentEntityTypes("doc-sin-sesion")).toEqual([]);
+
+    // `closeDocument` los descarta.
+    await orchestrator.closeDocument("doc-1");
+    expect(orchestrator.getDocumentEntityTypes("doc-1")).toEqual([]);
+  });
+
+  // Caso 53 (ADR-225 §3 y §4).
+  it("updating and removing a document type delegate to grouping and guard the stage", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    wireHappyPathSpies(engines, bus);
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+    await orchestrator.importDocument(createImportInput());
+    const afiliado = createUserTypeDefinition("Afiliado", 1);
+
+    // update: delega y el re-render sale de ENTITY_GROUP_UPDATED (caso 27).
+    vi.mocked(engines.grouping.updateSessionType).mockImplementation((documentId) => {
+      bus.emit(EventChannel.Grouping, EngineEvents.ENTITY_GROUP_UPDATED, {
+        documentId,
+        group: createEntityGroup({
+          id: "group-afiliado",
+          type: afiliado.id,
+          members: [
+            {
+              occurrenceId: "occ-1",
+              value: "123",
+              pageIndex: 0,
+              bbox: { x: 0, y: 0, width: 1, height: 1 },
+              source: DetectionSource.Manual,
+            },
+          ],
+        }),
+        changes: ["replacementValue"],
+      });
+      return Promise.resolve();
+    });
+    vi.mocked(engines.render.renderPage).mockClear();
+    await orchestrator.updateDocumentEntityType("doc-1", afiliado);
+    expect(engines.grouping.updateSessionType).toHaveBeenCalledWith("doc-1", afiliado);
+    await vi.waitFor(() =>
+      expect(engines.render.renderPage).toHaveBeenCalledWith(
+        expect.objectContaining({ pageIndex: 0, kind: "anonymized", mode: "preview" }),
+        expect.anything(),
+      ),
+    );
+
+    // remove: delega.
+    await orchestrator.removeDocumentEntityType("doc-1", afiliado.id);
+    expect(engines.grouping.removeSessionType).toHaveBeenCalledWith("doc-1", afiliado.id);
+
+    // Sin sesión (documento desconocido): InvalidInputError sin llamar al motor.
+    vi.mocked(engines.grouping.updateSessionType).mockClear();
+    vi.mocked(engines.grouping.removeSessionType).mockClear();
+    await expect(orchestrator.updateDocumentEntityType("doc-x", afiliado)).rejects.toBeInstanceOf(
+      InvalidInputError,
+    );
+    await expect(
+      orchestrator.removeDocumentEntityType("doc-x", afiliado.id),
+    ).rejects.toBeInstanceOf(InvalidInputError);
+    expect(engines.grouping.updateSessionType).not.toHaveBeenCalled();
+    expect(engines.grouping.removeSessionType).not.toHaveBeenCalled();
+
+    // Con una pasada de detección en curso: lo mismo, sin llamar al motor.
+    const gate = createDeferred<void>();
+    await orchestrator.closeDocument("doc-1");
+    vi.spyOn(engines.regex, "process").mockImplementation(async (input) => {
+      await gate.promise;
+      bus.emit(EventChannel.Regex, EngineEvents.REGEX_FINISHED, {
+        documentId: input.document.id,
+        occurrenceCount: 0,
+        durationMs: 1,
+      });
+      return { documentId: input.document.id, occurrenceCount: 0, durationMs: 1 };
+    });
+    const importing = orchestrator.importDocument(createImportInput());
+    await vi.waitFor(() =>
+      expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Detecting),
+    );
+    await expect(orchestrator.updateDocumentEntityType("doc-1", afiliado)).rejects.toBeInstanceOf(
+      InvalidInputError,
+    );
+    await expect(
+      orchestrator.removeDocumentEntityType("doc-1", afiliado.id),
+    ).rejects.toBeInstanceOf(InvalidInputError);
+    expect(engines.grouping.updateSessionType).not.toHaveBeenCalled();
+    expect(engines.grouping.removeSessionType).not.toHaveBeenCalled();
+    gate.resolve();
+    await importing;
+  });
+
+  // Caso 53: un reanalyze posterior no vuelve a emitir los valores del tipo borrado.
+  it("removing a document type drops its retained manual literals", async () => {
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    wireHappyPathSpies(engines, bus, {
+      pdfOutput: createPdfEngineOutput({ document: JOSE_PEREZ_DOCUMENT, textlessPages: [0] }),
+    });
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig(),
+      engines,
+    });
+    await orchestrator.importDocument(createImportInput());
+    const afiliado = createUserTypeDefinition("Afiliado", 1);
+    vi.mocked(engines.grouping.getSessionTypes).mockReturnValue([afiliado]);
+
+    await orchestrator.addManualEntity("doc-1", { value: "Ana Gomez", entityType: afiliado.id });
+    await orchestrator.addManualEntity("doc-1", {
+      value: "Jose Perez",
+      entityType: EntityType.Person,
+    });
+    await orchestrator.removeDocumentEntityType("doc-1", afiliado.id);
+    vi.mocked(engines.grouping.getSessionTypes).mockReturnValue([]);
+
+    vi.mocked(engines.regex.findLiteral).mockClear();
+    await orchestrator.reanalyze("doc-1", { ocr: { languages: ["eng"] } });
+
+    // Solo el literal del tipo base se vuelve a buscar.
+    expect(vi.mocked(engines.regex.findLiteral).mock.calls.map(([input]) => input.value)).toEqual([
+      "Jose Perez",
+    ]);
+  });
+
+  // Caso 53 (ADR-225 §4; Grouping_Engine.md caso 90): con los motores reales.
+  it("removing a document type resolves its held manual conflict and drops its literal", async () => {
+    const { bus, orchestrator, engines } = await makeOrchestratorWithRealDetection(
+      createPdfEngineOutput({ document: DNI_DOCUMENT, textlessPages: [0] }),
+    );
+    await orchestrator.importDocument(createImportInput());
+    expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
+    const afiliado = createUserTypeDefinition("Afiliado", 1);
+    orchestrator.defineDocumentEntityType("doc-1", afiliado);
+
+    // El mismo valor que Regex ya detectó como DNI, agregado como «Afiliado»:
+    // pierde la superposición y queda retenido en un choque (ADR-174).
+    const added = await orchestrator.addManualEntity("doc-1", {
+      value: "34567891",
+      entityType: afiliado.id,
+    });
+    expect(added.heldConflictIds).toHaveLength(1);
+    const dniGroupBefore = engines.grouping
+      .getSnapshot("doc-1")
+      .groups.find((group) => group.type === EntityType.DNI);
+    expect(dniGroupBefore).toBeDefined();
+
+    const resolved: string[] = [];
+    bus.on(EventChannel.Grouping, EngineEvents.CONFLICT_RESOLVED, (payload) => {
+      resolved.push(payload.conflictId);
+    });
+    await orchestrator.removeDocumentEntityType("doc-1", afiliado.id);
+
+    expect(resolved).toEqual(added.heldConflictIds);
+    const snapshot = engines.grouping.getSnapshot("doc-1");
+    expect(snapshot.conflicts.every((conflict) => conflict.resolved)).toBe(true);
+    // Queda lo detectado, como estaba.
+    expect(snapshot.groups.find((group) => group.id === dniGroupBefore?.id)).toBeDefined();
+    expect(orchestrator.getDocumentEntityTypes("doc-1")).toEqual([]);
+
+    // El literal también se descartó: un reanalyze no lo vuelve a buscar.
+    const findLiteralSpy = vi.spyOn(engines.regex, "findLiteral");
+    await orchestrator.reanalyze("doc-1", { ocr: { languages: ["eng"] } });
+    expect(findLiteralSpy).not.toHaveBeenCalled();
+  });
+
+  // Caso 54 (ADR-225 §6): con los motores reales.
+  it("undo restores document types together with their groups and literals", async () => {
+    const { orchestrator, engines } = await makeOrchestratorWithRealDetection(
+      createPdfEngineOutput({ document: JOSE_PEREZ_DOCUMENT, textlessPages: [0] }),
+    );
+    await orchestrator.importDocument(createImportInput());
+    const afiliado = createUserTypeDefinition("Afiliado", 1);
+
+    // 1. define -> restore: el tipo vuelve a no estar.
+    const beforeDefine = orchestrator.createEditCheckpoint("doc-1");
+    orchestrator.defineDocumentEntityType("doc-1", afiliado);
+    expect(orchestrator.getDocumentEntityTypes("doc-1")).toEqual([afiliado]);
+    await orchestrator.restoreEditCheckpoint("doc-1", beforeDefine);
+    expect(orchestrator.getDocumentEntityTypes("doc-1")).toEqual([]);
+
+    // 2. remove -> restore: vuelven el tipo, sus grupos y el literal retenido.
+    orchestrator.defineDocumentEntityType("doc-1", afiliado);
+    await orchestrator.addManualEntity("doc-1", { value: "Jose Perez", entityType: afiliado.id });
+    const groupsBefore = engines.grouping.getSnapshot("doc-1").groups;
+    expect(groupsBefore.map((group) => group.type)).toEqual([afiliado.id]);
+    const beforeRemove = orchestrator.createEditCheckpoint("doc-1");
+
+    await orchestrator.removeDocumentEntityType("doc-1", afiliado.id);
+    expect(orchestrator.getDocumentEntityTypes("doc-1")).toEqual([]);
+    expect(engines.grouping.getSnapshot("doc-1").groups).toEqual([]);
+
+    await orchestrator.restoreEditCheckpoint("doc-1", beforeRemove);
+    expect(orchestrator.getDocumentEntityTypes("doc-1")).toEqual([afiliado]);
+    const groupsAfter = engines.grouping.getSnapshot("doc-1").groups;
+    expect(groupsAfter.map((g) => [g.id, g.type, g.indexInType, g.replacementValue])).toEqual(
+      groupsBefore.map((g) => [g.id, g.type, g.indexInType, g.replacementValue]),
+    );
+
+    // Un reanalyze posterior conserva la entidad: el literal retenido volvió.
+    await orchestrator.reanalyze("doc-1", { ocr: { languages: ["eng"] } });
+    const afterReanalyze = engines.grouping.getSnapshot("doc-1").groups;
+    expect(afterReanalyze.map((group) => [group.type, group.canonicalValue])).toEqual([
+      [afiliado.id, "Jose Perez"],
+    ]);
+  });
+
+  // Caso 49 (ADR-219 §1).
+  it("addManualEntity accepts a saved or a document user type like a base type", async () => {
+    const saved = createUserTypeDefinition("CBU", 1);
+    const documentType = createUserTypeDefinition("Afiliado", 2);
+    const { orchestrator, engines } = await makeOrchestratorWithRealDetection(
+      createPdfEngineOutput({ document: JOSE_PEREZ_DOCUMENT, textlessPages: [0] }),
+      { userTypes: [saved] },
+    );
+    await orchestrator.importDocument(createImportInput());
+    orchestrator.defineDocumentEntityType("doc-1", documentType);
+
+    const withSaved = await orchestrator.addManualEntity("doc-1", {
+      value: "Jose Perez",
+      entityType: saved.id,
+    });
+    const withDocument = await orchestrator.addManualEntity("doc-1", {
+      value: "Ana Gomez",
+      entityType: documentType.id,
+    });
+
+    expect(withSaved.occurrenceCount).toBeGreaterThan(0);
+    expect(withDocument.occurrenceCount).toBeGreaterThan(0);
+    const groups = engines.grouping.getSnapshot("doc-1").groups;
+    expect(groups.map((group) => [group.type, group.canonicalValue])).toEqual(
+      expect.arrayContaining([
+        [saved.id, "Jose Perez"],
+        [documentType.id, "Ana Gomez"],
+      ]),
+    );
+  });
+
+  // Caso 50 (ADR-219 §6).
+  it("export receives saved and document user types", async () => {
+    const saved = createUserTypeDefinition("CBU", 1);
+    const documentType = createUserTypeDefinition("Afiliado", 2);
+    const bus = createRealBus();
+    const engines = createMockEngines();
+    wireHappyPathSpies(engines, bus);
+    vi.mocked(engines.grouping.getSessionTypes).mockReturnValue([documentType]);
+    const orchestrator = new PipelineOrchestrator({
+      bus,
+      logger: createMockLogger(),
+      cache: new LruCache(),
+      config: createEngineConfig({
+        detection: { ...DEFAULT_DETECTION_CONFIG, userTypes: [saved] },
+      }),
+      engines,
+    });
+    await orchestrator.importDocument(createImportInput());
+
+    bus.emit(EventChannel.UI, EngineEvents.EXPORT_REQUESTED, {
+      documentId: "doc-1",
+      options: {
+        imageFormat: "jpeg",
+        jpegQuality: 0.85,
+        dpi: 150,
+        includeOriginalMetadata: false,
+        includeMarkerLegend: false,
+        filename: "out.pdf",
+      },
+    });
+    await vi.waitFor(() => expect(engines.export.export).toHaveBeenCalled());
+
+    // Los guardados y después los del documento.
+    expect(vi.mocked(engines.export.export).mock.calls[0]?.[0].userTypes).toEqual([
+      saved,
+      documentType,
+    ]);
+  });
+
+  // Caso 52 (ADR-223 §6).
+  it("validateFormatsFile rejects the whole file on any invalid item", () => {
+    const type = createUserTypeDefinition("Afiliado", 1);
+    const good = createValidFormat(type.id);
+    const bad: FormatDefinition = {
+      ...createValidFormat(type.id, "Otro formato"),
+      id: "fmt:bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      variants: [],
+    };
+    const file = (formats: ReadonlyArray<FormatDefinition>): string =>
+      JSON.stringify({
+        kind: "anonly-formats",
+        version: 1,
+        types: [type],
+        formats,
+        catalogRefs: [],
+      });
+
+    // Un archivo válido da ok: true con el contenido.
+    expect(validateFormatsFile(file([good]), "AR")).toEqual({
+      ok: true,
+      content: {
+        kind: "anonly-formats",
+        version: 1,
+        types: [type],
+        formats: [good],
+        catalogRefs: [],
+      },
+    });
+
+    // Un formato inválido entre varios válidos: el archivo entero se rechaza.
+    expect(validateFormatsFile(file([good, bad]), "AR")).toEqual({
+      ok: false,
+      issues: [{ code: "format_invalid", path: "formats[1]" }],
+    });
   });
 });

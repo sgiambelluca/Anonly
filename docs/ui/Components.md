@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=componentes-ui | dependencias=ui/React_Client.md,ui/UX_Guidelines.md,ADR-001-Framework.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-054-Scroll-Independiente-Por-Panel.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-056-RenderRequested-Kind-Por-Panel.md,adr/ADR-150-La-Pantalla-De-Escaneo-Dura-Lo-Que-Dura-El-Escaneo.md,adr/ADR-151-La-Primera-Pagina-Ya-Esta-Dibujada-Cuando-Se-Abre-El-Panel.md,adr/ADR-152-La-Pantalla-De-Escaneo-Dice-En-Que-Pagina-Va.md,adr/ADR-069-Lexico-De-Genero-Fuente-Unica-Y-Canal-Del-Usuario.md,adr/ADR-071-El-Genero-Se-Muestra-Solo-Donde-Se-Usa.md,adr/ADR-089-Buscar-No-Es-Agregar.md,adr/ADR-114-La-Seleccion-Del-Mouse-Es-De-Un-Renglon.md,adr/ADR-168-Pantallas-De-Carga-Y-Escaneo-Tras-Pruebas-De-Usuario.md,adr/ADR-169-La-Pantalla-De-Trabajo-Tras-Pruebas-De-Usuario.md,adr/ADR-170-Las-Vistas-Previas-De-Edicion-Las-Calcula-El-Core.md,adr/ADR-171-El-Usuario-Puede-Eliminar-Una-Entidad.md,adr/ADR-172-Deshacer-Y-Rehacer-Exactos.md,adr/ADR-174-Un-Agregado-Manual-Que-Choca-Se-Resuelve-En-El-Momento.md,adr/ADR-175-Un-Choque-Manual-No-Queda-Colgado.md,adr/ADR-176-Un-Choque-Pendiente-Bloquea-El-Export.md,adr/ADR-177-Una-Entidad-Eliminada-No-Ocupa-Lugar.md,adr/ADR-178-Lo-Contenido-Se-Oculta-Solo-Si-Su-Contenedor-Se-Elimina.md,adr/ADR-204-La-Interaccion-Anonimizada-Usa-La-Geometria-Visible.md,adr/ADR-205-El-Resultado-Exportado-Pertenece-A-Una-Revision.md,adr/ADR-206-Una-Busqueda-Omitida-No-Confirma-La-Version.md,adr/ADR-207-Los-Menus-De-Entidades-Se-Mantienen-Dentro-Del-Area-Visible.md | audiencia=IA-implementador-ui | fase=4 (reconciliado en fase 10 por ADR-036: PasswordDialog/SettingsDialog/ConfirmDialog agregados §2.6–2.7/§8.9, zoom §5.2, mapeo §12; §2.6/§5.2/§5.5/§12 reescritos por ADR-037 —zoom con re-render real— y ADR-038 —SettingsDialog dispara reanalyze, no recreación del core—; §2.1/§2.5/§13.9 ajustados 2026-07-22 por el bug #7 del Escenario 1 E2E: gate de visibilidad por stage vs. vida del diálogo hijo abierto; §5.2/§5.4 en fase 11 por ADR-056 —requestRender con kind por panel, canvas que no se borra—; §3.3/§3.4/§7.1/§12 en fase 10.5 por ADR-058 —marca de reemplazo degradado— y ADR-059 —checkbox de leyenda—; §3.3 por ADR-062 —el canal `PREVIEW_UPDATED.degraded` del que sale esa marca, y las tres reglas de su consumo; el checkbox de leyenda entra en el Hito 10.5 y la marca queda para después—; §3.3/§3.4b/§12 en fase 10.6 por ADR-060 —PersonGenderSelect y marca de género sin determinar— y ADR-069 —§3.4b actualizado: el patch usa `PersonGenderChoice`, "sin determinar" viaja como `"neutral"` explícito—; §3.3/§3.4b/§8.3/§12 reescritos en fase 10.6 por ADR-071 —`PersonGenderSelect` pasa a ser `PersonGenderToggle`: visible solo en `placeholder`/`synthetic`, botón cíclico de tres estados con SVG propios, la marca de "sin determinar" fusionada con el estado neutro, y `Select` sin apertura controlada—; §3.4c/§5.4b/§5.4c/§12 en fase 10.7 por ADR-061 —agregado manual, hit-test de selección y buscador—; §1/§2.6 en fase 10.6 por ADR-070 —sección "Acerca de" con la atribución CC-BY dentro del SettingsDialog, y `thirdPartyCredits.ts` como módulo de datos—; post-Hito 10.10: §3.3 por ADR-086 —la marca de degradado se enciende cuando el texto queda más angosto que `DEGRADED_FONT_RATIO` de su ancho natural, criterio y valor nuevos—); §1/§2/§3/§4/§5/§7 reescritos en el rediseño post-10.9 por **ADR-087** —tres momentos en vez de cuatro paneles: `SideBySideViewer`/`ScrollSyncToggle` y los cuatro componentes de `rules/` se retiran, aparecen `LoadScreen`/`ScanScreen`/`ViewerModeToggle`/`DocumentModeSelect`/`TypeModeSelect`, y `ExportDialog` queda con un solo control—; §5.4c en fase 11 por **ADR-089** —la lupa afloja el último sub-token por prefijo y "Agregar como…" no, porque barre el documento entero—; §5.4b en fase 11 por **ADR-114** —la selección del arrastre se recorta a un renglón y el resultado de `addManualEntity` se muestra—; §3.3/§3.4d en fase 11 por **ADR-094** —`NeedsReviewBadge`: el detector sugiere lo que duda, apagado y marcado, y la fila sugerida no se atenúa—; §2.10 en fase 11 por **ADR-150**/**ADR-151**/**ADR-152** — `ScanScreen` pierde el techo y suelta cuando el `stage` es terminal, precalienta y espera la página 1 antes de soltar, y muestra progreso real por etapa incluido el OCR -->
+<!-- CONTEXT: scope=componentes-ui | dependencias=ui/React_Client.md,ui/UX_Guidelines.md,adr/ADR-225-Un-Tipo-Del-Documento-Se-Edita-Se-Borra-Y-Se-Guarda.md,adr/ADR-226-El-Formato-Se-Nombra-Solo-Cuando-Es-Del-Usuario.md,adr/ADR-227-Los-Formatos-De-Deteccion-Se-Abren-Desde-Inicio-Y-Se-Guardan-A-Pedido.md,adr/ADR-228-El-Generador-Se-Arma-Con-Piezas-Que-Se-Arrastran.md,adr/ADR-229-La-Pantalla-De-Trabajo-En-La-1.1.md,ADR-001-Framework.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-054-Scroll-Independiente-Por-Panel.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-056-RenderRequested-Kind-Por-Panel.md,adr/ADR-150-La-Pantalla-De-Escaneo-Dura-Lo-Que-Dura-El-Escaneo.md,adr/ADR-151-La-Primera-Pagina-Ya-Esta-Dibujada-Cuando-Se-Abre-El-Panel.md,adr/ADR-152-La-Pantalla-De-Escaneo-Dice-En-Que-Pagina-Va.md,adr/ADR-069-Lexico-De-Genero-Fuente-Unica-Y-Canal-Del-Usuario.md,adr/ADR-071-El-Genero-Se-Muestra-Solo-Donde-Se-Usa.md,adr/ADR-089-Buscar-No-Es-Agregar.md,adr/ADR-114-La-Seleccion-Del-Mouse-Es-De-Un-Renglon.md,adr/ADR-168-Pantallas-De-Carga-Y-Escaneo-Tras-Pruebas-De-Usuario.md,adr/ADR-169-La-Pantalla-De-Trabajo-Tras-Pruebas-De-Usuario.md,adr/ADR-170-Las-Vistas-Previas-De-Edicion-Las-Calcula-El-Core.md,adr/ADR-171-El-Usuario-Puede-Eliminar-Una-Entidad.md,adr/ADR-172-Deshacer-Y-Rehacer-Exactos.md,adr/ADR-174-Un-Agregado-Manual-Que-Choca-Se-Resuelve-En-El-Momento.md,adr/ADR-175-Un-Choque-Manual-No-Queda-Colgado.md,adr/ADR-176-Un-Choque-Pendiente-Bloquea-El-Export.md,adr/ADR-177-Una-Entidad-Eliminada-No-Ocupa-Lugar.md,adr/ADR-178-Lo-Contenido-Se-Oculta-Solo-Si-Su-Contenedor-Se-Elimina.md,adr/ADR-204-La-Interaccion-Anonimizada-Usa-La-Geometria-Visible.md,adr/ADR-205-El-Resultado-Exportado-Pertenece-A-Una-Revision.md,adr/ADR-206-Una-Busqueda-Omitida-No-Confirma-La-Version.md,adr/ADR-207-Los-Menus-De-Entidades-Se-Mantienen-Dentro-Del-Area-Visible.md | audiencia=IA-implementador-ui | fase=4 (reconciliado en fase 10 por ADR-036: PasswordDialog/SettingsDialog/ConfirmDialog agregados §2.6–2.7/§8.9, zoom §5.2, mapeo §12; §2.6/§5.2/§5.5/§12 reescritos por ADR-037 —zoom con re-render real— y ADR-038 —SettingsDialog dispara reanalyze, no recreación del core—; §2.1/§2.5/§13.9 ajustados 2026-07-22 por el bug #7 del Escenario 1 E2E: gate de visibilidad por stage vs. vida del diálogo hijo abierto; §5.2/§5.4 en fase 11 por ADR-056 —requestRender con kind por panel, canvas que no se borra—; §3.3/§3.4/§7.1/§12 en fase 10.5 por ADR-058 —marca de reemplazo degradado— y ADR-059 —checkbox de leyenda—; §3.3 por ADR-062 —el canal `PREVIEW_UPDATED.degraded` del que sale esa marca, y las tres reglas de su consumo; el checkbox de leyenda entra en el Hito 10.5 y la marca queda para después—; §3.3/§3.4b/§12 en fase 10.6 por ADR-060 —PersonGenderSelect y marca de género sin determinar— y ADR-069 —§3.4b actualizado: el patch usa `PersonGenderChoice`, "sin determinar" viaja como `"neutral"` explícito—; §3.3/§3.4b/§8.3/§12 reescritos en fase 10.6 por ADR-071 —`PersonGenderSelect` pasa a ser `PersonGenderToggle`: visible solo en `placeholder`/`synthetic`, botón cíclico de tres estados con SVG propios, la marca de "sin determinar" fusionada con el estado neutro, y `Select` sin apertura controlada—; §3.4c/§5.4b/§5.4c/§12 en fase 10.7 por ADR-061 —agregado manual, hit-test de selección y buscador—; §1/§2.6 en fase 10.6 por ADR-070 —sección "Acerca de" con la atribución CC-BY dentro del SettingsDialog, y `thirdPartyCredits.ts` como módulo de datos—; post-Hito 10.10: §3.3 por ADR-086 —la marca de degradado se enciende cuando el texto queda más angosto que `DEGRADED_FONT_RATIO` de su ancho natural, criterio y valor nuevos—); §1/§2/§3/§4/§5/§7 reescritos en el rediseño post-10.9 por **ADR-087** —tres momentos en vez de cuatro paneles: `SideBySideViewer`/`ScrollSyncToggle` y los cuatro componentes de `rules/` se retiran, aparecen `LoadScreen`/`ScanScreen`/`ViewerModeToggle`/`DocumentModeSelect`/`TypeModeSelect`, y `ExportDialog` queda con un solo control—; §5.4c en fase 11 por **ADR-089** —la lupa afloja el último sub-token por prefijo y "Agregar como…" no, porque barre el documento entero—; §5.4b en fase 11 por **ADR-114** —la selección del arrastre se recorta a un renglón y el resultado de `addManualEntity` se muestra—; §3.3/§3.4d en fase 11 por **ADR-094** —`NeedsReviewBadge`: el detector sugiere lo que duda, apagado y marcado, y la fila sugerida no se atenúa—; §2.10 en fase 11 por **ADR-150**/**ADR-151**/**ADR-152** — `ScanScreen` pierde el techo y suelta cuando el `stage` es terminal, precalienta y espera la página 1 antes de soltar, y muestra progreso real por etapa incluido el OCR -->
 
 # Anonly — Catálogo de Componentes
 
@@ -90,6 +90,11 @@ apps/react-client/src/components/
   > **Reconciliación con §2.4 (2026-08-18, revisada por ADR-087 §7)**: la fila `{Ready, Done}` decía "(+ `CancelButton` si hay jobs remanentes)", un matiz inimplementable —no existe ningún campo de "jobs remanentes" en `pipeline.store`— que se resolvió mostrando el botón en `Ready` como en cualquier stage no terminal. **ADR-087 §7 corrige esa resolución en el otro sentido**: en `Ready` el pipeline ya terminó, no hay nada que cancelar, y el botón aparecía con peso de secundario junto al CTA primario mientras su `ConfirmDialog` advertía que *"los cambios no guardados se perderán"* — una amenaza imposible. `Ready` se agrega a `HIDDEN_STAGES` (§2.4). El caso real que el matiz de 2026-08-18 intentaba cubrir —trabajo del pipeline todavía corriendo— **sí existe ahora** y tiene su propio stage: el escaneo en segundo plano de `UX_Guidelines.md` §7.2, donde `stage` sigue siendo `Detecting`/`OCRing` y el botón se muestra por la regla general.
 
 - **Acciones**: ninguna directa; delega en hijos.
+- **A la izquierda, el documento abierto** (pasada de UI de la 1.1, 2026-11-21): el logo, «Anonly»
+  y debajo el nombre del archivo con su cantidad de páginas (`doc.pdf · 4 páginas`), cortado con
+  «…» y completo en `title`. Reemplaza a la bajada fija «Anonimización documental local», que
+  repetía lo que dice la pantalla de inicio. El nombre ya se muestra en el escaneo y en el diálogo
+  de exportar, y no sale de la pantalla.
 
 ### 2.2 `ImportButton`
 
@@ -126,6 +131,8 @@ apps/react-client/src/components/
 - **Bloqueo** (ADR-176 §1): `exportBlockReason(conflicts)` —función pura con test, ADR-056— devuelve `null` o el motivo. Con motivo, el botón queda deshabilitado y un **globo flotante** debajo (ADR-177 §4, reemplaza la "ranura fija con alto reservado" de ADR-176 §1: siempre montado e invisible sin motivo, así que aparecer no mueve nada; anclado al **borde derecho** del botón, `right-0`; ancho máximo que entra en la ventana más angosta soportada, con el texto en hasta dos renglones; fondo, borde y sombra de superficie para leerse sobre el contenido en los dos temas) muestra *"Hay un choque sin resolver. Resolvelo para exportar."* con **"Resolver"** (abre `ManualOverlapDialog` sobre la primera fila con un choque pendiente, igual que el aviso de §6.3). Si el pendiente no es `heldManual`: *"Hay un conflicto sin resolver."* y "Resolver" abre el `ConflictDialog` de la primera fila con uno.
 
 ### 2.6 `SettingsButton` + `SettingsDialog` (ADR-036 §7, vocabulario por ADR-087 §4)
+
+> **1.1 (ADR-229 §8):** `SettingsDialog` suma la sección «Atajos de teclado». Ver §13b.8.
 
 > **Los campos no nombran el pipeline.** "Idiomas de OCR" pasa a "Idiomas del documento", y las
 > opciones pierden los códigos ISO ("Español (spa)" → "Español"), que son cómo se le pide el modelo
@@ -188,6 +195,8 @@ apps/react-client/src/components/
 
 ### 2.9 `LoadScreen` (ADR-087 §1, momento ①)
 
+> **1.1 (ADR-227 §1):** las tres tarjetas de rasgos se reemplazan por `DetectionCard` y por las garantías debajo de la `DropZone`. Ver §13b.1. Donde esta sección dice «tres features» o «tres tarjetas de rasgos», vale §13b.1.
+
 - **Stores**: ninguno (se monta cuando `document.store.id === null`).
 - **Render**: pantalla completa. Logo, una frase de qué hace la herramienta, la **zona de carga
   funcional** (drop + botón, los dos operativos) y tres features breves.
@@ -219,10 +228,17 @@ apps/react-client/src/components/
   viajan con la aplicación instalada, en `resources/renderer/licenses/THIRD_PARTY_LICENSES.txt`
   (en macOS, dentro de `Anonly.app/Contents/Resources/`).
   Un test comprueba que cada componente figura en `NOTICE` con la misma licencia (ADR-196 §6).
-- **URLs externas navegables** (ADR-070 §3 extendido por ADR-168 §3): las dos del crédito
-  (`sourceUrl`, `licenseUrl`) más `https://github.com/sgiambelluca/Anonly` (código fuente) y
-  `https://github.com/sgiambelluca/Anonly/issues/new` ("Reportar un problema", en el pie y en
-  `AboutDialog`). Son las **únicas**; cualquier otra necesita ADR.
+  **«Quién lo hace»** (ADR-234 §1 y §2) va entre el párrafo de presentación y «Código fuente»:
+  una tarjeta con las iniciales del mantenedor (decorativas), nombre, rol y ciudad, un texto que
+  invita a escribir, y dos acciones con la dirección visible al lado: «Escribirme por mail»
+  (`mailto:` con asunto que lleva la versión) y «Copiar correo» (`navigator.clipboard`; dice
+  «Copiado» durante 2 s sin cambiar de ancho).
+- **URLs externas navegables** (ADR-070 §3 extendido por ADR-168 §3 y ADR-234 §3): las dos del
+  crédito (`sourceUrl`, `licenseUrl`) más `https://github.com/sgiambelluca/Anonly` (código
+  fuente), `https://github.com/sgiambelluca/Anonly/issues/new` ("Reportar un problema", en el
+  pie y en `AboutDialog`) y `mailto:santinogiambe@gmail.com` («Quién lo hace»). Son las
+  **únicas**; cualquier otra necesita ADR. El shell abre afuera solo `https://` y `mailto:`
+  (ADR-234 §4).
 
 ### 2.9b `ReleaseNotesMenu` (ADR-216)
 
@@ -300,6 +316,8 @@ apps/react-client/src/components/
 ## 3. Componentes de Entidades
 
 ### 3.1 `EntitiesPanel`
+
+> **1.1 (ADR-225, ADR-226, ADR-229):** banda «Nuevo tipo», tipos del documento, subnivel por formato del usuario y filtros. Ver §13b.6.
 
 - **Stores**: `entities`, `pipeline`.
 - **Comportamiento**: lista `groupsByType` ordenada por `EntityType` (orden fijo: Person, Organization, Address, DNI, CUIT, Phone, Email, IBAN, CreditCard, Date, License, Plate, Custom).
@@ -401,6 +419,8 @@ apps/react-client/src/components/
 
 ### 3.4 `ReplacementModeSelect`
 
+> **1.1 (ADR-229 §4):** para un tipo propio no ofrece «Dato falso». Ver §13b.6.
+
 > **El menú de modos abre hacia arriba si abajo no entra (2026-10-01, pedido del humano).** Al abrirse mide el lugar que queda entre el disparador y el borde del área que lo recorta (la lista que scrollea, o la ventana). Abajo si entra; si no, arriba; si no entra en ninguno, el lado con más lugar. Antes abría siempre hacia abajo y en las últimas filas había que scrollear para leerlo. Regla pura en `entities/menuPlacement.ts`, con tests; `tests/e2e/mode-menu-opens-upward.spec.ts` lo cubre en la app.
 >
 > **Límites completos (ADR-207, 2026-10-06):** la dirección se conserva, pero
@@ -476,6 +496,8 @@ apps/react-client/src/components/
 
 ### 3.4c `AddEntityButton` + `AddEntityDialog` (ADR-061 §3, ruta A)
 
+> **1.1 (ADR-229 §2):** el selector lista los tipos propios y ofrece «Nuevo tipo» en línea. Ver §13b.7.
+
 - **Ubicación** (ADR-169 §2): **botón primario** "Agregar entidad" en la cabecera del panel (§3.1).
 - **Render del diálogo** (ADR-169 §7), en dos pasos numerados:
   1. *¿Qué texto querés ocultar?* — campo de texto. Mientras se escribe (con debounce), una caja de
@@ -484,9 +506,11 @@ apps/react-client/src/components/
      con el texto resaltado. Sin coincidencias, la misma caja dice *"No aparece en el documento"*
      **antes** de confirmar. Vacío (< 2 caracteres), un texto neutro.
   2. *¿Qué es?* — `EntityTypePicker` (§8.10) con los 13 tipos, en su caja gris.
-  Debajo, en una caja azul distinta, la advertencia de alcance (ver abajo). Pie: *"También podés
-  seleccionarlo en el PDF original"*, "Cancelar" y el botón **"Agregar N apariciones"** con ancho
-  mínimo fijo, deshabilitado sin coincidencias.
+  La advertencia de alcance (ver abajo) va **dentro de la caja de resultados**, en su estado de
+  antes de escribir, con un ícono de información; ya no tiene un recuadro azul propio. La caja
+  mide 128 px de alto en sus tres estados (UX §11b.18, pasada de UI de la 1.1, 2026-11-21). Pie:
+  *"También podés seleccionarlo en el PDF original"*, "Cancelar" y el botón **"Agregar N
+  apariciones"** con ancho mínimo fijo, deshabilitado sin coincidencias.
 - **Qué decir** (ADR-174, **ADR-175 §3**), en este orden y solo con el resultado del Core —sin buscar el grupo por texto (`findAddedGroup`/`foldForLookup` se retiran, U-3)—: `heldConflictIds` no vacío → **no** hay toast de alta, se abre `ManualOverlapDialog` (§6.3) con **todos** esos ids; si no, `groupIds` no vacío → toast de alta nombrando el primer grupo del tipo pedido (o el primero); si no, `occurrenceCount === 0` → "no se encontró"; el resto rompe el invariante del Core → toast de error *"No se pudo agregar «X»."*, se retira la entrada de deshacer y se loguea.
 - **Si no encontró nada o no cambió nada** (`not-found` / `no-op`): la entrada de deshacer registrada antes de agregar se retira de `history.store` (ADR-174 §4).
 - **Tras agregar**: se cierra y muestra el toast de ADR-169 §7 (*"Agregaste «X» · Persona N.º 06 · N
@@ -605,9 +629,12 @@ Marca los grupos que **el detector sugirió sin estar seguro**: nacen con `enabl
 
 ### 3.8 `ChangeTypeDialog` (ADR-082 §6)
 
+> **1.1 (ADR-229 §2 y §3):** el selector lista los tipos propios y ofrece «Nuevo tipo» en línea. Ver §13b.7.
+
 - **Props**: `groupId`, `currentType`, `canonicalValue`.
 - **Render** (ADR-169 §10): la entidad arriba (punto de color, nombre, "Persona N.º 06 · N apariciones"); `EntityTypePicker` (§8.10) con el tipo actual marcado "Actual" y no seleccionable; una caja **"Cómo queda"** de alto fijo con el token antes → después (**`[PERSONA 06]` → `[ORGANIZACION 03]`**, calculado por el Core con `previewEdit({ kind: "type", … })`, ADR-170) y, si deja de ser `Person`, *"El género se borra: solo se usa para personas"*. Botón "Cambiar tipo" (ancho fijo).
-- **Acción**: `actions.updateGroup(groupId, { type })`. Un tipo igual al vigente es no-op (el motor no emite nada, ADR-082 §1) y el diálogo además se ahorra el viaje. Confirmar cierra y muestra toast con "Deshacer" (ADR-172).
+- **Acción**: `actions.updateGroup(groupId, { type })`. Un tipo igual al vigente es no-op (el motor no emite nada, ADR-082 §1) y el diálogo además se ahorra el viaje. Confirmar cierra y muestra toast con "Deshacer" (ADR-172): título *«{valor}» ahora es {Tipo}* y detalle *«Se reemplaza como {token}.»*, con el token de la vista previa del Core (lienzo de la 1.1). Con un tipo nuevo creado en el mismo paso (§13b.7) el Core no lo pudo previsualizar, y el detalle dice si el tipo es solo de este documento o quedó guardado.
+- **Las ranuras de la caja "Cómo queda"** (alto fijo, UX-10): el género que se borra y, debajo, qué pasa con «Dato falso»: *"Sigue en «Dato falso»."* si el tipo destino lo admite y la entidad lo usaba, o el aviso de que pasa a «Etiquetar» si el destino es un tipo propio (ADR-229 §3). Vacías cuando no aplican.
 - **Por qué existe**: el tipo no es una etiqueta suelta — gobierna el token del documento anonimizado, su numeración por tipo, qué regla de scope `type` aplica y de qué pool sortea el sintetizador. Un tipo equivocado produce un documento que **afirma algo falso** sobre el dato que ocultó.
 
 ### 3.6 `MergeDialog`
@@ -796,8 +823,9 @@ existen. Lo que se retira es la superficie de UI, no el modelo.
 
 ### 5.4 `PageCanvas`
 
-- **Props**: `pageIndex`, `kind`, `blobUrl?`, `annotations?`, `highlights?`.
-- **Render**: `<canvas>` con dimensión correcta. Si `blobUrl`, dibuja la imagen. Si `annotations` (kind=original), dibuja bordes color por tipo. Si `highlights` con conflicto, dibuja borde rojo.
+- **Props**: `pageIndex`, `kind`, `blobUrl?`.
+- **Render**: `<canvas>` con dimensión correcta. Si `blobUrl`, dibuja la imagen.
+- **El resaltado de entidades del original no va en el `<canvas>`** (pasada de UI de la 1.1, 2026-11-21). Lo dibuja `WordSelectionOverlay` (§5.4b) con las cajas de cada aparición (`OccurrenceRef.bbox` o sus `fragments`), las mismas que ya usa el tooltip. La imagen del original sigue saliendo sin `annotations`, así que vale la condición de ADR-056 §3: un reanalyze no cambia sus píxeles. Cambiar un grupo repinta el resaltado al instante, sin pedir otra imagen.
 - **Skeleton**: si `!blobUrl`, dibuja skeleton gris con dimensión.
 - **Página con contenido que no se pudo leer (ADR-190 §4)**: si la página tiene `unreadableInk` y **ninguna entidad**, se muestra el aviso *"Esta página tiene contenido que no se pudo leer. Revisala: si tiene datos sensibles, no se van a tapar solos."*. Una página tiene entidad si algún grupo no eliminado (ADR-171) tiene una ocurrencia en ella, sea automático o manual, habilitado o no. **El aviso va en una franja fija justo arriba de la imagen de la página, fuera de ella**, para no tapar el contenido que pide revisar (decisión del humano, 2026-09-29; antes era una barra superpuesta a la parte inferior de la imagen). La franja queda reservada, con alto fijo, en toda página marcada con `unreadableInk`. Cuando la página recibe una entidad, el texto desaparece pero la franja sigue reservada hasta que cambie la marca, así que agregar o quitar entidades no desplaza el layout (UX-10). La marca cambia solo con un `reanalyze` de OCR o con un documento nuevo, y en ese momento se recalcula el layout de todas formas.
 - **Las dimensiones del `<canvas>` solo se asignan cuando cambian (ADR-056 §5)**. Asignar `canvas.width`/`canvas.height` **borra el bitmap aunque el valor sea idéntico** — es comportamiento del estándar HTML, no del navegador. Como el `blobUrl` cambia en cada `PREVIEW_UPDATED` aunque los píxeles sean los mismos (el motor acuña un `URL.createObjectURL` nuevo también en aciertos de cache, ADR-056 §6), asignarlas incondicionalmente al re-ejecutarse el efecto dejaba la página en gris hasta que la `Image` nueva terminaba de cargar: ese era el parpadeo constante que se veía al scrollear. La comprobación va en una **función pura testeable en Node** (los tests de `apps/react-client` corren sin jsdom), no en un `if` inline sin cobertura.
@@ -807,8 +835,11 @@ existen. Lo que se retira es la superficie de UI, no el modelo.
 
 ### 5.4b `WordSelectionOverlay` (ADR-061 §3/§4, ruta B)
 
+> **1.1 (ADR-229 §2):** el selector lista los tipos propios y ofrece «Nuevo tipo» en línea. Ver §13b.7.
+
 - **Solo sobre el panel `original`.** En el `anonymized` el texto visible puede ser un reemplazo, y señalarlo no significaría nada.
-- **Interacción**: click sobre una palabra, o arrastre de un recuadro sobre varias. Al soltar, aparece el globo flotante "Agregar «X» como…" con `EntityTypePicker` (§8.10), el conteo de apariciones y "Cancelar" / "Agregar".
+- **Resaltado de entidades** (`UX_Guidelines.md` §5.2): en el `original`, cada aparición de cada grupo lleva una caja con el color de su tipo (`typeColor`, §9). Un grupo activo tiene borde y un relleno suave. Uno desactivado tiene borde punteado gris, sin relleno. La aparición bajo el tooltip lleva el relleno más fuerte, y también las del grupo que se acaba de elegir con un clic mientras su fila se ilumina en el panel (`entities.store.flashGroupId`). Las cajas no reciben eventos (`pointer-events: none`): la selección y el tooltip siguen funcionando igual. No se dibuja con la página `inert` (ADR-213 §6), ni en el `anonymized`, ni con `settings.highlightEntities` apagado (§13b.8).
+- **Interacción**: click sobre una palabra, o arrastre de un recuadro sobre varias. Al soltar, aparece el globo flotante "Agregar «X» como…" con `EntityTypePicker` (§8.10), el conteo de apariciones y "Cancelar" / "Agregar". El globo se ubica con la regla de ADR-207 (`observeMenuLayout`, anclado al recuadro de la selección): abajo si entra, arriba si entra ahí; si no, se corre lo mínimo para quedar entero dentro del visor, y con scroll propio si es más alto. Sin esto, en una ventana baja sus botones quedaban fuera del visor y alcanzarlos movía el documento. Lo cubre `tests/e2e/selection-popover-placement.spec.ts`.
 - **La selección persiste** (ADR-169 §7): el recuadro de lo señalado se dibuja con **borde punteado de acento animado** (`prefers-reduced-motion`: borde quieto) y **no desaparece** hasta que se agrega la entidad, se cancela, se hace otra selección, se presiona Escape, se conmuta a Anonimizado o se cierra el documento.
 - **Descubrimiento** (ADR-169 §7): `SelectionHintCard`, tarjeta flotante sobre el visor —solo con el toggle en Original— con una animación del gesto de clic y arrastre, *"Agregá entidades desde el documento"* y "Entendido". Al cerrarla no vuelve (`settings.store.dismissedHints`, persistido).
 - **Cómo resuelve qué se señaló**: **hit-test contra `Page.words`, no selección de texto**. El overlay traduce coordenadas de pantalla a coordenadas de página y aplica `wordsInRect(words, rect)` (función pura de `@anonly/shared`). Los datos salen de `actions.getPageWords(pageIndex)` — el adaptador (`actions.ts`) resuelve el documento activo por su cuenta, mismo criterio que el resto de `actions.*` (§3.4c).
@@ -821,6 +852,8 @@ existen. Lo que se retira es la superficie de UI, no el modelo.
 
 ### 5.4c `DocumentSearchBox` (ADR-061 §8)
 
+> **1.1 (ADR-229 §2):** el selector lista los tipos propios y ofrece «Nuevo tipo» en línea. Ver §13b.7.
+
 > **Ancho de la barra (2026-10-01).** El conmutador de vista se centra recién desde 1536 px de ventana (`2xl`). Por debajo, la lupa toma todo el espacio que sobra, y por debajo de 1160 px el contador de resultados queda solo para lectores de pantalla. Con tres columnas simétricas el campo de texto medía 0 px a 1024 px, el ancho mínimo de la ventana. Lo cubre `tests/e2e/search-box-narrow-window.spec.ts`.
 
 - **Ubicación** (ADR-169 §7): a la izquierda de la barra del visor, **siempre visible y habilitada, en Original y en Anonimizado** — antes aparecía y desaparecía al conmutar. Campo *"Buscar un texto en el documento…"*, un contador en **ranura de ancho fijo** y un botón **"+ Agregar"** aparte, habilitado cuando hay resultados.
@@ -829,6 +862,7 @@ existen. Lo que se retira es la superficie de UI, no el modelo.
 - **El debounce es de este componente**: `findText` es sincrónica y recorre todas las palabras del documento en el main thread, así que una llamada por tecla se nota en documentos largos. El Core no amortigua —es una función de consulta, sin estado ni cache (`Regex_Engine.md` §12)—, así que la caja de búsqueda debe hacerlo, mismo criterio que el re-render del zoom (§5.5). Los resultados vienen en orden documental, así que "anterior/siguiente" navega el array tal cual, sin re-ordenar.
 - **Render**: contador de resultados, navegación anterior/siguiente con scroll a la página, y resaltado del match activo sobre el canvas (reusa el mismo overlay de §5.4b). **La lista de resultados** (ADR-169 §7) muestra por cada uno la página, la frase alrededor (`getPageWords` + `TextMatch.wordSpan`) con la coincidencia resaltada y su estado: **oculto como <Tipo> N.º NN** —el match cae sobre un miembro de un grupo **habilitado**; se compara contra `OccurrenceRef.fragments` cuando existen (ADR-074), nunca contra la envolvente— o **Sin ocultar**. El encabezado resume "N ocultos · M sin ocultar", ambos siempre presentes. **Un grupo deshabilitado no oculta** (`Contracts.md` §5: `enabled: false`, incluidas las sugerencias con `needsReview`, «no tapan nada»; decisión del humano, 2026-09-30): un match que cae sobre él cuenta como **sin ocultar** y la fila lo aclara con "Sin ocultar · <Tipo> N.º NN desactivada". Esa fila **no** ofrece "Agregar como…", porque agregar el valor no activaría el grupo; se activa desde el árbol. Si el match cae sobre un grupo habilitado y sobre uno deshabilitado, gana el habilitado.
 - **Tercera vía de agregado**: cada resultado **sin ocultar** ofrece "Agregar como…", que abre `EntityTypePicker` en un **globo flotante** (no expande la fila, UX-10) y llama a `addManualEntity`; al terminar, el toast de ADR-169 §7. Es la misma búsqueda literal que alimenta el agregado manual (ADR-061 §8), con **una** diferencia deliberada desde ADR-089 §2: la lupa acepta que el último sub-token de la consulta sea un **prefijo** (`Eta` resalta `Anabella`), y `addManualEntity` **no**. **Agrega todas las apariciones del valor, no solo el resultado clickeado** — `addManualEntity` recorre el documento entero, que es el comportamiento correcto para una entidad manual; el copy debe decirlo para que no se lea como que anonimiza solo esa coincidencia. Esas dos frases juntas son la razón de la asimetría: con prefijo en las dos, agregar `Eta` taparía cada `Anabella` del expediente. **Consecuencia visible**: un resultado resaltado por prefijo puede no ser agregable con ese mismo texto — el usuario tiene que agregar la palabra completa.
+- **Dónde se abren los globos** (ADR-207): el de "+ Agregar" cuelga del campo y el de un resultado, de la lista. Los dos se ubican con `observeMenuLayout`: abajo si entra, arriba si entra ahí; si no, se corren lo mínimo para quedar enteros en la ventana, aunque tapen parte de la lista, y con scroll propio si son más altos. Con la ventana de 720 px, el globo de un resultado dejaba sus botones 38 px por debajo del borde. Lo cubre `tests/e2e/search-popover-placement.spec.ts`.
 
 ### 5.5 `ZoomControls`
 
@@ -853,12 +887,15 @@ hay nada que sincronizar: se retira junto con `SideBySideViewer` y `scrollSyncCo
 
 ### 6.2 `ConflictDialog`
 
+> **1.1 (ADR-229 §6):** un conflicto entre dos formatos nombra los dos y su origen. Ver §13b.8.
+
 > **Recorrido desde «Resolver» (2026-10-01, pedido del humano).** El «Resolver» del globo de Exportar (§2.5) ya no abre un solo conflicto: arma la cola de **todos** los conflictos pendientes que no son `heldManual`, en el orden del árbol (`pendingConflictIdsInTreeOrder`), y el diálogo los muestra uno detrás del otro. A la derecha del título va un contador «5/9» (posición sobre el total que había al empezar; no se muestra si hay uno solo). «Aplicar» o «Descartar» pasa al siguiente sin cerrar; al terminar el último, el diálogo se cierra. **«Saltear»** pasa al siguiente sin aplicar nada: ese conflicto queda pendiente y el export sigue bloqueado (no aparece si hay uno solo). «Cerrar» corta el recorrido. Los que dejaron de estar pendientes mientras tanto se saltean. Abierto desde el ⚠ de una fila, el diálogo sigue mostrando un solo conflicto, sin contador. Los choques `heldManual` siguen yendo primero por `ManualOverlapDialog`. Lógica en `conflicts/conflictWalk.ts`, con tests.
 
 - **Props**: `conflictId`.
 - **Stores**: `entities.conflicts`.
 - **Render** (ADR-083 §6): el valor en disputa + los **tipos de entidad** candidatos como radios, con el de mayor `confidence` preseleccionado. **No nombra a Regex ni a NER** ni muestra números de confidence: son detalles de implementación del pipeline, y la pregunta útil es una sola — ¿esto es una organización o una dirección?
 - **Acción**: `actions.resolveConflict(conflictId, entityType?)`. Aplicar **reclasifica el grupo** por la vía de ADR-082 §2 y marca el conflicto resuelto. Sin tipo elegido, el motor aplica su default (mayor confidence), que coincide con la clasificación ya vigente: confirmar no cambia datos.
+- **Aviso al cambiar el tipo** (lienzo de la 1.1): si el tipo elegido no es el que el grupo ya tenía, aplicar muestra el mismo toast que «Cambiar tipo…» (§3.8), con «Deshacer». El token sale de la vista previa del Core pedida **antes** de resolver. Sin cambio de tipo no hay toast: no cambió nada que avisar.
 - **`ambiguous_canonical`: se elige la escritura** (ADR-106). El diálogo ofrece los `value` de los candidatos empatados como radios, con el `canonicalValue` vigente preseleccionado, y aplicar emite `actions.updateGroup(groupId, { canonicalValue })` + `actions.resolveConflict(conflictId)`. La pregunta es la que el usuario tiene: *¿cuál de estas dos escrituras usamos?* El botón dice **"Aplicar"** (ADR-193 §4). **Revisa ADR-083 §6**, que metía este caso junto a `low_confidence` bajo "no hay elección": era cierto sobre el eje del **tipo** —todos los candidatos comparten tipo— pero no comparten **valor**, y sobre ese eje la elección existe y está bien definida. Sin contrato nuevo: `canonicalValue` ya estaba en `GroupUpdateRequested.patch` y los `value` ya venían en el conflicto.
 - **Cuando no hay elección**: `low_confidence` no ofrece radios y el botón dice "Descartar" — con **un** candidato por debajo del umbral no hay nada entre qué elegir, y ADR-094 ya le dio a ese caso su propio camino (el grupo sugerido, apagado y visible).
 - **Qué cambió y por qué** (ADR-083): hasta este ADR el diálogo pedía un `ReplacementMode`, que **no resolvía el desacuerdo** — `applyConflictResolve` no tocaba el `entityType`, así que el usuario aplicaba y la discrepancia quedaba igual. El modo de reemplazo se sigue eligiendo donde siempre: el `ReplacementModeSelect` de la fila del grupo (§3.4).
@@ -877,6 +914,8 @@ hay nada que sincronizar: se retira junto con `SideBySideViewer` y `scrollSyncCo
 ## 7. Componentes de Export
 
 ### 7.1 `ExportDialog` (simplificado por ADR-087 §5)
+
+> **1.1 (ADR-229 §7):** suma el aviso de formatos que no se aplicaron. Ver §13b.8.
 
 - **Stores**: `document`, `entities`.
 - **Render**: ver `UX_Guidelines.md` §8.2. **Dos controles**: el nombre del archivo (default
@@ -950,7 +989,26 @@ hay nada que sincronizar: se retira junto con `SideBySideViewer` y `scrollSyncCo
 ### 8.2 `Dialog`
 
 - Wrapper sobre Radix `Dialog` con focus trap, escape para cerrar, backdrop.
-- Props: `open`, `onClose`, `title`, `children`.
+- Props: `open`, `onClose`, `title`, `children`. Opcionales:
+  - `description` y `descriptionInline` (la descripción en la columna del título, sin renglón
+    propio: el generador);
+  - `titleAside` (a la derecha del título, como el «5/9» de §6.2) y `icon` (ver abajo);
+  - `headerActions` (acciones del encabezado, antes del cierre) y `footer` (acciones fijas al pie,
+    que no scrollean con el cuerpo);
+  - `hideCloseButton`;
+  - `size`: `md` (el de siempre), `lg`, `xl` o `2xl`;
+  - `tall`: hasta el 92 % del alto de la ventana en vez del 85 % (UX §11b.18);
+  - `role="alertdialog"` para una confirmación que interrumpe;
+  - `onEscapeKeyDown`, que puede frenar el cierre con `preventDefault()` (UX §11b.7).
+- **Pila de diálogos** (UX §11b.17): cada diálogo abierto encima de otro toma la capa siguiente, y
+  su velo con desenfoque queda por encima del diálogo de abajo. El velo arranca en z 40 y el
+  contenido en z 50, y suben de a 20 por capa, hasta tres diálogos apilados (el primero y dos
+  encima). Uno más adentro reusa la capa del tercero. `Select` y `Tooltip` van en z 95, por encima de la pila, y los avisos en z 100. La cuenta
+  es pura, en `common/dialogLayers.ts`.
+- **El título se lee como título** (pasada de UI de la 1.1, 2026-11-21): 16 px semibold. Los
+  rótulos de los campos van en 14 px; con el título del mismo tamaño, «Nuevo tipo» y «Nombre del
+  tipo» se leían iguales. El resto del encabezado no cambia: fondo blanco, sin línea bajo el
+  título ni pie gris (decisión del mantenedor, 2026-11-21).
 - **`icon`** (opcional, ADR-215 §3): se dibuja a la izquierda del título y de la descripción. Sin la
   prop, el encabezado queda igual. Lo usa `RemoveEntityDialog` (§3.5b).
 - **Select anidado** (pedido del humano, 2026-10-05): con un Select abierto,
@@ -982,6 +1040,11 @@ hay nada que sincronizar: se retira junto con `SideBySideViewer` y `scrollSyncCo
 
 - Wrapper sobre Radix `Checkbox`.
 - Estados: `checked`, `unchecked`, `indeterminate` (para cascade de tipos).
+- **El borde de la casilla vacía se ve** (`UX_Guidelines.md` §9, 3:1 para componentes): va en
+  `text-secondary`, no en `border`, que da 1,2:1 sobre blanco. Lleva aro de foco con el teclado,
+  como el resto de los controles. Vale también para los círculos de elección de
+  `EntityTypePicker` (§8.10) y para las casillas propias de `ExportFormatsDialog`, cuyo tilde usa
+  `accent-foreground` como el de `Checkbox`. Pasada de UI de la 1.1, 2026-11-21.
 
 ### 8.5 `Tooltip`
 
@@ -1048,6 +1111,8 @@ hay nada que sincronizar: se retira junto con `SideBySideViewer` y `scrollSyncCo
 
 ### 8.10 `EntityTypePicker` (ADR-169 §7)
 
+> **1.1 (ADR-229 §2):** la lista pasa a doce tipos del catálogo más «Tus tipos», y suma «Nuevo tipo» en línea. Donde esta sección dice «los 13 tipos», vale §13b.7.
+
 - **Qué es**: el selector de `EntityType` único de la app. Reemplaza al `Select` de tipo y a los chips
   sueltos en cuatro lugares: la selección sobre el original (§5.4b), la lupa (§5.4c), `AddEntityDialog`
   (§3.4c) y `ChangeTypeDialog` (§3.8).
@@ -1080,6 +1145,15 @@ Paleta accesible (contrast ≥ 3:1 con fondo blanco), diferenciada también por 
 
 El patrón de borde (sólido/punteado/doble) permite distinguir tipos incluso para usuarios con visión monocromática o daltonismo.
 
+**El punto de un tipo propio** (ADR-219, ADR-229 §2; lienzo de la 1.1, clase `.udot`): un tipo
+propio no tiene color en esta tabla. Su punto es un **aro** de 9 px sin relleno, con borde de
+2,2 px en `--color-user` (§10). Guardado, el aro es continuo; solo de este documento, **punteado**.
+El punteado se dibuja como un `<svg>` (círculo de radio 3,4 con trazos de 2,4 y huecos de 1,6),
+porque un `border: dashed` del navegador sale con muy pocos trazos a ese tamaño. Es un solo
+componente, `TypeDot`, en todos los lugares donde aparece el punto de un tipo: el panel, el
+selector de tipo, el tooltip, «Formatos de detección», exportar e importar. Es decorativo
+(`aria-hidden`).
+
 ---
 
 ## 10. Tokens de diseño
@@ -1107,6 +1181,7 @@ sale sólido y nada avisa.
 --color-warning-strong: #b45309; /* ADR-087 §3.1: bordes, iconos y texto de precaución */
 --color-border-strong: #374151;  /* ADR-169 §11: bordes de la franja de tipo */
 --color-space: #c2410c;          /* ADR-169 §11: aviso "espacio justo" — 5.18:1 sobre blanco */
+--color-user: #64748b;           /* aro del punto de un tipo propio (§9) */
 --color-error: #dc2626;      /* 4.83:1 — era #ef4444, que fallaba en sus tres usos */
 --radius-sm: 4px;
 --radius-md: 8px;
@@ -1136,6 +1211,7 @@ dark` cuando el usuario no eligió explícitamente. La preferencia vive en
 --color-warning: #fbbf24;
 --color-border-strong: #9ca3af;     /* ADR-169 §11: bordes de la franja de tipo */
 --color-space: #fb923c;             /* ADR-169 §11: aviso "espacio justo" — 6.49:1 sobre la superficie */
+--color-user: #94a3b8;              /* aro del punto de un tipo propio (§9) */
 --color-warning-strong: #fbbf24;    /* 8.79:1 */
 --color-error: #f87171;             /* 5.31:1 como texto */
 --color-error-foreground: #111827;  /* 6.41:1 sobre el relleno error */
@@ -1183,6 +1259,17 @@ quedara debajo de su mínimo.
 > `bg-primary`.
 
 Modo oscuro: en v1.0. MVP es solo claro.
+
+**Barra de scroll** (`UX_Guidelines.md` §11b.18, pasada de UI de la 1.1, 2026-11-21): global, en
+`index.css`. `::-webkit-scrollbar` de 10 px, sin flechas, riel transparente; el pulgar es
+`rgb(var(--color-text-secondary) / 0.4)` (0.65 al pasar el mouse, `accent` al arrastrar),
+redondeado y con 2 px de borde transparente para que no toque el borde. Las mismas variables sirven
+para los dos temas. Sin soporte de `::-webkit-scrollbar`: `scrollbar-width: thin` y
+`scrollbar-color`.
+
+**«Ver en la lista»** (`.anonly-flash`): la fila se ilumina con `accent` al
+`--anonly-flash-alpha` (0.18 en claro, 0.4 en oscuro) y, en oscuro, un borde interior de `accent`
+(`--anonly-flash-ring`).
 
 ---
 
@@ -1305,6 +1392,320 @@ export ni presentar la exportación previa como error. Resetear el estado local
 de descarga al generar un archivo nuevo, aunque el componente siga montado.
 Una solicitud pendiente bloquea nuevos submits; error/cancelación habilitan
 reintento. El archivo ya descargado no se modifica.
+
+## 13b. Componentes de la 1.1 — detección a medida (ADR-225 a ADR-229)
+
+> Fuente visual: el lienzo «Anonly 1.1 — UI final», páginas _Inicio y formatos_ y _Pantalla de
+> trabajo_, aprobado por el mantenedor el 2026-11-16. Qué hace cada cosa lo definen ADR-219 a
+> ADR-225; cómo se ve, ADR-226 a ADR-229. Las secciones anteriores que esta cambia llevan una nota
+> que apunta acá.
+
+**Archivos nuevos:**
+
+```
+apps/react-client/src/components/
+├── formats/                          // ADR-227, ADR-228: solo se monta sin documento abierto
+│   ├── DetectionFormatsDialog.tsx    // el árbol tipo → formatos
+│   ├── FormatTypeBand.tsx
+│   ├── FormatRow.tsx
+│   ├── UserTypeDialog.tsx            // crear y editar un tipo propio (guardado o del documento)
+│   ├── DeleteUserTypeDialog.tsx
+│   ├── ExportFormatsDialog.tsx
+│   ├── ImportFormatsResultDialog.tsx
+│   ├── FormatBuilderDialog.tsx       // el generador
+│   ├── PieceStrip.tsx
+│   ├── PieceInspector.tsx
+│   ├── ContextWords.tsx
+│   ├── FormatTestPanel.tsx
+│   ├── FormatStatusBox.tsx
+│   └── formatExamples.ts             // ADR-227 §5 (datos, no componente)
+├── entities/
+│   ├── NewTypeBand.tsx               // ADR-229 §1
+│   ├── DocumentTypeMenu.tsx          // ADR-225 §2
+│   ├── RemoveDocumentTypeDialog.tsx  // ADR-225 §4
+│   ├── FormatSubgroup.tsx            // ADR-226 §2
+│   └── EntityFiltersPopover.tsx      // ADR-229 §5
+├── viewer/
+│   └── EntityTooltip.tsx             // ADR-226 §4
+└── toolbar/
+    ├── SkippedFormatsNotice.tsx      // ADR-229 §7
+    └── ShortcutsDialog.tsx           // ADR-229 §8
+```
+
+### 13b.1 `LoadScreen`: la tarjeta de detección y las garantías (ADR-227 §1)
+
+- **`DetectionCard`** reemplaza a las tres tarjetas de rasgos de §2.9. Es **un solo enlace-botón**
+  a lo ancho: ícono, «Detección automática», una línea y, a la derecha, «Ver y editar los
+  formatos» con una flecha. Abre `DetectionFormatsDialog`.
+- **Texto**: con formatos del usuario, «Formatos de Argentina, N tuyos y un modelo que reconoce
+  nombres.»; sin ellos, «Formatos de Argentina para DNI y CUIT, y un modelo que reconoce
+  nombres.». N cuenta formatos propios, copias editadas y referencias (ADR-226 §1).
+- **`LoadGuarantees`**: dentro de la caja principal, **debajo** de la `DropZone`, dos garantías en
+  una fila: «Todo local · Nunca salen de tu computadora.» y «No se puede deshacer · No queda nada
+  debajo para recuperar.».
+- **Stores**: `detection.store` (solo para el texto de la tarjeta).
+- **Aviso**: al volver de guardar, `toast` «Formatos guardados · Se aplican al próximo documento
+  que abras».
+
+### 13b.2 `DetectionFormatsDialog` (ADR-227 §2 y §3)
+
+- **Qué es**: el árbol tipo → formatos. Trabaja sobre un **borrador** de `detection.store`
+  (`React_Client.md` §3.8): nada llega a `anonly:detection` hasta «Guardar».
+- **Encabezado**: título, la línea que define tipo y formato, «Importar…», «Exportar…» y cerrar.
+- **Barra**: buscador (por nombre de tipo o de formato, sin mayúsculas ni tildes) y el conteo
+  «N prendidos · N apagados · N tuyos». En la 1.1.1 suma el selector de país y «Sumar un formato
+  de otro país…» (ADR-227 §7); en la 1.1 no se montan.
+- **Tres secciones**: «Tus tipos», «Tipos del catálogo» y «Tipos fijos del catálogo». La tercera
+  arranca plegada. Con búsqueda activa, todo se despliega y las secciones sin resultados se
+  ocultan.
+- **`FormatTypeBand`**: plegar, punto del tipo (hueco para un tipo propio, §9), nombre, resumen
+  («3 formatos · 1 apagado»), botón **«Nuevo formato»** si el tipo admite formatos
+  (`FORMAT_ADMITTING_BASE_TYPES` o tipo propio) y menú ⋯ si es del usuario: «Editar tipo…»,
+  «Exportar este tipo…», «Borrar tipo…».
+- **Banda punteada «Nuevo tipo»**: primera fila de «Tus tipos». Abre `UserTypeDialog`.
+- **`FormatRow`**: `Checkbox` (§8.4) para prender y apagar —**no** un interruptor—, nombre y clase,
+  ejemplo (`formatExamples.ts` o el que arma el generador), etiqueta («Tuyo», «Editado», «Del
+  catálogo», «Con control»), «Editar» si el formato es propio o `structure`, y menú ⋯ si es del
+  usuario («Restaurar original» / «Borrar formato»). Una fila apagada se atenúa.
+- **Jerarquía**: «Nuevo formato» lleva borde y texto de acento; «Editar» va sin borde.
+- **Los menús ⋯ llevan un ícono por opción**, como el de las entidades (`GroupContextMenu`, §3.5):
+  lápiz para editar, la flecha de «Exportar…» del encabezado para exportar, flecha circular para
+  restaurar y tacho para borrar, este en rojo como su texto. Vale también para el ⋯ de un tipo del
+  documento (§13b.6), que agrega un marcador con «+» para «Guardar para los próximos documentos».
+  `Esc` cierra el menú y no el diálogo que lo contiene. Pasada de UI de la 1.1, 2026-11-21.
+- **Estados vacíos**: sin tipos propios, solo la banda punteada; un tipo propio sin formatos
+  muestra su fila de aviso; búsqueda sin resultados, con «Borrar la búsqueda».
+- **Pie**: candado y «Se aplica al próximo documento que abras · Se guarda en este equipo, sin
+  cifrar…», el contador «N cambios sin guardar», «Cancelar» y **«Guardar»**, apagado sin cambios.
+- **Cerrar con cambios**: `ConfirmDialog` (§8.2b) «¿Descartar N cambios sin guardar?», con «Seguir
+  editando» y «Descartar cambios».
+- **Acciones de ⋯**: `toast` con «Deshacer», válido hasta guardar. Deshace sobre el borrador.
+- **Guardar**: `detection.store.commit()` → recrea el Core si el override derivado cambió
+  (ADR-125 §2, con el diálogo todavía abierto, ADR-125 §3) → cierra → aviso en `LoadScreen`.
+
+### 13b.3 `UserTypeDialog` y `DeleteUserTypeDialog` (ADR-227 §4, ADR-229 §1)
+
+- **`UserTypeDialog`**: un solo formulario para cuatro casos, según `scope` (`"saved"` |
+  `"document"`) y `mode` (`"create"` | `"edit"`).
+  - Campos: nombre (hasta `USER_TYPE_NAME_MAX`), la caja «Cómo se reemplaza» con los tres largos
+    de la escalera, y las dos versiones cortas, opcionales (hasta `USER_TYPE_SHORT_LABEL_MAX`),
+    con la automática de marcador de posición.
+  - Validación en vivo con `validateUserEntityType`, en la **línea de ayuda** de cada campo (`UX_Guidelines.md` §11b.17). Con error, el
+    botón principal se apaga, y la ranura muestra el texto del código, que dice por qué y qué hacer
+    (`UX_Guidelines.md` §11b.16).
+  - Nota al pie del cuerpo: para `saved`, que se guarda en el equipo y aplica a los próximos
+    documentos; para `document`, que es solo de este documento. **La de `document` va como aviso
+    ámbar** (ícono de advertencia, borde y fondo de `warning`), no como una nota más: el tipo se
+    pierde al cerrar el documento, y es lo único del diálogo que puede costarle trabajo al usuario.
+    Pasada de UI de la 1.1, 2026-11-21.
+  - **Al crear un tipo del documento, el aviso lleva la casilla «Guardarlo también para los
+    próximos documentos»** (ADR-225 §5, precisión del 2026-11-21), destildada. Tildada, el aviso
+    deja de ser ámbar y pasa a nota: «Se guarda en este equipo y queda en «Tus tipos», en la
+    pantalla de inicio. Para que se detecte solo, sumale un formato desde ahí.». Al crear, hace lo mismo que «Guardar para los
+    próximos documentos» del ⋯, y el aviso de creado lo dice. Las dos versiones del aviso miden lo
+    mismo (UX-10). Al editar no está: un tipo del documento ya creado se guarda desde el ⋯.
+  - Botón: «Crear tipo» o «Guardar».
+- **`DeleteUserTypeDialog`** (tipo guardado): `alertdialog` que lista los formatos que se borran
+  con el tipo. Botón «Borrar tipo y formatos».
+
+### 13b.4 `ExportFormatsDialog` e `ImportFormatsResultDialog` (ADR-227 §6)
+
+- **`ExportFormatsDialog`**: dos listas de `Checkbox`. «Tus tipos · viajan con todos sus
+  formatos», con los formatos anidados y estado mixto en el tipo; «Tuyos, en tipos del catálogo ·
+  viajan solos». «Elegir todo» y «Nada». Pie con el resumen y «Exportar archivo», apagado sin
+  selección. Baja `formatos.anonly-formatos` como cualquier descarga.
+- **`ImportFormatsResultDialog`**: se abre después de elegir el archivo y de `validateFormatsFile`.
+  - **Conflicto de nombre** (decisión del mantenedor, 2026-11-20; ADR-223 §6): si un formato del
+    archivo tiene el nombre de uno que el usuario ya tiene, sin ser idéntico, antes del resumen
+    aparece un paso «Hay formatos con un nombre que ya usás». Cada uno trae su campo con el nombre
+    del archivo y, debajo, en una ranura de alto fijo, el texto de `name_taken` de
+    `UX_Guidelines.md` §11b.16 mientras siga chocando (también contra otro del mismo archivo).
+    «Importar» queda apagado hasta que no quede ningún conflicto. «Cancelar» no importa nada. El
+    resumen después dice qué formatos se renombraron.
+  - **Resumen**: «Se importó», «Se sumó a un tipo que ya tenías» y «No se importó», cada grupo con
+    su cantidad y, el último, el motivo de cada elemento. Aviso amarillo si un formato comparte
+    textos con otro. Botón «Ver en la lista».
+  - **Rechazo**: `alertdialog` «No se importó nada», con el motivo (inválido, versión más nueva, no
+    es de Anonly) y «Elegir otro archivo».
+- Lo importado entra al **borrador** del árbol, prendido: también se guarda con «Guardar».
+
+### 13b.5 `FormatBuilderDialog`: el generador (ADR-228)
+
+- **Estado**: local al diálogo (el formato en edición, la variante y la pieza elegidas). Se vuelca
+  al borrador de `detection.store` al confirmar.
+- **Encabezado**: título según el caso, «Probar con un texto» (alterna `FormatTestPanel`) y cerrar.
+- **Cuerpo, una columna**: nombre y «Es un…»; pestañas de variantes con «+ Variante»; `PieceStrip`;
+  «Se lee» y «Ejemplo»; `PieceInspector`; `ContextWords`. El nombre **no lleva línea de ayuda**:
+  no tiene error propio (lo dice `FormatStatusBox`) y «así lo vas a ver en tu lista» va en el
+  placeholder. Con dos renglones de piezas y un bloque de letras elegido, el cuerpo entra sin scroll
+  en 1280 × 800 (`UX_Guidelines.md` §11b.18).
+- **Pie, una fila**: `FormatStatusBox` a la izquierda, ocupando el ancho que sobra, y «Cancelar» y
+  el botón principal a la derecha (ADR-228 §7, precisión del 2026-11-21).
+- **Menú ⋯ de cada pestaña de variante** (`ActionsMenu`, dentro de la pestaña): «Cambiar nombre…»
+  (`PencilIcon`), «Duplicar variante» (`CopyIcon`; suma la copia justo después y la elige; apagado
+  en `FORMAT_MAX_VARIANTS`) y «Borrar variante…» (`Trash2Icon`, de peligro; apagado con una sola
+  variante). Reemplaza al botón rojo «Borrar variante» que iba a la derecha de las pestañas
+  (ADR-228 §2, precisión del 2026-11-21).
+- **Nombre de la variante** (ADR-233): la pestaña muestra `variantNames[i]` o, vacío, «Variante
+  N» por posición; hasta 12 rem, con «…» y el nombre entero en `title`. «Cambiar nombre…» o un
+  doble clic vuelven la pestaña un campo (hasta `FORMAT_MAX_TEXT`): `Enter` o salir del campo
+  guardan, `Esc` cancela sin cerrar el generador, vacío vuelve al automático. La copia de
+  «Duplicar variante» se llama «Copia de » + el nombre que se ve, cortado a `FORMAT_MAX_TEXT`.
+  `buildDefinition` omite `variantNames` si ninguna variante tiene nombre. «¿Borrar …?» y los
+  textos de la caja de estado nombran la variante por su nombre si tiene. Con muchas variantes
+  las pestañas pasan a un segundo renglón en vez de desbordar el diálogo.
+- **`PieceStrip`**: fichas de tres renglones y cajas punteadas para las partes opcionales.
+  - Clic elige; «+ Pieza» abre un menú con las seis clases, cada una con su descripción y ejemplo.
+    El menú entra sin scroll en una ventana de 1280 × 800 (una descripción por renglón), se abre
+    hacia la izquierda si a la derecha no entra, y `Esc` lo cierra sin cerrar el generador.
+  - **Cada parte opcional lleva su propio «+»**, un cubo punteado al final de la caja, del alto de
+    las fichas de adentro. Abre el mismo menú con las cinco clases que admite (dígitos, letras,
+    letras o dígitos, separador y texto fijo; todas menos otra parte opcional) y suma la pieza al
+    final de esa parte. **Al crear una parte opcional
+    con «+ Pieza», su menú de adentro se abre solo**, para elegir la primera pieza en el mismo
+    paso: vacía no deja crear el formato (`optional_empty`). Cerrarlo sin elegir la deja vacía, con
+    su «+» a mano (decisión del mantenedor, 2026-11-21). Así se suma donde se ve que cae;
+    el `PieceInspector` de la parte opcional ya no tiene botones de sumar, solo dice cuántas piezas
+    tiene y cómo sumarle. Pasada de UI de la 1.1, 2026-11-21.
+  - **Arrastre** con las APIs del navegador (sin dependencia nueva): reordena, mete y saca de una
+    parte opcional, con una marca de inserción. Una parte opcional no entra en otra.
+  - Con más de un renglón, una flecha al final de cada renglón (`CornerRightDownIcon`, ⤵: sigue
+    hacia adelante y abajo) y otra al principio del siguiente (`CornerDownRightIcon`, ↳). La del
+    final no apunta de vuelta hacia la ficha (precisión del 2026-11-21).
+  - **Menú contextual de la pieza** (`PieceContextMenu`): clic derecho sobre una ficha, o la tecla
+    de menú o `Mayús`+`F10` con la ficha enfocada. «Mover a la izquierda», «Mover a la derecha» y
+    «Borrar pieza»; sobre la caja de una parte opcional, «Borrar parte opcional», que se lleva sus
+    piezas. Flota donde se hizo el clic, sin salirse de la ventana; `Esc`, un clic afuera o un
+    scroll lo cierran sin cerrar el generador. `Supr` sobre una ficha enfocada la borra.
+- **`PieceInspector`**: mide lo que su contenido, **sin scroll propio**: si no entra, scrollea el
+  cuerpo del diálogo. «Mover» a izquierda y derecha —la alternativa por teclado al arrastre— y
+  «Borrar pieza». Para un bloque: «Qué va» (tres tarjetas `radio` con ejemplo), «Cuántos» y, si
+  son letras, «Escritas». Para un separador: cuáles y un `Checkbox` «Puede faltar». Para un texto
+  fijo: el campo y el aviso de guardado. Sin pieza elegida, dice cómo se ajusta, se ordena y se
+  borra una pieza, con el clic derecho incluido.
+- **`ContextWords`**: arranca plegada en una fila si no hay palabras, y abierta si hay. **El
+  encabezado la pliega y la despliega siempre**; plegada con palabras, la fila las nombra («Solo si
+  antes dice «legajo» o «leg.»») con el contador. Abierta: las palabras como etiquetas con borde
+  (`rounded-md`, fondo `bg-tertiary`, borde `border-strong` al 40 %, una X cada una), en la misma fila que el campo y «Agregar», y
+  debajo el mismo aviso de guardado que el texto fijo (`UX_Guidelines.md` §11b.9). El subrayado
+  punteado queda solo en `FormatTestPanel` (ADR-228 §5, precisión del 2026-11-21).
+- **`FormatTestPanel`**: panel **flotante** que se mueve por su encabezado. Texto de prueba,
+  cantidad de coincidencias y resultado resaltado (`testFormat`). Su texto vive solo en el estado
+  del componente: nunca se guarda ni se loguea.
+- **`FormatStatusBox`**: en el pie, a la izquierda de los botones, de **alto fijo** (lugar para tres
+  renglones de 13 px, el texto centrado en vertical) y siempre en caja. Sale de `validateFormat` y
+  `compareFormat`: verde, amarillo (deja crear) o rojo (apaga el botón principal). Un texto que no
+  entra en tres renglones termina en «…» y se lee entero en su `title`.
+- **Confirmaciones** (`ConfirmDialog`): «¿Borrar la variante N?», que dice cuántas piezas se
+  pierden, y, al cerrar con cambios —con «Cancelar», con la X o con un clic afuera—, «¿Cerrar sin
+  guardar?», con «Seguir editando» y «Descartar cambios» (`UX_Guidelines.md` §11b.5).
+- **Límites**: los de `Contracts.md` §6 (`FORMAT_*`). Los contadores aparecen cerca del tope.
+
+### 13b.6 Panel de entidades (ADR-225, ADR-226, ADR-229)
+
+- **`NewTypeBand`**: banda punteada arriba de la lista. Abre `UserTypeDialog` con
+  `scope: "document"`, `mode: "create"`.
+  - **También con el panel vacío** (un documento sin entidades ni tipos del documento): la banda va
+    arriba, en su ranura, y debajo el estado vacío de siempre. Decisión del mantenedor, 2026-11-21.
+- **Orden de los tipos**: primero los propios (guardados y del documento), después los del
+  catálogo.
+- **Un tipo del documento se muestra siempre**, aunque no tenga grupos: su banda dice «solo en este
+  documento» y, vacía, muestra la fila «Todavía no tiene entidades…» con «Agregar entidad». Un tipo
+  guardado sin grupos no se muestra. La lista de tipos del documento sale de
+  `orchestrator.getDocumentEntityTypes`.
+- **`DocumentTypeMenu`** (⋯, solo en tipos del documento): «Editar nombre y abreviaturas…»
+  (`UserTypeDialog`, `mode: "edit"`), «Guardar para los próximos documentos» y «Borrar tipo…».
+- **`RemoveDocumentTypeDialog`**: `alertdialog`. Con entidades, las lista y muestra el aviso «Sus
+  entidades quedan libres y descubiertas», que sugiere cambiarles el tipo antes (`UX_Guidelines.md`
+  §11b.10); botón «Borrar tipo y entidad(es)». Vacío, sin lista ni aviso.
+  - **Con choques sin resolver** de entidades del tipo, suma antes de la lista el aviso de
+    `UX_Guidelines.md` §11b.10. Recomienda resolverlos y no bloquea el botón (ADR-225 §4, precisión
+    del 2026-11-20).
+- **Después de guardar un tipo del documento**: la banda dice «guardado» y pierde el ⋯. El aviso
+  tiene «Deshacer», sin la pista `Ctrl+Z`.
+- **`FormatSubgroup`**: subnivel con el nombre del formato, **solo para formatos del usuario** y
+  solo si separa algo (ADR-226 §2). Los grupos de formatos del catálogo van directo bajo el tipo.
+- **`EntityFiltersPopover`**: se abre desde el botón «Filtros», flotante. Cuatro secciones de
+  `Checkbox`: «Tipos» (en dos columnas, con el `TypeDot` de cada uno, su nombre en plural y su
+  cantidad, en el orden de la lista; ADR-229 §5, precisión del 2026-11-21), «Tus formatos»
+  (solo los formatos del usuario que separan algo dentro de su tipo, con la regla del subnivel;
+  oculta si no queda ninguno; ADR-226 §3, precisión del 2026-11-21), «Modo de reemplazo» (con muestra y cantidad) y «Para revisar». Alto máximo
+  de 640 px, o lo que deje la ventana; más allá scrollea por dentro. Pie con «Quitar filtros» y «Listo». Con filtros, el resumen de la lista dice
+  «Mostrando N de M · Quitar filtros».
+- **Conflicto resuelto**: con el filtro «con conflicto» activo, la fila muestra un `ConflictBadge`
+  gris que abre `ConflictDialog`.
+- **`ReplacementModeSelect`** de un tipo propio: sin «Dato falso» (ADR-229 §4).
+
+### 13b.7 `EntityTypePicker` en la 1.1 (ADR-229 §2)
+
+- **Lista**: «Tipos del catálogo», con **doce** tipos —`Custom` ya no se ofrece—, y «Tus tipos»,
+  con los guardados y los del documento. El del documento lleva el punto punteado y un `title`.
+  **Sin tipos propios, «Tus tipos» no se monta.**
+- **«Nuevo tipo» en línea**: una celda punteada al final de «Tus tipos», o una fila punteada bajo
+  el catálogo si no hay tipos propios. Al activarla se convierte en un campo de nombre con la vista
+  previa de la etiqueta y una X para descartar. Valida con `validateUserEntityType`.
+  - **El campo lleva la casilla «Guardarlo»**, destildada, con el `title` «Guardarlo también para
+    los próximos documentos» (ADR-225 §5, precisión del 2026-11-21). Tildada, al confirmar el
+    tipo se crea y se guarda en el mismo paso, y la línea de pie del contenedor dice «Tipo nuevo:
+    queda guardado para los próximos documentos.» en lugar de «Después lo editás o lo guardás
+    desde ⋯ en el panel.». `NewTypeDraft` suma `save`.
+- **Props nuevas**: `userTypes` (con su marca de «del documento»), `newType` (`{ name }` o
+  `null`), `onNewTypeChange` y `newTypeError`. `value` pasa a `EntityTypeId | "new"`.
+- **El contenedor decide el botón**: «Crear y agregar» en `WordSelectionOverlay`,
+  `DocumentSearchBox` y `AddEntityDialog`; «Crear y cambiar» en `ChangeTypeDialog`. Al confirmar:
+  `history.record` → `defineDocumentEntityType` → la acción de siempre. Es **una** entrada del
+  deshacer.
+- **El error de nombre** se muestra en la línea de pie del contenedor, que ya existe; no agrega
+  altura.
+  - Esa línea tiene el `id` al que apunta el `aria-describedby` del campo (`new-type-hint`), así
+    que se lee el texto entero. Si no entra en sus renglones, se corta con «…» y el texto completo
+    queda en `title` (UX §11b.17).
+  - En los globos de la selección y de la lupa (`WordSelectionOverlay`, `DocumentSearchBox`), la
+    línea de pie es una línea de ayuda de 12 px (`FieldHint`, UX §11b.17), en rojo con su ícono
+    cuando hay error o el texto no se encontró. Su segundo renglón ocupa el espacio que hay hasta
+    los botones, así que el «qué hacer» del final se lee sin mover nada. Revisión de F7,
+    2026-11-21.
+- **`ChangeTypeDialog`**: si el tipo elegido es propio y la entidad estaba en «Dato falso», la caja
+  «Cómo queda» avisa que pasa a «Etiquetar».
+
+### 13b.8 Visor, barra, export y configuración
+
+- **`EntityTooltip`** (ADR-226 §4): aparece a los ~400 ms de dejar el mouse quieto sobre una
+  entidad, en las dos vistas. Tipo y número, valor original, reemplazo, apariciones y, **solo si el
+  formato es del usuario**, «Formato». Se cierra al salir, con `Esc` o con un clic. Un clic sin
+  arrastrar sobre una entidad activa la selecciona en el panel (va a su fila y la resalta); sobre una
+  desactivada solo cierra el tooltip (ADR-226 §4, precisión del 2026-11-21); no aparece
+  durante una selección por arrastre, un zoom, ni con un menú o un diálogo abierto. No se ata al
+  foco.
+- **`SkippedFormatsNotice`** (ADR-229 §7): en la ranura de la barra que usa el aviso de análisis
+  incompleto. Nombra el formato y las páginas, con «Ir a la página N».
+- **`ExportDialog`**: suma el mismo aviso, una fila por formato con «Ir a la página N». No bloquea.
+- **`ConflictDialog`** entre dos formatos (ADR-229 §6): cada opción con tipo, formato y origen; el
+  texto de que nació resuelto. Como ya nació resuelto, mientras la elección sea la vigente el botón
+  dice «Listo» y solo cierra; si se elige la otra, dice «Aplicar».
+- **`SettingsDialog`**: sección nueva «Atajos de teclado» con «Ver atajos…», que abre
+  **`ShortcutsDialog`**. La tabla sale de la misma fuente que declara los atajos (ADR-224 §5), y la
+  barra **no** tiene ícono de atajos.
+  - **«Apariencia» suma la casilla «Resaltar en el original lo que se detectó»**, tildada por
+    defecto, debajo de los temas (`settings.highlightEntities`, `React_Client.md` §3.6). Destildada,
+    `WordSelectionOverlay` no dibuja las cajas de §5.4b; el tooltip y el clic siguen igual. Se
+    aplica al guardar, como el tema. Pasada de UI de la 1.1, 2026-11-21.
+
+### 13b.9 Mapeo al Core
+
+| Componente | Acción | Core |
+|---|---|---|
+| `DetectionFormatsDialog` | Guardar | `detection.store.commit()` → `recreateCore` si cambió el override (ADR-125 §2) |
+| `FormatBuilderDialog` | Validar, probar, comparar | `validateFormat`, `testFormat`, `compareFormat` (funciones puras del façade) |
+| `UserTypeDialog` | Validar | `validateUserEntityType` |
+| `ImportFormatsResultDialog` | Importar | `validateFormatsFile` |
+| `NewTypeBand` / `EntityTypePicker` | Crear tipo del documento | `orchestrator.defineDocumentEntityType` |
+| `DocumentTypeMenu` | Editar | `orchestrator.updateDocumentEntityType` |
+| `RemoveDocumentTypeDialog` | Borrar | `orchestrator.removeDocumentEntityType` |
+| `DocumentTypeMenu` | Guardar para los próximos documentos | ninguna llamada al Core: `detection.store` (ADR-225 §5) |
+| `SkippedFormatsNotice` | — | `REGEX_FINISHED.skippedFormats` |
+
+---
 
 ## 14. Referencias
 

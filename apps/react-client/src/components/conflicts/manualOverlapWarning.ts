@@ -19,7 +19,7 @@
  * choque que nació en un re-análisis, no solo al que se acaba de agregar.
  */
 
-import type { Conflict, EntityGroup, EntityType } from "@anonly/anonymization-core";
+import type { Conflict, EntityGroup, EntityTypeId } from "@anonly/anonymization-core";
 
 import type { EntitySortOrder } from "../../store/entities.store.js";
 import { visibleTypeEntries } from "../entities/entityTree.js";
@@ -53,7 +53,7 @@ export function shouldShowManualOverlapWarning(params: {
  * ninguno pendiente.
  */
 export function firstPendingManualOverlapGroupId(params: {
-  readonly groupsByType: ReadonlyMap<EntityType, ReadonlyArray<EntityGroup>>;
+  readonly groupsByType: ReadonlyMap<EntityTypeId, ReadonlyArray<EntityGroup>>;
   readonly sortOrder: EntitySortOrder;
   readonly conflicts: ReadonlyArray<Conflict>;
 }): string | null {
@@ -100,7 +100,7 @@ export interface ManualOverlapWarning {
 
 export function resolveManualOverlapWarning(params: {
   readonly conflicts: ReadonlyArray<Conflict>;
-  readonly groupsByType: ReadonlyMap<EntityType, ReadonlyArray<EntityGroup>>;
+  readonly groupsByType: ReadonlyMap<EntityTypeId, ReadonlyArray<EntityGroup>>;
   readonly sortOrder: EntitySortOrder;
   readonly dialogOpen: boolean;
 }): ManualOverlapWarning | null {

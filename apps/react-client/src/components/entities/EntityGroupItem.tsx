@@ -34,7 +34,7 @@ import { useEntitiesStore } from "../../store/entities.store.js";
 import { usePipelineStore } from "../../store/pipeline.store.js";
 import { useViewerStore } from "../../store/viewer.store.js";
 import { Checkbox } from "../common/Checkbox.js";
-import { ConflictBadge } from "../conflicts/ConflictBadge.js";
+import { ConflictBadge, ResolvedConflictBadge } from "../conflicts/ConflictBadge.js";
 
 import { applyEnabled, restoreComputedValue } from "./applyEdits.js";
 import { ChangeTypeDialog } from "./ChangeTypeDialog.js";
@@ -42,7 +42,7 @@ import { DegradedBadge } from "./DegradedBadge.js";
 import { EditReplacementDialog } from "./EditReplacementDialog.js";
 import { ENTITY_ROW_GRID, ENTITY_ROW_PADDING } from "./entityRowLayout.js";
 import { isIndexInTypeVisible } from "./entityTree.js";
-import { ENTITY_TYPE_SINGULAR, formatIndexInType } from "./entityTypeLabels.js";
+import { describeEntityNumber, formatIndexInType } from "./entityTypeLabels.js";
 import { GroupContextMenu } from "./GroupContextMenu.js";
 import { MergeDialog } from "./MergeDialog.js";
 import { NeedsReviewBadge } from "./NeedsReviewBadge.js";
@@ -52,6 +52,7 @@ import { isPersonGenderToggleVisible } from "./personGenderVisibility.js";
 import { RemoveEntityDialog } from "./RemoveEntityDialog.js";
 import { ReplacementModeSelect } from "./ReplacementModeSelect.js";
 import { SplitDialog } from "./SplitDialog.js";
+import { useUserTypes } from "./useUserTypes.js";
 
 /** Cuánto dura el resaltado de "Ver en la lista". */
 const FLASH_MS = 1600;
@@ -67,6 +68,13 @@ function EntityGroupItemImpl({ group, nodeId, activeNodeId }: EntityGroupItemPro
   const conflict = useEntitiesStore((state) =>
     state.conflicts.find((candidate) => candidate.groupId === group.id && !candidate.resolved),
   );
+  // ADR-229 §5: con el filtro «con conflicto» activo, un conflicto resuelto lleva su ícono gris.
+  const resolvedConflict = useEntitiesStore((state) =>
+    state.filters.review.has("conflict")
+      ? state.conflicts.find((candidate) => candidate.groupId === group.id && candidate.resolved)
+      : undefined,
+  );
+  const userTypes = useUserTypes();
   const flashing = useEntitiesStore((state) => state.flashGroupId === group.id);
   const showIndex = usePipelineStore((state) => isIndexInTypeVisible(state.stage));
   const [mergeOpen, setMergeOpen] = useState(false);
@@ -119,9 +127,7 @@ function EntityGroupItemImpl({ group, nodeId, activeNodeId }: EntityGroupItemPro
       <span
         className={`text-sm tabular-nums text-text-secondary ${dim}`}
         title={
-          showIndex
-            ? `${ENTITY_TYPE_SINGULAR[group.type]} N.º ${formatIndexInType(group.indexInType)}`
-            : undefined
+          showIndex ? describeEntityNumber(group.type, group.indexInType, userTypes) : undefined
         }
       >
         {showIndex ? formatIndexInType(group.indexInType) : ""}
@@ -141,7 +147,11 @@ function EntityGroupItemImpl({ group, nodeId, activeNodeId }: EntityGroupItemPro
       </span>
       {/* Avisos: columna de 52 px; dos juntos entran sin correr nada (UX-10). */}
       <span className="flex min-w-0 items-center gap-1">
-        {conflict !== undefined ? <ConflictBadge groupId={group.id} /> : null}
+        {conflict !== undefined ? (
+          <ConflictBadge groupId={group.id} />
+        ) : resolvedConflict !== undefined ? (
+          <ResolvedConflictBadge conflictId={resolvedConflict.id} />
+        ) : null}
         {/*
           ADR-094 §4 y ADR-062: los dos se montan siempre y deciden solos si
           hay algo que mostrar (sugerida por `needsReview`, espacio justo por

@@ -5,7 +5,7 @@
  * **local** del `ExportDialog`, calculado del store — no es un evento)".
  */
 
-import type { EntityGroup, EntityType } from "@anonly/anonymization-core";
+import type { EntityGroup, EntityTypeId } from "@anonly/anonymization-core";
 
 export interface GroupCounts {
   readonly total: number;
@@ -14,7 +14,7 @@ export interface GroupCounts {
 }
 
 export function countGroups(
-  groupsByType: ReadonlyMap<EntityType, ReadonlyArray<EntityGroup>>,
+  groupsByType: ReadonlyMap<EntityTypeId, ReadonlyArray<EntityGroup>>,
 ): GroupCounts {
   let total = 0;
   let enabled = 0;

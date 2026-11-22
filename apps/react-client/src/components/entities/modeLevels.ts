@@ -23,7 +23,7 @@
  * Módulo puro: los tests de `apps/react-client` corren en Node sin jsdom.
  */
 
-import { ReplacementMode, type EntityType, type Rule } from "@anonly/anonymization-core";
+import { type EntityTypeId, ReplacementMode, type Rule } from "@anonly/anonymization-core";
 
 /**
  * Default del motor cuando no hay ninguna regla
@@ -44,7 +44,7 @@ export function findDocumentRule(rules: ReadonlyArray<Rule>): Rule | undefined {
 }
 
 /** La `Rule` de scope `type` vigente para ese `EntityType`, o `undefined`. */
-export function findTypeRule(rules: ReadonlyArray<Rule>, type: EntityType): Rule | undefined {
+export function findTypeRule(rules: ReadonlyArray<Rule>, type: EntityTypeId): Rule | undefined {
   return enabledRules(rules).find(
     (rule) => rule.scope === "type" && rule.target.entityType === type,
   );
@@ -88,7 +88,7 @@ export type TypeHeaderState =
 
 export function resolveTypeHeaderState(
   rules: ReadonlyArray<Rule>,
-  type: EntityType,
+  type: EntityTypeId,
   groupModes: ReadonlyArray<ReplacementMode>,
 ): TypeHeaderState {
   if (groupModes.length > 0) {
@@ -141,7 +141,7 @@ export function planApplyDocumentMode(rules: ReadonlyArray<Rule>): ApplyModePlan
  */
 export function planApplyTypeMode(
   rules: ReadonlyArray<Rule>,
-  type: EntityType,
+  type: EntityTypeId,
   groupIdsOfType: ReadonlySet<string>,
 ): ApplyModePlan {
   const swept = rules.filter(
@@ -193,7 +193,7 @@ export function needsConfirmation(counts: OverrideCounts): boolean {
  */
 export function countEntitiesWithOwnMode(
   rules: ReadonlyArray<Rule>,
-  groups: ReadonlyArray<{ readonly id: string; readonly type: EntityType }>,
+  groups: ReadonlyArray<{ readonly id: string; readonly type: EntityTypeId }>,
 ): number {
   return groups.filter(
     (group) => hasOwnDecision(rules, group.id) || findTypeRule(rules, group.type) !== undefined,

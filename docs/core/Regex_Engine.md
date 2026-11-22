@@ -1,12 +1,53 @@
-<!-- CONTEXT: scope=regex-engine | dependencias=core/Contracts.md,architecture/06_Pipeline.md,adr/ADR-021-Engines-Inline-Hasta-Hito9.md,adr/ADR-022-Regex-Phone-AR-Word-Boundaries.md,adr/ADR-066-Texto-De-Anotaciones-Y-Reemplazo-Rotado.md,adr/ADR-074-Una-Entidad-Partida-En-Varias-Lineas.md,adr/ADR-075-Fechas-En-Texto-Y-Tramos-De-Identificadores.md,adr/ADR-089-Buscar-No-Es-Agregar.md,adr/ADR-115-La-Puntuacion-Pegada-No-Es-Parte-Del-Valor.md,adr/ADR-091-El-Lexico-De-Nombres-No-Es-De-Un-Motor.md,adr/ADR-092-La-Caratula-Es-Un-Patron-No-Un-Caso-De-Modelo.md,adr/ADR-093-La-Caracteristica-Telefonica-No-Siempre-Tiene-Dos-Digitos.md,adr/ADR-122-Una-Caratula-Se-Escribe-En-Mayusculas.md,adr/ADR-181-Email-Default-Con-Escaner-Lineal.md,adr/ADR-217-Una-Direccion-Con-Palabra-Clave-Es-Un-Patron.md | audiencia=IA-implementador | fase=3 (§2/§6/§10/§13/§14/§15 y la tabla de patrones en fase 10.9: `fragments` por línea en `mapSpanToWords` —ADR-074 §2—, patrón `date-textual-ar` y guarda de corrida alfanumérica —ADR-075 §1/§2—; la tabla de patrones/§13/§14 en fase 11 por ADR-092: fila `caratula-ar` con el léxico de nombres como checksum; §6/§13/§14 en fase 11 por ADR-089: la comparación literal pasa a ser por sub-token y `searchText` afloja el último por prefijo mientras `findLiteral` no; §6/§13/§14 en fase 11 por la v1.6.2: `runPattern` recorta el espacio de borde del match antes de armar el `RawMatch`, para que el `value` de la ocurrencia se pueda volver a buscar; §6/§13/§14 en fase 10.9 post-mergeo: la guarda recorta el espacio de borde que `phone-mobile-ar` se traga antes de medir la corrida, caso 29, v1.6.1; items §15 1-18 implementados; tests cancel/perf de §14 diferidos a Hito 11; §4/§6/§13/§14/§15 en fase 10.7: findLiteral para el agregado manual de entidades, ADR-061, con sus dos primitivas importadas de shared y no reimplementadas —errata de ADR-061 §2—, y searchText de solo lectura como primitiva de findLiteral y de la lupa —errata de ADR-061 §8—; §6/§13/§14/§15 en fase 10.7 post-aprobación: stripEdgePunctuation, segunda errata de ADR-061 §2; §10/§14/§15 en fase 10.8: propagación de bbox.rotation, ADR-066 §6; la tabla de patrones/§13/§14 en fase 11 por ADR-093: fila `phone-mobile-ar` pasa de característica fija de 2 dígitos a una alternancia de tres ramas, característica+abonado suman 10; §12/§13/§14/§15 en fase 11 por ADR-181: escáner lineal para email default con salida idéntica) -->
+<!-- CONTEXT: scope=regex-engine | dependencias=core/Contracts.md,architecture/06_Pipeline.md,adr/ADR-021-Engines-Inline-Hasta-Hito9.md,adr/ADR-022-Regex-Phone-AR-Word-Boundaries.md,adr/ADR-066-Texto-De-Anotaciones-Y-Reemplazo-Rotado.md,adr/ADR-074-Una-Entidad-Partida-En-Varias-Lineas.md,adr/ADR-075-Fechas-En-Texto-Y-Tramos-De-Identificadores.md,adr/ADR-089-Buscar-No-Es-Agregar.md,adr/ADR-115-La-Puntuacion-Pegada-No-Es-Parte-Del-Valor.md,adr/ADR-091-El-Lexico-De-Nombres-No-Es-De-Un-Motor.md,adr/ADR-092-La-Caratula-Es-Un-Patron-No-Un-Caso-De-Modelo.md,adr/ADR-093-La-Caracteristica-Telefonica-No-Siempre-Tiene-Dos-Digitos.md,adr/ADR-122-Una-Caratula-Se-Escribe-En-Mayusculas.md,adr/ADR-181-Email-Default-Con-Escaner-Lineal.md,adr/ADR-217-Una-Direccion-Con-Palabra-Clave-Es-Un-Patron.md,adr/ADR-219-Un-Tipo-De-Entidad-Puede-Ser-Del-Usuario.md,adr/ADR-220-Un-Formato-Se-Arma-Con-Piezas-Y-Se-Recorre-En-Tiempo-Lineal.md,adr/ADR-221-Los-Formatos-Base-Salen-De-Un-Catalogo-Por-Pais.md,adr/ADR-222-Dos-Formatos-Que-Se-Pisan-Van-Al-Panel-De-Conflicto.md,adr/ADR-223-Los-Formatos-Se-Configuran-Desde-Inicio-Y-Viajan-En-Un-Archivo.md,adr/ADR-233-Una-Variante-Puede-Tener-Nombre.md | audiencia=IA-implementador | fase=3 (§2/§6/§10/§13/§14/§15 y la tabla de patrones en fase 10.9: `fragments` por línea en `mapSpanToWords` —ADR-074 §2—, patrón `date-textual-ar` y guarda de corrida alfanumérica —ADR-075 §1/§2—; la tabla de patrones/§13/§14 en fase 11 por ADR-092: fila `caratula-ar` con el léxico de nombres como checksum; §6/§13/§14 en fase 11 por ADR-089: la comparación literal pasa a ser por sub-token y `searchText` afloja el último por prefijo mientras `findLiteral` no; §6/§13/§14 en fase 11 por la v1.6.2: `runPattern` recorta el espacio de borde del match antes de armar el `RawMatch`, para que el `value` de la ocurrencia se pueda volver a buscar; §6/§13/§14 en fase 10.9 post-mergeo: la guarda recorta el espacio de borde que `phone-mobile-ar` se traga antes de medir la corrida, caso 29, v1.6.1; items §15 1-18 implementados; tests cancel/perf de §14 diferidos a Hito 11; §4/§6/§13/§14/§15 en fase 10.7: findLiteral para el agregado manual de entidades, ADR-061, con sus dos primitivas importadas de shared y no reimplementadas —errata de ADR-061 §2—, y searchText de solo lectura como primitiva de findLiteral y de la lupa —errata de ADR-061 §8—; §6/§13/§14/§15 en fase 10.7 post-aprobación: stripEdgePunctuation, segunda errata de ADR-061 §2; §10/§14/§15 en fase 10.8: propagación de bbox.rotation, ADR-066 §6; la tabla de patrones/§13/§14 en fase 11 por ADR-093: fila `phone-mobile-ar` pasa de característica fija de 2 dígitos a una alternancia de tres ramas, característica+abonado suman 10; §12/§13/§14/§15 en fase 11 por ADR-181: escáner lineal para email default con salida idéntica) -->
 
 # Regex Engine — Spec de Motor
 
-> Detecta patrones determinísticos (DNI, CUIT, teléfono, email, IBAN, tarjeta, fecha, matrícula, patente) en el texto de cada página. Emite `Occurrence[]` con `source: "regex"` y `confidence: 1.0`. Es determinista: mismo input → mismo output.
+> Detecta patrones determinísticos (DNI, CUIT, teléfono, email, IBAN, tarjeta, fecha, matrícula, patente) y los formatos que arma el usuario con el generador (ADR-220) en el texto de cada página. Emite `Occurrence[]` con `source: "regex"` y `confidence: 1.0`. Es determinista: mismo input → mismo output.
 
 **EngineId**: `regex`
-**Versión del spec**: 1.16.0
-**Última actualización**: 2026-10-08
+**Versión del spec**: 2.1.0
+**Última actualización**: 2026-11-21
+
+> **Nota (v2.1.0, ADR-233, 2026-11-21 — una variante puede tener nombre)**: versión menor porque **suma contrato público** sin retirar nada. `FormatDefinition` gana `variantNames`, opcional y en paralelo a `variants`, y `validateFormat` gana dos códigos: `variant_name_too_long` (con `variantIndex`) y `variant_names_mismatch` (del formato entero) (`Contracts.md` §5.2). El nombre **no cambia qué se reconoce**: el autómata, `process` y `testFormat` no lo leen, `testFormat` no cuenta los dos códigos como problema de forma, y `compareFormat` lo deja fuera de la forma canónica. `init` descarta un formato con esos códigos como a cualquier inválido. Ver §6, caso 49 y dos filas nuevas en §14.
+
+> **Nota (v2.0.2, 2026-11-20 — auditoría antes de F2)**: precisiones para los ítems 26 a 28. No cambia ningún contrato público. Las dos primeras las decidió el mantenedor el 2026-11-20.
+>
+> 1. **Una copia editada que no pasa `validateFormat` no reemplaza al original**: se descarta como cualquier formato inválido, y el original corre (§6, «Qué corre», paso 1; caso 39, con una fila nueva en §14). Así un DNI no deja de detectarse porque su copia llegó rota.
+> 2. **Sin tope de cantidad de formatos propios.** El costo medido crece lineal con la cantidad, y los números quedan en §12.
+> 3. **`skippedFormats` lo arma `process`**, porque `init` no conoce el documento. Se precisa qué páginas lleva cada entrada y en qué orden van (§6).
+> 4. **El fallo por página es de los formatos del generador.** Un formato base que lanza sigue como en la v1.16.0. El `warn` lleva el id, la página y el nombre de la clase del error, y nunca su mensaje (§11, caso 48).
+> 5. **El borde del generador no es el `\b` del `RegExp`.** La diferencia no aparece en el corpus del caso 50 y queda escrita en «Definiciones equivalentes», con un test que la fija.
+> 6. **El caso 50 son dos tests**: el del paquete, sobre los textos de §13, y uno nuevo en `tests/quality`, sobre las páginas de la línea de base de calidad, que un paquete no puede importar (§14).
+> 7. En `04_Event_System.md` §5, `ENTITY_FOUND` suma `manual` a sus `source`: es el de `findLiteral` (ADR-061).
+> 8. **`compareFormat`**, dos precisiones de lo que ya hace el código de F1:
+>    - ante un problema de forma devuelve `{ identicalTo: null, overlaps: [] }`;
+>    - no valida la copia de un base, porque no recibe `userTypes`.
+
+> **Nota (v2.0.1, 2026-11-20 — auditoría antes de F1)**: precisiones y un reparto nuevo entre F1 y F2. No cambia ningún contrato público. Las decidió el mantenedor el 2026-11-20.
+>
+> 1. **F1 ya detecta.** El ítem 25 suma el cableado mínimo:
+>    - `init` compila los formatos prendidos de `detection.userFormats` y descarta los inválidos;
+>    - `process` los corre después de los base, con la resolución de siempre (caso 10);
+>    - `BASE_CATALOG` y `getCatalog` pasan de F2 a F1, porque `compareFormat` compara contra el catálogo.
+>
+>    Lo demás de la lista que corre, el origen en la resolución, el `formatId` de los base y `skippedFormats` quedan en F2 (ítems 26 a 28).
+> 2. **`testFormat`** devuelve `[]` solo ante un problema de la forma del formato. El nombre, el tipo y el id no frenan la prueba (§6, `Contracts.md` §5.2).
+> 3. **`compareFormat`** compara contra todos los formatos propios y las referencias, prendidos o apagados, y contra los base que corren. Un formato idéntico va solo en `identicalTo`, y el ejemplo de solapamiento es determinista (§6).
+> 4. **`id_invalid`** tiene regla. Las definiciones del catálogo, con id `fmt:base:…`, son la excepción, porque nunca se validan («Definiciones equivalentes», `Contracts.md` §5.2).
+> 5. **`init` valida con `existingFormats: []`**: un nombre repetido no descarta un formato al analizar (§6).
+> 6. En **§10**, `formatId` y `formatOrigin` figuran como opcionales, igual que en el tipo. En **§15** se corrigen los ítems 6 y 17, que seguían hablando de patrones custom y de los exports de antes.
+
+> **Nota (v2.0.0, ADR-219 a ADR-223, 2026-10-19 — catálogo, formatos del generador y colisiones)**: versión mayor porque **retira contrato público**: `RegexEngineConfig.customPatterns`, `addPattern`, `removePattern` y el presupuesto de 1000 ms por patrón custom (ADR-220 §7). Ningún código de producto los usaba. En su lugar:
+>
+> 1. **Catálogo** (ADR-221): los quince patrones pasan a ser el catálogo `AR` más los universales (`BASE_CATALOG`), con los mismos ids, el mismo orden y el mismo comportamiento. Cada uno declara si es `structure` o `control` (ADR-220 §4). Los apagados por `detection.baseFormats` no corren.
+> 2. **Formatos del generador** (ADR-220): un `FormatDefinition` se compila a un autómata y se recorre en tiempo lineal, sin `RegExp`. Por construcción, un formato del usuario no puede colgar el motor.
+> 3. **Funciones puras** `getCatalog`, `validateFormat`, `testFormat` y `compareFormat` (ADR-220 §3).
+> 4. **Colisiones** (ADR-222): dos matches de tipos distintos que se pisan sin que uno contenga al otro se emiten los dos cuando uno es propio, y cada `Occurrence` lleva `formatId`/`formatOrigin`.
+> 5. **Fallos** (ADR-220 §6): un formato que falla en una página se saltea y se informa en `REGEX_FINISHED.skippedFormats`.
+>
+> **Hallazgo al escribir el spec**: `phone-mobile-ar` y `license-ar` no se pueden expresar con el generador, y pasan a `control` por la regla de ADR-220 §4 (nota en «Catálogo»). Quedan cinco formatos `structure`.
+>
+> Los casos 8, 9 y 13 de §13 quedan superados; los casos 37 a 52 son nuevos. Ver §2, §3, §4, §6, §7, §10, §11, §12, §13, §14, §15, «Catálogo» y la tabla de patrones.
 
 > **Nota (v1.16.0, ADR-217, 2026-10-08 — una dirección con palabra clave es un patrón)**: el modelo de nombres no marca todas las calles, y cuando no la marca quedan a la vista la calle y la altura. Medido en M-D2 con una palabra clave antes de la calle: algo a la vista en 41 de 138 páginas sintéticas, 8 en escritura normal y 33 en mayúsculas. Se agrega el patrón `address-keyword-ar`, tipo `Address`: empieza en una palabra de vía («calle», «Av.») o justo después de una palabra de domicilio («domicilio en»), toma de una a seis palabras de nombre y termina en la altura. La palabra clave vale en mayúsculas y en minúsculas; cada palabra del nombre empieza con mayúscula o con un dígito, salvo conectores. Es la misma regla para un texto en escritura normal y para uno todo en mayúsculas, y en este último tapa de más cuando la palabra de vía se usa como palabra común: costo aceptado por el mantenedor. Sin contrato nuevo. §3 deja de decir que ninguna dirección es de este motor. Ver caso 36, §14, §15 ítem 24 y la tabla de patrones.
 
@@ -57,13 +98,15 @@ Recorrer el `Document` (con texto ya fusionado PDF+OCR) y emitir `Occurrence[]` 
 
 ## 2. Responsabilidades
 
-- Cargar los patrones default de tipos argentinos (DNI, CUIT/CUIL, teléfono, email, IBAN, tarjeta, fecha, matrícula, patente).
+- Cargar el catálogo del país activo (`detection.country`, ADR-221) más los formatos universales, sin los apagados por `detection.baseFormats` ni los reemplazados por una copia editada (§6). En la 1.1 el único país es `AR`: los quince patrones de siempre (DNI, CUIT/CUIL, teléfono, email, IBAN, tarjeta, fecha, matrícula, patente, carátula y dirección con palabra clave).
 - Aplicar cada patrón a `Page.text` y mapear matches a `Occurrence` con `bbox`, `pageIndex`, `entityType`, y —cuando el match cruza un salto de línea— la descomposición por línea en `fragments` (ADR-074 §2).
 - Descartar el match que es un **tramo de un identificador alfanumérico más largo**: sin letras en el match y con letras en su corrida (ADR-075 §2, ver §6).
-- Soportar patrones custom del usuario (con validación: regex válida + `entityType` válido).
+- Compilar y recorrer en tiempo lineal los formatos del usuario (`detection.userFormats`, `FormatDefinition`), y correr las referencias a otros catálogos (`detection.catalogRefs`) (ADR-220, ADR-221 §5).
+- Exponer las funciones puras del generador: `getCatalog`, `validateFormat`, `testFormat` y `compareFormat` (ADR-220 §3).
+- Emitir los dos matches de una colisión de tipos distintos cuando uno es propio, y marcar cada `Occurrence` con `formatId`/`formatOrigin` (ADR-222).
 - Validar con checksum cuando aplique (CUIT con dígito verificador, tarjeta con Luhn).
 - Emitir `ENTITY_FOUND` por ocurrencia (evento **interno**, solo escuchado por Grouping Engine).
-- Emitir `REGEX_FINISHED` al final.
+- Emitir `REGEX_FINISHED` al final, con `skippedFormats` si algún formato no se aplicó en alguna página (ADR-220 §6).
 - Normalizar el `normalizedValue` de cada ocurrencia (sin puntuación redundante, lowercase) para agrupación consistente.
 
 ---
@@ -74,7 +117,8 @@ Recorrer el `Document` (con texto ya fusionado PDF+OCR) y emitir `Occurrence[]` 
 - Agrupar ocurrencias (es tarea de Grouping Engine).
 - Renderizar el PDF.
 - Conocer React ni UI.
-- Persistir nada.
+- Persistir nada. Los formatos y tipos los guarda la aplicación (ADR-223 §3).
+- Validar tipos propios: `validateUserEntityType` es de `grouping-engine`, dueño de las etiquetas (ADR-219 §2).
 - Hacer OCR.
 
 ---
@@ -82,10 +126,11 @@ Recorrer el `Document` (con texto ya fusionado PDF+OCR) y emitir `Occurrence[]` 
 ## 4. Dependencias permitidas
 
 - `@anonly/shared` — incluidas sus dos funciones puras `sharesVerticalBand` y `normalizeForComparison` (`Contracts.md` §6), que `findLiteral` **consume, no reimplementa**: las dos son compartidas con otros motores y con el façade, y `shared` es el único lugar desde el que los tres las alcanzan (errata de ADR-061 §2).
-- Tipos de `core/Contracts.md`: `IEngine`, `EngineContext`, `Document`, `Page`, `Word`, `Occurrence`, `EntityType`, `DetectionSource`, `BoundingBox`, `TextMatch` (salida de `searchText`, ADR-061 §8)
+- Tipos de `core/Contracts.md`: `IEngine`, `EngineContext`, `Document`, `Page`, `Word`, `Occurrence`, `EntityType`, `EntityTypeId`, `DetectionSource`, `BoundingBox`, `TextMatch` (salida de `searchText`, ADR-061 §8), y los de §5.2 para el generador y el catálogo (`FormatDefinition`, `CatalogFormatInfo`, `DetectionConfig`, `FormatValidation`, `FormatComparison` y los demás)
+- De `@anonly/shared` (1.1): `alphanumericKey` y `maskByCharacters` (`Contracts.md` §5.2), y las constantes `FORMAT_*` (`Contracts.md` §6)
 - `architecture/04_Event_System.md`: `ENTITY_FOUND`, `REGEX_FINISHED`
 
-No requiere dependencias externas: usa `RegExp` nativo de JS.
+No requiere dependencias externas: los formatos base usan `RegExp` nativo de JS, y los del generador, un autómata propio (ADR-220 §2).
 
 ---
 
@@ -96,13 +141,14 @@ No requiere dependencias externas: usa `RegExp` nativo de JS.
 - Cualquier otro motor
 - `pdfjs-dist`, `tesseract.js`, `@huggingface/transformers`, `onnxruntime-web`, `pdf-lib`
 - Node builtins, libs de network
-- Libs de regex externas (`xregexp`, etc.) sin ADR
+- Libs de regex o de autómatas externas (`xregexp`, `re2`, etc.) sin ADR: ADR-220 decidió un recorrido propio
 
 ---
 
 ## 6. Interfaces públicas
 
 ```ts
+// Patrones del catálogo (ADR-221 §2). Desde la v2.0.0 ya no vienen del usuario (ADR-220 §7).
 export interface RegexPattern {
   readonly id: string;                    // "dni-ar", "cuit-ar", etc.
   readonly entityType: EntityType;
@@ -112,9 +158,13 @@ export interface RegexPattern {
   readonly maskFormat: string;            // "XX.XXX.XXX" — referenciado por Render/Export
 }
 
-export interface RegexEngineConfig {
-  readonly patterns: ReadonlyArray<RegexPattern>;
-  readonly customPatterns: ReadonlyArray<RegexPattern>;  // del usuario
+// ADR-221 §2 y ADR-220 §4: un formato del catálogo. Su vista pública es
+// CatalogFormatInfo (Contracts.md §5.2); el RegexPattern es lo que corre
+// mientras el usuario no lo edita. RegexEngineConfig se retiró en la v2.0.0:
+// la configuración llega en ctx.config.detection (ADR-223 §2).
+export interface CatalogFormat {
+  readonly info: CatalogFormatInfo;
+  readonly pattern: RegexPattern;
 }
 
 export interface RegexEngineInput {
@@ -129,10 +179,8 @@ export interface RegexEngineOutput {
 
 export class RegexEngine implements IEngine {
   readonly id = EngineId.Regex;
-  init(ctx: EngineContext): Promise<void>;
+  init(ctx: EngineContext): Promise<void>;       // compila catálogo y formatos desde ctx.config.detection
   process(input: RegexEngineInput, ctx: EngineContext): Promise<RegexEngineOutput>;
-  addPattern(pattern: RegexPattern): void;       // runtime, para UI
-  removePattern(patternId: string): void;
   findLiteral(input: FindLiteralInput, ctx: EngineContext): Promise<RegexEngineOutput>;  // ADR-061 §1
   searchText(input: RegexSearchInput): ReadonlyArray<TextMatch>;                         // ADR-061 §8 errata
   dispose(): Promise<void>;
@@ -142,7 +190,7 @@ export class RegexEngine implements IEngine {
 export interface FindLiteralInput {
   readonly document: Document;
   readonly value: string;
-  readonly entityType: EntityType;
+  readonly entityType: EntityTypeId;     // ADR-219 §1: también un tipo propio o del documento
 }
 
 // ADR-061 §8 (errata): la misma búsqueda, de solo lectura. Sin entityType
@@ -151,12 +199,18 @@ export interface RegexSearchInput {
   readonly document: Document;
   readonly query: string;
 }
+
+// ADR-220 §3 y ADR-221 §2: funciones puras, sin EngineContext. El façade las reexporta.
+export function getCatalog(country: CountryCode): ReadonlyArray<CatalogFormatInfo>;
+export function validateFormat(definition: FormatDefinition, context: FormatValidationContext): FormatValidation;
+export function testFormat(definition: FormatDefinition, sampleText: string): ReadonlyArray<FormatTestMatch>;
+export function compareFormat(definition: FormatDefinition, others: FormatComparisonInput): FormatComparison;
 ```
 
 Semántica de `findLiteral` (ADR-061 §1/§2):
 
 - Busca el `value` en el documento y emite una `Occurrence` por coincidencia, con `source: DetectionSource.Manual`, `confidence: 1.0` y el bbox resuelto por `mapSpanToWords` — el mismo camino que usa `process`.
-- **No emite `REGEX_FINISHED`** y **no toca el registro de patrones**: no es una corrida de detección, es una consulta puntual. `addPattern` sigue siendo para patrones que participan de todas las corridas.
+- **No emite `REGEX_FINISHED`** y **no toca el registro de patrones**: no es una corrida de detección, es una consulta puntual. Los formatos que participan de todas las corridas llegan por `ctx.config.detection` (§6; hasta la v2.0.0, por `addPattern`).
 - **Matcheo exacto, normalizado**: NFC + minúsculas + sin diacríticos, mismo criterio que el `normalizedValue` de `Occurrence`. `"JOSE PEREZ"` encuentra `"José Pérez"`. La normalización es **`normalizeForComparison` de `@anonly/shared`** (`Contracts.md` §6), no una función local: los `normalizer` de `RegexPattern` (`stripDots`, `stripDashes`) asumen un dato estructurado y acá el valor es texto libre. Se normaliza **antes** de tokenizar por espacios, así que el colapso de espacios repetidos sale gratis (§13 caso 17).
 - **Puntuación de borde recortada, la interna no** (errata de §2, 2026-08-15): `Page.words` separa por whitespace (ADR-020 §1), así que un nombre pegado a puntuación sin espacio (`"Gorrister,"`, `"¡Gorrister!"`) vive en un solo `Word` con la puntuación adentro, y `normalizeForComparison` no la saca. `stripEdgePunctuation` (local a `regex-engine`, no en `@anonly/shared`) recorta **solo el borde** de cada `Word` y de cada token del `value` antes de comparar — `"O'Brien"` no se toca, porque el apóstrofo no está en el borde. Se aplica a los dos lados de la comparación: si solo se recortara la palabra, un resultado con puntuación pegada (`match.text === "Gorrister,"`) dejaría de encontrarse a sí mismo al re-buscarlo vía "Agregar como…" (§8, caso 25).
 - **Valores multi-palabra** matchean sobre `Word` contiguas de la misma línea. "Misma línea" es **`sharesVerticalBand` de `@anonly/shared`** (`Contracts.md` §6): cada par consecutivo de la ventana candidata tiene que compartir banda vertical, no alcanza con ser contiguas en `Page.words`. Es la misma definición que usan `render-engine` y el façade — una sola, no tres (errata de ADR-061 §2). Sin ese chequeo, un valor que cruza de un renglón al siguiente da un falso positivo (§13 caso 16).
@@ -188,8 +242,140 @@ Semántica de la **guarda de corrida** (ADR-075 §2), que se aplica a todo match
 Patrones default exportados desde `index.ts`:
 
 ```ts
-export const DEFAULT_PATTERNS_AR: ReadonlyArray<RegexPattern>;
+export const DEFAULT_PATTERNS_AR: ReadonlyArray<RegexPattern>;   // los quince, en el orden de siempre
+export const BASE_CATALOG: ReadonlyArray<CatalogFormat>;          // los mismos, con su CatalogFormatInfo (ADR-221)
 ```
+
+### Qué corre: catálogo y configuración (ADR-221, ADR-223 §2)
+
+`init` lee `ctx.config.detection` (`Contracts.md` §5.2) y arma la lista que corre, **en este orden**:
+
+1. **Los formatos base del país activo y los universales**, en el orden de `BASE_CATALOG`, que es el de `DEFAULT_PATTERNS_AR` desde siempre. Se saltean:
+   - los que `detection.baseFormats` tiene en `enabled: false`;
+   - los que tienen una **copia editada prendida y válida**: un `FormatDefinition` de `userFormats` con `basedOn` igual a su id, `enabled: true` y que pasa la validación del paso 3 (ADR-220 §4). La regla vale aunque `baseFormats` no lo apague: así nunca corren el original y su copia a la vez. Una copia que no pasa la validación se descarta como dice el paso 3, y el original corre (decisión del mantenedor, 2026-11-20): un dato no deja de detectarse porque su copia llegó rota.
+2. **Las referencias a otros catálogos** (`detection.catalogRefs` con `enabled: true`), en el orden de la configuración. Corren con su `RegexPattern` de origen, control incluido (ADR-221 §5). Una referencia a un id que no existe en otro catálogo, o que apunta al catálogo del país activo, se descarta con `warn` y figura en `skippedFormats` con todas las páginas. **En la 1.1 no hay otro catálogo** (ADR-221 §7), así que toda referencia cae en este caso (§13 caso 51).
+3. **Los formatos del generador** (`detection.userFormats` con `enabled: true`), en el orden de la configuración, compilados como dice la sección siguiente. Uno que no pasa `validateFormat` contra `{ userTypes: detection.userTypes, existingFormats: [] }` se descarta con `REGEX_INVALID_PATTERN` y `warn`, y figura en `skippedFormats` con todas las páginas (ADR-220 §6). `existingFormats` va vacío porque el nombre es para la interfaz: dos formatos con el mismo nombre corren los dos.
+
+**`skippedFormats` lo arma `process`**, porque `init` no conoce el documento:
+
+- un formato descartado al `init` (pasos 2 y 3) figura con todas las páginas del documento, de `0` a `pageCount - 1`;
+- un formato del generador que falló en una o más páginas figura con esas páginas (caso 48);
+- hay una entrada por formato, en el orden de la lista que corre, con sus páginas en orden ascendente;
+- un formato sin páginas que listar, como en un documento sin páginas, no figura. Sin entradas, el campo se omite.
+
+`BASE_CATALOG` vive en `patterns/catalog.ts`. Envuelve cada `RegexPattern` de `DEFAULT_PATTERNS_AR` con su `CatalogFormatInfo`: país (`"AR"` o `"universal"`), nombre para la interfaz, tipo, clase y, si es `structure`, su definición equivalente. Las tablas están en «Catálogo». `DEFAULT_PATTERNS_AR` se sigue exportando igual que hoy. `getCatalog(country)` devuelve las `info` de los formatos de ese país y de los universales, en el mismo orden.
+
+Con `DEFAULT_DETECTION_CONFIG`, la lista que corre es exactamente la de la v1.16.0 (§13 caso 37).
+
+### Formatos del generador (ADR-220)
+
+Un `FormatDefinition` **no se ejecuta con `RegExp`**. `init` lo compila a un autómata finito no determinista (construcción de Thompson), y `process` lo recorre con una simulación de estados en paralelo. Cuesta O(caracteres × estados) por página. `FORMAT_MAX_STATES` acota los estados, y `validateFormat` rechaza al crear lo que lo supere.
+
+**Qué reconoce cada pieza**, comparando contra `Page.text`, que ya es NFC:
+
+| Pieza | Reconoce |
+|---|---|
+| `chars` `digit` | entre `min` y `max` dígitos ASCII `0-9` |
+| `chars` `letter` | entre `min` y `max` letras (`\p{L}`) |
+| `chars` `upper` / `lower` | entre `min` y `max` letras `\p{Lu}` / `\p{Ll}` |
+| `chars` `alnum` | entre `min` y `max` caracteres que son letra (`\p{L}`) o dígito ASCII |
+| `text` | cada carácter de `value` contra un carácter de la página con el mismo **pliegue**: NFD, sin marcas combinantes (`U+0300`–`U+036F`) y en minúsculas. `"AR-"` reconoce `ar-` y `Ar-` |
+| `separator` | un carácter de `chars`. `" "` reconoce cualquier espacio en blanco (`\s`), como el `[\s-]` de los patrones base, así que un formato puede cruzar un salto de línea (ADR-074) |
+| `separator` con `optional: true` | lo mismo, o nada |
+| `optional` | sus piezas en orden, o nada |
+
+**Qué devuelve el recorrido:**
+
+- **La coincidencia más a la izquierda y, de las que empiezan ahí, la más larga.** Después sigue desde el final del match, así que no reporta matches solapados de un mismo formato. Es distinto de `RegExp`, que se queda con la primera alternativa que matchea (ADR-220 §2).
+- **Bordes.** Un match solo empieza donde el carácter anterior no es letra ni dígito, o donde empieza la página. Solo termina donde el siguiente no es letra ni dígito, o donde termina la página. Los bordes son parte del recorrido, no un filtro posterior: `"12345678A"` con `digit 8..8` no da nada, en vez de dar `"12345678"` y descartarlo.
+- **Contexto** (`contextBefore`). Además, el match solo empieza justo después de una de esas palabras, seguida de espacios en blanco y como mucho un `:` (`palabra\s*:?\s*`). La palabra se compara por pliegue, como `text`, y también tiene borde: el carácter anterior a ella no es letra ni dígito. **La palabra no forma parte del match.**
+
+**Después del recorrido, el camino es el de cualquier match:**
+
+- el recorte de espacio de borde (caso 29);
+- la guarda de corrida de ADR-075 §2, sin excepción;
+- la resolución de solapamientos (abajo);
+- `mapSpanToWords`, con `fragments` y `rotation`;
+- `ENTITY_FOUND`.
+
+**La `Occurrence` de un formato del generador:**
+
+- **`entityType`**: el de la definición.
+- **`normalizedValue`**:
+  - bajo un **tipo propio**, `alphanumericKey(value)` (`Contracts.md` §5.2);
+  - bajo un **tipo base**, el normalizador de ese tipo, aplicado después de quitar los separadores del generador (espacio, `-`, `.` y `/`). Así, el mismo dato escrito con otros separadores cae en el grupo del formato base: `"34-567-891"` da `"34567891"`, igual que el `"34.567.891"` de `dni-ar` (ADR-220 §5). Los normalizadores por tipo son: DNI, `stripDots`; CUIT, `stripDashes`; Phone, solo dígitos; License, mayúsculas sin guiones; Plate, mayúsculas sin espacios.
+- **`maskFormat`**: bajo un tipo base, `maskByCharacters(value)`. Bajo un tipo propio, ausente (ADR-219 §3).
+- **`formatId`**: el `id` de la definición, con `formatOrigin: "user"`.
+
+**`formatId` de los demás orígenes:**
+
+- un formato base corre con su `RegExp` y emite su id de catálogo, con `formatOrigin: "base"`;
+- una referencia emite el id de la referencia (`ref:…`), con `formatOrigin: "user"`;
+- `findLiteral` no emite ninguno de los dos.
+
+### Resolución de solapamientos (caso 10, ADR-222)
+
+Se aplica sobre los matches de una página, ya filtrados por checksum y guarda:
+
+```text
+ordenar por: largo desc; formatOrigin "user" antes que "base"; startIndex asc; orden de la lista que corre
+aceptados = []
+para cada m en ese orden:
+  choques = aceptados que se solapan con m
+  si choques está vacío, o todo a de choques cumple emitirAmbos(a, m): aceptar m
+  si no: descartar m
+
+emitirAmbos(a, m) =
+     a.entityType !== m.entityType
+  && ninguno contiene estrictamente al otro      // mismo tramo, o se cruzan
+  && (a.formatOrigin === "user" || m.formatOrigin === "user")
+```
+
+- **Entre dos formatos base no cambia nada.** El origen empata, así que el orden es el de hoy, y `emitirAmbos` es falso. Es el caso 10 de siempre.
+- **Contención estricta:** gana el que contiene, sea cual sea el origen.
+- **Mismo tipo:** gana el más largo y, con el mismo largo, el propio (ADR-222 §1), por el segundo criterio del orden.
+- **Tipos distintos que se cruzan o cubren el mismo tramo, con uno propio:** se emiten los dos, y Grouping arma el conflicto (`Grouping_Engine.md`, ADR-222 §3).
+
+### Funciones puras del generador (ADR-220 §3)
+
+No reciben `EngineContext`, no emiten eventos y no loguean. El façade las reexporta (`Contracts.md` §3.5), y su semántica normativa está en `Contracts.md` §5.2. Lo propio de este motor:
+
+**`testFormat`** usa **el mismo** recorrido que `process` (bordes, contexto, recorte y guarda de corrida) sobre `sampleText`, sin `mapSpanToWords`: devuelve índices sobre el texto. Un test aserta que da los mismos tramos que `process` sobre un documento con ese texto (caso 49).
+
+- **Cuándo devuelve `[]` por inválido** (`Contracts.md` §5.2): cuando `validateFormat` daría algún código de la forma del formato. No cuentan `name_empty`, `name_too_long`, `name_taken`, `variant_name_too_long`, `variant_names_mismatch` (ADR-233), `type_unknown`, `type_not_admitted` ni `id_invalid`, porque no cambian qué se reconoce y `testFormat` no recibe el contexto para revisarlos.
+- **`sampleText` se recorre tal como llega**, sin normalizar, y los índices son sobre ese texto. `Page.text` ya llega en NFC, así que un texto de muestra en otra forma puede dar tramos distintos.
+
+**`compareFormat`** responde dos preguntas.
+
+**¿Es idéntico?** Dos formatos son idénticos si tienen la misma forma canónica. La forma canónica sale de `variants` y `contextBefore`; el nombre del formato y `variantNames` (ADR-233) no entran. La forma canónica de una definición:
+
+- ordena y deduplica los `chars` de cada `separator`;
+- pliega los `text` y las palabras de contexto;
+- ordena y deduplica las palabras de contexto;
+- ordena las variantes por su serialización canónica.
+
+No entran `id`, `name`, `entityType`, `basedOn` ni `enabled`. Dos formatos con la misma estructura bajo tipos distintos son idénticos.
+
+**¿Comparten textos?** Depende del formato contra el que se compara:
+
+- **Contra otro formato con autómata** (uno propio, o un `structure` del catálogo): se recorre en anchura el producto de los dos autómatas. El `example` es el texto más corto que los dos reconocen, sin bordes ni contexto.
+  - Cada paso usa el carácter de un `text` cuando lo hay, y si no, el representante de la clase que comparten: `1` para `digit`, `A` para `letter`, `upper` y `alnum`, y `a` para `lower`. Un `separator` usa el menor carácter que comparten.
+  - Entre los textos más cortos, gana el menor en orden de code units. Así el ejemplo es determinista: `digit 8..8` contra `dni-ar` da `"11111111"`.
+- **Contra un formato `control`**: se generan ejemplos del formato nuevo y se pasa cada uno, solo, por el `RegExp` del formato con su checksum y su guarda. Si alguno lo reconoce **entero**, hay solapamiento, y ese es el ejemplo.
+  - Para cada variante se generan el ejemplo más corto y el más largo, con y sin cada `optional`.
+  - `digit` se llena con `1`, `letter` y `alnum` con `A` (o `a` si es `lower`), y cada `separator` con su primer carácter.
+  - Puede pasar por alto un caso. Lo que se escape lo atrapa el conflicto al analizar (ADR-222).
+
+**Contra qué se compara** (`Contracts.md` §5.2):
+
+- **Los formatos base de `others.country` que corren**: los que no están apagados en `baseFormats` y no tienen una copia editada prendida en `userFormats` (§6, «Qué corre»). Si tienen esa copia, se compara contra la copia, que es un formato propio. Acá la copia no se valida: `FormatComparisonInput` no trae `userTypes`. Una copia rota igual se compara, porque está en `userFormats`, y su original no, aunque en el análisis sí correría.
+- **Todos los formatos de `userFormats` y todas las referencias de `catalogRefs`**, prendidos o apagados. Uno apagado también bloquea crear uno idéntico.
+- **Nunca contra sí mismo**, porque `others` lo excluye.
+
+Un formato idéntico figura solo en `identicalTo`, no también en `overlaps`.
+
+Ante un problema de forma del formato que se compara, con los mismos códigos que vacían `testFormat`, devuelve `{ identicalTo: null, overlaps: [] }`.
+
 
 ---
 
@@ -198,7 +384,7 @@ export const DEFAULT_PATTERNS_AR: ReadonlyArray<RegexPattern>;
 | Evento | Cuándo | Payload | Sync/Async | Idempotente |
 |---|---|---|---|---|
 | `ENTITY_FOUND` | por cada ocurrencia detectada | `EntityFound` con `occurrence.source = "regex"`, `confidence = 1.0` | async | sí |
-| `REGEX_FINISHED` | al finalizar todas las páginas | `RegexFinished` | async | sí |
+| `REGEX_FINISHED` | al finalizar todas las páginas | `RegexFinished`, con `skippedFormats` si algún formato no se aplicó en alguna página (ADR-220 §6) | async | sí |
 
 Canal: `EventChannel.Regex`.
 
@@ -248,8 +434,10 @@ Las `Occurrence` individuales no se retornan; se emiten vía `ENTITY_FOUND`. Cad
   pageIndex: number;
   source: DetectionSource.Regex;
   confidence: 1.0;
-  entityType: EntityType;      // según el patrón que matcheó
-  maskFormat?: string;         // RegexPattern.maskFormat del patrón que matcheó (ADR-029)
+  entityType: EntityTypeId;    // según el patrón o el formato que matcheó (ADR-219 §1)
+  maskFormat?: string;         // RegexPattern.maskFormat del patrón que matcheó (ADR-029); de un formato del generador, ver §6
+  formatId?: string;           // ADR-222 §2: id del patrón, del formato (fmt:…) o de la referencia (ref:…). Presente en toda Occurrence de process; ausente en las de findLiteral (caso 52)
+  formatOrigin?: "base" | "user"; // ADR-222 §2: "base" solo para el catálogo del país activo. Presente y ausente junto con formatId
   wordSpan?: WordSpan;         // referencia a Page.words[startIndex, endIndexExclusive)
 }
 ```
@@ -270,12 +458,16 @@ Sin esta propagación el campo se cae en silencio y el pintado rotado de ADR-066
 
 | Code | Clase | Cuándo | Recuperable | Acción |
 |---|---|---|---|---|
-| `REGEX_INVALID_PATTERN` | `RegexInvalidPatternError` | patrón custom del usuario con regex inválida | no | descartar el patrón con warning, continuar con los demás |
+| `REGEX_INVALID_PATTERN` | `RegexInvalidPatternError` | un `FormatDefinition` de `detection.userFormats` que no pasa `validateFormat` al `init` (ADR-220 §6) | no | descartar el formato con `warn`, listarlo en `skippedFormats` con todas las páginas y seguir con los demás |
 | `ENGINE_NOT_INITIALIZED` | `EngineNotInitializedError` | `process` antes de `init` | no | bug del caller |
 | `ENGINE_DISPOSED` | `EngineDisposedError` | `process` tras `dispose` | no | bug del caller |
 | `INVALID_INPUT` | `InvalidInputError` | input null/undefined | no | bug del caller |
 
-Regex es determinista: si la regex compila, no hay errores de runtime. Errores de un patrón custom no bloquean los demás.
+Regex es determinista. Un formato que falla, al `init` o en una página, no bloquea a los demás ni al análisis: se saltea y se informa en `REGEX_FINISHED.skippedFormats` (ADR-220 §6). Ese camino nunca lanza hacia el caller.
+
+- **El fallo por página es de los formatos del generador** (ADR-220 §6 habla de su recorrido). Un formato base que lanza sigue como en la v1.16.0: `process` rechaza.
+- **El `warn` de un fallo por página** lleva `formatId`, `pageIndex` y `errorName`, el `name` del error. Nunca lleva su `message` ni su `stack`, que pueden arrastrar texto de la página. No lleva `code`, porque no es un error del contrato.
+- **El `warn` de un descarte al `init`** es el de siempre: `code: REGEX_INVALID_PATTERN`, `formatId` y los códigos de los problemas. Una referencia descartada (caso 51) lleva `formatId`, sin `code`.
 
 `retryable`: todos `false` (no tiene sentido reintentar un cálculo determinista).
 
@@ -284,11 +476,15 @@ Regex es determinista: si la regex compila, no hay errores de runtime. Errores d
 ## 12. Consideraciones de rendimiento
 
 - **Corre en main thread** (no en Worker). En documentos normales medidos es ligero; un patrón adverso puede bloquearlo, de modo que el porcentaje del pipeline no es una garantía.
-- El email default usa el escáner de ADR-181, con costo O(caracteres + matches) en vez del backtracking cuadrático de su `RegExp` de referencia. Los demás defaults y los custom conservan su ruta de ejecución.
-- Memoria: < 10 MB (solo estructuras de output).
+- El email default usa el escáner de ADR-181, con costo O(caracteres + matches) en vez del backtracking cuadrático de su `RegExp` de referencia. Los demás formatos base conservan su `RegExp`.
+- Memoria: < 10 MB (estructuras de output y autómatas compilados).
 - Sin transferencia de buffers (trabaja sobre `Document` en memoria).
 - Procesa página por página; entre páginas chequea `abortSignal` para cancelación.
-- Para patrones custom complejos (catastrophic backtracking), se envuelve en `try/catch` con timeout de 1000 ms por página por patrón. Si timeout, se descarta el patrón custom con warning.
+- **Los formatos del generador no usan `RegExp`** (ADR-220 §2). Su recorrido cuesta O(caracteres × estados) por página, con `FORMAT_MAX_STATES` como tope por formato, y no tiene retroceso. **No hay presupuesto por tiempo**: el de 1000 ms por patrón custom se retiró con la API (ADR-220 §7), porque se medía después de terminar y no podía cortar nada.
+- Cada formato prendido suma un recorrido por página. **No hay tope de cantidad** (decisión del mantenedor, 2026-11-20, con la medición de `roadmap/mediciones/regex/Formatos_Generador_Costo_Medicion.md`):
+  - el costo crece lineal con la cantidad: unos 11 ms por formato cada 100 000 caracteres, igual con 10, 50 y 200 formatos;
+  - proyectado al tamaño de R1 (51 páginas, unos 69 500 caracteres), 10 formatos suman 0,08 s, 50 suman 0,4 s y 200 suman 1,5 s;
+  - el texto medido es sintético y denso en números; de los documentos reales salen solo los tamaños.
 - La especialización de email no añade timeout ni un chequeo intra-página de `abortSignal`; la cancelación de `process` continúa entre páginas. El escáner debe conservar exactamente los spans y el orden global que produciría la expresión de referencia, incluida la `@` tardía y el caso de dos matches separados por un tramo continuo de caracteres permitidos.
 - **`searchText` es la única entrada que se invoca de forma interactiva** (ADR-061 §8: la lupa, mientras el usuario tipea). Su costo es O(páginas × palabras) por llamada y es sincrónica, así que **bloquea el main thread** mientras corre — sobre un documento largo, una llamada por tecla se nota. El motor **no** hace debounce ni cachea: es una función de consulta y no retiene nada entre llamadas. Amortiguar la frecuencia es responsabilidad de quien la llama, y para la lupa eso es la UI (`ui/Components.md`, `DocumentSearchBox`). Si la medición sobre documentos reales mostrara que no alcanza, la respuesta es un índice, y eso pide su propio ADR.
 
@@ -303,12 +499,12 @@ Regex es determinista: si la regex compila, no hay errores de runtime. Errores d
 5. **Tarjeta con Luhn inválido**: idem.
 6. **Email edge case (`a@b.c`)**: el patrón default es RFC 5322 simplificado; requiere al menos `x@y.zz`. `a@b.c` no matchea.
 7. **Patente AR vieja (`ABC 123`) vs Mercosur (`AB 123 CD`)**: dos patrones distintos; ambos emitirán `EntityType.Plate`.
-8. **Patrón custom con regex inválida**: lanza `RegexInvalidPatternError` (capturado por el caller), se descarta el patrón, los demás siguen.
-9. **Patrón custom con catastrophic backtracking**: timeout 1000 ms por página, se descarta el patrón con warning.
+8. ~~Patrón custom con regex inválida~~. **Superado en la v2.0.0** (ADR-220 §7): ya no hay patrones del usuario con `RegExp`. Una definición inválida es el caso 47.
+9. ~~Patrón custom con catastrophic backtracking~~. **Superado en la v2.0.0** (ADR-220 §2): un formato del generador no tiene retroceso. Ver caso 43.
 10. **Overlap entre dos patrones (DNI dentro de un CUIT)**: el CUIT es más específico; el motor prioriza el match más largo en el mismo span. Solo se emite el CUIT.
 11. **Cancelación entre páginas**: aborta en < 50 ms (no requiere Worker, basta no iterar más).
 12. **`process` tras `dispose`**: lanza `EngineDisposedError`.
-13. **100 patrones custom activos**: el costo escala lineal con #patrones; 100 patrones × 50 páginas = 5000 ejecuciones de regex. Mitigado: compilar todas las regex al `init`, reutilizar instancias `RegExp` compiladas.
+13. ~~100 patrones custom activos~~. **Superado en la v2.0.0**: el costo con muchos formatos del usuario se mide con 10, 50 y 200 formatos (§12, arnés opt-in de §14).
 
 Casos de `findLiteral` (ADR-061 §1/§2 y su errata):
 
@@ -342,14 +538,14 @@ Casos de fragmentos y de la tabla de patrones (ADR-074, ADR-075):
 
 ---
 
-34. **Email default con costo acotado y salida idéntica** (ADR-181): el escáner examina tramos alrededor de cada `@` con índices monótonos, sin volver a intentar el patrón desde cada carácter del prefijo. Sobre texto sin `@` y texto con `@` tardía, duplicar longitud no debe cuadruplicar el trabajo del email. Su lista ordenada de spans/valores es exactamente la del `RegExp` de referencia en corpus de prueba acotados: puntos múltiples, TLD inválido, dígito o `_` pegado al TLD, vecinos Unicode, puntuación y dos emails separados por un tramo continuo que exige respetar `lastIndex` y `\b`. El custom con id `email` conserva la ruta custom, no la especialización. Normalización, bbox, overlaps y eventos permanecen iguales.
+34. **Email default con costo acotado y salida idéntica** (ADR-181): el escáner examina tramos alrededor de cada `@` con índices monótonos, sin volver a intentar el patrón desde cada carácter del prefijo. Sobre texto sin `@` y texto con `@` tardía, duplicar longitud no debe cuadruplicar el trabajo del email. Su lista ordenada de spans/valores es exactamente la del `RegExp` de referencia en corpus de prueba acotados: puntos múltiples, TLD inválido, dígito o `_` pegado al TLD, vecinos Unicode, puntuación y dos emails separados por un tramo continuo que exige respetar `lastIndex` y `\b`. Desde la v2.0.0 no hay patrones del usuario con id libre: un formato tiene id `fmt:…` y nunca toma la ruta del email default. Normalización, bbox, overlaps y eventos permanecen iguales.
 35. **Email leído con `Q` en texto de OCR** (ADR-211). Segunda búsqueda del email default, después de la de ADR-181 y sin alterarla:
     - **Forma**, sin flags y con `\b` ASCII como el patrón de referencia: `\b(?:[a-z0-9._%+-]*[a-z0-9]\. ){0,2}[a-z0-9._%+-]*[a-z0-9]Q[a-z0-9][a-z0-9.-]*\.[a-z]{2,}\b`. Todo en minúsculas y dígitos salvo una `Q` mayúscula, con letra o dígito a cada lado. El grupo inicial admite hasta dos tramos «nombre, punto, **un** espacio» antes del resto. Entre coincidencias posibles rige la semántica de esa expresión en JavaScript (la más a la izquierda, codiciosa).
     - **Solo OCR**: la coincidencia se acepta únicamente si **todas** las `Word` de su span tienen `source: "ocr"`. Si alguna es `"pdf"`, no hay ocurrencia.
     - **Un email con `@` gana**: se descarta la coincidencia que se superpone con un match de la búsqueda normal de email.
     - **Salida**: `entityType: Email`, `source: Regex`, `confidence: 1.0`, mismo `maskFormat`. `value` es el texto del span tal como está en `Page.text`. `normalizedValue` se obtiene quitando el espacio de cada «punto, espacio» del grupo inicial, cambiando esa `Q` por `@` y pasando a minúsculas: `contacto. estudioQexample.org` → `contacto.estudio@example.org`.
     - **Costo**: anclada en cada `Q`, con índices monótonos y costo O(caracteres + coincidencias), como el caso 34. Sin reintentar desde cada carácter del prefijo.
-    - **Solo el default**: un patrón custom con id `email` no gana esta búsqueda (misma regla de identidad del caso 34).
+    - **Solo el default**: ningún formato del usuario gana esta búsqueda (misma regla de identidad del caso 34).
     - El resto del camino es el de cualquier match: guarda de corrida, resolución de overlaps, mapeo a palabras, `fragments`, `rotation` y eventos.
     - Fuera de alcance, a propósito: mayúsculas en el nombre o el dominio, un espacio sin punto, un tercer tramo, y el espacio tras el punto en un email leído con `@`.
 36. **Dirección con palabra clave** (ADR-217). Patrón `address-keyword-ar`, tipo `Address`. Las piezas, en orden:
@@ -370,6 +566,49 @@ Casos de fragmentos y de la tabla de patrones (ADR-074, ADR-075):
     - **Todo en mayúsculas, costo aceptado** (ADR-217, «Lo que se tapa de más»): `LA CALLE ESTUVO CORTADA 3 HORAS` da `CALLE ESTUVO CORTADA 3`, y `DOMICILIO PROCESAL EN LA CALLE TUCUMÁN 1650` da `LA CALLE TUCUMÁN 1650`.
     - Fuera de alcance, a propósito: una dirección sin altura, una calle sin palabra clave antes, `ruta`, el piso y el departamento que siguen a la altura, y un nombre de más de seis palabras.
 
+Casos del catálogo, los formatos del generador y las colisiones (v2.0.0; ADR-220, ADR-221, ADR-222):
+
+37. **Con `DEFAULT_DETECTION_CONFIG`, la detección es la de la v1.16.0** (ADR-221, «Lo que no cambia»). Mismos formatos, mismo orden, y mismos spans, valores y eventos en todos los casos anteriores de esta sección. Lo único nuevo es que cada `Occurrence` de `process` lleva `formatId`, el id del patrón, y `formatOrigin: "base"`.
+38. **Un formato base apagado no corre** (ADR-223 §2). Con `baseFormats: [{ formatId: "phone-landline-ar", enabled: false }]`, `"0221-4567890"` no emite `Phone`, y el resto del catálogo sigue igual.
+39. **La copia editada reemplaza al original** (ADR-220 §4). Con un `FormatDefinition` prendido y `basedOn: "dni-ar"`, `dni-ar` no corre aunque `baseFormats` no lo apague. Los DNI que la copia reconoce salen con su `formatId` y `formatOrigin: "user"`. Si la copia se apaga, vuelve a correr el original. Si la copia está prendida pero no pasa `validateFormat`, también corre el original, y la copia figura en `skippedFormats` con todas las páginas.
+40. **Las piezas del generador** (ADR-220 §1 y §2), con formatos de un tipo propio «CBU»:
+    - **Contexto.** Con `digit 22..22` y `contextBefore: ["CBU"]`, `"CBU: 0170099220000067797370"` y `"cbu 0170099220000067797370"` emiten los 22 dígitos, sin la palabra. Los mismos 22 dígitos sin «CBU» antes no emiten, y `"CBU0170099220000067797370"` tampoco, por el borde.
+    - **Texto fijo.** `text "AR-"` más `digit 6..6`: `"ar-123456"` y `"AR-123456"` emiten, con el texto fijo adentro del match.
+    - **Parte opcional.** `digit 4..4` más `optional[separator ["/"], digit 4..4]`: `"1234/2024"` y `"1234"` emiten.
+    - **Separadores.** `digit 2..2`, `separator [" ", "-"]` opcional y `digit 8..8`: emiten `"20 12345678"`, `"20-12345678"` y `"2012345678"`.
+    - **Variantes.** Con dos variantes, cualquiera de las dos emite.
+41. **Bordes.** Con `digit 8..8`, no emiten `"X12345678"`, `"12345678Y"` ni `"123456789"`. Sí emiten `"(12345678)"` y `"12345678."`.
+42. **Más a la izquierda y más larga.** Con las variantes `digit 4..4` y `digit 4..4, separator ["-"], digit 4..4`, `"1234-5678"` emite **un** match, `"1234-5678"`, y no `"1234"` más `"5678"`.
+43. **Tiempo lineal** (ADR-220 §2). Ocho piezas `digit 1..8` pegadas, sobre una página de 100 000 dígitos, terminan con un costo proporcional al largo: duplicar el texto no cuadruplica el trabajo. Es el formato que con `RegExp` dispararía retroceso catastrófico, y por eso reemplaza al caso 9.
+44. **La guarda de corrida alcanza a los formatos del generador** (ADR-075 §2, ADR-220 §2). Con `digit 2..2, separator ["-"], digit 6..6`, `"PP-13-00-000000-24/00"` no emite.
+45. **Normalización y máscara de un formato propio** (ADR-220 §5):
+    - bajo un tipo propio, `"0170-0994 11"` da `normalizedValue: "0170099411"` y no lleva `maskFormat`;
+    - bajo `DNI`, `"34-567-891"` da `normalizedValue: "34567891"`, el mismo que `dni-ar` da para `"34.567.891"`, y `maskFormat: "XX-XXX-XXX"`.
+46. **Colisiones** (ADR-222):
+    - **Tipos distintos, mismo tramo.** Un formato propio de tipo «CBU» con `digit 8..8`, y `dni-ar`, sobre `"34567891"`: se emiten **los dos**, uno de cada tipo.
+    - **Contención.** Un formato propio de tipo «Legajo» con `digit 4..4, separator ["/"], digit 8..8`, sobre `"2024/34567891"`: se emite solo el legajo. `dni-ar` matchea `"34567891"` adentro y pierde por contención.
+    - **Mismo tipo, mismo largo.** Un formato propio bajo `Phone` con `text "0", digit 3..3, separator ["-"], digit 7..7`, y `phone-landline-ar`, sobre `"0221-4567890"`: un solo match, el propio.
+    - **Dos formatos base** siguen resolviéndose como hoy (caso 10).
+47. **Un formato inválido al `init`** (ADR-220 §6). Un `FormatDefinition` sin pieza `chars`, o que apunta a un tipo propio que no está en `userTypes`, se descarta con `REGEX_INVALID_PATTERN` y un `warn`, y figura en `skippedFormats` con todas las páginas. El resto corre.
+48. **Un formato que falla en una página** (ADR-220 §6). Si el recorrido de un formato lanza en la página 3:
+    - ese formato no emite nada en esa página;
+    - los demás formatos sí emiten en esa página, y el que falló sigue corriendo en las siguientes;
+    - `REGEX_FINISHED.skippedFormats` lo lista con `[3]`;
+    - el `warn` lleva el id del formato, la página y el `name` del error, y **ningún texto de la página**: ni el `message` ni el `stack` del error (§11).
+49. **Funciones puras** (ADR-220 §3):
+    - **`validateFormat`** devuelve cada código de `FormatIssueCode` en su caso, con `variantIndex` y `pieceIndex` cuando corresponden, y `ok: true` sin issues sobre un formato válido.
+    - **Nombres de variante** (ADR-233). `variant_name_too_long` lleva el `variantIndex` del nombre largo; `variant_names_mismatch` va sin `variantIndex` cuando `variantNames` no tiene el largo de `variants`. Sin el campo, con nombres vacíos, de espacios (de cualquier largo) o repetidos, ninguno de los dos. Los nombres que sobran después de la última variante no se miden: alcanza con `variant_names_mismatch`. `testFormat` da los mismos tramos con y sin nombres, también con un nombre demasiado largo.
+    - **`compareFormat` y los nombres de variante** (ADR-233). Dos formatos que solo difieren en `variantNames` dan `identicalTo`.
+    - **`testFormat`** da los mismos tramos que `process` sobre un documento de una página con el mismo texto.
+    - **`compareFormat`, identidad.** Dos formatos con las mismas piezas, en otro orden de separadores y de variantes y con textos en otras mayúsculas, son idénticos.
+    - **`compareFormat` contra un autómata.** `digit 8..8` contra `dni-ar`, que es `structure`, da solapamiento con un ejemplo de 8 dígitos, el más corto que reconocen los dos.
+    - **`compareFormat` contra un `control`.** `letter 3..10, text "@", letter 3..10, text ".com"` contra `email` da solapamiento por ejemplos.
+50. **Equivalencia de los formatos `structure`** (ADR-220 §4). Las definiciones de `dni-ar`, `phone-landline-ar` y las tres patentes en `BASE_CATALOG` dan los mismos tramos que su `RegExp` sobre todos los textos de esta sección y de la línea de base de calidad. Se compara lo que emite `process` con el formato base solo contra lo que emite con su copia sola, así los dos lados pasan por la guarda y el recorte. Son dos tests:
+    - el del paquete usa los textos de esta sección, y fija las diferencias de borde que quedan fuera del corpus («Definiciones equivalentes»): `"_12345678"` emite con la definición de `dni-ar` y no con su `RegExp`, y `"ÑABC 123"` emite con el `RegExp` de `plate-vieja-ar` y no con su definición;
+    - el de `tests/quality` usa las páginas de `buildReferenceDocSpecs()` (`tests/fixtures/generate.ts`), de donde sale la línea de base de calidad. Un paquete no importa de `tests/`, por eso va aparte y en su propio commit.
+51. **Referencias en la 1.1** (ADR-221 §7). No hay otro catálogo, así que una `CatalogFormatRef` en la configuración se descarta con `warn` y figura en `skippedFormats`, sin romper el análisis.
+52. **`formatId` y `formatOrigin`** (ADR-222 §2). Están presentes, y juntos, en toda `Occurrence` de `process`. Faltan en las de `findLiteral`.
+
 ---
 
 ## 14. Casos de prueba
@@ -386,7 +625,6 @@ Casos de fragmentos y de la tabla de patrones (ADR-074, ADR-075):
 | `invalid email does not match` | `edge.test.ts` | edge | caso 6 |
 | `default email scanner matches reference spans and values` | `unit.test.ts` | unit | caso 34, ADR-181: diferencial de lista ordenada en corpus generado con semilla fija y casos manuales acotados; regex anterior solo como oráculo del test |
 | `default email scanner keeps events, normalization and bbox` | `contract.test.ts` | contract | caso 34, ADR-181: misma salida pública, incluidos orden y overlaps |
-| `custom pattern named email uses custom path` | `edge.test.ts` | edge | caso 34, ADR-181: especialización por identidad del default; custom mantiene presupuesto y semántica |
 | `long no-at and late-at text use linear email scan` | `tests/perf/regex-worst-case.ts` | perf opt-in | caso 34, ADR-181: curva de 2–160 KiB y cancelación; no gate temporal absoluto |
 | `email read with Q is detected in OCR words only` | `unit.test.ts` | unit | caso 35, ADR-211: mismas palabras con `source: "ocr"` dan una ocurrencia `Email`; con `source: "pdf"`, o mezcladas, ninguna |
 | `email read with Q requires the strict lowercase shape` | `edge.test.ts` | edge | caso 35: `ProQuest.com`, `BanQ.com.ar`, `JUAN.PEREZQGMAIL.COM` y una `Q` sin letra o dígito a cada lado no coinciden; `juanQgmail.com` sí |
@@ -394,7 +632,6 @@ Casos de fragmentos y de la tabla de patrones (ADR-074, ADR-075):
 | `email read with Q includes up to two dot-space name segments` | `edge.test.ts` | edge | caso 35: uno y dos tramos «nombre. » se incluyen; un tercero queda afuera; dos espacios o un espacio sin punto no extienden |
 | `email read with Q yields to an overlapping regular email` | `edge.test.ts` | edge | caso 35: gana el match con `@` |
 | `regular emails are unchanged by the Q search` | `contract.test.ts` | contract | caso 35: sobre texto de OCR y de PDF, los matches con `@` (spans, valores, orden, eventos) son los mismos que sin la segunda búsqueda; `palabra. nombre@dominio` no se extiende |
-| `custom pattern named email does not get the Q search` | `edge.test.ts` | edge | caso 35: identidad del default, como en el caso 34 |
 | `Q email search stays linear on adversarial text` | `tests/perf/regex-worst-case.ts` | perf opt-in | caso 35: texto largo con muchas `Q` y tramos locales largos; duplicar la longitud no cuadruplica el trabajo |
 | `keyword address is detected after a street-type word` | `unit.test.ts` | unit | caso 36, ADR-217: `Av. Corrientes 1980`, `avenida Pueyrredón 1999`, `calle Tucumán 1650`, `Avda. Rivadavia 4520`, `pasaje Rauch 742`, `Pje. Güemes 315`, `boulevard Oroño 1260`, `Bv. Gálvez 2150` y `diagonal Norte 615`; el `value` incluye la palabra de vía; las abreviaturas valen con y sin punto |
 | `keyword address after a domicile phrase starts at the street name` | `unit.test.ts` | unit | caso 36: `con domicilio en Maipú 1434`, `domiciliada en Sarmiento 742`, `domiciliado en Belgrano 1950`, `con domicilio real en Lavalle 385`, `sito en Mitre 1985`, `sita en Alsina 455` y `domicilio legal en Viamonte 867`; el `value` no incluye la frase |
@@ -410,12 +647,9 @@ Casos de fragmentos y de la tabla de patrones (ADR-074, ADR-075):
 | `a plate inside a keyword address yields to the address` | `edge.test.ts` | edge | caso 36 + caso 10: sobre `CON DOMICILIO EN AVENIDA DEL MAR 450` se emite la dirección y no la patente `MAR 450`; sobre `EL DOMINIO MAR 450` la patente se emite como antes |
 | `keyword address search stays linear on adversarial text` | `tests/perf/regex-worst-case.ts` | perf opt-in | caso 36: texto largo con muchas palabras clave y corridas largas de palabras con mayúscula sin altura; duplicar la longitud no cuadruplica el trabajo |
 | `AR plate vieja and Mercosur both match as Plate` | `edge.test.ts` | edge | caso 7 |
-| `custom invalid regex throws and is discarded` | `edge.test.ts` | edge | caso 8 |
-| `custom catastrophic regex times out and is discarded` | `edge.test.ts` | edge | caso 9 |
 | `DNI inside CUIT only emits CUIT` | `edge.test.ts` | edge | caso 10 |
 | `cancel between pages within 50ms` | `cancel.test.ts` | cancel | caso 11; SLA — pendiente, diferido a Hito 11 (mismo tratamiento que PDF Engine, `MVP.md` §4 Hito 2). Comportamiento funcional (chequeo de `abortSignal` entre páginas) sí cubierto en `edge.test.ts` desde Hito 4 |
 | `throws EngineDisposedError after dispose` | `edge.test.ts` | edge | caso 12 |
-| `100 custom patterns complete within perf budget` | `perf.test.ts` (en `tests/perf/`) | perf | caso 13; pendiente, diferido a Hito 11 (mismo tratamiento que PDF Engine, `MVP.md` §4 Hito 2) |
 | `empty document returns 0 occurrences` | `edge.test.ts` | edge | caso 1 |
 | `textless page returns 0 occurrences` | `edge.test.ts` | edge | caso 2 |
 | `findLiteral emits ENTITY_FOUND with source "manual" and correct bbox` | `contract.test.ts` | contract | ADR-061 §1 |
@@ -477,7 +711,6 @@ Casos de fragmentos y de la tabla de patrones (ADR-074, ADR-075):
 | **`still finds a name with internal punctuation by its own text`** | `unit.test.ts` | unit | caso 30 — `"O'Brien"`, la no regresión de ADR-061 §2 |
 | **`searchText with a punctuation-only query returns an empty array`** | `edge.test.ts` | edge | caso 22 |
 | **`the emitted value never carries the edge whitespace the pattern swallowed`** | `unit.test.ts` | unit | caso 29 (v1.6.2) — el `value` y el `wordSpan` arrancan en el primer dígito; sin este test, el grupo vuelve a quedar con un `canonicalValue` que no se puede buscar |
-| `a custom pattern is subject to the run guard too` | `edge.test.ts` | edge | ADR-075 §4 |
 | `"Tel.0221-4567890" does not emit (accepted residue)` | `edge.test.ts` | edge | caso 28 (ADR-075 §5) — la limitación documentada en un test, para que sea conocida y no una sorpresa |
 | **`"11 4567-8900"/"221 456-7890"/"341 456-7890"/"351 456-7890"/"2954 12-3456" match, with and without "+54"`** | `unit.test.ts` | unit | caso 32 (ADR-093 §1) — los cinco ejemplos literales del Contexto del ADR, uno por longitud de característica |
 | **`"+54 9 11 4567-8900" matches (international mobile format)`** | `unit.test.ts` | unit | caso 32 (ADR-093 §1) — el `9` opcional |
@@ -493,9 +726,42 @@ Casos de fragmentos y de la tabla de patrones (ADR-074, ADR-075):
 | **`"011 4567-8902" emits Phone`** | `unit.test.ts` | unit | caso 33 (ADR-096 §4) — el caso que apareció solo, en la corrida del evaluador |
 | `"0221-4567890" still emits Phone (no regression)` | `unit.test.ts` | unit | caso 33 (ADR-096 §4) — no regresión del separador que ya funcionaba |
 | **`the seven hard traps do not emit License, Plate, IBAN or Phone`** | `edge.test.ts` | edge | caso 33 (ADR-096) — ley, artículo, código postal, resolución, foja, numeral y decreto; la mitad de la medición que protege contra convertir un patrón más laxo en una fuga |
-| `snapshot of occurrences for text-10p.pdf stable` | `snapshot.test.ts` | snapshot | fixture |
+| `default detection config emits the same occurrences as v1.16 plus base format ids` | `contract.test.ts` | contract | caso 37 |
+| `getCatalog returns the AR and universal formats in run order` | `unit.test.ts` | unit | ADR-221 §2 |
+| `a disabled base format does not run` | `unit.test.ts` | unit | caso 38 |
+| `an enabled edited copy replaces its base format` | `unit.test.ts` | unit | caso 39 |
+| `an invalid edited copy does not replace its base format` | `edge.test.ts` | edge | caso 39: la copia rota se descarta y el original corre (v2.0.2) |
+| `user format pieces: context, fixed text, optional part, separators and variants` | `unit.test.ts` | unit | caso 40 |
+| `user format matches only at alphanumeric boundaries` | `edge.test.ts` | edge | caso 41 |
+| `user format takes the leftmost longest match` | `unit.test.ts` | unit | caso 42 |
+| `user format with adjacent variable pieces runs in linear time` | `edge.test.ts` | edge | caso 43: cuenta pasos del autómata, no tiempo de reloj |
+| `user format scan stays linear on long adversarial pages` | `tests/perf/regex-worst-case.ts` | perf opt-in | caso 43 |
+| `cost with 10, 50 and 200 user formats` | `tests/perf/regex-worst-case.ts` | perf opt-in | `roadmap/Plan_1.1.md` §7: la medición que decide si hace falta un tope |
+| `a user format is subject to the run guard too` | `edge.test.ts` | edge | caso 44; renombra el test de ADR-075 §4 |
+| `user format normalizes like its type and masks by characters` | `unit.test.ts` | unit | caso 45 |
+| **`a user format and a base format of different types on the same span are both emitted`** | `unit.test.ts` | unit | caso 46: la colisión que llega al panel |
+| `a user format that contains a base match wins without conflict` | `unit.test.ts` | unit | caso 46 |
+| `same type and same length: the user format wins` | `unit.test.ts` | unit | caso 46 |
+| **`two crossing base formats resolve as before`** | `unit.test.ts` | unit | caso 46: no regresión del caso 10 |
+| `an invalid user format at init is skipped and reported` | `edge.test.ts` | edge | caso 47 |
+| **`a user format that throws on a page is skipped on that page and reported without page text`** | `edge.test.ts` | edge | caso 48 |
+| `validateFormat reports each issue code` | `unit.test.ts` | unit | caso 49 |
+| `variant names do not change what testFormat finds` | `unit.test.ts` | unit | caso 49 (ADR-233) |
+| `compareFormat ignores variant names` | `unit.test.ts` | unit | caso 49 (ADR-233) |
+| **`testFormat finds the same spans as process`** | `unit.test.ts` | unit | caso 49: un solo recorrido para las dos entradas |
+| `compareFormat detects identical structure regardless of order and case` | `unit.test.ts` | unit | caso 49 |
+| `compareFormat gives the shortest shared text against an automaton format` | `unit.test.ts` | unit | caso 49 |
+| `compareFormat finds overlap with a control format by examples` | `unit.test.ts` | unit | caso 49 |
+| **`structure definitions match their RegExp on the regex corpus`** | `unit.test.ts` | unit | caso 50: los textos de §13 y las diferencias de borde |
+| **`structure definitions match their RegExp on the quality reference pages`** | `tests/quality/structure-equivalence.test.ts` | unit | caso 50: las páginas de la línea de base de calidad (v2.0.2); va en su propio commit |
+| `a catalog reference is skipped in 1.1` | `edge.test.ts` | edge | caso 51 |
+| `every process occurrence carries formatId and formatOrigin, findLiteral none` | `contract.test.ts` | contract | caso 52 |
+| `REGEX_FINISHED omits skippedFormats when every format ran` | `contract.test.ts` | contract | ADR-220 §6: ausente ≡ ninguno |
+| `snapshot of occurrences for text-10p.pdf stable` | `snapshot.test.ts` | snapshot | fixture; desde la v2.0.0 cada ocurrencia suma `formatId`/`formatOrigin` y nada más |
 
 Fixtures: `tests/fixtures/text-10p.pdf` (con DNIs, CUITs, emails, teléfonos conocidos).
+
+> **Filas retiradas en la v2.0.0** (ADR-220 §7): `custom invalid regex throws and is discarded` (caso 8, reemplazada por las del caso 47), `custom catastrophic regex times out and is discarded` (caso 9, reemplazada por las del caso 43), `100 custom patterns complete within perf budget` (caso 13, reemplazada por el arnés de 10/50/200 formatos), `custom pattern named email uses custom path` y `custom pattern named email does not get the Q search` (ya no hay patrones del usuario con id libre). `a custom pattern is subject to the run guard too` pasa a llamarse `a user format is subject to the run guard too`. Los tests con esos nombres se borran o se renombran en el mismo commit que retira la API (§15 ítem 25).
 
 > **Filas `perf opt-in`.** Las filas cuyo archivo es un script de `tests/perf/` y cuyo tipo es `perf opt-in` describen **qué tiene que cubrir el arnés**; no son tests de Vitest ni identificadores de Playwright, así que su texto no se exige como nombre literal. Esos arneses se corren a mano (`tests/perf/README.md`), no forman parte de `pnpm test` y no son gate. Las demás filas sí son nombres exactos de test.
 
@@ -504,15 +770,15 @@ Fixtures: `tests/fixtures/text-10p.pdf` (con DNIs, CUITs, emails, teléfonos con
 ## 15. Checklist de implementación
 
 - [ ] 1. Crear paquete `packages/anonymization-core/regex-engine/`.
-- [ ] 2. Definir `types.ts` con `RegexPattern`, `RegexEngineConfig`, `RegexEngineInput`, `RegexEngineOutput`.
+- [ ] 2. Definir `types.ts` con `RegexPattern`, `RegexEngineInput`, `RegexEngineOutput` (`RegexEngineConfig` se retiró en la v2.0.0, ítem 25).
 - [ ] 3. Definir `errors.ts` con `RegexInvalidPatternError`.
 - [ ] 4. Implementar `DEFAULT_PATTERNS_AR` en `patterns/default-ar.ts` con todos los patrones y sus `checksum`/`normalizer`/`maskFormat`.
 - [ ] 5. Implementar `regex.engine.ts` respetando `IEngine` y la firma pública de §6.
-- [ ] 6. Implementar `init` (compilar todas las regex al cargar, incluyendo custom).
+- [ ] 6. Implementar `init` (compilar al cargar los patrones del catálogo y los formatos de `ctx.config.detection`, §6).
 - [ ] 7. Implementar `process` recorriendo páginas, aplicando patrones, mapeando matches a `bbox` vía `Word` positions, emitiendo `ENTITY_FOUND` por match, `REGEX_FINISHED` al final.
 - [ ] 8. Implementar priorización de match más largo en overlap (caso 10).
-- [ ] 9. Implementar timeout por patrón custom (1000 ms).
-- [ ] 10. Implementar `addPattern`/`removePattern` (recompila la lista activa).
+- [x] 9. ~~Implementar timeout por patrón custom (1000 ms).~~ Retirado en la v2.0.0 (ADR-220 §7, ítem 25).
+- [x] 10. ~~Implementar `addPattern`/`removePattern`.~~ Retirado en la v2.0.0 (ADR-220 §7, ítem 25).
 - [x] 10b. (Hito 10.7, PR 2 — ADR-061 §1/§2 y su errata) Implementar `findLiteral`: matcheo sobre secuencias de `Word` contiguas **y de la misma línea**, `Occurrence` con `source: Manual` y bbox por `mapSpanToWords`. **Sin emitir `REGEX_FINISHED` y sin tocar el registro de patrones.** Valor ausente o vacío → `occurrenceCount: 0` sin eventos ni error. Las dos primitivas —`sharesVerticalBand` y `normalizeForComparison`— se **importan de `@anonly/shared`** (§4, `Contracts.md` §6); reimplementarlas acá es exactamente lo que la errata de ADR-061 §2 vino a impedir, y el PR de `shared` que las declara (Hito 10.7 PR 1c) es precondición de éste. Dos tests son parte del entregable, no un extra: que `"J. Pérez"` **no** matchea `"José Pérez"`, y que un valor cuyas palabras caen en **líneas distintas** tampoco (§13 caso 16). Los casos 14-19 de §13 y sus filas de §14 entran completos en este PR.
 - [x] 10c. (Hito 10.7, PR 3c — ADR-061 §8 errata) Extraer el matcheo de `findLiteral` a una función interna **por página** (`collectPageTextMatches(page, queryTokens): TextMatch[]`) y construir las **dos** entradas encima: `searchText(input)` la recorre y devuelve; `findLiteral(input, ctx)` la recorre, mapea cada `TextMatch` a `Occurrence` y emite. **Por página y no por documento a propósito**: `findLiteral` conserva así su chequeo de `abortSignal` entre páginas, que un núcleo por documento habría borrado en silencio. `searchText` es **sincrónica, sin `EngineContext`, sin emitir y sin loguear la query** (§6, §12). `findLiteral` **no cambia de firma** —`Promise<RegexEngineOutput>`, contrato ya mergeado (R-2)— ni de comportamiento observable: los tests de §14 que ya existen son la no regresión. Exportar `RegexSearchInput` desde `index.ts`. Casos 20-24 de §13 y seis filas de §14.
 - [x] 10d. (Hito 10.7, errata de §2 post-aprobación, 2026-08-15) `stripEdgePunctuation`: recorta puntuación de **borde** (`^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$`) de cada `Word.text` normalizado y de cada token del `value`/`query` en `slideWordWindowMatches`/`tokenizeLiteralValue`, sin tocarla en `normalizeForComparison` de `@anonly/shared` (queda local a `regex-engine`, no es una primitiva de línea/normalización compartida — ver Validación). Corrige el gap por el que `searchText`/`findLiteral` no encontraban ocurrencias cuyo `Word` viene pegado a puntuación por el whitespace-split de `pdf-engine`/`ocr-engine` (ADR-020 §1). Caso 25 de §13, cuatro filas de §14.
@@ -522,7 +788,7 @@ Fixtures: `tests/fixtures/text-10p.pdf` (con DNIs, CUITs, emails, teléfonos con
 - [ ] 14. Escribir `edge.test.ts` con todos los casos límite.
 - [ ] 15. Escribir `snapshot.test.ts` con occurrences de `text-10p.pdf`.
 - [ ] 16. Ejecutar `pnpm lint && pnpm typecheck && pnpm test` verde.
-- [ ] 17. Verificar `index.ts` exporta solo `RegexEngine`, tipos, `DEFAULT_PATTERNS_AR`, errores.
+- [ ] 17. Verificar que `index.ts` exporta solo lo de §6: `RegexEngine`, sus tipos, `DEFAULT_PATTERNS_AR`, `BASE_CATALOG`, `getCatalog`, `validateFormat`, `testFormat`, `compareFormat` y los errores.
 - [ ] 18. Verificar imports sin dependencias prohibidas.
 - [x] 19. (Hito 10.8 — ADR-066 §6) `mapSpanToWords`: propagar `bbox.rotation` a la `Occurrence`, solo si **todas** las palabras del match coinciden en el ángulo; si discrepan, el campo queda ausente (§10). **No** tocar la geometría de la unión (`x`/`y`/`width`/`height`) ni el `wordSpan`. Cuatro filas nuevas en §14.
 - [x] 20. (Hito 10.9, PR 5 — ADR-074 §2/§3) `mapSpanToWords`: partir las `Word` del match en corridas de la misma línea con `sharesVerticalBand` de `@anonly/shared` (§4, `Contracts.md` §6 — **importada, no reimplementada**, mismo criterio que la errata de ADR-061 §2) y emitir un rectángulo por corrida en `Occurrence.fragments`. Con una sola corrida, **no emitir el campo**. Con `rotation` presente en alguna palabra, tampoco. **No** tocar `bbox` (sigue siendo la envolvente), ni `wordSpan`, ni la propagación de `rotation` del item 19. El PR de `shared` que declara el campo (Hito 10.9 PR 4) es precondición. Caso 26 de §13, cinco filas de §14.
@@ -530,6 +796,27 @@ Fixtures: `tests/fixtures/text-10p.pdf` (con DNIs, CUITs, emails, teléfonos con
 - [x] 22. (Hito 11, ADR-181) Especializar solo el objeto del email default con el escáner lineal por `@` descrito en el ADR. Conservar la expresión como oráculo de tests, la ruta `runPattern`/presupuesto de todo custom, el `RawMatch` y todos los filtros/eventos posteriores. Añadir diferencial exacto de spans/valores, contrato de salida y casos límite de §14; repetir el banco opt-in y R1/R2 reales antes de cerrar el punto.
 - [x] 23. (1.0.x, Confianza — **ADR-211**) Segunda búsqueda del email default para la forma con `Q` del caso 35: solo sobre palabras de OCR, forma estricta en minúsculas, hasta dos tramos «nombre. », descarte ante un email con `@` superpuesto, `value` como se leyó y `normalizedValue` restituido, costo lineal anclado en cada `Q`, y sin tocar la búsqueda de ADR-181 ni los patrones custom. Los ocho tests de §14 con sus nombres exactos (el de peores casos vive en `tests/perf` y va en su propio commit). Cobertura del módulo ≥ 85 %.
 - [ ] 24. (1.0.x, cierre de Confianza — **ADR-217**) Patrón `address-keyword-ar` del caso 36 en la tabla de defaults: palabra clave de vía dentro del match o de domicilio en lookbehind, nombre perezoso de una a seis palabras con la regla de mayúscula inicial, altura con la forma del caso 34 de `NER_Engine.md`, `normalizeEntityValue` de `@anonly/shared` como normalizador y `maskFormat` de ADR-012. Sin tocar los demás patrones, la guarda de corrida ni la prioridad del match más largo. Los trece tests de §14 con sus nombres exactos (el de peores casos vive en `tests/perf` y va en su propio commit). Si `snapshot.test.ts` cambia, se reporta qué ocurrencias entran antes de actualizarlo. Cobertura del módulo ≥ 85 %.
+
+- [x] 25. (1.1, frente F1 — **ADR-220**, ADR-221 §2) **Generador.**
+    - Compilar `FormatDefinition` a autómata (Thompson), con `FORMAT_MAX_STATES`.
+    - Recorrido más a la izquierda y más largo, con bordes y contexto integrados.
+    - `validateFormat`, `testFormat` y `compareFormat`: forma canónica, producto de autómatas y ejemplos contra los `control`.
+    - `BASE_CATALOG` en `patterns/catalog.ts`, con la `CatalogFormatInfo` de cada patrón de «Catálogo», en el orden de `DEFAULT_PATTERNS_AR` (que no cambia), y las definiciones `structure` de «Definiciones equivalentes». Es solo dato: lo que corre de base no cambia. Y `getCatalog`.
+    - **Cableado mínimo de los formatos del generador:**
+      - `init` compila los de `ctx.config.detection.userFormats` con `enabled: true` y descarta con `REGEX_INVALID_PATTERN` y `warn` los que no pasan `validateFormat` (§6, «Qué corre», paso 3, sin `skippedFormats`).
+      - `process` los corre después de los patrones base, que siguen siendo los de `DEFAULT_PATTERNS_AR`, todos y en su orden. Usa la resolución de solapamientos de siempre (caso 10: largo, `startIndex` y orden de la lista, sin el criterio de origen).
+      - Su `Occurrence` lleva `entityType`, `normalizedValue`, `maskFormat`, `formatId` y `formatOrigin: "user"`, como dice §6.
+    - Retirar `RegexEngineConfig`, `addPattern`, `removePattern`, `runCustomPatternWithBudget` y `CUSTOM_PATTERN_BUDGET_MS`, con sus tests (filas retiradas de §14).
+    - Sin librerías nuevas (R-12).
+    - Casos 40 a 45, 47 sin `skippedFormats`, y 49. El test de `getCatalog`.
+    - Los arneses opt-in del caso 43 y de 10/50/200 formatos van en su propio commit.
+    - Cobertura del módulo ≥ 85 %.
+- [x] 26. (1.1, frente F2 — **ADR-221**, ADR-223 §2) **Catálogo.**
+    - `init` arma la lista entera que corre (§6): base sin los apagados ni los reemplazados por una copia válida, después las referencias y después los formatos. Una copia inválida no reemplaza al original.
+    - Casos 37 a 39, 50 y 51. La parte del caso 50 sobre la línea de base de calidad vive en `tests/quality` y va en su propio commit.
+    - Si `snapshot.test.ts` cambia por algo más que `formatId` y `formatOrigin`, se para y se reporta.
+- [x] 27. (1.1, frente F2 — **ADR-222**) **Colisiones.** `formatId` y `formatOrigin` en cada `Occurrence` de los formatos base y de las referencias (los del generador los llevan desde el ítem 25), y la resolución de solapamientos de §6 (origen en el orden y `emitirAmbos`). Casos 46 y 52. Con el origen en el orden, el test del caso 40 vuelve a los literales del spec: en F1 usa otros largos, porque `"20 12345678"` empata con `phone-mobile-ar` y `digit 8..8` con `dni-ar`, y con la resolución de siempre gana el base.
+- [x] 28. (1.1, frente F2 — **ADR-220 §6**) **Fallos.** Fallo por página (solo formatos del generador) y por definición: saltear el formato, `warn` sin texto (§11) y `REGEX_FINISHED.skippedFormats`, armado en `process` como dice §6 (ausente si no hay). El caso 47 completo, con su `skippedFormats`, y el 48.
 
 > **Estado Hito 4**: items 1–18 implementados, incluyendo el comportamiento funcional de cancelación
 > cooperativa (chequeo de `abortSignal` entre páginas) y de timeout por patrón custom (1000 ms).
@@ -541,6 +828,57 @@ Fixtures: `tests/fixtures/text-10p.pdf` (con DNIs, CUITs, emails, teléfonos con
 ---
 
 ## Patrones default (especificación exacta)
+
+### Catálogo (ADR-221 §2, ADR-220 §4)
+
+| Id | Nombre en la interfaz | País | Clase |
+|---|---|---|---|
+| `dni-ar` | DNI | AR | `structure` |
+| `cuit-ar` | CUIT/CUIL | AR | `control`: dígito verificador |
+| `phone-mobile-ar` | Celular | AR | `control`: ver la nota |
+| `phone-landline-ar` | Teléfono fijo | AR | `structure` |
+| `email` | Email | universal | `control`: escáner de ADR-181 y búsqueda de ADR-211 |
+| `iban` | IBAN | universal | `control`: ISO 13616 |
+| `credit-card` | Tarjeta | universal | `control`: Luhn |
+| `date-ar` | Fecha | universal | `control`: rango de día y mes |
+| `date-textual-ar` | Fecha en texto | universal | `control`: lista de meses |
+| `license-ar` | Matrícula profesional | AR | `control`: ver la nota |
+| `plate-vieja-ar` | Patente (formato anterior) | AR | `structure` |
+| `plate-mercosur-ar` | Patente Mercosur | AR | `structure` |
+| `plate-mercosur-moto-ar` | Patente Mercosur de moto | AR | `structure` |
+| `caratula-ar` | Carátula (Apellido, Nombre) | universal | `control`: léxico de nombres |
+| `address-keyword-ar` | Dirección con palabra clave | universal | `control`: palabras de vía |
+
+El orden de la tabla es el orden en que corren.
+
+> **Celular y matrícula pasan a `control`** al escribir este spec (2026-10-19), por la regla de ADR-220 §4: «si un formato muestra una diferencia que no se puede eliminar, pasa a `control` y se informa». ADR-220 los contaba entre los siete de pura forma, pero el generador no los puede expresar:
+>
+> - **`phone-mobile-ar`** necesita nueve variantes (tres prefijos por tres ramas), contra `FORMAT_MAX_VARIANTS = 8`. Además tiene un `\b` en el medio, entre el `9` opcional y el número.
+> - **`license-ar`** mezcla una alternativa anclada en «Matrícula Profesional» (un contexto) con dos que no lo están, y el contexto es del formato entero, no de una variante.
+>
+> Quien necesite otra forma de celular o de matrícula la crea como formato propio bajo ese tipo. Quedan cinco formatos `structure`.
+
+### Definiciones equivalentes de los formatos `structure` (ADR-220 §4)
+
+Son las `CatalogFormatInfo.definition` que el generador abre para editar. El caso 50 aserta que dan los mismos tramos que su `RegExp`.
+
+| Id | Piezas de su única variante |
+|---|---|
+| `dni-ar` | `digit 1..2`, `separator ["."]` opcional, `digit 3..3`, `separator ["."]` opcional, `digit 3..3` |
+| `phone-landline-ar` | `text "0"`, `digit 1..4`, `separator [" ", "-"]` opcional, `digit 3..4`, `separator [" ", "-"]` opcional, `digit 4..4` |
+| `plate-vieja-ar` | `upper 3..3`, `separator [" ", "-"]` opcional, `digit 3..3` |
+| `plate-mercosur-ar` | `upper 2..2`, `separator [" ", "-"]` opcional, `digit 3..3`, `separator [" ", "-"]` opcional, `upper 2..2` |
+| `plate-mercosur-moto-ar` | `upper 1..1`, `separator [" ", "-"]` opcional, `digit 3..3`, `separator [" ", "-"]` opcional, `upper 3..3` |
+
+- Las cinco tienen una sola variante y ningún contexto.
+- Su `entityType` y su `name` son los de la tabla anterior.
+- Su `id` es `fmt:base:<id del patrón>`, y sirve solo como referencia: la definición del catálogo nunca entra en `userFormats`. Al editarla, la aplicación crea la copia con un id `fmt:<uuid>` nuevo y `basedOn` igual al id del patrón.
+- `upper` es `\p{Lu}`, y el patrón dice `[A-Z]`. La diferencia, una mayúscula no ASCII, no aparece en el corpus. Si un caso real la mostrara, ese formato pasa a `control` por la misma regla.
+- **El borde tampoco es el mismo.** El generador corta en «letra o dígito» (`[\p{L}\p{N}]`, §6). El `\b` del `RegExp`, sin flag `u`, corta en `[A-Za-z0-9_]`. Después de la guarda de corrida quedan dos diferencias, y ninguna aparece en el corpus:
+  - un dato pegado a `_`: la copia lo emite y el original no. Por ejemplo, `"_12345678"` con `dni-ar`;
+  - un dato con letras pegado a una letra no ASCII: el original lo emite y la copia no. Por ejemplo, `"ÑABC 123"` con `plate-vieja-ar`. Un dato sin letras pegado a una letra lo descarta la guarda en los dos casos.
+
+  El caso 50 las fija, y si un caso real mostrara una, ese formato pasa a `control` por la misma regla.
 
 Los patrones exactos viven en `patterns/default-ar.ts` y son parte del contrato público. Resumen:
 
@@ -568,7 +906,7 @@ La implementación debe respetar estos patrones y checksums. Cualquier cambio re
 **Los quince patrones pasan además por la guarda de corrida de §6** (ADR-075 §2): un match sin letras
 cuya corrida alfanumérica sí las tiene no se emite. La guarda no está en ningún `pattern` de la
 tabla porque no es una propiedad de los patrones sino del **contexto** del match, y por eso alcanza
-también a los patrones custom del usuario. En la práctica solo alcanza a los seis tipos puramente
+también a los formatos del generador (ADR-220 §2). En la práctica solo alcanza a los seis tipos puramente
 numéricos (§6): License, Plate (las tres variantes), IBAN y la dirección con palabra clave llevan letras en el match, así que la
 guarda no los mira nunca.
 

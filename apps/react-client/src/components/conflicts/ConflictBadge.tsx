@@ -18,17 +18,20 @@
 
 import { useState } from "react";
 
+import { useDetectionStore } from "../../store/detection.store.js";
 import { useEntitiesStore } from "../../store/entities.store.js";
 import { Tooltip } from "../common/Tooltip.js";
 import { WARNING_TOOLTIP } from "../entities/needsReviewBadgeCopy.js";
 import {
   CONFLICT_BADGE_CLASS,
   ConflictSymbol,
+  RESOLVED_CONFLICT_BADGE_CLASS,
   WarningTooltipText,
 } from "../entities/warningSymbols.js";
 
 import { ConflictDialog } from "./ConflictDialog.js";
 import { heldManualConflictIdsForGroup } from "./conflictResolution.js";
+import { resolvedByDefaultTooltip } from "./formatConflict.js";
 import { openManualOverlapDialog } from "./manualOverlapController.js";
 
 export interface ConflictBadgeProps {
@@ -74,6 +77,39 @@ export function ConflictBadge({ groupId }: ConflictBadgeProps) {
       {plainConflictId !== undefined ? (
         <ConflictDialog conflictId={plainConflictId} open={open} onClose={() => setOpen(false)} />
       ) : null}
+    </>
+  );
+}
+
+/**
+ * ADR-229 §5: con el filtro «con conflicto» activo, la fila de una entidad cuyo
+ * conflicto **nació resuelto** (ADR-222 §3) muestra el mismo símbolo en gris, que
+ * abre el panel de conflicto. Sin el filtro, esa fila no lleva ícono, como hoy.
+ */
+export function ResolvedConflictBadge({ conflictId }: { readonly conflictId: string }) {
+  const [open, setOpen] = useState(false);
+  const detection = useDetectionStore((state) => state.saved);
+  const conflict = useEntitiesStore((state) =>
+    state.conflicts.find((candidate) => candidate.id === conflictId),
+  );
+  // Un conflicto que nació resuelto a favor de un formato del usuario dice cuál
+  // ganó (`Conflicto.dc.html`); el resto, el texto de siempre.
+  const byDefault = conflict !== undefined ? resolvedByDefaultTooltip(conflict, detection) : null;
+  return (
+    <>
+      <Tooltip
+        content={<WarningTooltipText {...(byDefault ?? WARNING_TOOLTIP.resolvedConflict)} />}
+      >
+        <button
+          type="button"
+          aria-label="Conflicto resuelto"
+          onClick={() => setOpen(true)}
+          className={RESOLVED_CONFLICT_BADGE_CLASS}
+        >
+          <ConflictSymbol />
+        </button>
+      </Tooltip>
+      <ConflictDialog conflictId={conflictId} open={open} onClose={() => setOpen(false)} />
     </>
   );
 }

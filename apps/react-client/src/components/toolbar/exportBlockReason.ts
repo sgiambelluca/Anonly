@@ -12,7 +12,7 @@
  * no hay ningún camino para eso.
  */
 
-import type { Conflict, EntityGroup, EntityType } from "@anonly/anonymization-core";
+import type { Conflict, EntityGroup, EntityTypeId } from "@anonly/anonymization-core";
 
 import type { EntitySortOrder } from "../../store/entities.store.js";
 import { visibleTypeEntries } from "../entities/entityTree.js";
@@ -40,7 +40,7 @@ export function exportBlockReason(conflicts: ReadonlyArray<Conflict>): string | 
  */
 export function pendingConflictIdsInTreeOrder(params: {
   readonly conflicts: ReadonlyArray<Conflict>;
-  readonly groupsByType: ReadonlyMap<EntityType, ReadonlyArray<EntityGroup>>;
+  readonly groupsByType: ReadonlyMap<EntityTypeId, ReadonlyArray<EntityGroup>>;
   readonly sortOrder: EntitySortOrder;
 }): ReadonlyArray<string> {
   const byGroupId = new Map<string, string[]>();
@@ -68,7 +68,7 @@ export function pendingConflictIdsInTreeOrder(params: {
  */
 export function firstPendingConflictId(params: {
   readonly conflicts: ReadonlyArray<Conflict>;
-  readonly groupsByType: ReadonlyMap<EntityType, ReadonlyArray<EntityGroup>>;
+  readonly groupsByType: ReadonlyMap<EntityTypeId, ReadonlyArray<EntityGroup>>;
   readonly sortOrder: EntitySortOrder;
 }): string | null {
   return pendingConflictIdsInTreeOrder(params)[0] ?? null;

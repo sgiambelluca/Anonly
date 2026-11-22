@@ -34,6 +34,7 @@ import {
   EventChannel,
   InvalidInputError,
   isEngineErrorCode,
+  isUserEntityType,
   MAX_EDIT_CHECKPOINTS,
   PipelineStage,
   type CancelRequested,
@@ -50,6 +51,7 @@ import {
   type EntityGroupCreated,
   type EntityGroupRemoved,
   type EntityGroupUpdated,
+  type EntityTypeId,
   type ExportFailed,
   type ExportFinished,
   type ExportOptions,
@@ -76,6 +78,8 @@ import {
   type Replacement,
   type TextMatch,
   type Unsubscribe,
+  type UserEntityTypeDefinition,
+  type UserEntityTypeId,
   type WorkerFactory,
   type Word,
   type WorkerJobTimeout,
@@ -524,6 +528,10 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
       });
     }
 
+    // ADR-219 §1: falla antes de retener el literal, de tocar el stage o de
+    // reabrir la sesión.
+    this.assertKnownEntityType(documentId, request.entityType);
+
     // Retenido ANTES de buscar: la durabilidad (ADR-061 §5) no depende de
     // que la búsqueda encuentre algo hoy — un reanalyze posterior puede
     // hacer aparecer el valor en una página recién re-OCR-eada.
@@ -610,6 +618,80 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
   previewEdit(documentId: string, request: EditPreviewRequest): EditPreview {
     this.assertNotDisposed();
     return this.engines.grouping.previewEdit(documentId, request);
+  }
+
+  /**
+   * ADR-219 §5: delegación pura en `grouping.defineSessionType`, que valida
+   * con `validateUserEntityType` contra los tipos base, los guardados y los del
+   * documento. Sincrónica, sin eventos. Sin sesión lanza el `InvalidInputError`
+   * del motor.
+   */
+  defineDocumentEntityType(documentId: string, definition: UserEntityTypeDefinition): void {
+    this.assertNotDisposed();
+    this.engines.grouping.defineSessionType(documentId, definition);
+  }
+
+  /** ADR-219 §5: delegación pura en `grouping.getSessionTypes`; sin sesión, `[]`. */
+  getDocumentEntityTypes(documentId: string): ReadonlyArray<UserEntityTypeDefinition> {
+    this.assertNotDisposed();
+    return this.engines.grouping.getSessionTypes(documentId);
+  }
+
+  /**
+   * ADR-225 §3: delega en `grouping.updateSessionType` y nada más. El
+   * re-render de las páginas de los grupos que cambiaron sale de
+   * `ENTITY_GROUP_UPDATED` por el camino de siempre (ADR-044, caso 27); el
+   * `GROUP_REPLACEMENT_CHANGED` que Grouping emite junto con él no lo escucha
+   * este componente (§8). La validación de la definición y del `id` la hace el
+   * motor.
+   */
+  async updateDocumentEntityType(
+    documentId: string,
+    definition: UserEntityTypeDefinition,
+  ): Promise<void> {
+    this.assertNotDisposed();
+    this.assertCheckpointableStage(documentId, "updateDocumentEntityType");
+    await this.engines.grouping.updateSessionType(documentId, definition);
+  }
+
+  /**
+   * ADR-225 §4: delega en `grouping.removeSessionType` (que elimina los grupos
+   * del tipo, resuelve como `detected` el choque con un agregado a mano de ese
+   * tipo y descarta la definición, las correcciones y las reglas) y, si no
+   * lanzó, descarta los literales manuales retenidos con ese tipo (ADR-061
+   * §5): sin eso el próximo `reanalyze` volvería a emitir ocurrencias de un
+   * tipo que ya no existe. Si el motor lanza, los literales no se tocan. Las
+   * copias de literales de los puntos de restauración tampoco: restaurar un
+   * punto anterior devuelve el tipo y su literal juntos (ADR-225 §6, caso 54).
+   */
+  async removeDocumentEntityType(documentId: string, typeId: UserEntityTypeId): Promise<void> {
+    this.assertNotDisposed();
+    this.assertCheckpointableStage(documentId, "removeDocumentEntityType");
+    await this.engines.grouping.removeSessionType(documentId, typeId);
+    const literals = this.manualLiteralsByDocument.get(documentId);
+    if (literals !== undefined) {
+      this.manualLiteralsByDocument.set(
+        documentId,
+        literals.filter((literal) => literal.entityType !== typeId),
+      );
+    }
+  }
+
+  /**
+   * ADR-219 §1: `entityType` tiene que ser un `EntityType` o un tipo propio de
+   * `detection.userTypes` (guardado) o de `getDocumentEntityTypes(documentId)`.
+   * Un tipo de otro documento, o uno que se borró o que una restauración se
+   * llevó, no está ahí. Si no, `InvalidInputError`, sin tocar la sesión.
+   */
+  private assertKnownEntityType(documentId: string, entityType: EntityTypeId): void {
+    if (!isUserEntityType(entityType)) return;
+    const saved = this.effectiveConfigFor(documentId).detection.userTypes;
+    if (saved.some((definition) => definition.id === entityType)) return;
+    if (this.engines.grouping.getSessionTypes(documentId).some((d) => d.id === entityType)) return;
+    throw new InvalidInputError("addManualEntity: el tipo propio no existe para este documento.", {
+      documentId,
+      entityType,
+    });
   }
 
   /**
@@ -1256,6 +1338,15 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
     ctx: EngineContext,
   ): Promise<void> {
     try {
+      // ADR-231: en caliente, el modelo de NER del documento anterior sigue
+      // residente (ADR-167: 15 s de inactividad) y el OCR de este documento
+      // correría apilado sobre él. Se pide la baja UNA vez, antes de despachar
+      // la primera página de OCR. `NerEngine.releaseIdleWorkers()` es `void` y
+      // trae su guarda (no hace nada con un `processPage`/`processPages` en
+      // curso); la recarga cae en la detección, con el pool de OCR ya dado de
+      // baja (ADR-157). Un documento sin páginas OCR nunca entra acá.
+      this.engines.ner.releaseIdleWorkers();
+
       // Progreso granular OCR (spec Orchestrator.md §8, ADR-065 §2): total fijo
       // para toda la etapa (textlessPages.length + ocrRegions.length, ambos
       // conjuntos disjuntos); current arranca en 0 y lo incrementa
@@ -1500,6 +1591,12 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
         rules: snapshot.rules,
         options,
         renderPageProvider: provider,
+        // ADR-219 §6: los guardados y los del documento, en ese orden, para
+        // nombrar sus filas de la hoja de referencia.
+        userTypes: [
+          ...this.effectiveConfigFor(documentId).detection.userTypes,
+          ...this.engines.grouping.getSessionTypes(documentId),
+        ],
       };
 
       this.setStage(documentId, PipelineStage.Exporting);
@@ -1557,11 +1654,12 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
       },
       // ADR-059 §5: mediación de la leyenda -- Export no puede importar
       // render-engine (P-1), así que este componente (que ya importa ambos)
-      // delega a RenderEngine.renderLegendPage. Dimensiones: el spec no fija
-      // un tamaño de página propio para la leyenda (no es una página del
-      // documento) -- se usa document.pages[0] como default razonable, el
-      // mismo criterio que export.engine.ts usa del otro lado del puerto para
-      // armar legendPageWidthPt/legendPageHeightPt de ExportSavePayload.
+      // delega a RenderEngine.renderLegendPages (ADR-219 §6), que devuelve
+      // una o más imágenes. Dimensiones: Render_Engine.md §6 fija que la
+      // leyenda usa el ancho de la primera página del documento -- se pasa
+      // document.pages[0], el mismo criterio que export.engine.ts usa del otro
+      // lado del puerto para armar legendPageWidthPt/legendPageHeightPt de
+      // ExportSavePayload.
       renderLegend: async (rows, abortSignal) => {
         const legendCtx: EngineContext = { ...ctx, abortSignal };
         const firstPage = this.documents.get(documentId)?.pages[0];
@@ -1573,7 +1671,7 @@ export class PipelineOrchestrator implements IPipelineOrchestrator {
             { documentId },
           );
         }
-        return this.engines.render.renderLegendPage(
+        return this.engines.render.renderLegendPages(
           rows,
           firstPage.width,
           firstPage.height,

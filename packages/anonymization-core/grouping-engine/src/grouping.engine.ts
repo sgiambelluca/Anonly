@@ -160,14 +160,18 @@
  */
 
 import {
+  alphanumericKey,
   CancelledError,
   ConflictReason,
   DetectionSource,
   GENDER_LEXICON,
+  isUserEntityType,
+  maskByCharacters,
   normalizeEntityValue,
   normalizeForComparison,
   EngineDisposedError,
   EngineEvents,
+  type EntityTypeId,
   EngineId,
   EngineNotInitializedError,
   EntityType,
@@ -204,6 +208,8 @@ import {
   type RuleDeleted,
   type RuleUpdated,
   type Unsubscribe,
+  type UserEntityTypeDefinition,
+  type UserEntityTypeId,
 } from "@anonly/shared";
 
 import { inferPersonGender } from "./gender.js";
@@ -216,10 +222,12 @@ import type {
 import {
   buildPlaceholderLadder,
   buildPlaceholderValue,
-  MASK_FORMAT_BY_TYPE,
+  maskFormatFallback,
+  type LabelContext,
   type PlaceholderValueInput,
 } from "./labels.js";
 import { levenshteinNormalizedAtLeast } from "./levenshtein.js";
+import { validateUserEntityType } from "./user-types.js";
 
 const DEFAULT_SIMILARITY_THRESHOLD = 0.88;
 
@@ -250,7 +258,7 @@ const MIN_SUGGESTION_CONFIDENCE = 0.5;
 const SUPPRESSED_GROUP_ID = "";
 
 /** ADR-073 §1: los tres tipos cuyo valor es texto libre. */
-const FUZZY_MATCHING_TYPES: ReadonlySet<EntityType> = new Set([
+const FUZZY_MATCHING_TYPES: ReadonlySet<EntityTypeId> = new Set([
   EntityType.Person,
   EntityType.Organization,
   EntityType.Address,
@@ -283,7 +291,7 @@ const PATCH_ALLOWED_KEYS: ReadonlySet<string> = new Set([
 /** Info de "quién detectó primero" un alias — para poblar `ConflictCandidate`. */
 interface AliasSourceInfo {
   readonly source: DetectionSource;
-  readonly entityType: EntityType;
+  readonly entityType: EntityTypeId;
   readonly confidence: number;
 }
 
@@ -294,7 +302,7 @@ interface AliasSourceInfo {
  */
 interface InternalGroup {
   id: string;
-  type: EntityType;
+  type: EntityTypeId;
   canonicalValue: string;
   members: OccurrenceRef[];
   replacementMode: ReplacementMode;
@@ -330,7 +338,7 @@ interface InternalGroup {
    * `normalizedValues`/`aliasFrequency`. No guarda ningún valor del documento:
    * solo tipos.
    */
-  readonly absorbedTypes: Set<EntityType>;
+  readonly absorbedTypes: Set<EntityTypeId>;
   /**
    * ADR-076 §1: el `replacementValue` lo escribió el usuario. Ningún
    * recálculo automático lo pisa (§3) — el corte es si el `replacementMode`
@@ -340,6 +348,21 @@ interface InternalGroup {
    * este motor.
    */
   replacementValueUserSet: boolean;
+  /**
+   * ADR-224 §2: el `formatId` del primer miembro, en orden documental, que salió
+   * de un formato del tipo del detector igual al tipo actual del grupo. Lo
+   * recalcula `refreshFormatId` donde cambian los miembros o el tipo.
+   */
+  formatId?: string;
+}
+
+/**
+ * ADR-224 §2 / ADR-219: lo que las funciones puras necesitan para resolver un
+ * grupo: la semilla de la sesión, el país (tabla de etiquetas y sintetizador) y
+ * las definiciones de los tipos propios.
+ */
+interface GroupEnv extends LabelContext {
+  readonly seed: string;
 }
 
 /** Copia liviana de los campos de `Occurrence` necesarios para matching/conflictos, indexada por sesión. */
@@ -350,7 +373,7 @@ interface SessionOccurrenceRecord {
    * reclasificación del usuario no lo toca: este campo se compara contra lo
    * que el detector vuelve a emitir en un `reanalyze`.
    */
-  readonly entityType: EntityType;
+  readonly entityType: EntityTypeId;
   readonly source: DetectionSource;
   readonly confidence: number;
   readonly value: string;
@@ -367,6 +390,9 @@ interface SessionOccurrenceRecord {
   readonly pageIndex: number;
   /** ADR-029: formato de máscara del patrón que matcheó (ausente en NER). */
   readonly maskFormat?: string;
+  /** ADR-222 §2 / ADR-224 §2: el formato que matcheó; ausente fuera de Regex. */
+  readonly formatId?: string;
+  readonly formatOrigin?: "base" | "user";
   groupId: string;
 }
 
@@ -381,8 +407,8 @@ interface SessionOccurrenceRecord {
  * simétrico, y sin este campo no lo era.
  */
 interface TypeCorrection {
-  readonly correctedType: EntityType;
-  readonly detectorType: EntityType;
+  readonly correctedType: EntityTypeId;
+  readonly detectorType: EntityTypeId;
 }
 
 /**
@@ -401,7 +427,7 @@ interface Session {
   readonly groups: Map<string, InternalGroup>;
   /** ADR-184: derived candidate index; omitted from snapshots and checkpoints. */
   candidateIndex: GroupCandidateIndex | undefined;
-  readonly nextIndexByType: Map<EntityType, number>;
+  readonly nextIndexByType: Map<EntityTypeId, number>;
   rules: Rule[];
   readonly conflicts: Map<string, Conflict>;
   readonly recordedOccurrences: SessionOccurrenceRecord[];
@@ -479,6 +505,13 @@ interface Session {
    */
   readonly manualOutcomes: Map<string, ManualOutcomeAnnotation>;
   readonly seed: string;
+  /**
+   * ADR-219 §5 / ADR-225 §6: los tipos propios del documento, en orden de
+   * creación. Se reemplaza el array entero en cada cambio (nunca se muta en el
+   * lugar), así que `cloneSession` comparte la referencia. Viaja en los puntos
+   * de restauración, sobrevive a `reopenSession` y muere con la sesión.
+   */
+  sessionTypes: ReadonlyArray<UserEntityTypeDefinition>;
   /**
    * ADR-191 §2: `id` del próximo grupo que cree una división. La división real
    * lo consume y reserva otro; el simulacro de `previewEdit` y los checkpoints
@@ -749,6 +782,9 @@ function cloneSession(session: Session): Session {
     // peor, un grupo/conflicto que el punto restaurado no tiene más.
     manualOutcomes: new Map(),
     seed: session.seed,
+    // ADR-225 §6: las definiciones de los tipos de la sesión viajan en la
+    // copia; el array nunca se muta en el lugar, así que se comparte.
+    sessionTypes: session.sessionTypes,
     reservedSplitGroupId: session.reservedSplitGroupId,
     startedAt: session.startedAt,
     regexFinished: session.regexFinished,
@@ -768,21 +804,28 @@ function cloneSession(session: Session): Session {
  * función, así que no hay forma de que lo mire.
  */
 function computeReplacementPreviews(
-  group: PlaceholderValueInput & Pick<EntityGroup, "id">,
-  seed: string,
+  group: PlaceholderValueInput & Pick<EntityGroup, "id" | "canonicalValue">,
+  env: GroupEnv,
   maskFormat: string,
 ): ReplacementPreviews {
+  const userType = isUserEntityType(group.type);
   return {
-    placeholder: buildPlaceholderValue(group),
-    mask: maskFormat,
-    synthetic: synthesize({
-      type: group.type,
-      groupId: group.id,
-      seed,
-      indexInType: group.indexInType,
-      ...(group.personGender !== undefined ? { personGender: group.personGender } : {}),
-    }),
-    placeholderLadder: buildPlaceholderLadder(group),
+    placeholder: buildPlaceholderValue(group, env),
+    // ADR-219 §3: un tipo propio enmascara por caracteres, sin mirar `maskFormat`.
+    mask: userType ? maskByCharacters(group.canonicalValue) : maskFormat,
+    // ADR-219 §3: un tipo propio nunca llega al sintetizador; su vista es "".
+    synthetic: isUserEntityType(group.type)
+      ? ""
+      : synthesize({
+          type: group.type,
+          groupId: group.id,
+          seed: env.seed,
+          indexInType: group.indexInType,
+          // ADR-221 §4: el país activo elige el generador.
+          country: env.country,
+          ...(group.personGender !== undefined ? { personGender: group.personGender } : {}),
+        }),
+    placeholderLadder: buildPlaceholderLadder(group, env),
   };
 }
 
@@ -810,7 +853,7 @@ function addReplacementPreviewsIfAffected(
     : changed;
 }
 
-function toPublicGroup(group: InternalGroup, seed: string, maskFormat: string): EntityGroup {
+function toPublicGroup(group: InternalGroup, env: GroupEnv, maskFormat: string): EntityGroup {
   return {
     id: group.id,
     type: group.type,
@@ -834,7 +877,9 @@ function toPublicGroup(group: InternalGroup, seed: string, maskFormat: string): 
     // ADR-170 §1: recalculado en el mismo punto que produce la copia pública
     // — es lo que hace que "cada vez que el motor emite ENTITY_GROUP_CREATED
     // o ENTITY_GROUP_UPDATED, el grupo sale con sus vistas previas al día".
-    replacementPreviews: computeReplacementPreviews(group, seed, maskFormat),
+    replacementPreviews: computeReplacementPreviews(group, env, maskFormat),
+    // ADR-224 §2: ausente si ningún miembro salió de un formato del tipo del grupo.
+    ...(group.formatId !== undefined ? { formatId: group.formatId } : {}),
     createdAt: group.createdAt,
     updatedAt: group.updatedAt,
   };
@@ -885,6 +930,7 @@ function diffEntityGroup(
     "replacementValueUserSet",
     "needsReview",
     "replacementPreviews",
+    "formatId",
     "createdAt",
     "updatedAt",
   ];
@@ -909,6 +955,8 @@ function toOccurrenceRef(occurrence: Occurrence): OccurrenceRef {
     // ADR-105: la frase alrededor, tal cual — es lo que distingue apariciones
     // del mismo valor en el separador.
     ...(occurrence.context !== undefined ? { context: occurrence.context } : {}),
+    // ADR-224 §2: propagación explícita, como `fragments`.
+    ...(occurrence.formatId !== undefined ? { formatId: occurrence.formatId } : {}),
   };
 }
 
@@ -918,6 +966,19 @@ function occurrenceAsCandidate(occurrence: Occurrence): ConflictCandidate {
     entityType: occurrence.entityType,
     confidence: occurrence.confidence,
     value: occurrence.value,
+    // ADR-222 §2: el formato del candidato, para que el panel lo nombre.
+    ...(occurrence.formatId !== undefined ? { formatId: occurrence.formatId } : {}),
+  };
+}
+
+/** Candidato del registro ya agrupado de un conflicto (ADR-222 §3: con su `formatId`). */
+function recordAsCandidate(rec: SessionOccurrenceRecord): ConflictCandidate {
+  return {
+    source: rec.source,
+    entityType: rec.entityType,
+    confidence: rec.confidence,
+    value: rec.value,
+    ...(rec.formatId !== undefined ? { formatId: rec.formatId } : {}),
   };
 }
 
@@ -1068,10 +1129,10 @@ type RecordWithMaskFormat = SessionOccurrenceRecord & { readonly maskFormat: str
  */
 function resolveMaskFormatFromRecords(
   records: ReadonlyArray<SessionOccurrenceRecord>,
-  type: EntityType,
+  type: EntityTypeId,
 ): string {
   const withFormat = records.filter((r): r is RecordWithMaskFormat => r.maskFormat !== undefined);
-  if (withFormat.length === 0) return MASK_FORMAT_BY_TYPE[type];
+  if (withFormat.length === 0) return maskFormatFallback(type);
 
   const counts = new Map<string, number>();
   for (const rec of withFormat) {
@@ -1088,6 +1149,18 @@ function resolveMaskFormatFromRecords(
 
 /** "Algoritmos clave" > "Resolución de modo" (literal, ver nota 3 del header). */
 function resolveMode(
+  group: Pick<InternalGroup, "id" | "type" | "replacementMode">,
+  rules: ReadonlyArray<Rule>,
+): ReplacementMode {
+  const mode = resolveModeByRules(group, rules);
+  // ADR-219 §3, después de resolver: un tipo propio no sintetiza.
+  if (isUserEntityType(group.type) && mode === ReplacementMode.Synthetic) {
+    return ReplacementMode.Placeholder;
+  }
+  return mode;
+}
+
+function resolveModeByRules(
   group: Pick<InternalGroup, "id" | "type" | "replacementMode">,
   rules: ReadonlyArray<Rule>,
 ): ReplacementMode {
@@ -1127,17 +1200,22 @@ function topPriority(rules: ReadonlyArray<Rule>): Rule {
  * `InternalGroup` no tiene (solo `toPublicGroup()` lo produce, y esta misma
  * función es una de las piezas que ese cómputo usa).
  */
-type ReplacementValueInput = PlaceholderValueInput & Pick<EntityGroup, "id" | "replacementMode">;
+type ReplacementValueInput = PlaceholderValueInput &
+  Pick<EntityGroup, "id" | "replacementMode" | "canonicalValue">;
 
 function computeReplacementValue(
   group: ReplacementValueInput,
-  seed: string,
+  env: GroupEnv,
   maskFormat: string,
 ): string {
   switch (group.replacementMode) {
     case ReplacementMode.Mask:
-      return maskFormat;
+      // ADR-219 §3: un tipo propio enmascara por caracteres, sin mirar `maskFormat`.
+      return isUserEntityType(group.type) ? maskByCharacters(group.canonicalValue) : maskFormat;
     case ReplacementMode.Synthetic:
+      // ADR-219 §3: un tipo propio nunca llega acá (`resolveMode` lo pasa a
+      // placeholder); por las dudas, no sintetiza.
+      if (isUserEntityType(group.type)) return buildPlaceholderValue(group, env);
       // ADR-072 §1-§2: la semilla del sorteo es la identidad del grupo
       // (`group.id`), no su `indexInType`. ADR-071 §5: `personGender`
       // filtra el pool de nombres de pila y NO entra a la semilla; se omite
@@ -1147,16 +1225,18 @@ function computeReplacementValue(
       return synthesize({
         type: group.type,
         groupId: group.id,
-        seed,
+        seed: env.seed,
         indexInType: group.indexInType,
+        // ADR-221 §4: el país activo elige el generador.
+        country: env.country,
         ...(group.personGender !== undefined ? { personGender: group.personGender } : {}),
       });
     case ReplacementMode.Placeholder:
-      return buildPlaceholderValue(group);
+      return buildPlaceholderValue(group, env);
     case ReplacementMode.Redact:
       return "";
     default:
-      return buildPlaceholderValue(group);
+      return buildPlaceholderValue(group, env);
   }
 }
 
@@ -1193,7 +1273,7 @@ function setPersonGender(group: InternalGroup, value: PersonGender | undefined):
  * coincide con la resolución automática. O sea: resolver sin elegir confirma
  * lo que el motor decidió, y no cambia ningún dato.
  */
-function defaultCandidateType(conflict: Conflict): EntityType | undefined {
+function defaultCandidateType(conflict: Conflict): EntityTypeId | undefined {
   let best: ConflictCandidate | undefined;
   for (const candidate of conflict.candidates) {
     if (best === undefined || candidate.confidence > best.confidence) {
@@ -1347,6 +1427,7 @@ export class GroupingEngine implements IEngine {
       containedManualOccurrences: new Map(),
       manualOutcomes: new Map(),
       seed: crypto.randomUUID(),
+      sessionTypes: [],
       reservedSplitGroupId: crypto.randomUUID(),
       startedAt: Date.now(),
       regexFinished: false,
@@ -1365,7 +1446,7 @@ export class GroupingEngine implements IEngine {
     return {
       documentId,
       groups: [...session.groups.values()].map((group) =>
-        toPublicGroup(group, session.seed, this.resolveMaskFormat(session, group)),
+        toPublicGroup(group, this.env(session), this.resolveMaskFormat(session, group)),
       ),
       conflicts: [...session.conflicts.values()],
       rules: [...session.rules],
@@ -1506,7 +1587,7 @@ export class GroupingEngine implements IEngine {
     // para los conflictos que queden huérfanos. Desde ADR-083 §3 lo que
     // registra un conflicto resuelto es el TIPO con el que quedó clasificado
     // el grupo, no el modo de reemplazo.
-    const typeBeforeRemoval = new Map<string, EntityType>();
+    const typeBeforeRemoval = new Map<string, EntityTypeId>();
     for (const groupId of affectedGroupIds) {
       const group = session.groups.get(groupId);
       if (group) typeBeforeRemoval.set(groupId, group.type);
@@ -1566,7 +1647,7 @@ export class GroupingEngine implements IEngine {
       if (!group.replacementValueUserSet) {
         group.replacementValue = computeReplacementValue(
           group,
-          session.seed,
+          this.env(session),
           this.resolveMaskFormat(session, group),
         );
       }
@@ -1574,6 +1655,8 @@ export class GroupingEngine implements IEngine {
 
       const changed: (keyof EntityGroup)[] = ["members", "aliases", "updatedAt"];
       if (group.canonicalValue !== previousCanonical) changed.push("canonicalValue");
+      // ADR-224 §2: cambiaron los members, así que se recalcula el formato.
+      if (this.refreshFormatId(session, group)) changed.push("formatId");
       changed.push(...this.emitReplacementChangeIfNeeded(session, group, beforeReplacement));
       this.emitGroupUpdated(session, group, changed);
     }
@@ -1681,7 +1764,7 @@ export class GroupingEngine implements IEngine {
     session: Session,
     filter: DropOccurrencesFilter,
     emptiedGroupIds: ReadonlySet<string>,
-    typeBeforeRemoval: ReadonlyMap<string, EntityType>,
+    typeBeforeRemoval: ReadonlyMap<string, EntityTypeId>,
   ): Set<string> {
     const handled = new Set<string>();
     for (const [conflictId, heldOccurrence] of session.heldManualOccurrences) {
@@ -1741,7 +1824,7 @@ export class GroupingEngine implements IEngine {
         // también en modo synthetic, no solo en placeholder.
         group.replacementValue = computeReplacementValue(
           group,
-          session.seed,
+          this.env(session),
           this.resolveMaskFormat(session, group),
         );
       }
@@ -1764,7 +1847,7 @@ export class GroupingEngine implements IEngine {
    * aparición documental de cada grupo dentro de su `entityType`.
    */
   private renumberGroupsCanonically(session: Session): void {
-    const groupsByType = new Map<EntityType, InternalGroup[]>();
+    const groupsByType = new Map<EntityTypeId, InternalGroup[]>();
     for (const group of session.groups.values()) {
       const list = groupsByType.get(group.type);
       if (list) list.push(group);
@@ -1798,9 +1881,9 @@ export class GroupingEngine implements IEngine {
           // el indexInType YA actualizado arriba.
           group.replacementValue = computeReplacementValue(
             group,
-            session.seed,
+            this.env(session),
             // maskFormat no aplica: esta rama solo corre en modo placeholder.
-            MASK_FORMAT_BY_TYPE[group.type],
+            maskFormatFallback(group.type),
           );
         }
         group.updatedAt = Date.now();
@@ -1834,6 +1917,69 @@ export class GroupingEngine implements IEngine {
     // Invariante members.length >= 1 (Grouping_Engine.md §10): todo grupo
     // tiene al menos una ocurrencia grabada.
     return best ?? { pageIndex: 0, y: 0, x: 0, normalizedValue: group.canonicalValue };
+  }
+
+  /**
+   * ADR-219 §2: la definición de un tipo propio, primero entre los guardados
+   * (`detection.userTypes`) y después entre los del documento.
+   */
+  private findUserType(
+    session: Session,
+    id: UserEntityTypeId,
+  ): UserEntityTypeDefinition | undefined {
+    return (
+      this.ctx?.config.detection.userTypes.find((type) => type.id === id) ??
+      session.sessionTypes.find((type) => type.id === id)
+    );
+  }
+
+  /** Lo que las funciones puras necesitan para resolver los grupos de `session` (ADR-219, ADR-221). */
+  private env(session: Session): GroupEnv {
+    return {
+      seed: session.seed,
+      country: this.ctx?.config.detection.country ?? "AR",
+      findUserType: (id) => this.findUserType(session, id),
+    };
+  }
+
+  /** ADR-219 §2: ¿es un tipo base, o un tipo propio guardado o de la sesión? */
+  private isKnownType(session: Session, type: EntityTypeId): boolean {
+    return !isUserEntityType(type) || this.findUserType(session, type) !== undefined;
+  }
+
+  /**
+   * ADR-219 §3: rechaza (sin mutar nada) un tipo propio desconocido como destino
+   * de una reclasificación o de un conflicto.
+   */
+  private assertKnownType(session: Session, type: EntityTypeId): void {
+    if (this.isKnownType(session, type)) return;
+    throw new GroupingInvalidPatchError("patch.type es un tipo propio desconocido.", {
+      documentId: session.documentId,
+      type,
+    });
+  }
+
+  /**
+   * ADR-224 §2: recalcula `formatId` del grupo. Es el `formatId` del primer
+   * registro (orden documental) del grupo que lo tiene y cuyo tipo de detector
+   * es el tipo actual del grupo. Devuelve `true` si cambió.
+   */
+  private refreshFormatId(session: Session, group: InternalGroup): boolean {
+    let best: SessionOccurrenceRecord | undefined;
+    for (const rec of session.recordedOccurrences) {
+      if (rec.groupId !== group.id || rec.formatId === undefined) continue;
+      if (rec.entityType !== group.type) continue;
+      if (
+        best === undefined ||
+        compareDocumentPosition(recordPosition(rec), recordPosition(best)) < 0
+      ) {
+        best = rec;
+      }
+    }
+    if (best?.formatId === group.formatId) return false;
+    if (best?.formatId === undefined) delete group.formatId;
+    else group.formatId = best.formatId;
+    return true;
   }
 
   /** ADR-029: resolución de `mask` para un grupo ya existente en la sesión. */
@@ -1878,6 +2024,16 @@ export class GroupingEngine implements IEngine {
 
       const { type, replacementMode, replacementValue, enabled, canonicalValue, personGender } =
         req.patch;
+      // ADR-219 §3: se rechaza ANTES de mutar nada. Un tipo propio desconocido
+      // como destino, y `synthetic` sobre un tipo propio (el destino, si el
+      // patch también reclasifica).
+      if (type !== undefined) this.assertKnownType(session, type);
+      if (replacementMode === ReplacementMode.Synthetic && isUserEntityType(type ?? group.type)) {
+        throw new GroupingInvalidPatchError(
+          "replacementMode synthetic no se acepta sobre un tipo propio.",
+          { documentId: req.documentId, groupId: group.id, type: type ?? group.type },
+        );
+      }
       const changed = new Set<keyof EntityGroup>();
       const beforeReplacement = {
         replacementMode: group.replacementMode,
@@ -1952,7 +2108,7 @@ export class GroupingEngine implements IEngine {
           // previo (es también la vía de vuelta al valor automático, §5).
           group.replacementValue = computeReplacementValue(
             group,
-            session.seed,
+            this.env(session),
             this.resolveMaskFormat(session, group),
           );
           group.replacementValueUserSet = false;
@@ -1982,7 +2138,19 @@ export class GroupingEngine implements IEngine {
         // atado antes solo a placeholder (ADR-071 §6).
         group.replacementValue = computeReplacementValue(
           group,
-          session.seed,
+          this.env(session),
+          this.resolveMaskFormat(session, group),
+        );
+      } else if (
+        canonicalValue !== undefined &&
+        isUserEntityType(group.type) &&
+        group.replacementMode === ReplacementMode.Mask &&
+        !group.replacementValueUserSet
+      ) {
+        // ADR-219 §3: la máscara de un tipo propio sigue al valor canónico.
+        group.replacementValue = computeReplacementValue(
+          group,
+          this.env(session),
           this.resolveMaskFormat(session, group),
         );
       }
@@ -1992,7 +2160,7 @@ export class GroupingEngine implements IEngine {
       }
 
       if (changed.size === 0) {
-        return toPublicGroup(group, session.seed, this.resolveMaskFormat(session, group));
+        return toPublicGroup(group, this.env(session), this.resolveMaskFormat(session, group));
       }
 
       group.updatedAt = Date.now();
@@ -2007,7 +2175,7 @@ export class GroupingEngine implements IEngine {
         });
       }
 
-      return toPublicGroup(group, session.seed, this.resolveMaskFormat(session, group));
+      return toPublicGroup(group, this.env(session), this.resolveMaskFormat(session, group));
     }
   }
 
@@ -2123,7 +2291,7 @@ export class GroupingEngine implements IEngine {
       if (!target.replacementValueUserSet) {
         target.replacementValue = computeReplacementValue(
           target,
-          session.seed,
+          this.env(session),
           this.resolveMaskFormat(session, target),
         );
       }
@@ -2133,6 +2301,8 @@ export class GroupingEngine implements IEngine {
 
       const changed: (keyof EntityGroup)[] = ["members", "aliases", "updatedAt", "indexInType"];
       if (target.canonicalValue !== beforeCanonical) changed.push("canonicalValue");
+      // ADR-224 §2: la fusión recalcula el formato (los records ya apuntan a `target`).
+      if (this.refreshFormatId(session, target)) changed.push("formatId");
       if (genderChanged) changed.push("personGender");
       changed.push(...this.emitReplacementChangeIfNeeded(session, target, beforeReplacement));
 
@@ -2142,7 +2312,7 @@ export class GroupingEngine implements IEngine {
         groupId: sourceGroupId,
       });
 
-      return toPublicGroup(target, session.seed, this.resolveMaskFormat(session, target));
+      return toPublicGroup(target, this.env(session), this.resolveMaskFormat(session, target));
     }
   }
 
@@ -2250,7 +2420,7 @@ export class GroupingEngine implements IEngine {
     // movedRecords, no session.recordedOccurrences: la reasignación de
     // groupId a `created.id` recién pasa más abajo.
     const movedMaskFormat = resolveMaskFormatFromRecords(movedRecords, created.type);
-    created.replacementValue = computeReplacementValue(created, session.seed, movedMaskFormat);
+    created.replacementValue = computeReplacementValue(created, this.env(session), movedMaskFormat);
     session.groups.set(created.id, created);
 
     // El grupo original preserva canonicalValue si fue fijado manualmente
@@ -2278,13 +2448,21 @@ export class GroupingEngine implements IEngine {
     // tiene uno, se respeta igual que el de `dropOccurrences` (fila 9).
     const remainingMaskFormat = resolveMaskFormatFromRecords(remainingRecords, group.type);
     if (!group.replacementValueUserSet) {
-      group.replacementValue = computeReplacementValue(group, session.seed, remainingMaskFormat);
+      group.replacementValue = computeReplacementValue(
+        group,
+        this.env(session),
+        remainingMaskFormat,
+      );
     }
     group.updatedAt = now;
 
     for (const rec of session.recordedOccurrences) {
       if (idsToMove.has(rec.occurrenceId)) rec.groupId = created.id;
     }
+    // ADR-224 §2: la división recalcula el formato de las dos mitades, ya con
+    // los records reasignados.
+    const formatIdChanged = this.refreshFormatId(session, group);
+    this.refreshFormatId(session, created);
 
     // ADR-176 §2: un conflicto `heldManual` SIN RESOLVER del grupo dividido
     // pasa al grupo -- original o nuevo -- que se queda con el member que se
@@ -2318,14 +2496,15 @@ export class GroupingEngine implements IEngine {
       "aliases",
       "canonicalValue",
       "updatedAt",
+      ...(formatIdChanged ? (["formatId"] as const) : []),
       ...this.emitReplacementChangeIfNeeded(session, group, beforeReplacement),
     ];
     this.emitGroupUpdated(session, group, changed);
     this.emitGroupCreated(session, created);
 
     return {
-      merged: toPublicGroup(group, session.seed, remainingMaskFormat),
-      created: toPublicGroup(created, session.seed, movedMaskFormat),
+      merged: toPublicGroup(group, this.env(session), remainingMaskFormat),
+      created: toPublicGroup(created, this.env(session), movedMaskFormat),
     };
   }
 
@@ -2532,6 +2711,7 @@ export class GroupingEngine implements IEngine {
         this.ctx?.logger.warn("RULE_CREATED sin sesión activa.", { documentId: req.documentId });
         return Promise.resolve();
       }
+      this.assertRuleAllowed(req.documentId, req.rule);
       session.rules.push(req.rule);
       this.recomputeAllGroupModes(session);
       return Promise.resolve();
@@ -2560,7 +2740,9 @@ export class GroupingEngine implements IEngine {
         });
         return Promise.resolve();
       }
-      session.rules[idx] = { ...current, ...req.patch, updatedAt: Date.now() };
+      const updated = { ...current, ...req.patch, updatedAt: Date.now() };
+      this.assertRuleAllowed(req.documentId, updated);
+      session.rules[idx] = updated;
       this.recomputeAllGroupModes(session);
       return Promise.resolve();
     } catch (err: unknown) {
@@ -2650,6 +2832,8 @@ export class GroupingEngine implements IEngine {
           conflictId: req.conflictId,
         });
       }
+      // ADR-219 §3: un tipo propio desconocido se rechaza antes de mutar nada.
+      this.assertKnownType(session, chosenType);
       const resolved: Conflict = { ...conflict, resolved: true, resolvedType: chosenType };
       session.conflicts.set(conflict.id, resolved);
 
@@ -2705,7 +2889,7 @@ export class GroupingEngine implements IEngine {
     const heldOccurrence = session.heldManualOccurrences.get(conflict.id);
     session.heldManualOccurrences.delete(conflict.id);
 
-    let resolvedType: EntityType | undefined;
+    let resolvedType: EntityTypeId | undefined;
     if (winner === "manual" && heldOccurrence) {
       const group = this.groupOccurrence(session, heldOccurrence);
       resolvedType = group.type;
@@ -2839,7 +3023,8 @@ export class GroupingEngine implements IEngine {
 
   /**
    * ADR-172 §1: copia estructural de la sesión completa (`cloneSession`, la
-   * misma función que usa `previewEdit`) bajo un id opaco. Hasta
+   * misma función que usa `previewEdit`; por ADR-225 §6 incluye las
+   * definiciones de los tipos de la sesión) bajo un id opaco. Hasta
    * `MAX_EDIT_CHECKPOINTS` por documento — al pasarse, se descarta el más
    * viejo. Sincrónico. Documento sin sesión → `InvalidInputError`: no hay
    * forma de que este método, que siempre devuelve un `string`, señalice
@@ -2927,12 +3112,12 @@ export class GroupingEngine implements IEngine {
         if (!beforeGroup) continue;
         const beforePublic = toPublicGroup(
           beforeGroup,
-          before.seed,
+          this.env(before),
           this.resolveMaskFormat(before, beforeGroup),
         );
         const afterPublic = toPublicGroup(
           afterGroup,
-          after.seed,
+          this.env(after),
           this.resolveMaskFormat(after, afterGroup),
         );
         const changed = diffEntityGroup(beforePublic, afterPublic);
@@ -3001,6 +3186,189 @@ export class GroupingEngine implements IEngine {
     this.checkpoints.delete(documentId);
   }
 
+  /**
+   * ADR-219 §5: registra un tipo propio del documento. Valida con
+   * `validateUserEntityType` contra los tipos base del país, los guardados
+   * (`ctx.config.detection.userTypes`) y los de la sesión. Inválido, repetido o
+   * sin sesión -> `InvalidInputError`. No emite eventos. Viaja en los puntos de
+   * restauración (ADR-225 §6), sobrevive a `reopenSession` y muere en
+   * `closeSession`.
+   */
+  defineSessionType(documentId: string, definition: UserEntityTypeDefinition): void {
+    this.assertNotDisposed();
+    this.assertInitialized();
+    const session = this.requireSessionForTypes("defineSessionType", documentId);
+    this.assertValidSessionType(session, definition, this.allUserTypes(session));
+    session.sessionTypes = [...session.sessionTypes, definition];
+  }
+
+  /** ADR-219 §5: los tipos del documento, en orden de creación. Sin sesión, `[]`. */
+  getSessionTypes(documentId: string): ReadonlyArray<UserEntityTypeDefinition> {
+    this.assertNotDisposed();
+    this.assertInitialized();
+    return [...(this.sessions.get(documentId)?.sessionTypes ?? [])];
+  }
+
+  /**
+   * ADR-225 §3: reemplaza la definición del tipo de la sesión que tiene ese id.
+   * Valida como `defineSessionType`, sin comparar la etiqueta contra sí misma.
+   * En cada grupo del tipo recalcula `replacementPreviews` y, en `placeholder`
+   * sin `replacementValueUserSet`, `replacementValue`; emite
+   * `ENTITY_GROUP_UPDATED` y `GROUP_REPLACEMENT_CHANGED` por el camino de
+   * siempre. No cambia `id`, `indexInType` ni modo. Definición inválida, etiqueta
+   * repetida, id que no es de un tipo de la sesión (un tipo guardado tampoco),
+   * o sin sesión -> `InvalidInputError`, sin mutar nada. No es `async` por la
+   * misma razón que `applyGroupUpdate`.
+   */
+  updateSessionType(documentId: string, definition: UserEntityTypeDefinition): Promise<void> {
+    try {
+      this.assertNotDisposed();
+      this.assertInitialized();
+      const session = this.requireSessionForTypes("updateSessionType", documentId);
+      this.requireSessionType(session, "updateSessionType", definition.id);
+      this.assertValidSessionType(
+        session,
+        definition,
+        this.allUserTypes(session).filter((other) => other.id !== definition.id),
+      );
+
+      const affected = [...session.groups.values()].filter((group) => group.type === definition.id);
+      const previewsBefore = affected.map((group) =>
+        JSON.stringify(
+          computeReplacementPreviews(
+            group,
+            this.env(session),
+            this.resolveMaskFormat(session, group),
+          ),
+        ),
+      );
+      session.sessionTypes = session.sessionTypes.map((type) =>
+        type.id === definition.id ? definition : type,
+      );
+
+      affected.forEach((group, i) => {
+        const beforeReplacement = {
+          replacementMode: group.replacementMode,
+          replacementValue: group.replacementValue,
+        };
+        if (
+          group.replacementMode === ReplacementMode.Placeholder &&
+          !group.replacementValueUserSet
+        ) {
+          group.replacementValue = computeReplacementValue(
+            group,
+            this.env(session),
+            this.resolveMaskFormat(session, group),
+          );
+        }
+        const previewsChanged =
+          JSON.stringify(
+            computeReplacementPreviews(
+              group,
+              this.env(session),
+              this.resolveMaskFormat(session, group),
+            ),
+          ) !== previewsBefore[i];
+        const replacementChanged = this.emitReplacementChangeIfNeeded(
+          session,
+          group,
+          beforeReplacement,
+        );
+        if (!previewsChanged && replacementChanged.length === 0) return;
+        group.updatedAt = Date.now();
+        this.emitGroupUpdated(session, group, [
+          "replacementPreviews",
+          ...replacementChanged,
+          "updatedAt",
+        ]);
+      });
+      return Promise.resolve();
+    } catch (err: unknown) {
+      return Promise.reject(err instanceof Error ? err : new Error(String(err)));
+    }
+  }
+
+  /**
+   * ADR-225 §4: borra un tipo de la sesión. Cada grupo del tipo pasa por
+   * `applyGroupRemove` (`ENTITY_GROUP_REMOVED`, `CONFLICT_RESOLVED`,
+   * `removedValues`). Después descarta la definición, las entradas de
+   * `typeCorrections` que apuntan a ese tipo y las reglas que lo tienen de
+   * objetivo. Un tipo sin grupos se borra sin emitir. Id que no es de un tipo de
+   * la sesión (un tipo guardado tampoco), o sin sesión -> `InvalidInputError`,
+   * sin mutar nada.
+   */
+  async removeSessionType(documentId: string, typeId: UserEntityTypeId): Promise<void> {
+    this.assertNotDisposed();
+    this.assertInitialized();
+    const session = this.requireSessionForTypes("removeSessionType", documentId);
+    this.requireSessionType(session, "removeSessionType", typeId);
+
+    // Un grupo que reaparece por una ocurrencia manual contenida que
+    // `applyGroupRemove` re-procesa también se elimina: sin definición, un grupo
+    // de este tipo no tendría etiqueta.
+    for (;;) {
+      const groups = [...session.groups.values()].filter((group) => group.type === typeId);
+      if (groups.length === 0) break;
+      for (const group of groups) {
+        await this.applyGroupRemove({ documentId, groupId: group.id });
+      }
+    }
+
+    // v1.19.1: una retenida manual del tipo, en un conflicto `heldManual` sin
+    // resolver, se descarta: el conflicto se resuelve como `winner: "detected"`
+    // (ADR-174 §3) y el grupo detectado queda como estaba.
+    for (const [conflictId, held] of [...session.heldManualOccurrences]) {
+      if (held.entityType !== typeId) continue;
+      const conflict = session.conflicts.get(conflictId);
+      if (conflict?.heldManual !== true || conflict.resolved) continue;
+      this.resolveHeldManualConflict(session, conflict, "detected");
+    }
+
+    session.sessionTypes = session.sessionTypes.filter((type) => type.id !== typeId);
+    for (const [normalizedValue, correction] of session.typeCorrections) {
+      if (correction.correctedType === typeId) session.typeCorrections.delete(normalizedValue);
+    }
+    session.rules = session.rules.filter((rule) => rule.target.entityType !== typeId);
+  }
+
+  /** ADR-219 §5: los guardados y los del documento, en ese orden. */
+  private allUserTypes(session: Session): ReadonlyArray<UserEntityTypeDefinition> {
+    return [...(this.ctx?.config.detection.userTypes ?? []), ...session.sessionTypes];
+  }
+
+  private requireSessionForTypes(method: string, documentId: string): Session {
+    const session = this.sessions.get(documentId);
+    if (!session) {
+      throw new InvalidInputError(`${method}: documento sin sesión de grouping.`, { documentId });
+    }
+    return session;
+  }
+
+  /** ADR-225 §3/§4: solo se editan y se borran los tipos del documento, no los guardados. */
+  private requireSessionType(session: Session, method: string, typeId: UserEntityTypeId): void {
+    if (session.sessionTypes.some((type) => type.id === typeId)) return;
+    throw new InvalidInputError(`${method}: el id no es de un tipo de la sesión.`, {
+      documentId: session.documentId,
+      typeId,
+    });
+  }
+
+  private assertValidSessionType(
+    session: Session,
+    definition: UserEntityTypeDefinition,
+    existing: ReadonlyArray<UserEntityTypeDefinition>,
+  ): void {
+    const validation = validateUserEntityType(definition, {
+      country: this.ctx?.config.detection.country ?? "AR",
+      existing,
+    });
+    if (validation.ok) return;
+    throw new InvalidInputError("el tipo propio no es válido.", {
+      documentId: session.documentId,
+      issues: validation.issues.map((issue) => issue.code),
+    });
+  }
+
   closeSession(documentId: string): Promise<void> {
     this.assertNotDisposed();
     this.assertInitialized();
@@ -3066,6 +3434,21 @@ export class GroupingEngine implements IEngine {
 
   private processOccurrence(session: Session, occurrence: Occurrence): void {
     if (!this.ctx) return;
+
+    // Caso 88 (§9, ADR-219): una ocurrencia de un tipo propio desconocido se
+    // descarta con `warn` y no crea grupo. No debería pasar: Regex solo emite
+    // tipos de `detection.userTypes` y el Orchestrator valida el agregado manual.
+    if (!this.isKnownType(session, occurrence.entityType)) {
+      this.ctx.logger.warn(
+        "ENTITY_FOUND con un tipo propio desconocido; se descarta sin agrupar (ADR-219).",
+        {
+          documentId: session.documentId,
+          occurrenceId: occurrence.id,
+          entityType: occurrence.entityType,
+        },
+      );
+      return;
+    }
 
     // Caso 23 (§13, ADR-038 §3): invariante permanente de dedup por
     // identidad — no exclusivo de sesiones reabiertas. Se descarta en
@@ -3280,6 +3663,7 @@ export class GroupingEngine implements IEngine {
         suggested.enabled = false;
         suggested.needsReview = true;
         this.recordOccurrence(session, occurrence, suggested.id);
+        if (occurrence.formatId !== undefined) this.refreshFormatId(session, suggested);
         this.emitGroupCreated(session, suggested);
         return;
       }
@@ -3357,7 +3741,7 @@ export class GroupingEngine implements IEngine {
     occurrence: Occurrence,
   ): ManualOutcomeAnnotation | null {
     const sameIdentity = (rec: {
-      readonly entityType: EntityType;
+      readonly entityType: EntityTypeId;
       readonly pageIndex: number;
       readonly normalizedValue: string;
       readonly bbox: BoundingBox;
@@ -3446,6 +3830,18 @@ export class GroupingEngine implements IEngine {
     if (occurrence.confidence !== existing.confidence) {
       return occurrence.confidence > existing.confidence;
     }
+    if (occurrence.source === DetectionSource.Regex && existing.source === DetectionSource.Regex) {
+      // Caso 85 (ADR-222 §3): dos ocurrencias de Regex con la misma confidence.
+      // Gana la de formato propio; con el mismo origen, la de valor más largo;
+      // con el mismo largo, la que ya estaba registrada.
+      if (occurrence.formatOrigin !== existing.formatOrigin) {
+        return occurrence.formatOrigin === "user";
+      }
+      if (occurrence.value.length !== existing.value.length) {
+        return occurrence.value.length > existing.value.length;
+      }
+      return false;
+    }
     if (occurrence.source === existing.source) return false;
     return occurrence.source === DetectionSource.Regex;
   }
@@ -3457,19 +3853,21 @@ export class GroupingEngine implements IEngine {
     reason: ConflictReason,
   ): void {
     const group = session.groups.get(existing.groupId);
-    const existingCandidate: ConflictCandidate = {
-      source: existing.source,
-      entityType: existing.entityType,
-      confidence: existing.confidence,
-      value: existing.value,
-    };
+    // ADR-222 §3: entre dos ocurrencias de Regex el conflicto nace resuelto con
+    // el tipo de la ganadora; en los demás casos, el del grupo existente.
+    const bothRegex =
+      existing.source === DetectionSource.Regex && occurrence.source === DetectionSource.Regex;
+    const resolvedType =
+      bothRegex && this.conflictWinnerIsNew(existing, occurrence, reason)
+        ? occurrence.entityType
+        : group?.type;
     const conflict = this.buildConflict(
       session,
       existing.groupId,
       reason,
-      [existingCandidate, occurrenceAsCandidate(occurrence)],
+      [recordAsCandidate(existing), occurrenceAsCandidate(occurrence)],
       true,
-      group?.type,
+      resolvedType,
     );
     this.emitConflictDetected(session, conflict);
   }
@@ -3489,17 +3887,11 @@ export class GroupingEngine implements IEngine {
     occurrence: Occurrence,
     reason: ConflictReason,
   ): void {
-    const existingCandidate: ConflictCandidate = {
-      source: existing.source,
-      entityType: existing.entityType,
-      confidence: existing.confidence,
-      value: existing.value,
-    };
     const conflict: Conflict = {
       id: crypto.randomUUID(),
       groupId: existing.groupId,
       reason,
-      candidates: [existingCandidate, occurrenceAsCandidate(occurrence)],
+      candidates: [recordAsCandidate(existing), occurrenceAsCandidate(occurrence)],
       resolved: false,
       heldManual: true,
     };
@@ -3530,16 +3922,47 @@ export class GroupingEngine implements IEngine {
         changed.push("enabled", "needsReview");
       }
       this.recordOccurrence(session, occurrence, match.id);
+      // ADR-224 §2: entró una ocurrencia; solo una con formato puede mover el `formatId`.
+      if (occurrence.formatId !== undefined && this.refreshFormatId(session, match)) {
+        changed.push("formatId");
+      }
       this.emitGroupUpdated(session, match, changed);
       return match;
     }
     const created = this.createGroup(session, occurrence);
     this.recordOccurrence(session, occurrence, created.id);
+    if (occurrence.formatId !== undefined) this.refreshFormatId(session, created);
     this.emitGroupCreated(session, created);
     return created;
   }
 
+  /**
+   * ADR-219 §4: la agrupación de un tipo propio compara `alphanumericKey` de los
+   * dos lados, así que `"0170-0994"` y `"01700994"` caen en un mismo grupo. Una
+   * clave vacía (un valor sin letras ni dígitos) compara el valor tal cual. El
+   * pase difuso nunca corre. Se recorre en el orden de creación de los grupos.
+   */
+  private findMatchingUserTypeGroup(
+    session: Session,
+    occurrence: Occurrence,
+  ): InternalGroup | null {
+    const keyOf = (value: string): string => alphanumericKey(value) || value;
+    const key = keyOf(occurrence.normalizedValue);
+    for (const group of session.groups.values()) {
+      if (group.type !== occurrence.entityType && !group.absorbedTypes.has(occurrence.entityType)) {
+        continue;
+      }
+      for (const normalizedValue of group.normalizedValues) {
+        if (keyOf(normalizedValue) === key) return group;
+      }
+    }
+    return null;
+  }
+
   private findMatchingGroup(session: Session, occurrence: Occurrence): InternalGroup | null {
+    if (isUserEntityType(occurrence.entityType)) {
+      return this.findMatchingUserTypeGroup(session, occurrence);
+    }
     const threshold = this.ctx?.config.grouping.similarityThreshold ?? DEFAULT_SIMILARITY_THRESHOLD;
     const index = this.getCandidateIndex(session);
     const exact = [...(index.exact.get(occurrence.normalizedValue) ?? [])].sort(
@@ -3588,7 +4011,7 @@ export class GroupingEngine implements IEngine {
    * clasificó. Mismo criterio, misma constante y mismo umbral que el pase
    * difuso de `findMatchingGroup`.
    */
-  private correctedTypeFor(session: Session, occurrence: Occurrence): EntityType | undefined {
+  private correctedTypeFor(session: Session, occurrence: Occurrence): EntityTypeId | undefined {
     if (session.typeCorrections.size === 0) return undefined;
 
     const exact = session.typeCorrections.get(occurrence.normalizedValue);
@@ -3659,10 +4082,10 @@ export class GroupingEngine implements IEngine {
     // ocurrencia del grupo recién creado) — la escalera arranca desde ahí.
     group.replacementValue = computeReplacementValue(
       group,
-      session.seed,
+      this.env(session),
       // Única ocurrencia en el grupo recién creado: no hace falta pasar por
       // session.recordedOccurrences (recordOccurrence() corre después).
-      occurrence.maskFormat ?? MASK_FORMAT_BY_TYPE[occurrence.entityType],
+      occurrence.maskFormat ?? maskFormatFallback(occurrence.entityType),
     );
     session.groups.set(group.id, group);
     session.candidateIndex?.addGroup(group);
@@ -3699,20 +4122,30 @@ export class GroupingEngine implements IEngine {
 
     // Caso 18 (§13): si canonicalValue ya no está entre los aliases, fue
     // fijado manualmente por el usuario — no se recalcula automáticamente.
+    let canonicalChanged = false;
     if (group.aliases.includes(group.canonicalValue)) {
       const before = group.canonicalValue;
       this.recomputeCanonicalValue(session, group);
-      if (group.canonicalValue !== before) changed.add("canonicalValue");
+      canonicalChanged = group.canonicalValue !== before;
+      if (canonicalChanged) changed.add("canonicalValue");
     }
 
     // ADR-191 §1: el nivel de la escalera depende de la caja más angosta del
     // grupo; solo `placeholder` sin valor manual depende de los miembros.
-    if (group.replacementMode === ReplacementMode.Placeholder && !group.replacementValueUserSet) {
+    // ADR-219 §3: la máscara de un tipo propio sigue al valor canónico.
+    const maskFollowsCanonical =
+      canonicalChanged &&
+      group.replacementMode === ReplacementMode.Mask &&
+      isUserEntityType(group.type);
+    if (
+      (group.replacementMode === ReplacementMode.Placeholder || maskFollowsCanonical) &&
+      !group.replacementValueUserSet
+    ) {
       const beforeReplacement = {
         replacementMode: group.replacementMode,
         replacementValue: group.replacementValue,
       };
-      group.replacementValue = computeReplacementValue(group, session.seed, "");
+      group.replacementValue = computeReplacementValue(group, this.env(session), "");
       for (const key of this.emitReplacementChangeIfNeeded(session, group, beforeReplacement)) {
         changed.add(key);
       }
@@ -3738,7 +4171,7 @@ export class GroupingEngine implements IEngine {
   private changeGroupType(
     session: Session,
     group: InternalGroup,
-    nextType: EntityType,
+    nextType: EntityTypeId,
   ): ReadonlyArray<keyof EntityGroup> {
     const previousMode = group.replacementMode;
     const previousType = group.type;
@@ -3785,7 +4218,7 @@ export class GroupingEngine implements IEngine {
     if (!group.replacementValueUserSet || effectiveModeChanged) {
       group.replacementValue = computeReplacementValue(
         group,
-        session.seed,
+        this.env(session),
         this.resolveMaskFormat(session, group),
       );
       if (effectiveModeChanged) group.replacementValueUserSet = false;
@@ -3807,10 +4240,13 @@ export class GroupingEngine implements IEngine {
     const changed: (keyof EntityGroup)[] = ["type", "indexInType"];
     if (group.replacementMode !== previousMode) changed.push("replacementMode");
     if (group.personGender !== previousGender) changed.push("personGender");
+    // ADR-224 §2: un grupo reclasificado pierde el subnivel, y lo recupera si
+    // vuelve a su tipo (el registro conserva el tipo del detector).
+    if (this.refreshFormatId(session, group)) changed.push("formatId");
     return changed;
   }
 
-  private nextIndex(session: Session, type: EntityType): number {
+  private nextIndex(session: Session, type: EntityTypeId): number {
     const current = session.nextIndexByType.get(type) ?? 0;
     const next = current + 1;
     session.nextIndexByType.set(type, next);
@@ -3919,7 +4355,7 @@ export class GroupingEngine implements IEngine {
       group.replacementMode = effectiveMode;
       group.replacementValue = computeReplacementValue(
         group,
-        session.seed,
+        this.env(session),
         this.resolveMaskFormat(session, group),
       );
       group.replacementValueUserSet = false;
@@ -3950,6 +4386,10 @@ export class GroupingEngine implements IEngine {
       // ADR-107: se propagan explícitamente, mismo criterio que ADR-074 §1 —
       // nada viaja por una copia de campos.
       ...(occurrence.fragments !== undefined ? { fragments: occurrence.fragments } : {}),
+      // ADR-222 §3 / ADR-224 §2: el desempate entre dos Regex y el `formatId`
+      // del grupo leen el formato del registro.
+      ...(occurrence.formatId !== undefined ? { formatId: occurrence.formatId } : {}),
+      ...(occurrence.formatOrigin !== undefined ? { formatOrigin: occurrence.formatOrigin } : {}),
     });
   }
 
@@ -3984,7 +4424,7 @@ export class GroupingEngine implements IEngine {
     resolved: boolean,
     // ADR-083 §3: un conflicto resuelto registra el TIPO con el que quedó
     // clasificado el grupo, no el modo de reemplazo.
-    resolvedType: EntityType | undefined,
+    resolvedType: EntityTypeId | undefined,
   ): Conflict {
     const conflict: Conflict =
       resolved && resolvedType !== undefined
@@ -4004,7 +4444,7 @@ export class GroupingEngine implements IEngine {
   private emitGroupCreated(session: Session, group: InternalGroup): void {
     this.ctx?.bus.emit(EventChannel.Grouping, EngineEvents.ENTITY_GROUP_CREATED, {
       documentId: session.documentId,
-      group: toPublicGroup(group, session.seed, this.resolveMaskFormat(session, group)),
+      group: toPublicGroup(group, this.env(session), this.resolveMaskFormat(session, group)),
     });
   }
 
@@ -4016,7 +4456,7 @@ export class GroupingEngine implements IEngine {
     if (changes.length === 0) return;
     this.ctx?.bus.emit(EventChannel.Grouping, EngineEvents.ENTITY_GROUP_UPDATED, {
       documentId: session.documentId,
-      group: toPublicGroup(group, session.seed, this.resolveMaskFormat(session, group)),
+      group: toPublicGroup(group, this.env(session), this.resolveMaskFormat(session, group)),
       // ADR-170 §1: "replacementPreviews" entra a `changes` cuando cambió
       // algo de lo que depende — índice, tipo, género o members (que incluye
       // la escalera: el nivel se elige por los bbox de los members). El modo/
@@ -4069,6 +4509,26 @@ export class GroupingEngine implements IEngine {
       throw new GroupingGroupNotFoundError(documentId, groupId);
     }
     return { session, group };
+  }
+
+  /**
+   * ADR-219 §3: una regla de `scope: type` con `synthetic` sobre un tipo propio
+   * no se acepta (GROUPING_INVALID_PATCH), sin mutar nada. Una regla `global` en
+   * `synthetic` sí: `resolveMode` deja los grupos de tipo propio en placeholder.
+   */
+  private assertRuleAllowed(documentId: string, rule: Rule): void {
+    const type = rule.target.entityType;
+    if (
+      rule.scope === "type" &&
+      rule.mode === ReplacementMode.Synthetic &&
+      type !== undefined &&
+      isUserEntityType(type)
+    ) {
+      throw new GroupingInvalidPatchError(
+        "una regla de tipo con synthetic no se acepta sobre un tipo propio.",
+        { documentId, ruleId: rule.id, type },
+      );
+    }
   }
 
   private validatePatch(patch: GroupUpdateRequested["patch"]): void {

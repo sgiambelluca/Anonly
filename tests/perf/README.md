@@ -2253,3 +2253,67 @@ la variable no hace nada: no registra salvedad ni escribe esos archivos.
 `tests-untracked.sha256` y el digest del dist. Con archivos nuevos sin trackear bajo `packages/` o `apps/`, dos tandas
 con distinto contenido de esos archivos ya no se ven iguales: la identidad difiere y la tanda aborta sin medir. Que una
 tanda tenga ese archivo y la otra no (el árbol pasó de sucio a limpio o al revés) también es una diferencia.
+
+## Reducción de pico: A/B por brazos (`run-peak-ab.sh`) y P1/P2 sin NER
+
+Campaña de 2026-11 ([informe](../../docs/roadmap/memoria/Reduccion_De_Pico_Nube_2026-11.md),
+ADR-230 y ADR-231). Instrumentos opt-in, ninguno en `pnpm test:perf`:
+
+- `memory-ner-off.spec.ts` (`ANONLY_MEMORY_NER_OFF=1`): P1 y P2 de
+  `memory.spec.ts` con NER apagado, para un banco sin el modelo de NER. No
+  reemplaza a `memory.spec.ts`: P1 y P2 llevan NER por definición (ADR-146 §4).
+  `P2-ner-off` equivale a «P2-attrib — NER apagado» de `memory-attribution.spec.ts`.
+- `run-peak-ab.sh`: A/B intercalado ABBA entre dos brazos. El producto trae
+  C-1 (ADR-230, `pageProxy.cleanup()` en `parsePage`), C-2 (ADR-231, baja del
+  pool de NER al empezar el OCR) y C-4 en su opción 2 (ADR-232, cleanup después
+  de rasterizar para el OCR y de los renders `full`). Cada brazo se arma
+  **quitando** en el build los cambios que no lleva
+  (`support/peakArmsTransform.ts`, un bloque exacto por cambio, con test):
+
+  | brazo | C-1 | C-2 | C-4 |
+  |---|---|---|---|
+  | `base` | no | no | no |
+  | `c1` | sí | no | no |
+  | `c2` | no | sí | no |
+  | `c4` | no | no | sí |
+  | `c14` | sí | no | sí |
+  | `c2b` | sí | movido a la primera página con OCR | sí |
+  | `head` | sí | sí | sí (el producto) |
+
+  `support/peakArmsBuildCli.ts` transforma `pdf.engine.ts`, `orchestrator.ts` y
+  el kernel de Render en el bundle principal y en los de workers, y exige la
+  cantidad de pasadas por bundle. `packages/` y `apps/` no se tocan: el runner
+  copia el brazo a `apps/react-client/dist` antes de cada corrida, verifica el
+  digest del brazo y que `apps/desktop-shell/dist` no cambió, y restaura el
+  dist original al salir. Los `.measure/memory-*.json` previos se apartan a
+  `<carpeta>/preexisting/`, no se borran. El manifest registra `exit=` y cuántos
+  reportes dejó cada corrida. Variables: `ANONLY_AB_CONTROL` (default `base`),
+  `ANONLY_AB_CANDIDATE` (default `head`), `ANONLY_AB_ROUNDS`, `ANONLY_AB_SPEC`
+  (default `tests/perf/memory.spec.ts`), `ANONLY_AB_GREP` (default `"P2 —"`),
+  `ANONLY_AB_OUT`. En Linux sin pantalla usa `xvfb-run`. **Los nombres de los
+  brazos cambiaron de significado** al implementar C-4: en la versión del arnés
+  anterior a C-4, `c3`, `c4` y `c4r` **agregaban** candidatos sobre
+  `head` (`c4r` era C-4 restringido a OCR y export, el que se adoptó). Desde
+  entonces `c4` es «solo C-4». Los `transform-<brazo>.json` de cada campaña
+  registran qué se midió.
+- `support/summarizePeakArmsCli.ts <carpeta> [control] [candidato]` escribe un
+  `summary-<perfil>.json` por perfil medido (una corrida puede medir P1 y P2):
+  medianas por brazo, diferencia pareada por ronda, hash del texto de OCR y
+  cantidad de grupos (`support/peakArmsSummary.ts`, con test).
+  `P2-144dpi-ner-off` de `memory-ner-off.spec.ts` deja las
+  imágenes debajo del umbral de 10e6 bytes: pdf.js no las limpia después de
+  `render()` (las más grandes, con 5 s de retardo).
+
+```bash
+# Los dos cambios contra ninguno, P1 y P2 con NER
+ANONLY_AB_GREP="P1 —|P2 —" tests/perf/run-peak-ab.sh
+# Cada cambio por separado
+ANONLY_AB_CONTROL=base ANONLY_AB_CANDIDATE=c1 tests/perf/run-peak-ab.sh
+ANONLY_AB_CONTROL=base ANONLY_AB_CANDIDATE=c2 tests/perf/run-peak-ab.sh
+pnpm exec tsx tests/perf/support/summarizePeakArmsCli.ts .measure/peak-ab/<carpeta> base head
+```
+
+La primera campaña de C-1 (antes de implementarlo) usó una versión anterior de
+este arnés, `run-parse-cleanup.sh` con brazos A/B que **agregaban** el cleanup
+en el build; sus crudos están en `.measure/c1-parse-cleanup/`.
+No correr otra medición ni gates pesados en paralelo.

@@ -6,6 +6,8 @@
  * desde `PasswordDialog`.
  */
 
+import type { ReactNode } from "react";
+
 import { Button, type ButtonVariant } from "./Button.js";
 import { Dialog } from "./Dialog.js";
 
@@ -22,6 +24,8 @@ export interface ConfirmDialogProps {
   readonly busy?: boolean;
   /** Mensaje de error inline (p. ej. un `reanalyze` que rechazó). */
   readonly errorMessage?: string | null;
+  /** Ícono a la izquierda del título (ver `Dialog.icon`): la confirmación de descartar cambios lo lleva. */
+  readonly icon?: ReactNode;
 }
 
 export function ConfirmDialog({
@@ -35,11 +39,12 @@ export function ConfirmDialog({
   onCancel,
   busy = false,
   errorMessage = null,
+  icon,
 }: ConfirmDialogProps) {
   const confirmVariant: ButtonVariant = variant === "danger" ? "danger" : "primary";
 
   return (
-    <Dialog open={open} onClose={onCancel} title={title}>
+    <Dialog open={open} onClose={onCancel} title={title} {...(icon !== undefined ? { icon } : {})}>
       <p className="mb-4 text-sm text-text-secondary">{message}</p>
       {errorMessage ? (
         <p role="alert" className="mb-4 text-sm text-error">

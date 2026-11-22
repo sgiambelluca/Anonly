@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=ui-contract | dependencias=adr/ADR-191-Lo-Que-Muestra-La-Vista-Previa-Es-Lo-Que-Se-Exporta.md,01_Technical_Architecture_Document.md,03_Data_Model.md,04_Event_System.md,ADR-005-State-Management.md,adr/ADR-034-Auditoria-Pre-Hito9-Orchestrator.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-054-Scroll-Independiente-Por-Panel.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-056-RenderRequested-Kind-Por-Panel.md,adr/ADR-069-Lexico-De-Genero-Fuente-Unica-Y-Canal-Del-Usuario.md,adr/ADR-134-Cancelled-Es-Terminal.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,adr/ADR-168-Pantallas-De-Carga-Y-Escaneo-Tras-Pruebas-De-Usuario.md,adr/ADR-169-La-Pantalla-De-Trabajo-Tras-Pruebas-De-Usuario.md,adr/ADR-170-Las-Vistas-Previas-De-Edicion-Las-Calcula-El-Core.md,adr/ADR-171-El-Usuario-Puede-Eliminar-Una-Entidad.md,adr/ADR-172-Deshacer-Y-Rehacer-Exactos.md,adr/ADR-174-Un-Agregado-Manual-Que-Choca-Se-Resuelve-En-El-Momento.md,adr/ADR-204-La-Interaccion-Anonimizada-Usa-La-Geometria-Visible.md,adr/ADR-205-El-Resultado-Exportado-Pertenece-A-Una-Revision.md,adr/ADR-206-Una-Busqueda-Omitida-No-Confirma-La-Version.md | audiencia=IA-implementador-ui | fase=4 (reconciliado en fase 10 por ADR-036: acciones completas §2.3, workers §2.4, settings §3.7, zoom §7, errores §8; §2.3/§3.7/§7 reescritos por ADR-037 —zoom con re-render real— y ADR-038 —reanalyze preservando ediciones, supersede el flujo "recrear el core"; §2.3/§7 en fase 11 por ADR-056 —requestRender con kind requerido, cada panel pide lo suyo—; §2.3 en fase 10.6 por ADR-069 §4 —`updateGroup.patch` gana `personGender?: PersonGenderChoice`, para el control de género del PR 12, que ADR-071 rebautiza `PersonGenderToggle` sin tocar este contrato—; post-Hito 10.10: §2.2 y §3.6b nuevas por ADR-062 —`degraded.store`, el séptimo slice: convierte el veredicto por página que trae `PREVIEW_UPDATED.degraded` en la marca por grupo del árbol, con sus tres reglas de consumo—; §3.5 pierde `sideBySide`, que estaba declarado sin setter ni consumidor desde PR7); §3.5/§3.6/§6 reescritos en el rediseño post-10.9 por **ADR-087** —un solo visor con toggle: `viewer.currentPageIndex`/`visibleRange` dejan de ser por `kind` y aparece `viewer.mode`; `settings.scrollSyncEnabled` se retira; el recap de layout pasa a los tres momentos—; §2.2 ignora carga NER tardía después de Cancelled por ADR-134 -->
+<!-- CONTEXT: scope=ui-contract | dependencias=adr/ADR-223-Los-Formatos-Se-Configuran-Desde-Inicio-Y-Viajan-En-Un-Archivo.md,adr/ADR-225-Un-Tipo-Del-Documento-Se-Edita-Se-Borra-Y-Se-Guarda.md,adr/ADR-226-El-Formato-Se-Nombra-Solo-Cuando-Es-Del-Usuario.md,adr/ADR-227-Los-Formatos-De-Deteccion-Se-Abren-Desde-Inicio-Y-Se-Guardan-A-Pedido.md,adr/ADR-229-La-Pantalla-De-Trabajo-En-La-1.1.md,adr/ADR-191-Lo-Que-Muestra-La-Vista-Previa-Es-Lo-Que-Se-Exporta.md,01_Technical_Architecture_Document.md,03_Data_Model.md,04_Event_System.md,ADR-005-State-Management.md,adr/ADR-034-Auditoria-Pre-Hito9-Orchestrator.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-054-Scroll-Independiente-Por-Panel.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-056-RenderRequested-Kind-Por-Panel.md,adr/ADR-069-Lexico-De-Genero-Fuente-Unica-Y-Canal-Del-Usuario.md,adr/ADR-134-Cancelled-Es-Terminal.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,adr/ADR-168-Pantallas-De-Carga-Y-Escaneo-Tras-Pruebas-De-Usuario.md,adr/ADR-169-La-Pantalla-De-Trabajo-Tras-Pruebas-De-Usuario.md,adr/ADR-170-Las-Vistas-Previas-De-Edicion-Las-Calcula-El-Core.md,adr/ADR-171-El-Usuario-Puede-Eliminar-Una-Entidad.md,adr/ADR-172-Deshacer-Y-Rehacer-Exactos.md,adr/ADR-174-Un-Agregado-Manual-Que-Choca-Se-Resuelve-En-El-Momento.md,adr/ADR-204-La-Interaccion-Anonimizada-Usa-La-Geometria-Visible.md,adr/ADR-205-El-Resultado-Exportado-Pertenece-A-Una-Revision.md,adr/ADR-206-Una-Busqueda-Omitida-No-Confirma-La-Version.md | audiencia=IA-implementador-ui | fase=4 (reconciliado en fase 10 por ADR-036: acciones completas §2.3, workers §2.4, settings §3.7, zoom §7, errores §8; §2.3/§3.7/§7 reescritos por ADR-037 —zoom con re-render real— y ADR-038 —reanalyze preservando ediciones, supersede el flujo "recrear el core"; §2.3/§7 en fase 11 por ADR-056 —requestRender con kind requerido, cada panel pide lo suyo—; §2.3 en fase 10.6 por ADR-069 §4 —`updateGroup.patch` gana `personGender?: PersonGenderChoice`, para el control de género del PR 12, que ADR-071 rebautiza `PersonGenderToggle` sin tocar este contrato—; post-Hito 10.10: §2.2 y §3.6b nuevas por ADR-062 —`degraded.store`, el séptimo slice: convierte el veredicto por página que trae `PREVIEW_UPDATED.degraded` en la marca por grupo del árbol, con sus tres reglas de consumo—; §3.5 pierde `sideBySide`, que estaba declarado sin setter ni consumidor desde PR7); §3.5/§3.6/§6 reescritos en el rediseño post-10.9 por **ADR-087** —un solo visor con toggle: `viewer.currentPageIndex`/`visibleRange` dejan de ser por `kind` y aparece `viewer.mode`; `settings.scrollSyncEnabled` se retira; el recap de layout pasa a los tres momentos—; §2.2 ignora carga NER tardía después de Cancelled por ADR-134 -->
 
 # Anonly — React Client (UI Contract, TAD bloque 9)
 
@@ -357,6 +357,8 @@ interface DocumentSlice {
 
 ### 3.2 `entities.store.ts`
 
+> **1.1:** suma los tipos del documento (§3.9) y los filtros (§3.10), y `groupsByType` indexa por `EntityTypeId`.
+
 ```ts
 interface EntitiesSlice {
   readonly groupsByType: ReadonlyMap<EntityType, ReadonlyArray<EntityGroup>>;
@@ -392,6 +394,8 @@ interface RulesSlice {
 ```
 
 ### 3.4 `pipeline.store.ts`
+
+> **1.1:** suma `skippedFormats` (§3.11).
 
 ```ts
 interface PipelineSlice {
@@ -500,6 +504,12 @@ interface SettingsSlice {
    * pie del panel). Persistido: cerrado una vez, no vuelve.
    */
   readonly dismissedHints: ReadonlyArray<"selection-hint" | "panel-footer-hint">;
+  /**
+   * Pasada de UI de la 1.1 (2026-11-21): si el original muestra el resaltado de
+   * entidades (`Components.md` §5.4b, §13b.8). Default `true`. Persistido; un
+   * valor guardado que no es booleano se ignora y queda el default.
+   */
+  readonly highlightEntities: boolean;
   persist(): void;   // guarda en localStorage (solo settings, nunca documentos)
   load(): void;
 }
@@ -508,6 +518,8 @@ interface SettingsSlice {
 No todo lo de este slice alimenta `EngineConfig`: `language` y `defaultReplacementMode` son preferencias de la app que `settingsToEngineConfig` no mapea (§3.7).
 
 ### 3.6c `history.store.ts` (ADR-172 §2)
+
+> **1.1 (ADR-225 §6):** entran también crear, editar y borrar un tipo del documento. Ver §3.12.
 
 ```ts
 interface HistoryEntry { readonly checkpointId: string; readonly label: string; }
@@ -570,6 +582,8 @@ Se guarda por página, y no como un `Set` plano de `groupId`, porque sin la clav
 
 ### 3.7 Mapeo settings → `EngineConfig` (ADR-036 §5, reescrito por ADR-038 §7)
 
+> **1.1 (ADR-223 §2):** la sección `detection` del `EngineConfig` no sale de los settings: sale de `detection.store` (§3.8).
+
 | Setting | Destino | Regla |
 |---|---|---|
 | `nerEnabled` | `ner.enabled` | directo. **Ya no es un setting del usuario** (ADR-126): sin control en el formulario, `persist()` no lo escribe y ningún camino de producto lo apaga. `load()` lo lee si está presente, que es el canal de override de los E2E |
@@ -610,7 +624,198 @@ Documentado también en `tests/perf/README.md` — condición de la autorizació
 
 ---
 
+## 3b. Estado de la 1.1 — detección a medida (ADR-223, ADR-225 a ADR-229)
+
+> Lo que la 1.1 suma al estado del cliente. Los componentes están en `Components.md` §13b y las
+> reglas de interfaz en `UX_Guidelines.md` §11b.
+
+### 3.8 `detection.store.ts` (ADR-223 §3, ADR-227 §3)
+
+Guarda la configuración de detección del usuario. Es **configuración**, como `settings.store`,
+pero con clave propia y un ciclo distinto: se edita sobre un borrador y se guarda a pedido.
+
+```ts
+/** Lo que se persiste en `localStorage["anonly:detection"]`. Versionado. */
+interface DetectionState {
+  readonly version: 1;
+  readonly country: CountryCode;                                  // "AR" en la 1.1
+  /** Ids de formatos base apagados, por país (ADR-221 §5: al volver a un país, está lo suyo). */
+  readonly disabledBaseFormats: Readonly<Partial<Record<CountryCode, ReadonlyArray<string>>>>;
+  readonly userTypes: ReadonlyArray<UserEntityTypeDefinition>;    // los tipos guardados
+  readonly userFormats: ReadonlyArray<FormatDefinition>;          // propios y copias editadas (`basedOn`)
+  readonly catalogRefs: ReadonlyArray<CatalogFormatRef>;          // vacío en la 1.1
+}
+
+interface DetectionSlice {
+  readonly saved: DetectionState;          // lo último guardado: es lo que alimenta al Core
+  readonly draft: DetectionState | null;   // copia de trabajo de DetectionFormatsDialog; null = cerrado
+  readonly draftHistory: ReadonlyArray<DetectionState>;   // borradores anteriores, uno por cambio: lo que deshace undoLastDraftChange
+  readonly pendingChanges: number;         // cambios aplicados al borrador y no deshechos
+  openDraft(): void;                       // draft = saved
+  applyToDraft(change: DetectionChange): void;
+  undoLastDraftChange(): void;             // el «Deshacer» de los avisos del diálogo
+  commit(): Promise<void>;                 // saved = draft, persist(), y recrea el Core si hace falta
+  discardDraft(): void;
+  saveDocumentType(definition: UserEntityTypeDefinition): void;   // ADR-225 §5
+  unsaveDocumentType(id: UserEntityTypeId): void;                 // el «Deshacer» de ese aviso
+  persist(): void;
+  load(): void;
+}
+```
+
+- **`DetectionChange`** es una unión cerrada: prender o apagar un formato, crear, editar o borrar
+  un tipo propio, crear, editar o borrar un formato propio, crear o restaurar una copia editada, e
+  importar un archivo ya validado. Cada una cuenta como **un** cambio en `pendingChanges`,
+  también la importación entera.
+- **Nada del borrador llega a `saved` ni a `localStorage` antes de `commit()`.** Cerrar con
+  `pendingChanges > 0` pide confirmación (`UX_Guidelines.md` §11b.5).
+- **`commit()`** sigue el camino de ADR-125 §2 y §3: persiste, deriva el override y, **solo si
+  cambió**, recrea el Core con el diálogo todavía abierto. Después cierra y `LoadScreen` muestra
+  el aviso «Formatos guardados».
+- **Validación antes de escribir**: el borrador solo acepta tipos que pasan
+  `validateUserEntityType` y formatos que pasan `validateFormat`. `load()` descarta, con un aviso
+  en el log sin contenido, lo que ya no valide: el Core haría lo mismo (`Orchestrator.md` caso 47).
+- **Qué nunca entra a este store**: valores detectados, apariciones, texto del documento, el texto
+  de prueba del generador ni un tipo del documento que el usuario no guardó (`08_Security_Model.md`
+  §10.2).
+- **«Borrar datos locales» no lo toca** (ADR-223 §3).
+
+**Mapeo `detection.saved` → `EngineConfig.detection`** (`detectionToEngineConfig`, función pura,
+junto a `settingsToEngineConfig`):
+
+| Campo de `DetectionConfig` | Sale de |
+|---|---|
+| `country` | `saved.country` |
+| `baseFormats` | una entrada `{ formatId, enabled: false }` por cada id de `disabledBaseFormats[country]`. Un formato base sin entrada está prendido |
+| `userTypes` | `saved.userTypes` |
+| `userFormats` | `saved.userFormats`; de las copias editadas, solo las que tienen `basedOn` en el catálogo del país activo |
+| `catalogRefs` | `saved.catalogRefs` |
+
+- Se aplica en el **bootstrap** (`initCore(overrides)`) y en `commit()`.
+- `sameEngineConfigOverrides` compara también la sección `detection`.
+- **No hay camino por `reanalyze`**: `ReanalyzeConfigPatch` no la incluye (ADR-223 §2). Con un
+  documento abierto, «Formatos de detección» no se puede abrir.
+
+### 3.9 Tipos del documento (ADR-219 §5, ADR-225)
+
+`entities.store` suma:
+
+```ts
+/** Espejo de `orchestrator.getDocumentEntityTypes(documentId)`, en orden de creación. */
+readonly documentTypes: ReadonlyArray<UserEntityTypeDefinition>;
+/** Tipos del documento que el usuario guardó durante este documento (ADR-225 §5). */
+readonly savedDuringDocument: ReadonlySet<UserEntityTypeId>;
+refreshDocumentTypes(): void;
+```
+
+- **`groupsByType`** pasa a indexar por `EntityTypeId` (ADR-219 §1).
+- **`refreshDocumentTypes()`** vuelve a leer `getDocumentEntityTypes`. El Core no emite eventos
+  por las definiciones (ADR-225 §6), así que se llama **después de cada una** de estas acciones:
+  `defineDocumentEntityType`, `updateDocumentEntityType`, `removeDocumentEntityType`, y
+  `history.undo()` / `history.redo()`.
+- **Invariante de ADR-225 §6**: después de un `undo` o un `redo`, si un id de
+  `savedDuringDocument` ya no está en la sesión, `refreshDocumentTypes()` lo vuelve a definir con
+  `defineDocumentEntityType`, tomando la definición de `detection.saved.userTypes`. Vuelve vacío.
+- **Qué muestra el panel**: todos los tipos de `documentTypes`, tengan o no grupos. De los tipos
+  guardados, solo los que tienen grupos.
+- **Para la interfaz, un tipo es «solo de este documento»** si está en `documentTypes` y no en
+  `savedDuringDocument`. Solo esos tienen menú ⋯.
+
+**Acciones nuevas** (`actions`, §2.3):
+
+| Acción | Qué hace |
+|---|---|
+| `defineDocumentType(def)` | `orchestrator.defineDocumentEntityType` → `refreshDocumentTypes` |
+| `updateDocumentType(def)` | `await orchestrator.updateDocumentEntityType` → `refreshDocumentTypes` |
+| `removeDocumentType(id)` | borra las reglas de ese tipo y de sus grupos, como al eliminar una entidad (ADR-171 §5) → `await orchestrator.removeDocumentEntityType` → `refreshDocumentTypes` |
+| `saveDocumentType(id)` | busca la definición de `id` en `documentTypes`, `detection.saveDocumentType(def)` y suma el id a `savedDuringDocument`. **Sin** `history.record`: no es una edición del documento |
+| `unsaveDocumentType(id)` | lo inverso; es el «Deshacer» del aviso de guardar |
+
+- **El `history.record` lo hace quien llama**, antes de la acción, y no la acción por dentro: así
+  «Crear y agregar» y «Crear y cambiar» son una sola entrada (ver abajo). Si la acción falla, quien
+  llama retira esa entrada. Crear, editar y borrar un tipo desde el panel registran su entrada de
+  la misma forma.
+- **«Crear y agregar» y «Crear y cambiar»** (`EntityTypePicker`, ADR-229 §2): **un solo**
+  `history.record`, después `defineDocumentEntityType`, después el agregado o el cambio de tipo.
+- **El Core se recrea al cerrar el documento si hace falta.** `closeDocument()` compara
+  `detectionToEngineConfig(detection.saved)` con el override con que se creó el Core vigente. Si
+  difieren —el usuario guardó un tipo durante el documento—, recrea el Core **antes** de aceptar el
+  documento siguiente: `importDocument()` espera esa recreación (`getCoreWhenReady()`) y
+  `LoadScreen` no habilita su `DropZone` hasta que termina (ADR-125 §3 explica por qué no puede
+  haber una ventana sin Core). Alcanza con `closeDocument()` porque es el único camino a otro
+  documento: `ImportButton` solo se monta sin documento (`Components.md` §2.1) y el Core no acepta
+  un segundo documento sin cerrar el primero.
+- **`savedDuringDocument` y `documentTypes` se vacían** en `reset()`, con el resto del store.
+
+### 3.10 Filtros del panel (ADR-224 §3, ADR-226 §3, ADR-229 §5)
+
+`entities.store` suma:
+
+```ts
+interface EntityFilters {
+  readonly types: ReadonlySet<EntityTypeId>;                          // «Tipos» (ADR-229 §5, 2026-11-21)
+  readonly formatIds: ReadonlySet<string>;                            // «Tus formatos»
+  readonly modes: ReadonlySet<ReplacementMode>;                       // «Modo de reemplazo»
+  readonly review: ReadonlySet<"disabled" | "conflict" | "manual">;   // «Para revisar»
+}
+readonly filters: EntityFilters;
+setFilters(filters: EntityFilters): void;
+clearFilters(): void;
+```
+
+- **Son de la interfaz**: no emiten nada y no entran a la pila de deshacer.
+- **Combinación** (ADR-224 §3): dentro de un mismo conjunto, alcanza con cumplir una opción; entre
+  conjuntos, hay que cumplir todos. Con el buscador de la lista se combinan igual.
+- **`types`** admite cualquier tipo, de base o propio (ADR-229 §5, precisión del 2026-11-21).
+  El panel ofrece los que tienen grupos en el documento, más los ya elegidos que se quedaron sin
+  grupos, para poder destildarlos.
+- **`formatIds` solo admite formatos del usuario** (ADR-226 §3): ids presentes en
+  `detection.saved.userFormats` o `catalogRefs`. El panel ofrece solo los que separan algo dentro
+  de su tipo, con la regla del subnivel (`splitByFormat`, ADR-226 §2 y §3, precisión del
+  2026-11-21). La sección no se muestra si no queda ninguno.
+- **`"conflict"`** incluye los conflictos que nacieron resueltos (ADR-224 §3). Por eso
+  `conflicts` **conserva los resueltos** del documento, con su estado, en vez de quitarlos al
+  resolverse.
+- **`"manual"`**: el grupo tiene un miembro con `source: Manual` o `replacementValueUserSet`.
+- **Duran lo que dura el documento**: `reset()` los vacía. No se persisten.
+- **«Ver en la lista» los quita si esconden el grupo.** Cuando el panel va a un grupo (el toast de
+  un alta, un clic en el visor) y los filtros lo esconden, el panel llama a `clearFilters()`, como ya
+  hacía con el buscador. Son de la interfaz: quitarlos no pierde nada.
+- **Un formato es «del usuario»** (ADR-226 §1) si su id está en `detection.saved.userFormats` o en
+  `catalogRefs`. Es un selector puro, `isUserFormat(formatId)`, y lo usan el subnivel del árbol, el
+  filtro y el tooltip.
+
+### 3.11 Formatos que no se aplicaron (ADR-220 §6, ADR-229 §7)
+
+`pipeline.store` suma:
+
+```ts
+/** De `REGEX_FINISHED.skippedFormats`. `[]` es el caso sano. */
+readonly skippedFormats: ReadonlyArray<{ readonly formatId: string; readonly pageIndices: ReadonlyArray<number> }>;
+```
+
+- El bridge lo escribe al recibir `REGEX_FINISHED`; ausente equivale a `[]`. Un `reanalyze` lo
+  reemplaza y `reset()` lo vacía.
+- Lo leen `SkippedFormatsNotice` y `ExportDialog`. El nombre del formato sale de
+  `detection.saved.userFormats` o del catálogo (`getCatalog`).
+- **No participa de `exportBlockReason`**: no bloquea la exportación.
+
+### 3.12 Lo que cambia en `history.store` (§3.6c)
+
+- **Qué entra, además**: crear, editar y borrar un tipo del documento.
+- **Qué sigue sin entrar**: los filtros, y guardar un tipo para los próximos documentos.
+- **Después de `undo` / `redo`**: además de rehidratar `rules.store`, la interfaz llama a
+  `refreshDocumentTypes()` (§3.9).
+
+---
+
 ## 4. API pública del Core (consumida por el adapter)
+
+> **1.1:** el adapter usa además `defineDocumentEntityType`, `getDocumentEntityTypes`,
+> `updateDocumentEntityType` y `removeDocumentEntityType` (`Contracts.md` §3.5), y las funciones
+> puras que el façade reexporta y que **no necesitan un Core creado**: `validateFormat`,
+> `testFormat`, `compareFormat`, `validateUserEntityType`, `userTypeLabel`, `isUserEntityType`,
+> `getCatalog` y `validateFormatsFile`. Ver §3b.
 
 El paquete `@anonly/anonymization-core` expone:
 

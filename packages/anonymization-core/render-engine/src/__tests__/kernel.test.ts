@@ -34,6 +34,7 @@ import {
   fitReplacementFontSized,
   kernelLoadDocument,
   kernelRenderLegendPage,
+  kernelRasterizePage,
   kernelRenderPage,
   RenderKernelCanvasFactory,
   RenderKernelCMapReaderFactory,
@@ -764,7 +765,7 @@ describe("kernelRenderLegendPage — página de leyenda del export (ADR-059 §5)
 
   it("no toca pdfjs-dist en absoluto — no requiere documento cargado", async () => {
     await kernelRenderLegendPage(
-      { rows: [makeMarkerLegendRow()], pageWidthPt: 300, pageHeightPt: 200 },
+      { rows: [makeMarkerLegendRow()], startRow: 0, pageWidthPt: 300, pageHeightPt: 200 },
       legendOpts,
     );
 
@@ -773,7 +774,7 @@ describe("kernelRenderLegendPage — página de leyenda del export (ADR-059 §5)
 
   it("defaults to png when imageFormat is absent from the payload", async () => {
     await kernelRenderLegendPage(
-      { rows: [makeMarkerLegendRow()], pageWidthPt: 300, pageHeightPt: 200 },
+      { rows: [makeMarkerLegendRow()], startRow: 0, pageWidthPt: 300, pageHeightPt: 200 },
       legendOpts,
     );
 
@@ -782,9 +783,10 @@ describe("kernelRenderLegendPage — página de leyenda del export (ADR-059 §5)
   });
 
   it("respects an explicit imageFormat and the effective jpegQuality", async () => {
-    const encoded = await kernelRenderLegendPage(
+    const { image: encoded } = await kernelRenderLegendPage(
       {
         rows: [makeMarkerLegendRow()],
+        startRow: 0,
         pageWidthPt: 300,
         pageHeightPt: 200,
         imageFormat: "jpeg",
@@ -811,8 +813,8 @@ describe("kernelRenderLegendPage — página de leyenda del export (ADR-059 §5)
     // A4 (595): ancho donde el título entra en una línea. Con 500 pt el
     // título se envuelve en dos, que es correcto pero rompe el conteo fijo
     // que este test usa para verificar la estructura de la tabla.
-    const encoded = await kernelRenderLegendPage(
-      { rows, pageWidthPt: 595, pageHeightPt: 400 },
+    const { image: encoded } = await kernelRenderLegendPage(
+      { rows, startRow: 0, pageWidthPt: 595, pageHeightPt: 400 },
       legendOpts,
     );
 
@@ -843,12 +845,41 @@ describe("kernelRenderLegendPage — página de leyenda del export (ADR-059 §5)
     expect(row1Prefixes!.args[0]).toBe("MATR, MAT");
   });
 
+  it("draws one page from startRow and reports how many rows it drew (ADR-219 §6)", async () => {
+    const rows = [0, 1, 2, 3, 4].map((i) =>
+      makeMarkerLegendRow({ prefixes: `PRE${i}`, typeName: `T${i}`, countLabel: "1 marcador" }),
+    );
+
+    // Página de 150 pt: entran dos filas bajo el título.
+    const first = await kernelRenderLegendPage(
+      { rows, startRow: 0, pageWidthPt: 595, pageHeightPt: 150 },
+      legendOpts,
+    );
+    const second = await kernelRenderLegendPage(
+      { rows, startRow: first.rowsDrawn, pageWidthPt: 595, pageHeightPt: 150 },
+      legendOpts,
+    );
+
+    expect(first.rowsDrawn).toBe(2);
+    expect(second.rowsDrawn).toBe(2);
+    const [, secondCanvas] = getCreatedCanvases().filter((canvas) =>
+      canvas.calls.some((call) => call.op === "fillText"),
+    );
+    const secondTexts = secondCanvas!.calls
+      .filter((c) => c.op === "fillText")
+      .map((c) => c.args[0]);
+    expect(secondTexts).toContain("PRE2");
+    expect(secondTexts).toContain("PRE3");
+    expect(secondTexts).not.toContain("PRE1");
+    expect(secondTexts).not.toContain("PRE4");
+  });
+
   it("throws RenderPageFailedError (not the page-scoped constructor) when OffscreenCanvas is unavailable", async () => {
     Reflect.deleteProperty(globalThis, "OffscreenCanvas");
 
     await expect(
       kernelRenderLegendPage(
-        { rows: [makeMarkerLegendRow()], pageWidthPt: 300, pageHeightPt: 200 },
+        { rows: [makeMarkerLegendRow()], startRow: 0, pageWidthPt: 300, pageHeightPt: 200 },
         legendOpts,
       ),
     ).rejects.toThrow("OffscreenCanvas no disponible en este entorno.");
@@ -983,5 +1014,143 @@ describe("toPageFailure — una cancelación no es una falla (ADR-133)", () => {
     expect(mapped).toBeInstanceOf(RenderPageFailedError);
     expect(mapped.message).toContain("canvas sin contexto 2D");
     expect(mapped.details["pageIndex"]).toBe(3);
+  });
+});
+
+describe("cleanup de página después de dibujar (ADR-232, §13 caso 41)", () => {
+  const renderOpts: KernelRenderOptions = {
+    jpegQuality: 0.85,
+    timeoutMs: 5000,
+    abortSignal: new AbortController().signal,
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    installOffscreenCanvasStub();
+    resetCreatedCanvases();
+    resetConvertToBlobCalls();
+  });
+
+  /** Página doble que registra el orden entre `render().promise` y `cleanup()`. */
+  function createTrackedPage(
+    events: string[],
+    renderOutcome: "resolve" | "reject" = "resolve",
+  ): { readonly page: Record<string, unknown>; readonly cleanup: ReturnType<typeof vi.fn> } {
+    const base = createMockPage({ width: 300, height: 200 });
+    const cleanup = vi.fn(() => {
+      events.push(`cleanup(blobs=${String(getConvertToBlobCalls().length)})`);
+    });
+    const page: Record<string, unknown> = {
+      ...base,
+      cleanup,
+      render: vi.fn(() => {
+        events.push("render");
+        const promise =
+          renderOutcome === "resolve"
+            ? Promise.resolve().then(() => {
+                events.push("render-resolved");
+              })
+            : Promise.reject(new Error("render roto"));
+        return { promise };
+      }),
+    };
+    return { page, cleanup };
+  }
+
+  async function loadDoc(docId: string, page: Record<string, unknown>): Promise<void> {
+    vi.mocked(getDocument).mockReturnValue(
+      mockGetDocumentResult(createMockPdfDocument({ pageCount: 1, pageFactory: () => page })),
+    );
+    await kernelLoadDocument({ documentId: docId, buffer: createValidBuffer() });
+  }
+
+  it("rasterizePage releases the page objects after drawing it (ADR-232)", async () => {
+    const events: string[] = [];
+    const { page, cleanup } = createTrackedPage(events);
+    await loadDoc("doc-adr232-raster", page);
+
+    const image = await kernelRasterizePage(
+      { documentId: "doc-adr232-raster", pageIndex: 0, scale: 1 },
+      { timeoutMs: 5000, abortSignal: new AbortController().signal },
+    );
+
+    expect(image.format).toBe("png");
+    expect(cleanup).toHaveBeenCalledTimes(1);
+    // Después de que el dibujo resolvió y antes de codificar (ningún blob aún).
+    expect(events).toEqual(["render", "render-resolved", "cleanup(blobs=0)"]);
+  });
+
+  it("a full render releases the page objects and a preview render does not (ADR-232)", async () => {
+    const fullEvents: string[] = [];
+    const full = createTrackedPage(fullEvents);
+    await loadDoc("doc-adr232-full", full.page);
+    await kernelRenderPage(
+      { documentId: "doc-adr232-full", pageIndex: 0, kind: "original", mode: "full" },
+      renderOpts,
+    );
+    expect(full.cleanup).toHaveBeenCalledTimes(1);
+    expect(fullEvents).toEqual(["render", "render-resolved", "cleanup(blobs=0)"]);
+
+    const previewEvents: string[] = [];
+    const preview = createTrackedPage(previewEvents);
+    await loadDoc("doc-adr232-preview", preview.page);
+    await kernelRenderPage(
+      {
+        documentId: "doc-adr232-preview",
+        pageIndex: 0,
+        kind: "original",
+        mode: "preview",
+        scale: 1,
+      },
+      renderOpts,
+    );
+    // Redibujar la misma página a otra escala tampoco lo llama.
+    await kernelRenderPage(
+      {
+        documentId: "doc-adr232-preview",
+        pageIndex: 0,
+        kind: "original",
+        mode: "preview",
+        scale: 2,
+      },
+      renderOpts,
+    );
+    expect(preview.page["render"]).toHaveBeenCalledTimes(2);
+    expect(preview.cleanup).not.toHaveBeenCalled();
+  });
+
+  it("a failed or cancelled render does not call cleanup (ADR-232)", async () => {
+    const failedEvents: string[] = [];
+    const failing = createTrackedPage(failedEvents, "reject");
+    await loadDoc("doc-adr232-fail", failing.page);
+
+    await expect(
+      kernelRasterizePage(
+        { documentId: "doc-adr232-fail", pageIndex: 0, scale: 1 },
+        { timeoutMs: 5000, abortSignal: new AbortController().signal },
+      ),
+    ).rejects.toBeInstanceOf(RenderPageFailedError);
+    await expect(
+      kernelRenderPage(
+        { documentId: "doc-adr232-fail", pageIndex: 0, kind: "original", mode: "full" },
+        renderOpts,
+      ),
+    ).rejects.toBeInstanceOf(RenderPageFailedError);
+    expect(failing.cleanup).not.toHaveBeenCalled();
+
+    // Cancelación de pdf.js durante el dibujo: se mapea a CancelledError y
+    // tampoco se llama.
+    const cancelled = createTrackedPage([]);
+    const cancelError = new Error("Rendering cancelled, page 1");
+    cancelError.name = "RenderingCancelledException";
+    cancelled.page["render"] = vi.fn(() => ({ promise: Promise.reject(cancelError) }));
+    await loadDoc("doc-adr232-cancel", cancelled.page);
+    await expect(
+      kernelRasterizePage(
+        { documentId: "doc-adr232-cancel", pageIndex: 0, scale: 1 },
+        { timeoutMs: 5000, abortSignal: new AbortController().signal },
+      ),
+    ).rejects.toBeInstanceOf(CancelledError);
+    expect(cancelled.cleanup).not.toHaveBeenCalled();
   });
 });

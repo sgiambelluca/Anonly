@@ -8,7 +8,10 @@ import {
   InvalidInputError,
   ReplacementMode,
   type EngineContext,
+  type EntityGroup,
   type Replacement,
+  type UserEntityTypeDefinition,
+  type UserEntityTypeId,
 } from "@anonly/shared";
 import { PDFDocument } from "pdf-lib";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -689,15 +692,97 @@ describe("ExportEngine — unit", () => {
         ],
       });
 
-      const entries = buildMarkerLegendEntries([groupLevel0, groupLevel2]);
+      const entries = buildMarkerLegendEntries([groupLevel0, groupLevel2], []);
       // markerCount = miembros (3), no grupos (2).
       expect(entries).toEqual([
         { type: EntityType.Person, prefixes: ["PERSONA", "PRS"], markerCount: 3 },
       ]);
 
-      const rows = buildMarkerLegend(entries);
+      const rows = buildMarkerLegend(entries, []);
       expect(rows).toEqual([
         { prefixes: "PERSONA, PRS", typeName: "Persona", countLabel: "3 marcadores" },
+      ]);
+    });
+
+    // ─── ADR-219 §6, caso 22: tipos propios en la hoja de referencia ───
+
+    const USER_TYPE_ID_A: UserEntityTypeId = "user:00000000-0000-4000-8000-00000000000a";
+    const USER_TYPE_ID_B: UserEntityTypeId = "user:00000000-0000-4000-8000-00000000000b";
+    const USER_TYPE_ID_C: UserEntityTypeId = "user:00000000-0000-4000-8000-00000000000c";
+    const USER_TYPE_ID_D: UserEntityTypeId = "user:00000000-0000-4000-8000-00000000000d";
+    const USER_TYPE_ID_E: UserEntityTypeId = "user:00000000-0000-4000-8000-00000000000e";
+    const USER_TYPE_ID_F: UserEntityTypeId = "user:00000000-0000-4000-8000-00000000000f";
+
+    function userTypeGroup(id: string, type: UserEntityTypeId, label: string): EntityGroup {
+      return createEntityGroup({
+        id,
+        type,
+        replacementValue: `[${label} 01]`,
+        replacementMode: ReplacementMode.Placeholder,
+      });
+    }
+
+    it("user types appear in the legend by their name, after the base types", () => {
+      const userTypes: ReadonlyArray<UserEntityTypeDefinition> = [
+        { id: USER_TYPE_ID_A, name: "Historia clínica" },
+      ];
+      // El tipo propio llega PRIMERO en la entrada: la fila igual va después.
+      const groups = [
+        userTypeGroup("g-user", USER_TYPE_ID_A, "HISTORIA CLINICA"),
+        createEntityGroup({ id: "g-dni", type: EntityType.DNI, replacementValue: "[DNI 01]" }),
+        createEntityGroup({
+          id: "g-person",
+          type: EntityType.Person,
+          replacementValue: "[PERSONA 01]",
+        }),
+      ];
+
+      const entries = buildMarkerLegendEntries(groups, userTypes);
+
+      expect(entries.map((entry) => entry.type)).toEqual([
+        EntityType.Person,
+        EntityType.DNI,
+        USER_TYPE_ID_A,
+      ]);
+      expect(buildMarkerLegend(entries, userTypes)).toEqual([
+        { prefixes: "PERSONA", typeName: "Persona", countLabel: "1 marcador" },
+        { prefixes: "DNI", typeName: "DNI", countLabel: "1 marcador" },
+        // El nombre como lo escribió el usuario, no su etiqueta.
+        { prefixes: "HISTORIA CLINICA", typeName: "Historia clínica", countLabel: "1 marcador" },
+      ]);
+    });
+
+    it("user type rows sort by name in Spanish order, then by id", () => {
+      // Orden español: Álbum, Igual, Nube, Ñoño, Zeta. En inglés Ñoño iría antes
+      // de Nube, y por unidad de código Álbum y Ñoño irían después de Zeta. "Igual" está dos veces
+      // para el desempate por id.
+      const userTypes: ReadonlyArray<UserEntityTypeDefinition> = [
+        { id: USER_TYPE_ID_A, name: "Zeta" },
+        { id: USER_TYPE_ID_B, name: "Ñoño" },
+        { id: USER_TYPE_ID_C, name: "Álbum" },
+        { id: USER_TYPE_ID_D, name: "Igual" },
+        { id: USER_TYPE_ID_E, name: "Igual" },
+        { id: USER_TYPE_ID_F, name: "Nube" },
+      ];
+      // Llegan en un orden que no es el esperado, con el segundo "Igual" antes.
+      const groups = [
+        userTypeGroup("g-a", USER_TYPE_ID_A, "ZETA"),
+        userTypeGroup("g-e", USER_TYPE_ID_E, "IGUAL"),
+        userTypeGroup("g-b", USER_TYPE_ID_B, "ÑOÑO"),
+        userTypeGroup("g-c", USER_TYPE_ID_C, "ALBUM"),
+        userTypeGroup("g-d", USER_TYPE_ID_D, "IGUAL"),
+        userTypeGroup("g-f", USER_TYPE_ID_F, "NUBE"),
+      ];
+
+      const entries = buildMarkerLegendEntries(groups, userTypes);
+
+      expect(entries.map((entry) => entry.type)).toEqual([
+        USER_TYPE_ID_C, // Álbum
+        USER_TYPE_ID_D, // Igual, id ...d
+        USER_TYPE_ID_E, // Igual, id ...e
+        USER_TYPE_ID_F, // Nube: en español la Ñ va después de la N
+        USER_TYPE_ID_B, // Ñoño
+        USER_TYPE_ID_A, // Zeta
       ]);
     });
 
@@ -735,7 +820,7 @@ describe("ExportEngine — unit", () => {
         }),
       ];
 
-      const entries = buildMarkerLegendEntries(genderedGroups);
+      const entries = buildMarkerLegendEntries(genderedGroups, []);
       expect(entries).toEqual([
         {
           type: EntityType.Person,
@@ -744,7 +829,7 @@ describe("ExportEngine — unit", () => {
         },
       ]);
 
-      const rows = buildMarkerLegend(entries);
+      const rows = buildMarkerLegend(entries, []);
       expect(rows).toEqual([
         {
           prefixes: "PERSONA, MUJER, HOMBRE, MUJ, HOM",
@@ -766,12 +851,10 @@ describe("ExportEngine — unit", () => {
       });
       const disabledPlaceholder = createEntityGroup({ id: "g-disabled", enabled: false });
 
-      const entries = buildMarkerLegendEntries([
-        maskGroup,
-        syntheticGroup,
-        redactGroup,
-        disabledPlaceholder,
-      ]);
+      const entries = buildMarkerLegendEntries(
+        [maskGroup, syntheticGroup, redactGroup, disabledPlaceholder],
+        [],
+      );
 
       expect(entries).toEqual([]);
     });
@@ -809,12 +892,14 @@ describe("ExportEngine — unit", () => {
       vi.mocked(PDFDocument.create).mockResolvedValue(asPdfDocument(mockDoc));
       await engine.init(ctx);
       const provider = createMockRenderPageProvider({
-        legendImage: {
-          bytes: new Uint8Array([9, 9, 9, 9]).buffer,
-          format: "jpeg",
-          widthPx: 50,
-          heightPx: 50,
-        },
+        legendImages: [
+          {
+            bytes: new Uint8Array([9, 9, 9, 9]).buffer,
+            format: "jpeg",
+            widthPx: 50,
+            heightPx: 50,
+          },
+        ],
       });
 
       await engine.export(

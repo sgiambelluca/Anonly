@@ -20,7 +20,7 @@
 import type {
   BoundingBox,
   EntityGroup,
-  EntityType,
+  EntityTypeId,
   TextMatch,
   Word,
 } from "@anonly/anonymization-core";
@@ -76,7 +76,7 @@ export type MatchStatus =
   | {
       readonly kind: "hidden";
       readonly groupId: string;
-      readonly type: EntityType;
+      readonly type: EntityTypeId;
       readonly indexInType: number;
     }
   // Cae sobre un grupo `enabled: false`: no tapa nada (Contracts.md §5), cuenta
@@ -84,7 +84,7 @@ export type MatchStatus =
   | {
       readonly kind: "disabled";
       readonly groupId: string;
-      readonly type: EntityType;
+      readonly type: EntityTypeId;
       readonly indexInType: number;
     }
   | { readonly kind: "unhidden" };
@@ -96,7 +96,7 @@ export type MatchStatus =
  */
 export function resolveMatchStatus(
   match: TextMatch,
-  groupsByType: ReadonlyMap<EntityType, ReadonlyArray<EntityGroup>>,
+  groupsByType: ReadonlyMap<EntityTypeId, ReadonlyArray<EntityGroup>>,
 ): MatchStatus {
   let disabled: MatchStatus = { kind: "unhidden" };
   for (const groups of groupsByType.values()) {

@@ -36,10 +36,18 @@
 import {
   estimateTokenWidth,
   EntityType,
+  InvalidInputError,
+  isUserEntityType,
+  type CountryCode,
   type EntityGroup,
+  type EntityTypeId,
   type PersonGender,
   type OccurrenceRef,
+  type UserEntityTypeDefinition,
+  type UserEntityTypeId,
 } from "@anonly/shared";
+
+import { userTypeLabel } from "./user-type-label.js";
 
 /**
  * Los tres labels de un `EntityType` (más, desde ADR-060, las dos variantes
@@ -90,6 +98,36 @@ const GENDERED_PERSON_LABELS: Readonly<Record<PersonGender, PlaceholderLabelSet>
   m: { level0: "HOMBRE", level1: "HOMB", level2: "HOM" },
 };
 
+/**
+ * ADR-221 §3: las tablas de etiquetas por país. En la 1.1 solo existe la de
+ * `AR`, que es la de siempre; las de Chile y Uruguay llegan con sus catálogos
+ * en la 1.1.1. `resolveLabelSet` y la validación de un tipo propio eligen la
+ * tabla por `detection.country`.
+ */
+const LABEL_TABLES: Readonly<
+  Record<
+    CountryCode,
+    {
+      readonly ladder: Readonly<Record<EntityType, PlaceholderLabelSet>>;
+      readonly gendered: Readonly<Record<PersonGender, PlaceholderLabelSet>>;
+    }
+  >
+> = {
+  AR: { ladder: LADDER_LABELS, gendered: GENDERED_PERSON_LABELS },
+};
+
+/**
+ * El nivel 0 de la tabla de etiquetas de los tipos base de `country`: contra
+ * esas etiquetas valida `validateUserEntityType` (ADR-219 §2).
+ */
+export function baseTypeLabels(country: CountryCode): ReadonlyArray<string> {
+  const table = LABEL_TABLES[country];
+  // MUJER y HOMBRE (ADR-060 §3) también cuentan como etiquetas de tipo base.
+  return [...Object.values(table.ladder), ...Object.values(table.gendered)].map(
+    (labels) => labels.level0,
+  );
+}
+
 export const MASK_FORMAT_BY_TYPE: Readonly<Record<EntityType, string>> = {
   [EntityType.DNI]: "XX.XXX.XXX",
   [EntityType.CUIT]: "XX-XXXXXXXX-X",
@@ -131,11 +169,58 @@ export function pad2(n: number): string {
  */
 export type LabelSetInput = Pick<EntityGroup, "type" | "personGender">;
 
-export function resolveLabelSet(group: LabelSetInput): PlaceholderLabelSet {
-  if (group.type === EntityType.Person && group.personGender !== undefined) {
-    return GENDERED_PERSON_LABELS[group.personGender];
+/**
+ * ADR-219 §2 / ADR-221 §3: de dónde salen la tabla de etiquetas (el país) y las
+ * definiciones de los tipos propios (los guardados y los de la sesión). Lo arma
+ * el motor por sesión.
+ */
+export interface LabelContext {
+  readonly country: CountryCode;
+  readonly findUserType: (id: UserEntityTypeId) => UserEntityTypeDefinition | undefined;
+}
+
+/** Las primeras `n` letras o dígitos de `label`, sin espacios; si no alcanzan, la etiqueta entera. */
+function autoShortLabel(label: string, n: number): string {
+  const alphanumeric = [...label].filter((char) => /[\p{L}\p{N}]/u.test(char)).join("");
+  return alphanumeric.length < n ? label : alphanumeric.slice(0, n);
+}
+
+/** ADR-219 §2: la escalera de un tipo propio, armada desde su definición. */
+function userTypeLabelSet(definition: UserEntityTypeDefinition): PlaceholderLabelSet {
+  const level0 = userTypeLabel(definition.name);
+  const level1 = definition.shortLabels?.level1;
+  const level2 = definition.shortLabels?.level2;
+  return {
+    level0,
+    level1: level1 !== undefined ? userTypeLabel(level1) : autoShortLabel(level0, 4),
+    level2: level2 !== undefined ? userTypeLabel(level2) : autoShortLabel(level0, 3),
+  };
+}
+
+/**
+ * Máscara de respaldo de un tipo (ADR-012, ADR-029). Un tipo propio no tiene
+ * tabla: su máscara sale de `maskByCharacters(canonicalValue)` (ADR-219 §3), así
+ * que acá devuelve `""` y nadie la lee.
+ */
+export function maskFormatFallback(type: EntityTypeId): string {
+  return isUserEntityType(type) ? "" : MASK_FORMAT_BY_TYPE[type];
+}
+
+export function resolveLabelSet(group: LabelSetInput, context: LabelContext): PlaceholderLabelSet {
+  if (isUserEntityType(group.type)) {
+    const definition = context.findUserType(group.type);
+    if (definition === undefined) {
+      throw new InvalidInputError("grouping-engine: tipo propio sin definición.", {
+        type: group.type,
+      });
+    }
+    return userTypeLabelSet(definition);
   }
-  return LADDER_LABELS[group.type];
+  const table = LABEL_TABLES[context.country];
+  if (group.type === EntityType.Person && group.personGender !== undefined) {
+    return table.gendered[group.personGender];
+  }
+  return table.ladder[group.type];
 }
 
 /** Nivel 0/1: `[<LABEL> <NN>]`; nivel 2: colapsa el separador a guion (`[<CORTO>-<NN>]`). */
@@ -195,8 +280,8 @@ export type PlaceholderValueInput = LabelSetInput & Pick<EntityGroup, "indexInTy
  * `InternalGroup`, estructuralmente compatible con `EntityGroup`) ya tiene
  * esos tres campos actualizados en el momento de llamar.
  */
-export function buildPlaceholderValue(group: PlaceholderValueInput): string {
-  const labels = resolveLabelSet(group);
+export function buildPlaceholderValue(group: PlaceholderValueInput, context: LabelContext): string {
+  const labels = resolveLabelSet(group, context);
   const level = selectAbbreviationLevel(labels, group.indexInType, group.members);
   return tokenForLevel(labels, level, group.indexInType);
 }
@@ -210,8 +295,11 @@ export function buildPlaceholderValue(group: PlaceholderValueInput): string {
  * igual o menos que el anterior), así que deduplicar con `Set` preservando
  * el orden de inserción alcanza — no hace falta ordenar por longitud.
  */
-export function buildPlaceholderLadder(group: PlaceholderValueInput): ReadonlyArray<string> {
-  const labels = resolveLabelSet(group);
+export function buildPlaceholderLadder(
+  group: PlaceholderValueInput,
+  context: LabelContext,
+): ReadonlyArray<string> {
+  const labels = resolveLabelSet(group, context);
   const tokens = ([0, 1, 2] as const).map((level) =>
     tokenForLevel(labels, level, group.indexInType),
   );

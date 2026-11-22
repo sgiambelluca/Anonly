@@ -130,9 +130,11 @@ import {
   EntityType,
   EventChannel,
   InvalidInputError,
+  isUserEntityType,
   ReplacementMode,
   type EngineContext,
   type EntityGroup,
+  type EntityTypeId,
   type ExportMetadata,
   type ExportPagePayload,
   type ExportSavePayload,
@@ -140,6 +142,7 @@ import {
   type MarkerLegendEntry,
   type MarkerLegendRow,
   type Replacement,
+  type UserEntityTypeDefinition,
 } from "@anonly/shared";
 
 import { ExportFailedError, ExportTimeoutError } from "./export.errors.js";
@@ -433,6 +436,28 @@ const MARKER_LEGEND_TYPE_NAME: Readonly<Record<EntityType, string>> = {
 // el export completo por una fila de leyenda).
 const PLACEHOLDER_PREFIX_PATTERN = /^\[(.+)[\s-]\d+\]$/;
 
+/**
+ * Nombre de la fila de un tipo en la hoja de referencia (ADR-219 §6): el de la
+ * tabla de arriba para un tipo base, y el `name` de su definición en
+ * `userTypes` para un tipo propio. Un tipo propio sin definición no tiene
+ * nombre que mostrar: lo rechaza antes la validación de §9, y esta guarda
+ * cubre a quien llame a las funciones puras sin pasar por `export()`.
+ */
+function legendTypeName(
+  type: EntityTypeId,
+  userTypes: ReadonlyArray<UserEntityTypeDefinition>,
+): string {
+  if (!isUserEntityType(type)) return MARKER_LEGEND_TYPE_NAME[type];
+  const definition = userTypes.find((candidate) => candidate.id === type);
+  if (definition === undefined) {
+    throw new InvalidInputError(
+      "export-engine: un tipo propio de la leyenda no tiene definición en userTypes",
+      { type },
+    );
+  }
+  return definition.name;
+}
+
 function extractPlaceholderPrefix(replacementValue: string): string | undefined {
   return PLACEHOLDER_PREFIX_PATTERN.exec(replacementValue)?.[1];
 }
@@ -450,9 +475,10 @@ function extractPlaceholderPrefix(replacementValue: string): string | undefined 
  */
 export function buildMarkerLegendEntries(
   groups: ReadonlyArray<EntityGroup>,
+  userTypes: ReadonlyArray<UserEntityTypeDefinition>,
 ): ReadonlyArray<MarkerLegendEntry> {
-  const prefixesByType = new Map<EntityType, Set<string>>();
-  const countByType = new Map<EntityType, number>();
+  const prefixesByType = new Map<EntityTypeId, Set<string>>();
+  const countByType = new Map<EntityTypeId, number>();
 
   for (const group of groups) {
     if (!group.enabled || group.replacementMode !== ReplacementMode.Placeholder) continue;
@@ -472,6 +498,28 @@ export function buildMarkerLegendEntries(
     if (prefixes === undefined) continue;
     entries.push({ type, prefixes: [...prefixes], markerCount: countByType.get(type) ?? 0 });
   }
+
+  // ADR-219 §6, caso 22: los tipos propios van después de los base, por el
+  // `name` de su definición con `localeCompare(…, "es")` -- el orden A–Z de la
+  // lista de la interfaz -- y a igual nombre decide el `id`.
+  const userTypeIds = [...prefixesByType.keys()].filter(isUserEntityType);
+  const namedUserTypes = userTypeIds.map((type) => ({
+    type,
+    name: legendTypeName(type, userTypes),
+  }));
+  namedUserTypes.sort((a, b) => {
+    const byName = a.name.localeCompare(b.name, "es");
+    if (byName !== 0) return byName;
+    if (a.type < b.type) return -1;
+    return a.type > b.type ? 1 : 0;
+  });
+  for (const { type } of namedUserTypes) {
+    entries.push({
+      type,
+      prefixes: [...(prefixesByType.get(type) ?? [])],
+      markerCount: countByType.get(type) ?? 0,
+    });
+  }
   return entries;
 }
 
@@ -482,16 +530,17 @@ export function buildMarkerLegendEntries(
  */
 export function buildMarkerLegend(
   entries: ReadonlyArray<MarkerLegendEntry>,
+  userTypes: ReadonlyArray<UserEntityTypeDefinition>,
 ): ReadonlyArray<MarkerLegendRow> {
   return entries.map((entry) => ({
     prefixes: entry.prefixes.join(", "),
-    typeName: MARKER_LEGEND_TYPE_NAME[entry.type],
+    typeName: legendTypeName(entry.type, userTypes),
     countLabel: `${entry.markerCount} marcador${entry.markerCount === 1 ? "" : "es"}`,
   }));
 }
 
 interface LegendPayloadFields {
-  readonly legendImage: EncodedPageImage;
+  readonly legendImages: ReadonlyArray<EncodedPageImage>;
   readonly legendPageWidthPt: number;
   readonly legendPageHeightPt: number;
 }
@@ -502,7 +551,7 @@ async function renderLegendWithTimeout(
   abortSignal: AbortSignal,
   documentId: string,
   timeoutMs: number,
-): Promise<EncodedPageImage> {
+): Promise<ReadonlyArray<EncodedPageImage>> {
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
   const timeoutPromise = new Promise<never>((_, reject) => {
     timeoutId = setTimeout(() => {
@@ -691,6 +740,24 @@ export class ExportEngine implements IEngine {
         { documentId: input.documentId, jpegQuality },
       );
     }
+    // ADR-219 §6, §9: con la leyenda, cada tipo propio de un grupo habilitado en
+    // modo placeholder tiene su definición en userTypes. Antes de rasterizar
+    // ninguna página, porque sin definición la fila no tiene nombre. Sin la
+    // leyenda, userTypes no se consulta.
+    if (input.options.includeMarkerLegend) {
+      for (const group of input.groups) {
+        if (!group.enabled || group.replacementMode !== ReplacementMode.Placeholder) continue;
+        if (
+          isUserEntityType(group.type) &&
+          !input.userTypes.some((definition) => definition.id === group.type)
+        ) {
+          throw new InvalidInputError(
+            "options.includeMarkerLegend: un tipo propio de la leyenda no tiene definición en userTypes.",
+            { documentId: input.documentId, groupId: group.id },
+          );
+        }
+      }
+    }
     // ADR-190 §5: índices fuera de [0, pageCount) o no enteros lanzan
     // InvalidInputError; los duplicados se ignoran acá y en exportPage.
     for (const pageIndex of input.options.coveredPages ?? []) {
@@ -813,7 +880,7 @@ export class ExportEngine implements IEngine {
   ): Promise<LegendPayloadFields | undefined> {
     if (!input.options.includeMarkerLegend) return undefined;
 
-    const entries = buildMarkerLegendEntries(input.groups);
+    const entries = buildMarkerLegendEntries(input.groups, input.userTypes);
     if (entries.length === 0) {
       ctx.logger.warn(
         "includeMarkerLegend activo pero ningún grupo placeholder habilitado; no se agrega la página de leyenda.",
@@ -833,11 +900,11 @@ export class ExportEngine implements IEngine {
       );
     }
 
-    const rows = buildMarkerLegend(entries);
-    const legendImage = await this.renderLegendWithRetry(input, ctx, rows, timeoutMs);
+    const rows = buildMarkerLegend(entries, input.userTypes);
+    const legendImages = await this.renderLegendWithRetry(input, ctx, rows, timeoutMs);
 
     return {
-      legendImage,
+      legendImages,
       legendPageWidthPt: firstPage.width,
       legendPageHeightPt: firstPage.height,
     };
@@ -853,7 +920,7 @@ export class ExportEngine implements IEngine {
     ctx: EngineContext,
     rows: ReadonlyArray<MarkerLegendRow>,
     timeoutMs: number,
-  ): Promise<EncodedPageImage> {
+  ): Promise<ReadonlyArray<EncodedPageImage>> {
     let lastError: unknown;
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       if (ctx.abortSignal.aborted) {
@@ -893,7 +960,7 @@ export class ExportEngine implements IEngine {
       metadata,
       ...(legend !== undefined
         ? {
-            legendImage: legend.legendImage,
+            legendImages: legend.legendImages,
             legendPageWidthPt: legend.legendPageWidthPt,
             legendPageHeightPt: legend.legendPageHeightPt,
           }

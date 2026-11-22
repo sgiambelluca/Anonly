@@ -42,6 +42,7 @@ import {
   GaugeIcon,
   GlobeIcon,
   InfoIcon,
+  KeyboardIcon,
   RefreshCwIcon,
   SunMoonIcon,
   TriangleAlertIcon,
@@ -51,11 +52,12 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { actions } from "../../core-adapter/actions.js";
 import { recreateCore } from "../../core-adapter/index.js";
 import {
-  deriveEngineConfigOverrides,
+  deriveCoreOverrides,
   readDeviceSignals,
   readShellPlatform,
   sameEngineConfigOverrides,
 } from "../../core-adapter/settingsToEngineConfig.js";
+import { useDetectionStore } from "../../store/detection.store.js";
 import { useDocumentStore } from "../../store/document.store.js";
 import {
   installsWithoutAsking,
@@ -92,10 +94,15 @@ import {
   describeTheme,
   OCR_LANGUAGES_SLOT_TEXT,
   describePerformancePreset,
+  HIGHLIGHT_ENTITIES_HINT,
+  HIGHLIGHT_ENTITIES_LABEL,
   PERFORMANCE_PRESET_LABEL,
   PERFORMANCE_PRESET_ORDER,
   resolveOcrLanguagesSlot,
   resolveSaveErrorSlot,
+  SHORTCUTS_SECTION_BUTTON,
+  SHORTCUTS_SECTION_SUBTITLE,
+  SHORTCUTS_SECTION_TITLE,
   THEME_LABEL,
   THEME_ORDER,
   UPDATE_MODE_LABEL,
@@ -106,6 +113,7 @@ import {
   UPDATE_SECTION_SUBTITLE,
   updateModeDescription,
 } from "./settingsCopy.js";
+import { ShortcutsDialog } from "./ShortcutsDialog.js";
 import { transitionManualUpdateCheck, type ManualUpdateCheckState } from "./updateCheckState.js";
 import {
   syncAutomaticChecksPreference,
@@ -180,9 +188,13 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
    * en cada render — no cambia durante la vida de la página.
    */
   const [theme, setTheme] = useState<Theme>(() => useSettingsStore.getState().theme);
+  const [highlightEntities, setHighlightEntities] = useState<boolean>(
+    () => useSettingsStore.getState().highlightEntities,
+  );
   const [shellUpdater] = useState(() => getShellUpdater());
   const [platform] = useState(() => readShellPlatform());
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [manualUpdateCheck, setManualUpdateCheck] = useState<ManualUpdateCheckState>("idle");
@@ -208,7 +220,9 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
     setOcrLanguages(current.ocrLanguages);
     setUpdateMode(current.updateMode);
     setTheme(current.theme);
+    setHighlightEntities(current.highlightEntities);
     setSaveError(null);
+    setShortcutsOpen(false);
     manualUpdateCheckRef.current = "idle";
     setManualUpdateCheck("idle");
   }, [open]);
@@ -220,6 +234,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
     ocrLanguages: ReadonlyArray<string>;
     updateMode: UpdateMode;
     theme: Theme;
+    highlightEntities: boolean;
   }): void {
     const previousMode = useSettingsStore.getState().updateMode;
     const previousSearches = searchesAutomatically(previousMode);
@@ -258,6 +273,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
       ocrLanguages,
       updateMode,
       theme,
+      highlightEntities,
     };
     const change = diffReanalyzeChange(previous, next);
     const needsReanalyze =
@@ -282,11 +298,12 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
      * garantiza que nadie suelte un PDF en la ventana sin core, donde
      * `getCore()` lanzaría.
      */
-    const nextOverrides = deriveEngineConfigOverrides(next, deviceSignals);
+    const detection = useDetectionStore.getState().saved;
+    const nextOverrides = deriveCoreOverrides(next, detection, deviceSignals);
     const needsRecreate =
       documentId === null &&
       !sameEngineConfigOverrides(
-        deriveEngineConfigOverrides(previous, deviceSignals),
+        deriveCoreOverrides(previous, detection, deviceSignals),
         nextOverrides,
       );
 
@@ -318,6 +335,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
       ocrLanguages,
       updateMode,
       theme,
+      highlightEntities,
     };
     const change = diffReanalyzeChange(previous, next);
     const patches = planReanalyzePatches(change);
@@ -450,15 +468,17 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
               <p className="h-5 truncate text-sm text-text-secondary">
                 {describePerformancePreset(performancePreset, deviceSignals)}
               </p>
-              {/* Ranura reservada aunque no haya documento: no cambia el alto. */}
-              <p
-                className={`flex h-5 items-center gap-1.5 text-sm text-text-secondary ${
-                  documentId === null ? "invisible" : ""
-                }`}
-              >
-                <InfoIcon className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                Se aplica al próximo documento; no cambia el que está abierto.
-              </p>
+              {/*
+                Solo con un documento abierto. No hace falta reservarle lugar:
+                mientras Configuración está abierta no se abre ni se cierra un
+                documento, así que el alto no cambia (UX §11b.17).
+              */}
+              {documentId !== null && (
+                <p className="flex h-5 items-center gap-1.5 text-sm text-text-secondary">
+                  <InfoIcon className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                  Se aplica al próximo documento; no cambia el que está abierto.
+                </p>
+              )}
             </div>
             <div className="h-px bg-border" />
             <div className="flex flex-col gap-2">
@@ -548,7 +568,37 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                 </button>
               ))}
             </div>
+            <div className="h-px bg-border" />
+            {/*
+              Pasada de UI de la 1.1 (Components.md §13b.8): el resaltado de lo
+              detectado en el original se puede apagar. Se aplica al guardar, como
+              el tema.
+            */}
+            <div className="flex flex-col gap-1">
+              <Checkbox
+                id="settings-highlight-entities"
+                checked={highlightEntities}
+                onCheckedChange={setHighlightEntities}
+                label={HIGHLIGHT_ENTITIES_LABEL}
+              />
+              <span className="pl-6 text-sm text-text-secondary">{HIGHLIGHT_ENTITIES_HINT}</span>
+            </div>
           </Section>
+
+          {/*
+            ADR-229 §8: la ayuda de atajos vive acá y no en la barra (los atajos
+            no tienen relación con el documento abierto). Con o sin documento.
+          */}
+          <Section
+            icon={<KeyboardIcon className="h-5 w-5" aria-hidden />}
+            title={SHORTCUTS_SECTION_TITLE}
+            subtitle={SHORTCUTS_SECTION_SUBTITLE}
+            aside={
+              <Button variant="secondary" onClick={() => setShortcutsOpen(true)}>
+                {SHORTCUTS_SECTION_BUTTON}
+              </Button>
+            }
+          />
 
           {/*
             Solo dentro del contenedor de escritorio: en un navegador no hay
@@ -665,6 +715,13 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
         >
           {saveErrorSlot.text}
         </p>
+
+        {/* Anidado, como los diálogos de `ExportDialog`: al cerrarse vuelve a Configuración. */}
+        <ShortcutsDialog
+          open={shortcutsOpen}
+          onClose={() => setShortcutsOpen(false)}
+          platform={platform === "macos" ? "mac" : "other"}
+        />
       </Dialog>
 
       <ConfirmDialog

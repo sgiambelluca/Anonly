@@ -16,9 +16,10 @@
 import type {
   EditPreviewGroup,
   EntityGroup,
-  EntityType,
+  EntityTypeId,
   PersonGenderChoice,
   ReplacementMode,
+  UserEntityTypeDefinition,
 } from "@anonly/anonymization-core";
 
 import { actions } from "../../core-adapter/actions.js";
@@ -26,14 +27,17 @@ import { useEntitiesStore } from "../../store/entities.store.js";
 import { showToast } from "../common/toast.js";
 import { removedGroupOverlapReveal } from "../conflicts/conflictResolution.js";
 
-import { editToast, recordEdit } from "./editHistory.js";
+import { newTypeToastNote, TYPE_ACTION_FAILED_TOAST } from "./documentTypeCopy.js";
+import { discardLastEdit, editToast, recordEdit } from "./editHistory.js";
 import { typeChangeToastText } from "./editPreviews.js";
+import { typeSingular } from "./entityTypeLabels.js";
 import {
   discardedTextToastText,
   enabledToastText,
   groupsToToggle,
   removedToastText,
 } from "./undoableEdits.js";
+import { currentUserTypes } from "./useUserTypes.js";
 
 /**
  * Habilitar/deshabilitar uno o varios grupos. Cubre las dos superficies que
@@ -124,16 +128,45 @@ export function applyLeaveVisible(group: EntityGroup): void {
   applyEnabled({ groups: [group], next: false, label: group.canonicalValue, isType: false });
 }
 
-/** "Cambiar tipo…" (ADR-082 §6). `next` es la vista previa del Core, para el toast. */
+/**
+ * "Cambiar tipo…" (ADR-082 §6). `next` es la vista previa del Core, para el toast.
+ *
+ * Con `newType` es «Crear y cambiar» (ADR-229 §2): **una sola** entrada del
+ * deshacer, después `defineDocumentEntityType` y después el cambio de tipo
+ * (`React_Client.md` §3.9). `type` es entonces el id del tipo nuevo.
+ */
 export function applyTypeChange(
   group: EntityGroup,
-  type: EntityType,
+  type: EntityTypeId,
   next: EditPreviewGroup | undefined,
-): void {
-  const text = typeChangeToastText(group.canonicalValue, next);
+  newType?: UserEntityTypeDefinition,
+  saveNewType = false,
+): boolean {
+  const text = typeChangeToastText(
+    group.canonicalValue,
+    newType?.name ?? typeSingular(type, currentUserTypes()),
+    next,
+  );
   const recorded = recordEdit(text.title);
+  if (newType !== undefined) {
+    try {
+      actions.defineDocumentType(newType);
+    } catch {
+      if (recorded) discardLastEdit();
+      showToast({ title: TYPE_ACTION_FAILED_TOAST, tone: "error" });
+      return false;
+    }
+    // «Guardarlo», tildada en el campo «Nuevo tipo» (ADR-225 §5, precisión del 2026-11-21).
+    if (saveNewType) actions.saveDocumentType(newType.id);
+  }
   actions.updateGroup(group.id, { type });
-  showToast(editToast(text, recorded));
+  // Con un tipo nuevo el Core no previsualizó el cambio (el tipo todavía no
+  // existía): el toast nombra el tipo desde la definición recién creada y dice
+  // si quedó guardado, como el pie del selector (`Components.md` §3.8 y §13b.7).
+  const description =
+    newType !== undefined ? { ...text, description: newTypeToastNote(saveNewType) } : text;
+  showToast(editToast(description, recorded));
+  return true;
 }
 
 /**
@@ -197,15 +230,33 @@ export function applyRemove(group: EntityGroup): void {
 /**
  * Resolver un conflicto (ADR-083): elegir la grafía y el tipo son una sola
  * decisión del usuario y una sola entrada de la pila.
+ *
+ * **Confirma con un toast con «Deshacer»** cuando el tipo elegido cambia el del
+ * grupo (`currentType`): «{valor}» ahora es {Tipo} · Se reemplaza como {token}
+ * (`Conflicto.dc.html`, `Components.md` §6.2). El token sale de la vista previa
+ * del Core, pedida **antes** de resolver. Sin `currentType` o sin cambio de tipo
+ * no hay toast: no cambió nada que avisar.
  */
 export function applyConflictResolution(params: {
   readonly conflictId: string;
   readonly groupId: string;
   readonly spelling: string | null;
-  readonly entityType: EntityType | undefined;
+  readonly entityType: EntityTypeId | undefined;
+  readonly currentType?: EntityTypeId | undefined;
   readonly label: string;
 }): void {
-  recordEdit(`Revisaste «${params.label}»`);
+  const retype =
+    params.entityType !== undefined &&
+    params.currentType !== undefined &&
+    params.entityType !== params.currentType
+      ? params.entityType
+      : null;
+  const next =
+    retype !== null
+      ? (actions.previewEdit({ kind: "type", groupId: params.groupId, type: retype })?.groups[0] ??
+        undefined)
+      : undefined;
+  const recorded = recordEdit(`Revisaste «${params.label}»`);
   if (params.spelling !== null) {
     actions.updateGroup(params.groupId, { canonicalValue: params.spelling });
   }
@@ -213,6 +264,14 @@ export function applyConflictResolution(params: {
     params.conflictId,
     params.entityType !== undefined ? { entityType: params.entityType } : undefined,
   );
+  if (retype !== null) {
+    showToast(
+      editToast(
+        typeChangeToastText(params.label, typeSingular(retype, currentUserTypes()), next),
+        recorded,
+      ),
+    );
+  }
 }
 
 /**

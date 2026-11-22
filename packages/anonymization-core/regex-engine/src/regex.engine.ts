@@ -13,9 +13,8 @@ import {
   sharesVerticalBand,
   type BoundingBox,
   type EngineContext,
-  type EntityType,
+  type EntityTypeId,
   type IEngine,
-  type ILogger,
   type Occurrence,
   type Page,
   type TextMatch,
@@ -25,6 +24,11 @@ import {
 
 import { normalizeEmailReadWithQ, scanEmailReadWithQ } from "./email-q-scanner.js";
 import { scanEmailDefault, type EmailMatchSpan } from "./email-scanner.js";
+import { compileFormat, type CompiledFormat } from "./formats/format-automaton.js";
+import { detectFormatSpans } from "./formats/format-detect.js";
+import { validateFormat } from "./formats/format-validation.js";
+import { userFormatMaskFormat, userFormatNormalizedValue } from "./formats/format-values.js";
+import { BASE_CATALOG } from "./patterns/catalog.js";
 import { DEFAULT_PATTERNS_AR } from "./patterns/default-ar.js";
 import { RegexInvalidPatternError } from "./regex.errors.js";
 import type {
@@ -34,27 +38,23 @@ import type {
   RegexPattern,
   RegexSearchInput,
 } from "./regex.types.js";
+import { passesRunGuard } from "./run-guard.js";
 
-/* Regex_Engine.md §12: timeout de 1000ms por página por patrón custom. Solo
- * aplica a patrones custom (los default están fijados por el spec y son
- * confiables). Como JS es single-threaded, el "timeout" es best-effort: se
- * mide el tiempo transcurrido DESPUÉS de que la ejecución síncrona retorna
- * (no puede preemptarse a mitad de un backtracking catastrófico sin un
- * Worker — el spec §12 confirma que Regex corre en main thread, no en
- * Worker). Igual cumple el contrato: descarta el patrón con warning y no
- * bloquea a los demás. */
-const CUSTOM_PATTERN_BUDGET_MS = 1000;
 const DEFAULT_EMAIL_PATTERN = DEFAULT_PATTERNS_AR.find((pattern) => pattern.id === "email");
 
 interface RawMatch {
   readonly patternId: string;
-  readonly entityType: EntityType;
+  readonly entityType: EntityTypeId;
   readonly startIndex: number;
   readonly endIndexExclusive: number;
   readonly rawValue: string;
   readonly normalizedValue: string;
   readonly checksumPassed: boolean;
-  readonly maskFormat: string;
+  /** Ausente bajo un tipo propio (ADR-219 §3). */
+  readonly maskFormat?: string;
+  /** ADR-222 §2: el id del formato o patrón que matcheó. */
+  readonly formatId: string;
+  readonly formatOrigin: "base" | "user";
 }
 
 interface WordMapping {
@@ -114,82 +114,6 @@ function withGlobalFlag(pattern: RegExp): RegExp {
   return pattern.global ? pattern : new RegExp(pattern.source, `${pattern.flags}g`);
 }
 
-const RUN_ALNUM_RE = /[\p{L}\p{N}]/u;
-const RUN_SEPARATOR_RE = /[-./]/;
-const HAS_LETTER_RE = /\p{L}/u;
-
-function isRunChar(ch: string | undefined): boolean {
-  return ch !== undefined && RUN_ALNUM_RE.test(ch);
-}
-
-/*
- * ADR-075 §2: extiende [startIndex, endIndexExclusive) hacia los dos lados,
- * a través de [\p{L}\p{N}] y de los tres separadores internos de número -, /
- * y . — un separador solo extiende la corrida si el carácter que sigue del
- * lado hacia el que se expande es alfanumérico (si no, es un borde de
- * puntuación de oración, no una continuación del identificador). Nunca mira
- * dentro de [startIndex, endIndexExclusive): un match con espacios internos
- * (phone-mobile-ar, "11 4567 8900") sigue expandiéndose solo desde sus bordes.
- */
-function computeRunBounds(
-  text: string,
-  startIndex: number,
-  endIndexExclusive: number,
-): { readonly start: number; readonly end: number } {
-  let start = startIndex;
-  for (;;) {
-    if (isRunChar(text[start - 1])) {
-      start -= 1;
-      continue;
-    }
-    if (RUN_SEPARATOR_RE.test(text[start - 1] ?? "") && isRunChar(text[start - 2])) {
-      start -= 1;
-      continue;
-    }
-    break;
-  }
-
-  let end = endIndexExclusive;
-  for (;;) {
-    if (isRunChar(text[end])) {
-      end += 1;
-      continue;
-    }
-    if (RUN_SEPARATOR_RE.test(text[end] ?? "") && isRunChar(text[end + 1])) {
-      end += 1;
-      continue;
-    }
-    break;
-  }
-
-  return { start, end };
-}
-
-/*
- * ADR-075 §2/§4: `true` si el match hay que conservarlo. Se descarta cuando
- * el match no tiene ninguna letra pero su corrida sí — es un tramo de un
- * identificador más largo (número de expediente, folio, etc.), no la entidad
- * que su tipo declara. La condición de aplicabilidad ("el match no tiene
- * letras") hace que la guarda se ignore sola en License/Plate/IBAN/Email —
- * esos matches siempre llevan letras — sin ninguna lista de tipos en el
- * código. Se aplica también a patrones custom (§4): es una propiedad del
- * texto, no del patrón que lo encontró.
- *
- * El espacio de borde que `phone-mobile-ar` se traga (hallazgo post-mergeo,
- * Hito 10.9, escenario 8 de E2E) ya no llega hasta acá: desde v1.6.2 lo
- * recorta `runPattern`, antes de construir el `RawMatch`. Que la guarda mida
- * sobre el match sin espacio sigue siendo tan necesario como entonces —si no,
- * `computeRunBounds` mide adyacencia contra el carácter que está ANTES del
- * espacio (la "T" de "CUIT") y la corrida se extiende hasta una palabra con
- * letras, descartando un teléfono real—; lo que cambió es dónde deja de
- * existir el espacio.
- */
-function passesRunGuard(text: string, match: RawMatch): boolean {
-  if (HAS_LETTER_RE.test(match.rawValue)) return true;
-  const { start, end } = computeRunBounds(text, match.startIndex, match.endIndexExclusive);
-  return !HAS_LETTER_RE.test(text.slice(start, end));
-}
-
 /*
  * Recorre `text` con `pattern` y devuelve todos los matches crudos, ya con
  * normalizedValue y el resultado del checksum (si el patrón define uno). El
@@ -226,6 +150,8 @@ function buildRawMatch(
     normalizedValue,
     checksumPassed,
     maskFormat: pattern.maskFormat,
+    formatId: pattern.id,
+    formatOrigin: "base",
   };
 }
 
@@ -350,64 +276,48 @@ function runEmailDefaultPattern(pattern: RegexPattern, page: Page): RawMatch[] {
 }
 
 /*
- * Envuelve runPattern con try/catch (caso 8: regex inválida que lanza al
- * ejecutarse) y con el presupuesto de tiempo (caso 9: catastrophic
- * backtracking). En ambos casos se descarta el patrón para esa página con un
- * warning; no se propaga el error (§12: "Errores de un patrón custom no
- * bloquean los demás").
+ * Caso 10 e ADR-222: overlap entre dos matches de una página. Algoritmo
+ * genérico (no hardcodea DNI/CUIT): ordena por largo descendente, formato
+ * propio antes que base, `startIndex` ascendente y orden de la lista que corre
+ * (estable). Un match se acepta si no choca con ninguno ya aceptado, o si con
+ * cada uno de los que choca cumple `emitBoth` (`emitirAmbos` del spec). Entre
+ * dos formatos base el origen empata y `emitBoth` es falso: es la resolución
+ * de siempre.
  */
-function runCustomPatternWithBudget(
-  pattern: RegexPattern,
-  text: string,
-  budgetMs: number,
-  logger: ILogger,
-): RawMatch[] {
-  const startedAt = Date.now();
-  try {
-    const results = runPattern(pattern, text);
-    const elapsedMs = Date.now() - startedAt;
-    if (elapsedMs > budgetMs) {
-      logger.warn(
-        `Patrón custom "${pattern.id}" excedió el presupuesto de ${budgetMs}ms (${elapsedMs}ms); se descarta para esta página.`,
-        { patternId: pattern.id, elapsedMs, budgetMs },
-      );
-      return [];
-    }
-    return results;
-  } catch (err: unknown) {
-    const reason = err instanceof Error ? err.message : String(err);
-    logger.warn(`Patrón custom "${pattern.id}" es inválido y se descarta: ${reason}`, {
-      patternId: pattern.id,
-      reason,
-    });
-    return [];
-  }
+function containsStrictly(outer: RawMatch, inner: RawMatch): boolean {
+  return (
+    outer.startIndex <= inner.startIndex &&
+    inner.endIndexExclusive <= outer.endIndexExclusive &&
+    outer.endIndexExclusive - outer.startIndex > inner.endIndexExclusive - inner.startIndex
+  );
 }
 
-/*
- * Caso 10: overlap entre dos patrones (DNI dentro de CUIT) → gana el match
- * más largo en el mismo span. Algoritmo genérico (no hardcodea DNI/CUIT):
- * ordena por longitud de span descendente y hace un barrido greedy que
- * descarta cualquier match que se superponga con uno ya aceptado. Ante
- * empate de longitud, gana el de menor startIndex, y como último desempate
- * el orden original (estable).
- */
+function emitBoth(a: RawMatch, m: RawMatch): boolean {
+  return (
+    a.entityType !== m.entityType &&
+    !containsStrictly(a, m) &&
+    !containsStrictly(m, a) &&
+    (a.formatOrigin === "user" || m.formatOrigin === "user")
+  );
+}
+
 function resolveOverlaps(matches: ReadonlyArray<RawMatch>): RawMatch[] {
   const indexed = matches.map((m, i) => ({ m, i }));
   indexed.sort((a, b) => {
     const lenA = a.m.endIndexExclusive - a.m.startIndex;
     const lenB = b.m.endIndexExclusive - b.m.startIndex;
     if (lenA !== lenB) return lenB - lenA;
+    if (a.m.formatOrigin !== b.m.formatOrigin) return a.m.formatOrigin === "user" ? -1 : 1;
     if (a.m.startIndex !== b.m.startIndex) return a.m.startIndex - b.m.startIndex;
     return a.i - b.i;
   });
 
   const accepted: RawMatch[] = [];
   for (const { m } of indexed) {
-    const overlaps = accepted.some(
+    const clashes = accepted.filter(
       (a) => m.startIndex < a.endIndexExclusive && a.startIndex < m.endIndexExclusive,
     );
-    if (!overlaps) accepted.push(m);
+    if (clashes.every((a) => emitBoth(a, m))) accepted.push(m);
   }
 
   accepted.sort((a, b) => a.startIndex - b.startIndex);
@@ -516,10 +426,12 @@ function buildOccurrence(match: RawMatch, page: Page): Occurrence {
     confidence: 1.0,
     entityType: match.entityType,
     // ADR-029: maskFormat se copia del RegexPattern que matcheó (vía RawMatch,
-    // ver runPattern). Siempre es un string definido acá (RegexPattern.maskFormat
-    // es obligatorio, regex.types.ts), así que se asigna directo — no necesita
-    // el mismo condicional que wordSpan (cuyo valor sí puede estar ausente).
-    maskFormat: match.maskFormat,
+    // ver runPattern). De un formato del generador bajo un tipo propio queda
+    // ausente (ADR-219 §3): nunca se asigna explícitamente `undefined`.
+    ...(match.maskFormat !== undefined ? { maskFormat: match.maskFormat } : {}),
+    // ADR-222 §2: formatId y formatOrigin viajan juntos en toda ocurrencia de process.
+    formatId: match.formatId,
+    formatOrigin: match.formatOrigin,
   };
   // exactOptionalPropertyTypes: wordSpan, fragments y context solo se incluyen
   // si existen (nunca se asigna explícitamente `undefined`).
@@ -771,7 +683,7 @@ function collectPageTextMatches(
  * grouping no las junta —0,857 y 0,750 contra un umbral de 0,88—, así que un
  * solo apellido agregado a mano abría cuatro grupos.
  */
-function buildManualOccurrence(match: TextMatch, entityType: EntityType): Occurrence {
+function buildManualOccurrence(match: TextMatch, entityType: EntityTypeId): Occurrence {
   return {
     id: crypto.randomUUID(),
     value: match.text,
@@ -785,21 +697,140 @@ function buildManualOccurrence(match: TextMatch, entityType: EntityType): Occurr
   };
 }
 
+interface CompiledUserFormat {
+  readonly id: string;
+  readonly entityType: EntityTypeId;
+  readonly compiled: CompiledFormat;
+}
+
+/** Un formato del generador prendido, en el orden de la configuración. `format: null` = descartado al init. */
+interface UserFormatEntry {
+  readonly id: string;
+  readonly basedOn: string | undefined;
+  readonly format: CompiledUserFormat | null;
+}
+
+/** La lista que corre, armada por `init` (§6, «Qué corre»). */
+interface RunPlan {
+  readonly basePatterns: ReadonlyArray<RegexPattern>;
+  /** Referencias a otros catálogos descartadas, en el orden de la configuración. */
+  readonly skippedRefIds: ReadonlyArray<string>;
+  readonly userFormats: ReadonlyArray<UserFormatEntry>;
+}
+
+function compileUserFormats(ctx: EngineContext): ReadonlyArray<UserFormatEntry> {
+  const { userFormats, userTypes } = ctx.config.detection;
+  const entries: UserFormatEntry[] = [];
+  for (const definition of userFormats) {
+    if (!definition.enabled) continue;
+    const { ok, issues } = validateFormat(definition, { userTypes, existingFormats: [] });
+    if (!ok) {
+      // Sin nombre ni piezas del formato: solo su id y los códigos de sus problemas.
+      const reason = issues.map((issue) => issue.code).join(", ");
+      const error = new RegexInvalidPatternError(definition.id, reason);
+      ctx.logger.warn(error.message, {
+        code: error.code,
+        formatId: definition.id,
+        issues: issues.map((issue) => issue.code),
+      });
+      entries.push({ id: definition.id, basedOn: definition.basedOn, format: null });
+      continue;
+    }
+    entries.push({
+      id: definition.id,
+      basedOn: definition.basedOn,
+      format: {
+        id: definition.id,
+        entityType: definition.entityType,
+        compiled: compileFormat(definition),
+      },
+    });
+  }
+  return entries;
+}
+
+/*
+ * §6, «Qué corre»: los base del país activo y los universales, sin los
+ * apagados por `baseFormats` ni los que tienen una copia prendida y válida;
+ * las referencias (todas se descartan en la 1.1, caso 51); y los formatos del
+ * generador.
+ */
+function buildRunPlan(ctx: EngineContext): RunPlan {
+  const { country, baseFormats, catalogRefs } = ctx.config.detection;
+  const userFormats = compileUserFormats(ctx);
+
+  const replaced = new Set<string>();
+  for (const entry of userFormats) {
+    if (entry.format !== null && entry.basedOn !== undefined) replaced.add(entry.basedOn);
+  }
+  const disabled = new Set(
+    baseFormats.filter((setting) => !setting.enabled).map((setting) => setting.formatId),
+  );
+  const basePatterns = BASE_CATALOG.filter(
+    ({ info }) => info.country === country || info.country === "universal",
+  )
+    .map(({ pattern }) => pattern)
+    .filter((pattern) => !disabled.has(pattern.id) && !replaced.has(pattern.id));
+
+  const skippedRefIds: string[] = [];
+  for (const ref of catalogRefs) {
+    if (!ref.enabled) continue;
+    // En la 1.1 no hay otro catálogo (ADR-221 §7): toda referencia se descarta.
+    ctx.logger.warn("Referencia a otro catálogo descartada: no hay otro catálogo en la 1.1", {
+      formatId: ref.id,
+    });
+    skippedRefIds.push(ref.id);
+  }
+
+  return { basePatterns, skippedRefIds, userFormats };
+}
+
+/*
+ * ADR-220 §2/§5: recorre la página con el autómata del formato y arma sus
+ * `RawMatch`: tipo de la definición, valor normalizado como el de su tipo
+ * (o `alphanumericKey` bajo un tipo propio), máscara por caracteres bajo un
+ * tipo base, `formatId` y `formatOrigin: "user"`. Un formato del generador no
+ * tiene checksum.
+ */
+function runUserFormat(format: CompiledUserFormat, text: string): RawMatch[] {
+  return detectFormatSpans(format.compiled, text).map(({ start, end }) => {
+    const rawValue = text.slice(start, end);
+    const maskFormat = userFormatMaskFormat(format.entityType, rawValue);
+    return {
+      patternId: format.id,
+      entityType: format.entityType,
+      startIndex: start,
+      endIndexExclusive: end,
+      rawValue,
+      normalizedValue: userFormatNormalizedValue(format.entityType, rawValue),
+      checksumPassed: true,
+      ...(maskFormat !== undefined ? { maskFormat } : {}),
+      formatId: format.id,
+      formatOrigin: "user" as const,
+    };
+  });
+}
+
 export class RegexEngine implements IEngine {
   readonly id = EngineId.Regex;
 
   private ctx: EngineContext | null = null;
-  private customPatterns: ReadonlyArray<RegexPattern> = [];
-  private customPatternIds: ReadonlySet<string> = new Set();
-  private activePatterns: ReadonlyArray<RegexPattern> = DEFAULT_PATTERNS_AR;
+  /** La lista que corre (ADR-221, ADR-223 §2): base, referencias descartadas y formatos del generador. */
+  private plan: RunPlan = { basePatterns: DEFAULT_PATTERNS_AR, skippedRefIds: [], userFormats: [] };
   private initialized = false;
   private disposed = false;
 
+  /*
+   * Compila los formatos del generador de `ctx.config.detection.userFormats`
+   * (ADR-220 §2): los prendidos que pasan `validateFormat`. Uno que no pasa se
+   * descarta con `REGEX_INVALID_PATTERN` y un `warn` —nunca se lanza hacia el
+   * caller— y los demás siguen (§6, «Qué corre», paso 3). `existingFormats` va
+   * vacío: el nombre es para la interfaz, así que dos formatos con el mismo
+   * nombre corren los dos.
+   */
   init(ctx: EngineContext): Promise<void> {
     this.ctx = ctx;
-    this.customPatterns = [];
-    this.customPatternIds = new Set();
-    this.activePatterns = DEFAULT_PATTERNS_AR;
+    this.plan = buildRunPlan(ctx);
     this.initialized = true;
     this.disposed = false;
     ctx.logger.info("Regex Engine initialized");
@@ -836,6 +867,7 @@ export class RegexEngine implements IEngine {
       }
 
       let occurrenceCount = 0;
+      const failedPages = new Map<string, number[]>();
 
       for (const page of document.pages) {
         // Caso 11 (§13): cancelación entre páginas.
@@ -849,22 +881,40 @@ export class RegexEngine implements IEngine {
         }
 
         const rawMatches: RawMatch[] = [];
-        for (const pattern of this.activePatterns) {
-          const isEmailDefault = pattern === DEFAULT_EMAIL_PATTERN;
-          const isCustom = this.customPatternIds.has(pattern.id) && !isEmailDefault;
-          const patternMatches = isCustom
-            ? runCustomPatternWithBudget(pattern, page.text, CUSTOM_PATTERN_BUDGET_MS, ctx.logger)
-            : isEmailDefault
+        for (const pattern of this.plan.basePatterns) {
+          const patternMatches =
+            pattern === DEFAULT_EMAIL_PATTERN
               ? runEmailDefaultPattern(pattern, page)
               : runPattern(pattern, page.text);
           rawMatches.push(...patternMatches);
+        }
+        // ADR-220: los formatos del generador corren después de los base, y
+        // siguen el camino de cualquier match (checksum, guarda, solapamientos).
+        // ADR-220 §6: un fallo del recorrido saltea el formato en esa página.
+        for (const entry of this.plan.userFormats) {
+          if (entry.format === null) continue;
+          try {
+            rawMatches.push(...runUserFormat(entry.format, page.text));
+          } catch (err: unknown) {
+            const pages = failedPages.get(entry.id) ?? [];
+            pages.push(page.index);
+            failedPages.set(entry.id, pages);
+            // Nunca el message ni el stack: pueden arrastrar texto de la página (§11).
+            ctx.logger.warn("Un formato del generador falló en una página y se salteó", {
+              formatId: entry.id,
+              pageIndex: page.index,
+              errorName: err instanceof Error ? err.name : "UnknownError",
+            });
+          }
         }
 
         // Casos 4-5 (§13): checksum inválido (CUIT, Luhn) descarta el match.
         // ADR-075 §2/§4: un match sin letras dentro de una corrida con letras
         // es un tramo de un identificador más largo, no la entidad de su tipo.
         const validMatches = rawMatches.filter(
-          (m) => m.checksumPassed && passesRunGuard(page.text, m),
+          (m) =>
+            m.checksumPassed &&
+            passesRunGuard(page.text, m.startIndex, m.endIndexExclusive, m.rawValue),
         );
         // Caso 10 (§13): overlap → gana el match más largo en el mismo span.
         const resolvedMatches = resolveOverlaps(validMatches);
@@ -880,10 +930,12 @@ export class RegexEngine implements IEngine {
       }
 
       const durationMs = Date.now() - startedAt;
+      const skippedFormats = this.collectSkippedFormats(document.pages.length, failedPages);
       ctx.bus.emit(EventChannel.Regex, EngineEvents.REGEX_FINISHED, {
         documentId: document.id,
         occurrenceCount,
         durationMs,
+        ...(skippedFormats.length > 0 ? { skippedFormats } : {}),
       });
 
       ctx.logger.info(`Regex Engine terminó documento ${document.id}`, {
@@ -904,9 +956,8 @@ export class RegexEngine implements IEngine {
    * trabajo es cómputo síncrono; ver el comentario sobre `process` más
    * arriba). Guardas (`assertNotDisposed`/`assertInitialized`) y manejo de
    * `AbortSignal` idénticos a `process`, pero **nunca** emite
-   * `REGEX_FINISHED` ni llama a `recompileActivePatterns`/toca
-   * `this.customPatterns` — ese registro es solo para patrones que
-   * participan de corridas futuras (§1).
+   * `REGEX_FINISHED` ni toca los formatos que `init` compiló —
+   * esos son solo para las corridas de `process` (§1).
    */
   findLiteral(input: FindLiteralInput, ctx: EngineContext): Promise<RegexEngineOutput> {
     try {
@@ -987,57 +1038,33 @@ export class RegexEngine implements IEngine {
     return matches;
   }
 
-  /*
-   * Runtime, para UI (§6). Valida el patrón con una ejecución de humo contra
-   * un string vacío: si `pattern.pattern` lanza al ejecutarse, se considera
-   * inválido (caso 8), se descarta y se lanza RegexInvalidPatternError para
-   * que el caller lo capture. Patrones válidos se agregan (reemplazando
-   * cualquier patrón custom previo con el mismo id) y se recompila la lista
-   * activa (default ∪ custom).
-   */
-  addPattern(pattern: RegexPattern): void {
-    this.assertNotDisposed();
-    this.assertInitialized();
-
-    try {
-      withGlobalFlag(pattern.pattern).exec("");
-    } catch (err: unknown) {
-      const reason = err instanceof Error ? err.message : String(err);
-      this.ctx?.logger.warn(
-        `Patrón custom "${pattern.id}" es inválido y fue descartado: ${reason}`,
-        {
-          patternId: pattern.id,
-          reason,
-        },
-      );
-      throw new RegexInvalidPatternError(pattern.id, reason);
-    }
-
-    this.customPatterns = [...this.customPatterns.filter((p) => p.id !== pattern.id), pattern];
-    this.recompileActivePatterns();
-  }
-
-  removePattern(patternId: string): void {
-    this.assertNotDisposed();
-    this.assertInitialized();
-
-    this.customPatterns = this.customPatterns.filter((p) => p.id !== patternId);
-    this.recompileActivePatterns();
-  }
-
   dispose(): Promise<void> {
     this.disposed = true;
     this.initialized = false;
-    this.customPatterns = [];
-    this.customPatternIds = new Set();
-    this.activePatterns = [];
+    this.plan = { basePatterns: [], skippedRefIds: [], userFormats: [] };
     this.ctx = null;
     return Promise.resolve();
   }
 
-  private recompileActivePatterns(): void {
-    this.activePatterns = [...DEFAULT_PATTERNS_AR, ...this.customPatterns];
-    this.customPatternIds = new Set(this.customPatterns.map((p) => p.id));
+  /*
+   * §6: una entrada por formato, en el orden de la lista que corre (primero las
+   * referencias, después los formatos del generador). Los descartados al init
+   * figuran con todas las páginas; los que fallaron, con esas páginas en orden.
+   */
+  private collectSkippedFormats(
+    pageCount: number,
+    failedPages: ReadonlyMap<string, ReadonlyArray<number>>,
+  ): ReadonlyArray<{ readonly formatId: string; readonly pageIndices: ReadonlyArray<number> }> {
+    const allPages = Array.from({ length: pageCount }, (_, index) => index);
+    const skipped: Array<{ formatId: string; pageIndices: ReadonlyArray<number> }> = [];
+    for (const formatId of this.plan.skippedRefIds) {
+      skipped.push({ formatId, pageIndices: allPages });
+    }
+    for (const entry of this.plan.userFormats) {
+      const pageIndices = entry.format === null ? allPages : (failedPages.get(entry.id) ?? []);
+      if (pageIndices.length > 0) skipped.push({ formatId: entry.id, pageIndices });
+    }
+    return skipped;
   }
 
   private assertInitialized(): void {

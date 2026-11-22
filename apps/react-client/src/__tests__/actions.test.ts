@@ -68,6 +68,7 @@ vi.mock("../core-adapter/index.js", () => {
       previewEdit,
       createEditCheckpoint,
       restoreEditCheckpoint,
+      getDocumentEntityTypes: vi.fn(() => []),
       discardEditCheckpoints,
       cancel: vi.fn(),
       closeDocument: vi.fn(),

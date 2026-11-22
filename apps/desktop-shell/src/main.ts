@@ -7,7 +7,7 @@ import { app, BrowserWindow, ipcMain, net, protocol, shell } from "electron";
 
 import { PLATFORM_ARG, toDevicePlatform } from "./device-platform";
 import { rendererRoot, resolveAssetPath } from "./paths";
-import { headersFor } from "./security";
+import { headersFor, opensExternally } from "./security";
 import { createMacUpdateCheckPolicy } from "./update-check-policy";
 import { loadBridge, toUpdateEventPayload, type UpdateEventPayload } from "./updater";
 import { cleanupInstallRecovery } from "./windows-install-recovery";
@@ -137,14 +137,15 @@ function registerProtocol(root: string): void {
  * Nada que no sea `app://` se carga adentro de la app: una navegación externa
  * dentro de la ventana correría contenido remoto con el mismo origen que el
  * documento del usuario. Los links legítimos (releases, repo) se delegan al
- * navegador del sistema, que es donde el usuario puede ver a dónde va.
+ * navegador del sistema, que es donde el usuario puede ver a dónde va, y el
+ * `mailto:` de «Acerca de», al programa de correo (ADR-234 §4).
  */
 function lockNavigation(window: BrowserWindow): void {
   window.webContents.on("will-navigate", (event, url) => {
     if (!url.startsWith(`${ORIGIN}/`)) event.preventDefault();
   });
   window.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith("https://")) void shell.openExternal(url);
+    if (opensExternally(url)) void shell.openExternal(url);
     return { action: "deny" };
   });
 }

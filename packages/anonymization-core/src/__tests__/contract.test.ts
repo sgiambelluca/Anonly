@@ -15,12 +15,24 @@ import {
   PipelineStage,
   type Document,
   type EngineContext,
+  type FormatDefinition,
+  type UserEntityTypeDefinition,
 } from "@anonly/shared";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { LruCache } from "../cache.js";
 import { mergeEngineConfig } from "../config.js";
-import { createCore } from "../index.js";
+import {
+  compareFormat,
+  createCore,
+  getCatalog,
+  isUserEntityType,
+  testFormat,
+  userTypeLabel,
+  validateFormat,
+  validateFormatsFile,
+  validateUserEntityType,
+} from "../index.js";
 import { PipelineOrchestrator } from "../orchestrator.js";
 
 import {
@@ -1156,7 +1168,7 @@ describe("Orchestrator — contract tests", () => {
 
   // ─── Mediación de la leyenda de marcadores (ADR-059 §5) ───
 
-  it("renderLegend delegates to RenderEngine.renderLegendPage and returns its EncodedPageImage", async () => {
+  it("renderLegend delegates to RenderEngine.renderLegendPages and returns its images", async () => {
     const bus = createRealBus();
     const engines = createMockEngines();
     const document = createDocument({ pages: [createPage({ index: 0, width: 595, height: 842 })] });
@@ -1168,7 +1180,7 @@ describe("Orchestrator — contract tests", () => {
       widthPx: 595,
       heightPx: 842,
     };
-    vi.spyOn(engines.render, "renderLegendPage").mockResolvedValue(legendImage);
+    vi.spyOn(engines.render, "renderLegendPages").mockResolvedValue([legendImage, legendImage]);
 
     const orchestrator = new PipelineOrchestrator({
       bus,
@@ -1195,7 +1207,10 @@ describe("Orchestrator — contract tests", () => {
     });
     const exportCall = (engines.export.export as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as {
       renderPageProvider: RenderPageProvider;
+      userTypes: ReadonlyArray<unknown>;
     };
+    // Sin tipos propios guardados ni del documento, el export no recibe ninguno.
+    expect(exportCall.userTypes).toEqual([]);
 
     const rows = [{ prefixes: "DNI", typeName: "DNI", countLabel: "1 marcador" }];
     const result = await exportCall.renderPageProvider.renderLegend(
@@ -1203,8 +1218,13 @@ describe("Orchestrator — contract tests", () => {
       new AbortController().signal,
     );
 
-    expect(engines.render.renderLegendPage).toHaveBeenCalledWith(rows, 595, 842, expect.anything());
-    expect(result).toEqual(legendImage);
+    expect(engines.render.renderLegendPages).toHaveBeenCalledWith(
+      rows,
+      595,
+      842,
+      expect.anything(),
+    );
+    expect(result).toEqual([legendImage, legendImage]);
   });
 
   it("group events during detection accumulate without rendering", async () => {
@@ -1568,5 +1588,58 @@ describe("Orchestrator — contract tests", () => {
     expect(orchestrator.findText("doc-1", "Jose Perez")).not.toHaveLength(0);
 
     expect(engines.grouping.getSnapshot("doc-1")).toEqual(before);
+  });
+
+  // ─── Funciones puras de tipos y formatos (1.1, caso 51, ADR-220 §3) ───
+
+  it("format and user type functions are exported and work without a core", () => {
+    const exported = {
+      isUserEntityType,
+      userTypeLabel,
+      validateUserEntityType,
+      getCatalog,
+      validateFormat,
+      testFormat,
+      compareFormat,
+      validateFormatsFile,
+    };
+    for (const fn of Object.values(exported)) expect(typeof fn).toBe("function");
+
+    const type: UserEntityTypeDefinition = {
+      id: "user:11111111-1111-4111-8111-111111111111",
+      name: "Historia clínica",
+    };
+    expect(isUserEntityType(type.id)).toBe(true);
+    expect(isUserEntityType(EntityType.DNI)).toBe(false);
+    expect(userTypeLabel(type.name)).toBe("HISTORIA CLINICA");
+    expect(validateUserEntityType(type, { country: "AR", existing: [] }).ok).toBe(true);
+    expect(
+      validateUserEntityType({ ...type, name: "Mujer" }, { country: "AR", existing: [] }).issues,
+    ).toEqual([{ code: "label_taken" }]);
+
+    expect(getCatalog("AR").length).toBeGreaterThan(0);
+
+    const format: FormatDefinition = {
+      id: "fmt:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      name: "Numero de historia",
+      entityType: type.id,
+      variants: [
+        [
+          { kind: "chars", charClass: "digit", min: 3, max: 3 },
+          { kind: "separator", chars: ["-"], optional: false },
+          { kind: "chars", charClass: "digit", min: 4, max: 4 },
+        ],
+      ],
+      enabled: true,
+    };
+    expect(validateFormat(format, { userTypes: [type], existingFormats: [] }).ok).toBe(true);
+    expect(testFormat(format, "123-4567")).toEqual([{ start: 0, end: 8 }]);
+    expect(
+      compareFormat(format, { country: "AR", baseFormats: [], userFormats: [], catalogRefs: [] }),
+    ).toEqual({ identicalTo: null, overlaps: [] });
+    expect(validateFormatsFile("{}", "AR")).toEqual({
+      ok: false,
+      issues: [{ code: "wrong_kind" }],
+    });
   });
 });

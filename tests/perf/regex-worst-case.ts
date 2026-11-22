@@ -7,14 +7,18 @@ import { fileURLToPath } from "node:url";
 import { createEventBus } from "@anonly/event-system";
 import { RegexEngine, DEFAULT_PATTERNS_AR } from "@anonly/regex-engine";
 import {
+  DEFAULT_DETECTION_CONFIG,
   EntityType,
   EngineEvents,
   EventChannel,
   type EngineContext,
+  type FormatDefinition,
+  type FormatPiece,
   type ILogger,
   type ICache,
   type Document,
   type Page,
+  type UserEntityTypeDefinition,
   type Word,
 } from "@anonly/shared";
 
@@ -47,10 +51,16 @@ type Label = "adversarial" | "adversarial-late-at" | "normal" | QLabel | Keyword
 
 /**
  * `ANONLY_REGEX_WORST_LABELS=keyword` corre solo los textos del patrón de dirección con palabra clave
- * (ADR-217); `email` corre solo los del email. Sin la variable corren todos.
+ * (ADR-217); `email` corre solo los del email; `formats` corre solo los arneses de los formatos del
+ * generador (ADR-220, al final del archivo). Sin la variable corren todos, menos los de formatos.
  */
 const LABEL_FILTER = process.env.ANONLY_REGEX_WORST_LABELS ?? "";
-if (LABEL_FILTER !== "" && LABEL_FILTER !== "keyword" && LABEL_FILTER !== "email")
+if (
+  LABEL_FILTER !== "" &&
+  LABEL_FILTER !== "keyword" &&
+  LABEL_FILTER !== "email" &&
+  LABEL_FILTER !== "formats"
+)
   throw new Error(`ANONLY_REGEX_WORST_LABELS inválida: ${LABEL_FILTER}`);
 
 interface DetectionSummary {
@@ -163,6 +173,7 @@ function buildConfig(): EngineContext["config"] {
     grouping: { similarityThreshold: 0.88, minAliasFrequency: 1 },
     render: { previewScale: 0.5, fullScale: 2, jpegQuality: 80, cachePages: 16 },
     export: { defaultDpi: 300, defaultImageFormat: "png", defaultJpegQuality: 80 },
+    detection: DEFAULT_DETECTION_CONFIG,
   };
 }
 
@@ -660,9 +671,177 @@ async function childMain(args: ReadonlyArray<string>): Promise<void> {
   process.stdout.write(`${JSON.stringify(result)}\n`);
 }
 
+// ─── Formatos del generador (1.1, ADR-220) ───
+//
+// `ANONLY_REGEX_WORST_LABELS=formats` corre solo estos dos arneses, en proceso y sin hijos:
+// - `user format scan stays linear on long adversarial pages` (caso 43): ocho piezas `digit 1..8` pegadas, el
+//   formato que con `RegExp` dispararía retroceso catastrófico, sobre páginas largas de tres formas.
+// - `cost with 10, 50 y 200 user formats` (`roadmap/Plan_1.1.md` §7): cuánto suma cada formato prendido a una
+//   página, para decidir si hace falta un tope de cantidad (`Regex_Engine.md` §12).
+// No es un gate: no hay umbral de tiempo absoluto (criterio de ADR-181). Falla solo si duplicar el texto más que
+// cuadruplica el trabajo sobre el ruido.
+
+const FORMAT_PAGE_CHARS = [25_000, 50_000, 100_000, 200_000] as const;
+const FORMAT_COUNTS = [10, 50, 200] as const;
+const FORMAT_REPEATS = 5;
+/** Debajo de esto, un paso de duplicación no se interpreta: es ruido de medición. */
+const FORMAT_NOISE_FLOOR_MS = 5;
+const FORMAT_SUPERLINEAR_RATIO = 3;
+const PERF_USER_TYPE: UserEntityTypeDefinition = {
+  id: "user:00000000-0000-4000-8000-0000000000aa",
+  name: "Perf",
+};
+
+type FormatPageKind = "digits" | "words" | "near-miss";
+
+function formatPageText(chars: number, kind: FormatPageKind): string {
+  const unit = kind === "digits" ? "1" : kind === "words" ? "12345678 " : `${"1".repeat(65)} `;
+  return unit.repeat(Math.ceil(chars / unit.length)).slice(0, chars);
+}
+
+function perfFormat(n: number, pieces: ReadonlyArray<FormatPiece>): FormatDefinition {
+  return {
+    id: `fmt:00000000-0000-4000-8000-${n.toString(16).padStart(12, "0")}`,
+    name: `Perf ${n}`,
+    entityType: PERF_USER_TYPE.id,
+    variants: [pieces],
+    enabled: true,
+  };
+}
+
+const digitsOf = (min: number, max: number): FormatPiece => ({
+  kind: "chars",
+  charClass: "digit",
+  min,
+  max,
+});
+
+/** El formato del caso 43: ocho piezas `digit 1..8` pegadas. */
+const ADJACENT_FORMAT = perfFormat(
+  1,
+  Array.from({ length: 8 }, () => digitsOf(1, 8)),
+);
+
+/** `count` formatos distintos, de formas parecidas a las que escribiría un usuario. */
+function manyFormats(count: number): ReadonlyArray<FormatDefinition> {
+  return Array.from({ length: count }, (_, index) => {
+    const pieces: FormatPiece[] = [
+      digitsOf(3 + (index % 5), 3 + (index % 5)),
+      { kind: "separator", chars: ["-", " "], optional: true },
+      digitsOf(2 + (index % 4), 2 + (index % 4)),
+      { kind: "optional", pieces: [{ kind: "text", value: "/" }, digitsOf(2, 2)] },
+    ];
+    return {
+      ...perfFormat(index + 1, pieces),
+      ...(index % 3 === 0 ? { contextBefore: ["Ref", "Expediente"] } : {}),
+    };
+  });
+}
+
+/** Una página de texto corriente con números de formas parecidas a las de `manyFormats`. */
+function numericRichText(chars: number): string {
+  const unit = "Ref 12345-67 y Expediente 123 45/67, tel 4567 8900. Cuenta 99887-66 ok. ";
+  return unit.repeat(Math.ceil(chars / unit.length)).slice(0, chars);
+}
+
+async function timeFormatProcess(
+  text: string,
+  formats: ReadonlyArray<FormatDefinition>,
+): Promise<{ readonly ms: number; readonly occurrences: number }> {
+  const bus = createEventBus({ logger: NULL_LOGGER });
+  let occurrences = 0;
+  bus.on(EventChannel.Regex, EngineEvents.ENTITY_FOUND, () => {
+    occurrences += 1;
+  });
+  const context: EngineContext = {
+    bus,
+    logger: NULL_LOGGER,
+    cache: NULL_CACHE,
+    abortSignal: new AbortController().signal,
+    config: {
+      ...buildConfig(),
+      detection: { ...DEFAULT_DETECTION_CONFIG, userTypes: [PERF_USER_TYPE], userFormats: formats },
+    },
+  };
+  const engine = new RegexEngine();
+  await engine.init(context);
+  const started = performance.now();
+  await engine.process({ document: documentFor(text, "regex-formats", "normal") }, context);
+  const ms = performance.now() - started;
+  await engine.dispose();
+  return { ms, occurrences };
+}
+
+async function medianFormatMs(
+  text: string,
+  formats: ReadonlyArray<FormatDefinition>,
+): Promise<number> {
+  const samples: number[] = [];
+  for (let run = 0; run < FORMAT_REPEATS; run += 1) {
+    samples.push((await timeFormatProcess(text, formats)).ms);
+  }
+  samples.sort((a, b) => a - b);
+  return samples[Math.floor(samples.length / 2)] ?? 0;
+}
+
+async function runFormatHarness(): Promise<void> {
+  let superLinear = false;
+
+  // Caso 43: lo que suma el formato sobre lo que cuestan los formatos base de la misma página.
+  for (const kind of ["digits", "words", "near-miss"] as const) {
+    const curve: Array<{ readonly chars: number; readonly ms: number }> = [];
+    for (const chars of FORMAT_PAGE_CHARS) {
+      const text = formatPageText(chars, kind);
+      const base = await medianFormatMs(text, []);
+      const withFormat = await medianFormatMs(text, [ADJACENT_FORMAT]);
+      curve.push({ chars, ms: Math.max(withFormat - base, 0) });
+    }
+    const steps = curve.slice(1).map((point, index) => {
+      const previous = curve[index];
+      const ratio =
+        previous === undefined || previous.ms < FORMAT_NOISE_FLOOR_MS
+          ? null
+          : point.ms / previous.ms;
+      return { from: previous?.chars ?? 0, to: point.chars, ratio };
+    });
+    const kindSuperLinear = steps.some(
+      (step) => step.ratio !== null && step.ratio > FORMAT_SUPERLINEAR_RATIO,
+    );
+    superLinear ||= kindSuperLinear;
+    process.stdout.write(
+      `Formato adyacente, página «${kind}»: ${curve
+        .map((point) => `${point.chars} car.: ${point.ms.toFixed(2)} ms`)
+        .join("; ")}\n  duplicar: ${steps
+        .map(
+          (step) =>
+            `${step.from}>${step.to}: x${step.ratio === null ? "n/d (ruido)" : step.ratio.toFixed(2)}`,
+        )
+        .join("; ")}\n  superlineal: ${String(kindSuperLinear)}\n`,
+    );
+  }
+
+  // 10, 50 y 200 formatos prendidos sobre una página de 100 000 caracteres.
+  const text = numericRichText(100_000);
+  const baseMs = await medianFormatMs(text, []);
+  process.stdout.write(`Costo con N formatos, página de ${text.length} caracteres\n`);
+  process.stdout.write(`  0 formatos (solo base): ${baseMs.toFixed(2)} ms\n`);
+  for (const count of FORMAT_COUNTS) {
+    const formats = manyFormats(count);
+    const ms = await medianFormatMs(text, formats);
+    const detections = (await timeFormatProcess(text, formats)).occurrences;
+    process.stdout.write(
+      `  ${count} formatos: ${ms.toFixed(2)} ms; suma ${(ms - baseMs).toFixed(2)} ms, ` +
+        `${((ms - baseMs) / count).toFixed(3)} ms por formato; detecciones: ${detections}\n`,
+    );
+  }
+  if (superLinear) process.exitCode = 1;
+}
+
 const childIndex = process.argv.indexOf("--child");
 if (childIndex >= 0) {
   await childMain(process.argv.slice(childIndex + 1));
+} else if (LABEL_FILTER === "formats") {
+  await runFormatHarness();
 } else {
   await runCampaign();
 }

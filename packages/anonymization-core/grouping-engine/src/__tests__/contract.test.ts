@@ -8,6 +8,7 @@ import {
   estimateTokenWidth,
   EventChannel,
   ReplacementMode,
+  synthesize,
   type Conflict,
   type ConflictResolved,
   type EngineContext,
@@ -15,10 +16,12 @@ import {
   type EntityGroupRemoved,
   type EntityGroupUpdated,
   type GroupingFinished,
+  type UserEntityTypeDefinition,
 } from "@anonly/shared";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 import { GroupingEngine } from "../grouping.engine.js";
+import { MASK_FORMAT_BY_TYPE } from "../labels.js";
 
 import {
   createEngineContext,
@@ -1022,5 +1025,103 @@ describe("GroupingEngine — contract tests", () => {
       expect(match?.indexInType).toBe(original!.indexInType);
       expect(match?.replacementValue).toBe(original!.replacementValue);
     }
+  });
+});
+
+describe("GroupingEngine — contract tests (tipos propios y país)", () => {
+  let engine: GroupingEngine;
+  let ctx: EngineContext;
+
+  beforeEach(async () => {
+    engine = new GroupingEngine();
+    ctx = createEngineContext();
+    await engine.init(ctx);
+    engine.startSession("doc-1");
+  });
+
+  afterEach(async () => {
+    if (!engine["disposed"]) {
+      await engine.dispose();
+    }
+  });
+
+  // Caso 87 (ADR-221 §3).
+  it("AR labels and synthetic values are unchanged with country AR", () => {
+    expect(ctx.config.detection.country).toBe("AR");
+    const expectedLadders: ReadonlyArray<readonly [EntityType, ReadonlyArray<string>]> = [
+      [EntityType.Person, ["[PERSONA 01]", "[PERS 01]", "[PRS-01]"]],
+      [EntityType.Organization, ["[ORGANIZACION 01]", "[ORGA 01]", "[ORG-01]"]],
+      [EntityType.Address, ["[DIRECCION 01]", "[DIRE 01]", "[DIR-01]"]],
+      [EntityType.DNI, ["[DNI 01]", "[DNI-01]"]],
+      [EntityType.CUIT, ["[CUIT 01]", "[CUIT-01]"]],
+      [EntityType.Phone, ["[TELEFONO 01]", "[TELE 01]", "[TEL-01]"]],
+      [EntityType.Email, ["[EMAIL 01]", "[MAIL 01]", "[EML-01]"]],
+      [EntityType.IBAN, ["[IBAN 01]", "[IBAN-01]"]],
+      [EntityType.CreditCard, ["[TARJETA 01]", "[TARJ 01]", "[TRJ-01]"]],
+      [EntityType.Date, ["[FECHA 01]", "[FECH 01]", "[FEC-01]"]],
+      [EntityType.License, ["[MATRICULA 01]", "[MATR 01]", "[MAT-01]"]],
+      [EntityType.Plate, ["[PATENTE 01]", "[PATE 01]", "[PAT-01]"]],
+      [EntityType.Custom, ["[CUSTOM 01]", "[CUST 01]", "[CST-01]"]],
+    ];
+    const seed = engine["sessions"].get("doc-1")?.seed ?? "";
+    expectedLadders.forEach(([type, ladder], i) => {
+      const occurrence = makeOccurrence({
+        entityType: type,
+        value: `valor ${String(i)}`,
+        normalizedValue: `valor ${String(i)}`,
+        bbox: makeBBox(10, 20 * i, 600, 12),
+      });
+      ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+        documentId: "doc-1",
+        occurrence,
+      });
+      const group = engine
+        .getSnapshot("doc-1")
+        .groups.find((g) => g.members.some((m) => m.occurrenceId === occurrence.id));
+      expect(group?.replacementPreviews.placeholderLadder).toEqual(ladder);
+      // `synthesize` recibe `country: "AR"` y da el mismo valor que antes del campo.
+      expect(group?.replacementPreviews.synthetic).toBe(
+        synthesize({ type, groupId: group?.id ?? "", seed, indexInType: 1, country: "AR" }),
+      );
+      expect(group?.replacementPreviews.mask).toBe(MASK_FORMAT_BY_TYPE[type]);
+    });
+  });
+
+  // Casos 89 y 90.
+  it("updateSessionType and removeSessionType emit only existing grouping events", async () => {
+    const type: UserEntityTypeDefinition = {
+      id: "user:00000000-0000-4000-8000-0000000000e1",
+      name: "Número de afiliado",
+    };
+    const emitSpy = vi.spyOn(ctx.bus, "emit");
+    engine.defineSessionType("doc-1", type);
+    // `defineSessionType` no emite.
+    expect(emitSpy).not.toHaveBeenCalled();
+
+    ctx.bus.emit(EventChannel.Regex, EngineEvents.ENTITY_FOUND, {
+      documentId: "doc-1",
+      occurrence: makeOccurrence({
+        entityType: type.id,
+        value: "af-1",
+        normalizedValue: "af-1",
+        bbox: makeBBox(10, 10, 600, 12),
+      }),
+    });
+    emitSpy.mockClear();
+
+    await engine.updateSessionType("doc-1", { id: type.id, name: "Afiliado" });
+    await engine.removeSessionType("doc-1", type.id);
+
+    const known = new Set<string>(Object.values(EngineEvents));
+    const emitted = emitSpy.mock.calls.map(([, event]) => event);
+    expect(emitted.length).toBeGreaterThan(0);
+    expect(emitted.every((event) => known.has(event))).toBe(true);
+    expect(new Set(emitted)).toEqual(
+      new Set([
+        EngineEvents.ENTITY_GROUP_UPDATED,
+        EngineEvents.GROUP_REPLACEMENT_CHANGED,
+        EngineEvents.ENTITY_GROUP_REMOVED,
+      ]),
+    );
   });
 });

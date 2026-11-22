@@ -20,6 +20,7 @@ import { MinusIcon, PlusIcon } from "lucide-react";
 import { useEffect } from "react";
 
 import { MAX_ZOOM, MIN_ZOOM, useViewerStore } from "../../store/viewer.store.js";
+import { matchesShortcut } from "../toolbar/shortcuts.js";
 
 const ZOOM_STEP = 0.1;
 const DEFAULT_ZOOM = 1;
@@ -43,14 +44,13 @@ export function ZoomControls() {
 
   useEffect(() => {
     function onKeydown(event: KeyboardEvent): void {
-      if (!(event.metaKey || event.ctrlKey)) return;
-      if (event.key === "+" || event.key === "=") {
+      if (matchesShortcut("zoomIn", event)) {
         event.preventDefault();
         zoomIn();
-      } else if (event.key === "-") {
+      } else if (matchesShortcut("zoomOut", event)) {
         event.preventDefault();
         zoomOut();
-      } else if (event.key === "0") {
+      } else if (matchesShortcut("zoomReset", event)) {
         event.preventDefault();
         resetZoom();
       }

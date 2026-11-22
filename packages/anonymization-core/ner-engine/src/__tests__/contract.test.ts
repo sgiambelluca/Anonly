@@ -8,6 +8,7 @@ import {
   EventChannel,
   type EngineContext,
   type EntityFound,
+  type EntityTypeId,
   type NerFinished,
   type NerStarted,
   type Unsubscribe,
@@ -190,7 +191,7 @@ describe("NerEngine — contract tests", () => {
     const entityTypes = busEmitSpy.mock.calls
       .filter(([, event]) => event === EngineEvents.ENTITY_FOUND)
       .map((call) => (call[2] as EntityFound).occurrence.entityType);
-    const allowed = new Set([
+    const allowed = new Set<EntityTypeId>([
       EntityType.Person,
       EntityType.Organization,
       EntityType.Address,
@@ -460,6 +461,26 @@ describe("NerEngine — contract tests", () => {
     expect(eventsB.map((e) => stripNonDeterministic(e[1]))).toEqual(
       eventsA.map((e) => stripNonDeterministic(e[1])),
     );
+
+    await pooledEngine.dispose();
+  });
+
+  it("NerEngine exposes releaseIdleWorkers and its pool port declares it (ADR-231)", async () => {
+    const pool = createTrackingNerPool();
+    const pooledEngine = new NerEngine(pool);
+    await pooledEngine.init(ctx);
+
+    expect(typeof pooledEngine.releaseIdleWorkers).toBe("function");
+    expect(pooledEngine.releaseIdleWorkers()).toBeUndefined();
+    expect(pool.releaseIdleWorkersCalls.count).toBe(1);
+
+    // El compilador hace cumplir el puerto real (`NerJobPool`, no exportado),
+    // derivado del constructor: si su `releaseIdleWorkers` deja de devolver
+    // `boolean`, esta asignación deja de compilar.
+    type NerPoolPort = NonNullable<ConstructorParameters<typeof NerEngine>[0]>;
+    const portReleaseResult: (port: NerPoolPort) => boolean = (port) => port.releaseIdleWorkers();
+    expect(typeof portReleaseResult(pool)).toBe("boolean");
+    expect(pool.releaseIdleWorkersCalls.count).toBe(2);
 
     await pooledEngine.dispose();
   });

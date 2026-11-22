@@ -22,7 +22,7 @@
  */
 
 import { EntityType, type PersonGender } from "./enums.js";
-import type { SyntheticRequest } from "./types.js";
+import type { CountryCode, SyntheticRequest } from "./types.js";
 
 /**
  * Genera un valor sintético determinista para una entidad.
@@ -31,15 +31,17 @@ import type { SyntheticRequest } from "./types.js";
  * @returns Valor sintético plausible para el tipo.
  */
 export function synthesize(req: SyntheticRequest): string {
-  const { type, groupId, seed, indexInType, personGender } = req;
+  const { type, groupId, seed, indexInType, personGender, country } = req;
+  // ADR-221 §4: `country` elige el generador y NO entra a la semilla.
+  const generators = COUNTRY_GENERATORS[country];
   const rng = createSeededRng(seed, type, groupId);
   switch (type) {
     case EntityType.DNI:
-      return synthesizeDni(rng);
+      return generators.dni(rng);
     case EntityType.CUIT:
-      return synthesizeCuit(rng);
+      return generators.cuit(rng);
     case EntityType.Phone:
-      return synthesizePhone(rng);
+      return generators.phone(rng);
     case EntityType.Email:
       return synthesizeEmail(rng);
     case EntityType.IBAN:
@@ -55,9 +57,9 @@ export function synthesize(req: SyntheticRequest): string {
     case EntityType.Address:
       return synthesizeAddress(rng);
     case EntityType.License:
-      return synthesizeLicense(rng);
+      return generators.license(rng);
     case EntityType.Plate:
-      return synthesizePlate(rng);
+      return generators.plate(rng);
     // ADR-072 §3: las dos únicas ramas que INTERPOLAN el número del grupo en
     // vez de sortear. Para ellas seguir el índice es lo correcto —son tokens
     // numerados, no identidades—, con la contracara de que una renumeración
@@ -113,7 +115,7 @@ function randomDigits(rng: () => number, count: number): string {
   return s;
 }
 
-function synthesizeDni(rng: () => number): string {
+function synthesizeDniAr(rng: () => number): string {
   // DNI AR de 8 dígitos en rango realista (10.000.000-99.999.999): el primer
   // dígito nunca es 0. Formato XX.XXX.XXX.
   const first = (Math.floor(rng() * 9) + 1).toString();
@@ -121,7 +123,7 @@ function synthesizeDni(rng: () => number): string {
   return `${n.slice(0, 2)}.${n.slice(2, 5)}.${n.slice(5, 8)}`;
 }
 
-function synthesizeCuit(rng: () => number): string {
+function synthesizeCuitAr(rng: () => number): string {
   // CUIT AR: XX-XXXXXXXX-X con dígito verificador AFIP válido (módulo 11).
   // Si el dv daría 10 (no existe en CUITs reales), se regenera el cuerpo con el
   // mismo rng: determinista (mismo seed → mismo resultado) y siempre válido (ADR-019).
@@ -155,7 +157,7 @@ function computeCuitChecksum(prefix: string, body: string): string | null {
   return (11 - mod).toString();
 }
 
-function synthesizePhone(rng: () => number): string {
+function synthesizePhoneAr(rng: () => number): string {
   const area = pick(rng, ["11", "221", "341", "351", "343", "380"]);
   const part1 = randomDigits(rng, 4);
   const part2 = randomDigits(rng, 4);
@@ -310,7 +312,7 @@ function synthesizeAddress(rng: () => number): string {
   return `${street} ${number}`;
 }
 
-function synthesizeLicense(rng: () => number): string {
+function synthesizeLicenseAr(rng: () => number): string {
   // Matrícula profesional AR ficticia, formato XX-XXXX-XX (máscara de ADR-012).
   const part1 = randomDigits(rng, 2);
   const part2 = randomDigits(rng, 4);
@@ -318,7 +320,7 @@ function synthesizeLicense(rng: () => number): string {
   return `${part1}-${part2}-${part3}`;
 }
 
-function synthesizePlate(rng: () => number): string {
+function synthesizePlateAr(rng: () => number): string {
   // Patente AR Mercosur: AB 123 CD.
   const letters = "ABCDEFGHJKLMNPRSTVWXYZ";
   const l1 = letters.charAt(Math.floor(rng() * letters.length));
@@ -328,3 +330,33 @@ function synthesizePlate(rng: () => number): string {
   const l4 = letters.charAt(Math.floor(rng() * letters.length));
   return `${l1}${l2} ${num} ${l3}${l4}`;
 }
+
+// ─── Generadores por país (ADR-221 §4) ───
+
+/**
+ * Los tipos cuyo formato depende del país (Contracts.md §5, `SyntheticRequest.country`).
+ * Los universales (Email, IBAN, CreditCard, Date, Person, Organization, Address)
+ * no están acá: no cambian con el país.
+ */
+interface CountryGenerators {
+  readonly dni: (rng: () => number) => string;
+  readonly cuit: (rng: () => number) => string;
+  readonly phone: (rng: () => number) => string;
+  readonly license: (rng: () => number) => string;
+  readonly plate: (rng: () => number) => string;
+}
+
+/**
+ * Indexada por `CountryCode` con `Record`: agregar un país a la unión hace
+ * que el compilador pida su fila completa. Los de Argentina son los de
+ * siempre, con la misma secuencia de `rng`, así que dan el valor de antes.
+ */
+const COUNTRY_GENERATORS: Readonly<Record<CountryCode, CountryGenerators>> = {
+  AR: {
+    dni: synthesizeDniAr,
+    cuit: synthesizeCuitAr,
+    phone: synthesizePhoneAr,
+    license: synthesizeLicenseAr,
+    plate: synthesizePlateAr,
+  },
+};

@@ -1,11 +1,41 @@
-<!-- CONTEXT: scope=grouping-engine | dependencias=adr/ADR-193-Dos-Escrituras-Que-Solo-Difieren-En-Mayusculas-No-Son-Un-Empate.md,adr/ADR-214-La-Que-Pierde-Un-Conflicto-No-Se-Descarta-Si-Cubre-Mas-Texto.md,adr/ADR-191-Lo-Que-Muestra-La-Vista-Previa-Es-Lo-Que-Se-Exporta.md,core/Contracts.md,architecture/03_Data_Model.md,architecture/04_Event_System.md,adr/ADR-011-Grouping-First.md,adr/ADR-012-Replacement-Modes.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-073-Difuso-Solo-Para-Tipos-De-Texto-Libre.md,adr/ADR-074-Una-Entidad-Partida-En-Varias-Lineas.md,adr/ADR-076-La-Edicion-Manual-Del-Valor-De-Reemplazo-Gana.md,adr/ADR-094-Lo-Que-El-Detector-Duda-No-Se-Tira-En-Silencio.md,adr/ADR-116-Un-Valor-Que-El-Documento-Ya-Confirmo-No-Se-Descarta.md,adr/ADR-117-Una-Ocurrencia-Contenida-No-Aporta-Tinta.md,adr/ADR-170-Las-Vistas-Previas-De-Edicion-Las-Calcula-El-Core.md,adr/ADR-171-El-Usuario-Puede-Eliminar-Una-Entidad.md,adr/ADR-172-Deshacer-Y-Rehacer-Exactos.md,adr/ADR-173-El-Motor-Rechaza-Fusiones-Y-Divisiones-Invalidas.md,adr/ADR-174-Un-Agregado-Manual-Que-Choca-Se-Resuelve-En-El-Momento.md,adr/ADR-175-Un-Choque-Manual-No-Queda-Colgado.md,adr/ADR-176-Un-Choque-Pendiente-Bloquea-El-Export.md,adr/ADR-177-Una-Entidad-Eliminada-No-Ocupa-Lugar.md,adr/ADR-178-Lo-Contenido-Se-Oculta-Solo-Si-Su-Contenedor-Se-Elimina.md,adr/ADR-182-Distancia-Acotada-Para-Grouping.md,adr/ADR-183-Recortar-Afijos-Comunes-En-Distancia-Acotada.md,adr/ADR-184-Indice-Exacto-De-Candidatos-Para-Grouping.md | audiencia=IA-implementador | fase=3 (Hito 12.5: §13 casos 46-69 y §15 15r-15z; Hito 11: §13 casos 70-73 y §15 15aa-15ac) -->
+<!-- CONTEXT: scope=grouping-engine | dependencias=adr/ADR-225-Un-Tipo-Del-Documento-Se-Edita-Se-Borra-Y-Se-Guarda.md,adr/ADR-219-Un-Tipo-De-Entidad-Puede-Ser-Del-Usuario.md,adr/ADR-221-Los-Formatos-Base-Salen-De-Un-Catalogo-Por-Pais.md,adr/ADR-222-Dos-Formatos-Que-Se-Pisan-Van-Al-Panel-De-Conflicto.md,adr/ADR-224-Lo-Que-La-1.1-Cambia-En-El-Panel-De-Entidades-Y-El-Visor.md,adr/ADR-193-Dos-Escrituras-Que-Solo-Difieren-En-Mayusculas-No-Son-Un-Empate.md,adr/ADR-214-La-Que-Pierde-Un-Conflicto-No-Se-Descarta-Si-Cubre-Mas-Texto.md,adr/ADR-191-Lo-Que-Muestra-La-Vista-Previa-Es-Lo-Que-Se-Exporta.md,core/Contracts.md,architecture/03_Data_Model.md,architecture/04_Event_System.md,adr/ADR-011-Grouping-First.md,adr/ADR-012-Replacement-Modes.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-073-Difuso-Solo-Para-Tipos-De-Texto-Libre.md,adr/ADR-074-Una-Entidad-Partida-En-Varias-Lineas.md,adr/ADR-076-La-Edicion-Manual-Del-Valor-De-Reemplazo-Gana.md,adr/ADR-094-Lo-Que-El-Detector-Duda-No-Se-Tira-En-Silencio.md,adr/ADR-116-Un-Valor-Que-El-Documento-Ya-Confirmo-No-Se-Descarta.md,adr/ADR-117-Una-Ocurrencia-Contenida-No-Aporta-Tinta.md,adr/ADR-170-Las-Vistas-Previas-De-Edicion-Las-Calcula-El-Core.md,adr/ADR-171-El-Usuario-Puede-Eliminar-Una-Entidad.md,adr/ADR-172-Deshacer-Y-Rehacer-Exactos.md,adr/ADR-173-El-Motor-Rechaza-Fusiones-Y-Divisiones-Invalidas.md,adr/ADR-174-Un-Agregado-Manual-Que-Choca-Se-Resuelve-En-El-Momento.md,adr/ADR-175-Un-Choque-Manual-No-Queda-Colgado.md,adr/ADR-176-Un-Choque-Pendiente-Bloquea-El-Export.md,adr/ADR-177-Una-Entidad-Eliminada-No-Ocupa-Lugar.md,adr/ADR-178-Lo-Contenido-Se-Oculta-Solo-Si-Su-Contenedor-Se-Elimina.md,adr/ADR-182-Distancia-Acotada-Para-Grouping.md,adr/ADR-183-Recortar-Afijos-Comunes-En-Distancia-Acotada.md,adr/ADR-184-Indice-Exacto-De-Candidatos-Para-Grouping.md | audiencia=IA-implementador | fase=1.1 (1.1, frente F3: §13 casos 78-91 y §15 15af-15aj, ADR-219, ADR-221, ADR-222, ADR-224 y ADR-225; 1.0.x: §15 15ae, ADR-214; Hito 12.5: §13 casos 46-69 y §15 15r-15z; Hito 11: §13 casos 70-73 y §15 15aa-15ad) -->
 # Grouping Engine — Spec de Motor
 
 > Agrupa las `Occurrence` emitidas por Regex y NER en `EntityGroup` por tipo y valor canónico. Detecta conflictos. Expone grupos a la UI (la unidad de operación). Resuelve reemplazos según `ReplacementMode` y `Rule`.
 
 **EngineId**: `grouping`
-**Versión del spec**: 1.17.0
-**Última actualización**: 2026-10-07
+**Versión del spec**: 1.19.1
+**Última actualización**: 2026-11-20
+
+> **Nota (v1.19.1, precisiones del mantenedor del 2026-11-20 sobre ADR-219 §2 y ADR-225 §4)**:
+>
+> 1. **La etiqueta de un tipo propio tampoco puede repetir `MUJER` ni `HOMBRE`**, las de `Person` según el género. `validateUserEntityType` da `label_taken`.
+> 2. **`removeSessionType` descarta también el agregado a mano de ese tipo retenido en un choque sin resolver**: lo resuelve como `winner: "detected"` y emite `CONFLICT_RESOLVED`. Lo encontró el revisor del bloque F3+F5.
+>
+> Ver §6, los casos 83 y 90 de §13, §14 y el ítem 15aj de §15.
+
+> **Nota (v1.19.0, ADR-225, 2026-11-16 — un tipo del documento se edita, se borra y entra a los puntos de restauración)**:
+>
+> 1. **`updateSessionType`** reemplaza la definición de un tipo de la sesión. Recalcula el reemplazo de sus grupos y emite los eventos de siempre.
+> 2. **`removeSessionType`** borra un tipo de la sesión. Sus grupos se eliminan con las reglas de `applyGroupRemove` (ADR-171 §2), y se descartan las correcciones de tipo y las reglas que apuntaban a él.
+> 3. **Las definiciones de los tipos de la sesión entran a los puntos de restauración.** Cambia lo que decía la v1.18.0: `restoreCheckpoint` las deja como estaban en la copia.
+>
+> Ver §6, los casos 83 y 89 a 91 de §13, §14 y el ítem 15aj de §15.
+
+> **Nota (v1.18.0, ADR-219, ADR-221, ADR-222 y ADR-224, 2026-10-19 — tipos propios, etiquetas por país, desempate entre formatos y formato del grupo)**:
+>
+> 1. **Tipos propios** (ADR-219). `EntityGroup.type` pasa a `EntityTypeId`.
+>    - Los guardados llegan en `ctx.config.detection.userTypes`.
+>    - Los del documento llegan por `defineSessionType`, que el Orchestrator llama desde `defineDocumentEntityType`. Viven en la sesión, sobreviven a `reopenSession` y mueren en `closeSession`. Desde la v1.19.0 entran a los puntos de restauración (ADR-225 §6): `restoreCheckpoint` ya no las deja intactas, las restaura.
+>    - La etiqueta se deriva del nombre con `userTypeLabel`. Las versiones cortas son las que escribió el usuario, o automáticas.
+>    - Modos: `placeholder`, `mask` (`maskByCharacters(canonicalValue)`) y `redact`. Un `synthetic` que llega por el modo por defecto, por una regla global o por reclasificar se resuelve como `placeholder`; pedido por patch o por regla de tipo, se rechaza.
+>    - Agrupación exacta por `alphanumericKey`, sin pase difuso.
+>    - `userTypeLabel` y `validateUserEntityType` son funciones puras de este motor, y el façade las reexporta, porque la tabla de etiquetas es de acá (ADR-057).
+> 2. **Etiquetas por país** (ADR-221 §3). La escalera elige su tabla por `detection.country`. En la 1.1 solo existe la de `AR`, que es la de siempre. `synthesize` recibe `country`.
+> 3. **Desempate entre dos ocurrencias de Regex** (ADR-222 §3): gana la propia sobre la base, después la de valor más largo, y después la que ya estaba registrada.
+> 4. **`EntityGroup.formatId`** (ADR-224 §2).
+>
+> Ver §2, §3, §4, §6, §9, §11, los casos 7 y 78 a 88 de §13, §14, los ítems 15af a 15ai de §15 y «Algoritmos clave».
 
 > **Nota (v1.17.0, ADR-214, 2026-10-07 — la que pierde un conflicto no se descarta si cubre más texto)**: en un conflicto `overlap` o `disagree`, la ocurrencia que llegaba y perdía se descartaba entera, aunque cubriera más texto que la ganadora. Medido con el modelo real: sobre «AVENIDA DEL MAR 450» en mayúsculas, el patrón de patente toma «MAR 450», le gana a la dirección del modelo, y «AVENIDA DEL» quedaba a la vista. Desde esta versión una perdedora automática se descarta **solo si queda contenida entera en la ganadora** (criterio geométrico de ADR-117); si no, se agrupa igual y quedan las dos, como ya pasaba cuando ganaba la que llegaba. El conflicto se emite como siempre. No cambian el umbral, quién gana, los agregados manuales ni ningún contrato. Ver §13 casos 7, 8 y 77, §14 y §15 ítem 15ae.
 
@@ -68,7 +98,7 @@ Recibir el stream de `ENTITY_FOUND` (ocurrencias crudas de Regex y NER) y produc
 ## 2. Responsabilidades
 
 - Escuchar `ENTITY_FOUND` en el canal `regex` y `ner`.
-- Para cada `Occurrence`, encontrar un `EntityGroup` existente del mismo `entityType` por `normalizedValue` **exacto** — y, **solo para `Person`, `Organization` y `Address`**, también por fuzzy (Levenshtein normalizado con umbral `GROUPING_SIMILARITY_THRESHOLD`). Para los otros diez tipos el pase difuso **no corre**: en un identificador estructurado, un carácter de diferencia es otra entidad, y las variantes legítimas de escritura ya las colapsa el `normalizer` de su patrón (ADR-073 §1-§2, caso 3).
+- Para cada `Occurrence`, encontrar un `EntityGroup` existente del mismo `entityType` por `normalizedValue` **exacto** — y, **solo para `Person`, `Organization` y `Address`**, también por fuzzy (Levenshtein normalizado con umbral `GROUPING_SIMILARITY_THRESHOLD`). Para los demás tipos —los otros diez base y todos los tipos propios— el pase difuso **no corre**: en un identificador estructurado, un carácter de diferencia es otra entidad, y las variantes legítimas de escritura ya las colapsa el `normalizer` de su patrón (ADR-073 §1-§2, caso 3).
 - Si encuentra grupo, agregar la ocurrencia como `OccurrenceRef` (y como alias si el `value` difiere).
 - Si no encuentra, crear grupo nuevo con `indexInType = nextIndex(type)`.
 - Asignar `canonicalValue` (alias más frecuente; en empate, el más largo).
@@ -77,6 +107,10 @@ Recibir el stream de `ENTITY_FOUND` (ocurrencias crudas de Regex y NER) y produc
 - Resolver conflictos automáticamente con política default (ver §13 de `06_Pipeline.md`).
 - Procesar inputs del usuario: `GROUP_UPDATE_REQUESTED`, `GROUP_MERGE_REQUESTED`, `GROUP_SPLIT_REQUESTED`, `RULE_CREATED`, `RULE_UPDATED`, `RULE_DELETED`, `CONFLICT_RESOLVE_REQUESTED`.
 - Emitir `ENTITY_GROUP_CREATED`, `ENTITY_GROUP_UPDATED`, `ENTITY_GROUP_REMOVED`, `GROUP_REPLACEMENT_CHANGED`, `GROUP_TOGGLED`, `CONFLICT_RESOLVED`, `GROUPING_FINISHED`.
+- Mantener los tipos propios: los guardados de `ctx.config.detection.userTypes` y los del documento definidos por `defineSessionType` (ADR-219 §5). Resolver su etiqueta, sus modos y su agrupación (ADR-219 §2 a §4).
+- Elegir la tabla de etiquetas de los tipos base por `detection.country` (ADR-221 §3) y pasarle el país al sintetizador (ADR-221 §4).
+- Desempatar el conflicto entre dos ocurrencias de Regex (ADR-222 §3).
+- Calcular `EntityGroup.formatId` (ADR-224 §2).
 - Mantener `indexInType` estable: si un grupo se elimina, su índice se saltea; si dos se fusionan, el resultante conserva el menor.
 - Renumerar `indexInType` canónicamente en `finishSession` (por orden de primera aparición documental) antes de emitir `GROUPING_FINISHED`, recalculando `replacementValue` de los grupos en modo `placeholder` afectados (ADR-028). `finishSession` es re-ejecutable: tras un `reopenSession`, vuelve a renumerar sobre la unión de ocurrencias (ADR-038 §2).
 - Reabrir una sesión existente (`reopenSession`) para una segunda pasada de detección sin perder grupos, reglas, conflictos ni ediciones (ADR-038 §2).
@@ -90,7 +124,7 @@ Recibir el stream de `ENTITY_FOUND` (ocurrencias crudas de Regex y NER) y produc
 - Detectar entidades (Regex/NER).
 - Renderizar el PDF.
 - Conocer React ni UI.
-- Persistir nada.
+- Persistir nada. Los tipos del documento mueren con la sesión (ADR-219 §5).
 - Hacer OCR.
 - Cambiar `canonicalValue` sin intervención del usuario (excepto al crear/fusionar).
 
@@ -99,7 +133,8 @@ Recibir el stream de `ENTITY_FOUND` (ocurrencias crudas de Regex y NER) y produc
 ## 4. Dependencias permitidas
 
 - `@anonly/shared`
-- Tipos de `core/Contracts.md`: `IEngine`, `EngineContext`, `Occurrence`, `OccurrenceRef`, `EntityGroup`, `EntityType`, `ReplacementMode`, `Rule`, `Conflict`, `ConflictReason`, `Annotation`, `GroupingConfig`, `PersonGender` (ADR-060 §2), `PersonGenderChoice` (ADR-069 §4, entra por `GroupUpdateRequested.patch`) y `SyntheticRequest` (ADR-072 §2, la entrada de `synthesize`)
+- Tipos de `core/Contracts.md`: `IEngine`, `EngineContext`, `Occurrence`, `OccurrenceRef`, `EntityGroup`, `EntityType`, `ReplacementMode`, `Rule`, `Conflict`, `ConflictReason`, `Annotation`, `GroupingConfig`, `PersonGender` (ADR-060 §2), `PersonGenderChoice` (ADR-069 §4, entra por `GroupUpdateRequested.patch`), `SyntheticRequest` (ADR-072 §2, la entrada de `synthesize`) y, desde la 1.1, `EntityTypeId`, `UserEntityTypeDefinition`, `UserEntityTypeValidationContext`, `UserEntityTypeValidation`, `DetectionConfig` y `CountryCode` (`Contracts.md` §5.2)
+- De `@anonly/shared` (1.1): `isUserEntityType`, `alphanumericKey`, `maskByCharacters` y las constantes `USER_TYPE_*` (`Contracts.md` §5.2 y §6)
 - De `@anonly/shared`: `estimateTokenWidth` y sus constantes `REPLACEMENT_FONT_HEIGHT_RATIO`/`AVG_GLYPH_ADVANCE_RATIO` (`Contracts.md` §6, ADR-057 §5). **Este motor no tiene canvas ni debe tenerlo**: no puede medir texto, así que la selección de nivel usa esta estimación pura. La comparte con `render-engine` a través de `shared` porque P-1 impide que un motor importe a otro — y **no se duplica**. **ADR-109 §4**: `REPLACEMENT_FONT_HEIGHT_RATIO` bajó de 0,7 a 0,64 porque `bbox.height` pasó a ser el alto de tinta y no el cuerpo. Este motor **no cambia**: el producto `ratio × height` queda igual (×1,006 medido sobre el corpus), así que la escalera elige los mismos niveles.
 - `architecture/04_Event_System.md`: todos los eventos de grouping + UI inputs
 - Sin dependencias externas nuevas: usa algoritmos propios (Levenshtein). El léxico de nombres (ADR-069 §1, que supersede ADR-060 §9) son **datos commiteados en el repo**, no un paquete de npm. **Desde ADR-091 §1 vive en `@anonly/shared`**, no en este motor: tiene un segundo consumidor (`regex-engine`, como compuerta del patrón de carátula) que no puede importar otro motor. Lo que se queda acá es `inferPersonGender` — el dato se comparte, la política no. El R-12 de procedencia y licencia **está cerrado**: `shared/assets/gender-lexicon.provenance.json` (URL, licencia CC-BY-2.5-AR, fecha de descarga y `sha256` del artefacto), `NOTICE`, y la atribución visible en el producto que entregó ADR-070.
@@ -191,16 +226,52 @@ export class GroupingEngine implements IEngine {
   previewEdit(documentId: string, request: EditPreviewRequest): EditPreview;
   // ADR-172 §1: copia estructural de la sesión completa (grupos con campos
   // internos, registros de ocurrencias, reglas, conflictos, typeCorrections,
-  // removedValues, contadores de nextIndex); hasta MAX_EDIT_CHECKPOINTS por sesión.
+  // removedValues, contadores de nextIndex y, por ADR-225 §6, las definiciones de
+  // los tipos de la sesión); hasta MAX_EDIT_CHECKPOINTS por sesión.
   createCheckpoint(documentId: string): string;
   // Reemplaza la sesión por la copia y emite la diferencia: ENTITY_GROUP_REMOVED /
   // _CREATED / _UPDATED (changes = claves que difieren), CONFLICT_DETECTED /
   // _RESOLVED. Id desconocido -> InvalidInputError.
   restoreCheckpoint(documentId: string, checkpointId: string): Promise<void>;
   discardCheckpoints(documentId: string): void;   // también en closeSession; NO en reopenSession (errata ADR-172)
+  // ADR-219 §5: tipo del documento. Lo llama el Orchestrator desde
+  // defineDocumentEntityType. Valida con validateUserEntityType contra los tipos
+  // base del país, los guardados (ctx.config.detection.userTypes) y los de la
+  // sesión; inválido, repetido o sin sesión -> InvalidInputError. No emite
+  // eventos. Dentro de los puntos de restauración (ADR-225 §6): restoreCheckpoint
+  // deja las definiciones como estaban en la copia, sin emitir nada por ellas.
+  // Sobrevive a reopenSession; muere en closeSession.
+  defineSessionType(documentId: string, definition: UserEntityTypeDefinition): void;
+  getSessionTypes(documentId: string): ReadonlyArray<UserEntityTypeDefinition>;   // en orden de creación; sin sesión -> []
+  // ADR-225 §3: reemplaza la definición del tipo de la sesión que tiene ese id.
+  // Valida como defineSessionType, sin comparar la etiqueta contra sí mismo.
+  // En cada grupo del tipo recalcula replacementPreviews y, si el modo es
+  // placeholder y el valor no lo escribió el usuario (replacementValueUserSet),
+  // replacementValue; emite ENTITY_GROUP_UPDATED y GROUP_REPLACEMENT_CHANGED por
+  // el camino de siempre. No cambia id, indexInType ni modo. Definición inválida,
+  // etiqueta repetida, id que no es de un tipo de la sesión, o sin sesión
+  // -> InvalidInputError, sin mutar nada.
+  updateSessionType(documentId: string, definition: UserEntityTypeDefinition): Promise<void>;
+  // ADR-225 §4: borra un tipo de la sesión. Cada grupo del tipo pasa por
+  // applyGroupRemove (ENTITY_GROUP_REMOVED, CONFLICT_RESOLVED, removedValues).
+  // Después descarta la definición, las entradas de typeCorrections que apuntan
+  // a ese tipo y las reglas que lo tienen de objetivo. Cada conflicto heldManual
+  // sin resolver cuya ocurrencia manual retenida es de ese tipo se resuelve como
+  // winner "detected" (CONFLICT_RESOLVED; v1.19.1). Id que no es de un tipo
+  // de la sesión, o sin sesión -> InvalidInputError, sin mutar nada.
+  removeSessionType(documentId: string, typeId: UserEntityTypeId): Promise<void>;
   closeSession(documentId: string): Promise<void>;
   dispose(): Promise<void>;
 }
+
+// ADR-219 §2: funciones puras, dueñas de las etiquetas. El façade las reexporta
+// (Contracts.md §3.5). La validación compara contra el nivel 0 de la tabla del
+// país de context.country, incluidas MUJER y HOMBRE (v1.19.1).
+export function userTypeLabel(name: string): string;
+export function validateUserEntityType(
+  definition: UserEntityTypeDefinition,
+  context: UserEntityTypeValidationContext
+): UserEntityTypeValidation;
 ```
 
 ---
@@ -252,7 +323,7 @@ No recibe input directo en `process`. Recibe datos vía eventos del bus:
 
 **Restricciones**:
 - `Occurrence.normalizedValue` debe estar poblado (lo provee Regex/NER).
-- `Occurrence.entityType` debe ser válido.
+- `Occurrence.entityType` debe ser válido: un `EntityType`, o un tipo propio guardado o de la sesión. Una ocurrencia de un tipo propio desconocido se descarta con `warn` y no crea grupo (caso 88). No debería pasar: Regex solo emite tipos propios de `detection.userTypes`, y el Orchestrator valida el agregado manual.
 - `GroupUpdateRequested.patch` no puede contener campos no permitidos (`id`, `type`, `members`, `indexInType`, `createdAt` son inmutables).
 
 ---
@@ -282,7 +353,7 @@ Cada `EntityGroup` cumple las invariantes de `03_Data_Model.md` §9:
 
 | Code | Clase | Cuándo | Recuperable | Acción |
 |---|---|---|---|---|
-| `GROUPING_INVALID_PATCH` | `GroupingInvalidPatchError` | `GroupUpdateRequested.patch` contiene campos inmutables o inválidos; **fusión** de tipos distintos o de un grupo consigo mismo (ADR-173 §1); **división** con `occurrenceIds` vacío, ajeno al grupo o con todos sus members (ADR-173 §2); `winner` en un conflicto sin `heldManual` (ADR-174 §3) | no | rechazar el request, loguear warn |
+| `GROUPING_INVALID_PATCH` | `GroupingInvalidPatchError` | `GroupUpdateRequested.patch` contiene campos inmutables o inválidos; **fusión** de tipos distintos o de un grupo consigo mismo (ADR-173 §1); **división** con `occurrenceIds` vacío, ajeno al grupo o con todos sus members (ADR-173 §2); `winner` en un conflicto sin `heldManual` (ADR-174 §3); `replacementMode: synthetic` sobre un tipo propio, por patch o por regla de `scope: type`, o `patch.type` con un tipo propio desconocido (ADR-219 §3) | no | rechazar el request, loguear warn |
 | `GROUPING_GROUP_NOT_FOUND` | `GroupingGroupNotFoundError` | `groupId` referenciado no existe (fue eliminado o nunca existió) | no | rechazar el request, loguear warn |
 | `ENGINE_NOT_INITIALIZED` | `EngineNotInitializedError` | operación antes de `init` | no | bug del caller |
 | `ENGINE_DISPOSED` | `EngineDisposedError` | operación tras `dispose` | no | bug del caller |
@@ -316,7 +387,7 @@ Grouping es determinista dadas las ocurrencias y reglas; sin errores de runtime 
 6. **División manual**: un grupo se divide; las ocurrencias seleccionadas van a un grupo nuevo con `indexInType = nextIndex(type)`. El grupo original conserva las demás. **El grupo nuevo hereda el `replacementMode` del original**, incluido uno puesto a mano, y después pasa por `resolveMode` como cualquier grupo — así que una regla de grupo/tipo/global sigue ganando sobre lo heredado, con la precedencia de siempre. El `replacementValue` se computa de cero para el grupo nuevo (su `id` y sus `members` son otros), no se copia.
 
    > **Decidido el 2026-08-14, al implementar el Hito 10.6.** Esta sección solo hablaba del `indexInType` y el modo del grupo nuevo **no estaba especificado**: el código lo creaba en `placeholder` y recién después le corría `resolveMode`, con lo cual las reglas se heredaban pero **un modo puesto a mano en ese grupo no**. Se veía así: un grupo en `synthetic` mostrando un nombre falso se dividía, y la mitad nueva salía como `[PERSONA 04]` — las dos mitades de lo que el usuario venía tratando como una sola cosa quedaban en modos distintos. El comportamiento ya se conocía —el test de ADR-029 lo esquiva usando una regla de tipo "para que el grupo NUEVO que cree el split también nazca en modo mask"— pero nunca se había decidido. Se resuelve heredando, por dos razones: **la fusión ya preserva** el `replacementMode` del grupo que sobrevive, así que heredar deja las dos operaciones con el mismo criterio; y dividir no es "apareció una entidad nueva" sino "esto que yo trataba como una cosa son dos", donde el modo elegido para el todo es la mejor conjetura para cada parte. La alternativa —seguir cayendo al default— es defendible (nadie expresó una preferencia *sobre el grupo nuevo*) pero obliga al usuario a reponer el modo cada vez que divide.
-7. **Conflicto `overlap`**: dos ocurrencias de distinto tipo se solapan de verdad. El solapamiento se mide entre los `fragments ?? [bbox]` de las dos —nunca contra la envolvente sola (ADR-107; `Contracts.md`, nota de `fragments`)—, quedándose con el mayor ratio de los pares; el umbral sigue siendo `> 0,5` sobre el área menor. Para una entidad de una sola línea el cálculo es idéntico al de antes de ADR-107. Se emite `CONFLICT_DETECTED`. Resolución default: gana el de mayor `confidence`, en empate Regex. El usuario puede overridear. **Qué pasa con la que pierde: caso 77 (ADR-214).**
+7. **Conflicto `overlap`**: dos ocurrencias de distinto tipo se solapan de verdad. El solapamiento se mide entre los `fragments ?? [bbox]` de las dos —nunca contra la envolvente sola (ADR-107; `Contracts.md`, nota de `fragments`)—, quedándose con el mayor ratio de los pares; el umbral sigue siendo `> 0,5` sobre el área menor. Para una entidad de una sola línea el cálculo es idéntico al de antes de ADR-107. Se emite `CONFLICT_DETECTED`. Resolución default: gana el de mayor `confidence`, en empate Regex. Entre dos ocurrencias de Regex (las dos con `confidence` 1.0, posible desde ADR-222), el desempate es el del caso 85. El usuario puede overridear. **Qué pasa con la que pierde: caso 77 (ADR-214).**
 8. **Conflicto `disagree`**: Regex dice DNI, NER dice Person en el mismo span. Gana Regex. Conflicto emitido. **Qué pasa con la que pierde: caso 77 (ADR-214).**
 9. **Conflicto `low_confidence`**: NER con `confidence < 0.7`. **Con** grupo candidato al que parecerse: se emite `CONFLICT_DETECTED` para auditoría y, **desde ADR-116**, si la coincidencia es por `normalizedValue` **exacto** la ocurrencia **entra al grupo** (nunca lo crea ni lo enciende); si es **solo difusa** (Levenshtein ≥ `similarityThreshold`), se descarta como siempre. **Sin** grupo candidato (ADR-094 §1): deja de descartarse en silencio y se **sugiere** — grupo con `enabled: false` y `needsReview: true`, `ENTITY_GROUP_CREATED` normal, y ningún conflicto (no hay grupo contra el cual plantearlo). La sugerencia solo procede si el tipo es de texto libre, la confianza está por encima de `MIN_SUGGESTION_CONFIDENCE`, y —para `Person`— el primer token del valor está en `GENDER_LEXICON`; si alguna falla, se sigue descartando con el `warn` de siempre. **Promoción** (ADR-094 §3): si después entra al grupo una ocurrencia que no es de baja confianza, pasa a `enabled: true` / `needsReview: false`. **Decisión del usuario** (ADR-094 §4): un `patch.enabled`, en cualquiera de los dos sentidos, limpia `needsReview`.
 10. **Conflicto `ambiguous_canonical`**: dos aliases con misma frecuencia y misma longitud. `canonicalValue` se elige arbitrariamente (el primero encontrado) y se marca conflicto para que el usuario confirme. **Las formas que solo difieren en mayúsculas no cuentan como empate (ADR-193)**: las formas empatadas se agrupan por su `toLowerCase()`; si queda una sola, `canonicalValue` es igualmente el primero encontrado y **no** se emite conflicto. Si quedan varias, el conflicto lleva un candidato por forma distinta sin contar mayúsculas (la primera insertada de cada una). Una diferencia de tilde o de puntuación sigue siendo empate.
@@ -414,6 +485,60 @@ Grouping es determinista dadas las ocurrencias y reglas; sin errores de runtime 
     5. No cambian el umbral del conflicto (`> 0,5` sobre el área menor, ADR-107), quién gana (`conflictWinnerIsNew`), ni la rama en que la que llega **gana**, que ya dejaba las dos.
     - Ejemplo medido: Regex `Plate` «MAR 450» y NER `Address` «AVENIDA DEL MAR 450». Antes quedaba solo la patente y «AVENIDA DEL» a la vista; ahora quedan los dos grupos.
 
+
+Casos de tipos propios, país, desempate entre formatos y formato del grupo (v1.18.0):
+
+78. **Dos tipos propios numeran por separado** (ADR-219). Con «CBU» y «Historia clínica» se obtienen `[CBU 01]`, `[CBU 02]` y `[HISTORIA CLINICA 01]`. La renumeración canónica (ADR-028) corre por tipo propio igual que por tipo base.
+79. **Escalera de un tipo propio** (ADR-219 §2):
+    - Automática: `[HISTORIA CLINICA 01]`, `[HIST 01]` y `[HIS-01]`.
+    - Con `shortLabels: { level1: "HC" }`: `[HC 01]` en el nivel 1 y `[HIS-01]` en el 2.
+    - Con un nombre de tres letras («CBU»), los tres niveles son `CBU`, y la selección saltea los repetidos, como con `DNI`.
+80. **Máscara de un tipo propio**: `maskByCharacters(canonicalValue)`. `"0170-0994 11"` da `"XXXX-XXXX XX"`. No mira `maskFormat`, y cambia si cambia el valor canónico, por ejemplo en una fusión que trae un alias más frecuente.
+81. **Sintético en un tipo propio** (ADR-219 §3):
+    - una regla `global` en `synthetic` deja los grupos de tipo propio en `placeholder` y los de tipo base en `synthetic`;
+    - reclasificar a un tipo propio un grupo que estaba en `synthetic` lo deja en `placeholder`;
+    - un patch con `replacementMode: synthetic`, o una regla de tipo con `synthetic`, sobre un tipo propio se rechazan con `GROUPING_INVALID_PATCH`, sin mutar nada;
+    - `replacementPreviews.synthetic === ""`.
+82. **Agrupación de un tipo propio** (ADR-219 §4). `"0170-0994"`, que vino de un formato, y `"01700994"`, agregado a mano, caen en un mismo grupo. `"0170-0994"` y `"0170-0995"` quedan en dos. El pase difuso nunca corre.
+83. **Tipo del documento** (ADR-219 §5):
+    - `defineSessionType` lo registra y `getSessionTypes` lo devuelve;
+    - una etiqueta repetida lanza `InvalidInputError`, sea contra un tipo base («Teléfono» da `TELEFONO`; «Mujer» y «Hombre» chocan con las etiquetas de `Person` según el género), contra uno guardado o contra otro del documento;
+    - sobrevive a `reopenSession` y muere en `closeSession`. Frente a `restoreCheckpoint` vale el caso 91 (ADR-225 §6, que cambia lo que este caso decía en la v1.18.0).
+84. **Reclasificar y resolver conflictos con tipos propios**:
+    - `patch.type` hacia un tipo propio guardado o del documento funciona como con un tipo base (ADR-082);
+    - hacia un tipo propio desconocido se rechaza;
+    - `ConflictResolveRequested.entityType` con un tipo propio que está entre los candidatos lo aplica.
+85. **Desempate entre dos ocurrencias de Regex** (ADR-222 §3). Dos ocurrencias de tipos distintos sobre el mismo tramo, una con `formatOrigin: "user"` y otra con `"base"`, dan un conflicto `overlap` resuelto a favor de la propia, con los dos candidatos y sus `formatId`.
+    - Con el mismo origen, gana la de valor más largo.
+    - Con el mismo largo, gana la que ya estaba registrada.
+    - No bloquea el export (ADR-176): el conflicto nace resuelto.
+86. **`formatId` del grupo** (ADR-224 §2):
+    - está presente en un grupo que salió de un formato, y ausente en uno del modelo y en uno agregado a mano;
+    - un grupo con miembros de dos formatos toma el del primero en orden documental;
+    - un grupo reclasificado a otro tipo lo pierde, y lo recupera si vuelve a su tipo;
+    - la fusión y la división lo recalculan.
+87. **Etiquetas por país** (ADR-221 §3). Con `country: "AR"`, la escalera es exactamente la tabla de siempre, y `synthesize` recibe `country: "AR"` y da el mismo valor que antes del campo.
+88. **Ocurrencia de un tipo propio desconocido**: se descarta con `warn` y no crea grupo.
+89. **Editar un tipo de la sesión** (ADR-225 §3). Con «Número de afiliado» y un grupo `[NUMERO DE AFILIADO 01]`, `updateSessionType` con el nombre «Afiliado» deja el grupo en `[AFILIADO 01]`:
+    - el grupo conserva `id`, `indexInType` y modo, y emite `ENTITY_GROUP_UPDATED` y `GROUP_REPLACEMENT_CHANGED`;
+    - un grupo en `mask` o en `redact` no cambia su `replacementValue`, pero sí `replacementPreviews.placeholder`;
+    - un grupo con `replacementValueUserSet` conserva su `replacementValue`;
+    - cambiar solo las versiones cortas cambia los niveles 1 y 2 de la escalera;
+    - una etiqueta que repite la de otro tipo, base, guardado o de la sesión, lanza `InvalidInputError` y no muta nada; la misma etiqueta que ya tenía no es una repetición;
+    - el `id` de un tipo guardado, o uno desconocido, lanza `InvalidInputError`.
+90. **Borrar un tipo de la sesión** (ADR-225 §4):
+    - cada grupo del tipo se elimina como en el caso de `applyGroupRemove`: `ENTITY_GROUP_REMOVED`, conflictos descartados con `CONFLICT_RESOLVED` y sus valores en `removedValues`;
+    - `getSessionTypes` deja de devolverlo;
+    - una ocurrencia posterior de uno de esos valores se descarta, venga de la fuente que venga, y `liftRemoval` la vuelve a admitir;
+    - las entradas de `typeCorrections` hacia ese tipo y las reglas que lo tienen de objetivo se descartan;
+    - un agregado a mano de ese tipo retenido en un conflicto `heldManual` sin resolver se descarta: el conflicto se resuelve como `winner: "detected"`, emite `CONFLICT_RESOLVED` y el grupo detectado queda como estaba. Elegir después ese agregado ya no es posible (v1.19.1);
+    - un tipo sin grupos se borra sin emitir eventos, salvo el `CONFLICT_RESOLVED` del punto anterior;
+    - el `id` de un tipo guardado, o uno desconocido, lanza `InvalidInputError`.
+91. **Los tipos de la sesión en los puntos de restauración** (ADR-225 §6):
+    - un punto tomado antes de `defineSessionType`, al restaurarse, deja la sesión sin ese tipo;
+    - uno tomado antes de `updateSessionType` devuelve la definición anterior y el `replacementValue` anterior de sus grupos;
+    - uno tomado antes de `removeSessionType` devuelve el tipo y sus grupos con el mismo `id`, el mismo `indexInType` y el mismo `replacementValue`, y saca sus valores de `removedValues`;
+    - `restoreCheckpoint` no emite ningún evento por las definiciones: emite solo la diferencia de grupos y conflictos.
 
 ---
 
@@ -600,6 +725,31 @@ Grouping es determinista dadas las ocurrencias y reglas; sin errores de runtime 
 | `re-applying the same replacementMode clears replacementValueUserSet and restores the computed value` | `unit.test.ts` | unit | ADR-078 §3 — es la acción "restaurar valor calculado" de la UI, que no necesita API nueva |
 | `fragments survive from Occurrence to OccurrenceRef and reach getSnapshot` | `unit.test.ts` | unit | caso 43 (ADR-074 §1) |
 | `a narrow fragment hidden by a wide envelope lowers the abbreviation level` | `unit.test.ts` | unit | caso 43 (ADR-074 §7) — sin esto la escalera mide contra 557 pt y nunca baja |
+| `two user types number independently` | `unit.test.ts` | unit | caso 78 (ADR-219) |
+| `user type placeholder ladder uses short labels or the automatic ones` | `unit.test.ts` | unit | caso 79 |
+| `user type mask keeps separators and follows the canonical value` | `unit.test.ts` | unit | caso 80 |
+| **`synthetic never reaches a user type`** | `unit.test.ts` | unit | caso 81: regla global, modo heredado y preview vacío |
+| `synthetic for a user type is rejected by patch and by type rule` | `edge.test.ts` | edge | caso 81 |
+| `user type groups by alphanumeric key, never fuzzy` | `unit.test.ts` | unit | caso 82 |
+| `document types live in the session and survive reopen` | `unit.test.ts` | unit | caso 83. Renombrado en la v1.19.0: antes terminaba en `and restore` |
+| `defineSessionType rejects a label already taken` | `edge.test.ts` | edge | caso 83: contra un base, `MUJER`, `HOMBRE`, un guardado y otro del documento |
+| `reclassify and resolve conflicts to a user type` | `unit.test.ts` | unit | caso 84 |
+| **`a user format beats a base format in a regex-regex conflict`** | `unit.test.ts` | unit | caso 85 (ADR-222 §3) |
+| `regex-regex conflict falls back to the longer value and then the registered one` | `unit.test.ts` | unit | caso 85 |
+| `formatId follows the first member of the group's own type` | `unit.test.ts` | unit | caso 86 (ADR-224 §2) |
+| **`AR labels and synthetic values are unchanged with country AR`** | `contract.test.ts` | contract | caso 87: no regresión de la 1.0.2 |
+| `an occurrence of an unknown user type is discarded` | `edge.test.ts` | edge | caso 88 |
+| `userTypeLabel strips accents and uppercases` | `unit.test.ts` | unit | ADR-219 §2 |
+| `validateUserEntityType reports each issue code` | `unit.test.ts` | unit | ADR-219 §2 |
+| **`updateSessionType relabels the groups of the type and keeps id, index and mode`** | `unit.test.ts` | unit | caso 89 (ADR-225 §3) |
+| `updateSessionType keeps a replacement value written by the user` | `unit.test.ts` | unit | caso 89 |
+| `updateSessionType rejects a taken label and an id that is not a session type` | `edge.test.ts` | edge | caso 89: contra un base, un guardado y otro de la sesión; no muta nada |
+| **`removeSessionType removes every group of the type and suppresses its values`** | `unit.test.ts` | unit | caso 90 (ADR-225 §4) |
+| `removeSessionType drops type corrections and rules that target the type` | `unit.test.ts` | unit | caso 90 |
+| `removeSessionType rejects an id that is not a session type` | `edge.test.ts` | edge | caso 90: uno guardado y uno desconocido |
+| `removeSessionType resolves a pending held manual occurrence of the type as detected` | `unit.test.ts` | unit | caso 90 (v1.19.1): `CONFLICT_RESOLVED`, el grupo detectado intacto, y `winner: "manual"` sobre ese conflicto ya no aplica |
+| **`restoreCheckpoint restores session types exactly`** | `unit.test.ts` | unit | caso 91 (ADR-225 §6): tras definir, tras editar y tras borrar |
+| `updateSessionType and removeSessionType emit only existing grouping events` | `contract.test.ts` | contract | casos 89 y 90: no hay evento nuevo en el canal |
 
 Fixtures: `tests/fixtures/text-10p.pdf` con entidades conocidas que generan grupos predecibles.
 
@@ -657,6 +807,23 @@ Fixtures: `tests/fixtures/text-10p.pdf` con entidades conocidas que generan grup
 - [x] 15ac. (Hito 11, ADR-184) Implementar en `grouping-engine` el índice interno por sesión para exactos y candidatos difusos, con cota de trigramas, recorrido completo cuando la poda no es segura, orden de primera coincidencia y mantenimiento/invalidez en todas las mutaciones del caso 73. Añadir las cuatro filas de §14; ejecutar gates scoped y medir antes/después en el banco opt-in y R1/R2. Informar paridad, memoria, tiempo y bloqueo residual antes de conservar el cambio. Evidencia macOS en `roadmap/mediciones/grouping/Agrupacion_Difusa_Medicion.md`; Windows nativo pendiente.
 - [x] 15ad. (Hito 11, ADR-191) Recalcular `replacementValue` en `addOccurrenceToGroup` para `placeholder` sin valor manual, emitiendo por `emitReplacementChangeIfNeeded`; `id` reservado por sesión para el grupo nuevo de un split, copiado por el simulacro y por los checkpoints; diferencia de conflictos de `restoreCheckpoint` por `groupId`, `candidates`, `resolved`, `resolvedType` y `heldManual`. Casos 74-76.
 - [x] 15ae. (1.0.x, Confianza — **ADR-214**) En la rama de conflicto de `processOccurrence`, una perdedora que no es manual se descarta solo si `fragmentsContain(ganadora, perdedora)`; si no, sigue a `groupOccurrence` después de emitir el conflicto. Sin cambios en `findOverlapConflict`, en `conflictWinnerIsNew`, en la retención de manuales ni en el evento. Caso 77 y los cinco tests de §14 con sus nombres exactos. Cobertura del módulo ≥ 85 %.
+- [x] 15af. (1.1, frente F3 — **ADR-219**) **Tipos propios.**
+    - `resolveLabelSet` con la escalera de la definición.
+    - `maskByCharacters` para `mask`.
+    - `synthetic` resuelto como `placeholder` en `resolveMode`, y rechazado por patch o por regla de tipo.
+    - Pase exacto por `alphanumericKey`.
+    - `defineSessionType`/`getSessionTypes`. Los tipos de la sesión van dentro de los puntos de restauración (ítem 15aj; la v1.18.0 decía «fuera»).
+    - `userTypeLabel` y `validateUserEntityType` exportadas.
+    - Casos 78 a 84 y 88.
+- [x] 15ag. (1.1, F3 — **ADR-221** §3 y §4) **País.** Tabla de etiquetas elegida por `detection.country` (solo `AR` en la 1.1) y `country` en cada `SyntheticRequest`. Caso 87.
+- [x] 15ah. (1.1, F3 — **ADR-222** §3) **Desempate.** Dos ocurrencias de Regex en `conflictWinnerIsNew`, y `formatId` en los candidatos. Caso 85.
+- [x] 15ai. (1.1, F3 — **ADR-224** §2) **Formato del grupo.** `formatId` del grupo, recalculado en cada cambio de miembros o de tipo; `toOccurrenceRef` propaga `formatId`. Caso 86.
+- [x] 15aj. (1.1, frente F3 — **ADR-225**) **Editar y borrar un tipo de la sesión.**
+    - `updateSessionType`: validar sin compararse contra sí mismo, recalcular `replacementPreviews` y, si corresponde, `replacementValue`, y emitir por `emitReplacementChangeIfNeeded`.
+    - `removeSessionType`: `applyGroupRemove` por cada grupo del tipo, resolver como `winner: "detected"` cada conflicto `heldManual` sin resolver cuya retenida es de ese tipo, y después descartar la definición, sus `typeCorrections` y sus reglas (v1.19.1).
+    - `validateUserEntityType`: `MUJER` y `HOMBRE` cuentan como etiquetas de tipo base (v1.19.1).
+    - Las definiciones de la sesión dentro de la copia de `createCheckpoint` y de la restauración de `restoreCheckpoint`.
+    - Casos 89 a 91.
 - [ ] 16. Escribir `contract.test.ts` con todos los tests contractuales.
 - [ ] 17. Escribir `unit.test.ts` con cobertura ≥ 85%.
 - [ ] 18. Escribir `edge.test.ts` con todos los casos límite.
@@ -692,7 +859,8 @@ para cada Occurrence entrante:
   // tipo por una reclasificación del usuario (ADR-085 §1a)
   candidatos = grupos g donde g.type == occurrence.entityType
                             or occurrence.entityType in g.absorbedTypes
-  // 1. match exacto — los TRECE tipos
+  // 1. match exacto — todos los tipos. Para un tipo propio compara
+  //    alphanumericKey de los dos lados (ADR-219 §4)
   for g in candidatos:
     if g.aliases contiene occurrence.normalizedValue:
       agregar a g, return
@@ -725,7 +893,7 @@ El guard difuso del mapa es el **mismo** `FUZZY_MATCHING_TYPES` de arriba y se e
 
 **Dónde NO se consulta, y es la parte que se puede hacer mal**: ni en el dedup por identidad, ni en `findOverlapConflict`, ni al registrar la ocurrencia. Ahí el `entityType` es la **huella del detector** (ADR-082 §3) y tiene que seguir siendo la cruda. Sobrescribir el tipo de la ocurrencia al entrar —antes del dedup— hace que la ocurrencia re-emitida en un `reanalyze` no matchee su propio registro, entre como nueva, y genere un **conflicto espurio del grupo consigo mismo**. Ver ADR-085 §6.
 
-`FUZZY_MATCHING_TYPES = { Person, Organization, Address }` es una **lista cerrada y explícita**, no una regla derivada (ADR-073 §1): una condición del estilo "los que no tienen `checksum`" volvería a atar el comportamiento a una propiedad que puede cambiar por otra razón, y movería un tipo de un lado al otro en silencio. Son los tres tipos que emite NER, y los únicos donde una diferencia de un carácter puede ser ruido del canal —un OCR que lee `"Diego Ram0s"`— en vez de dato. `Custom` queda **afuera**: su valor lo define un patrón del usuario y el motor no tiene base para decidir si un carácter de diferencia es un typo o un identificador distinto.
+`FUZZY_MATCHING_TYPES = { Person, Organization, Address }` es una **lista cerrada y explícita**, no una regla derivada (ADR-073 §1): una condición del estilo "los que no tienen `checksum`" volvería a atar el comportamiento a una propiedad que puede cambiar por otra razón, y movería un tipo de un lado al otro en silencio. Son los tres tipos que emite NER, y los únicos donde una diferencia de un carácter puede ser ruido del canal —un OCR que lee `"Diego Ram0s"`— en vez de dato. `Custom` queda **afuera**: su valor lo define un patrón del usuario y el motor no tiene base para decidir si un carácter de diferencia es un typo o un identificador distinto. Los **tipos propios** también quedan afuera, por la misma razón (ADR-219 §4): la lista es cerrada y no los nombra.
 
 ### Levenshtein normalizado
 
@@ -779,15 +947,20 @@ function resolveMode(group, rules):
   if rules_global.length > 0: return rules_global.sort(by priority desc)[0].mode
   if group.replacementMode != default: return group.replacementMode  // editado manualmente
   return ReplacementMode.Placeholder
+
+// ADR-219 §3, después de resolver:
+if isUserEntityType(group.type) && modo == Synthetic: modo = Placeholder
 ```
+
+**Tipos propios** (ADR-219 §3): un `synthetic` llega a un tipo propio por una regla `global` o por el modo heredado al reclasificar, y se resuelve como `placeholder`. Una regla de `scope: type` con `synthetic` sobre un tipo propio no se acepta, y un patch con ese modo tampoco: los dos se rechazan con `GROUPING_INVALID_PATCH`.
 
 ### `replacementValue` por modo
 
 | Modo | replacementValue |
 |---|---|
-| `placeholder` | `[<LABEL> <NN>]` con `NN = pad2(indexInType)`, en uno de **tres niveles de abreviatura** elegidos por grupo (ADR-057; ver el bloque siguiente) |
-| `mask` | resolución por grupo (ADR-029): si algún member lleva `Occurrence.maskFormat`, el más frecuente entre los que lo llevan (empate → el del member con primera aparición documental, mismo orden que ADR-028); si ninguno, fallback `MASK_FORMAT_BY_TYPE[type]` (ADR-012; `Plate` → `XX XXX XX` Mercosur) |
-| `synthetic` | `synthesize({ type, groupId, seed, indexInType, personGender })` — determinista por **la identidad del grupo**, no por su número (ADR-072 §1); sobre `Person` con género resuelto, el pool de nombres de pila se filtra por ese género (ADR-071 §5) |
+| `placeholder` | `[<LABEL> <NN>]` con `NN = pad2(indexInType)`, en uno de **tres niveles de abreviatura** elegidos por grupo (ADR-057; ver el bloque siguiente). Para un tipo propio, la escalera de su definición |
+| `mask` | resolución por grupo (ADR-029): si algún member lleva `Occurrence.maskFormat`, el más frecuente entre los que lo llevan (empate → el del member con primera aparición documental, mismo orden que ADR-028); si ninguno, fallback `MASK_FORMAT_BY_TYPE[type]` (ADR-012; `Plate` → `XX XXX XX` Mercosur). Para un tipo propio, `maskByCharacters(canonicalValue)`, sin mirar `maskFormat` (ADR-219 §3) |
+| `synthetic` | `synthesize({ type, groupId, seed, indexInType, personGender })` — determinista por **la identidad del grupo**, no por su número (ADR-072 §1); sobre `Person` con género resuelto, el pool de nombres de pila se filtra por ese género (ADR-071 §5). Con `country: detection.country` (ADR-221 §4). Un tipo propio nunca llega acá; su `replacementPreviews.synthetic` es `""` |
 | `redact` | `""` |
 
 El sintetizador está en `shared/synthesizer.ts`, exportado desde `@anonly/shared` y declarado en `Contracts.md` §5-§6. **Su único caller es este motor** (`computeReplacementValue`): la versión previa de esta línea decía "delegado a `shared` **o** `export-engine`", y `export-engine` nunca lo usó — corregido por ADR-072 §2.
@@ -849,6 +1022,19 @@ Tabla canónica por `EntityType` — ratifica y completa ADR-012 §"Formato para
 | `Person` + `personGender: "f"` (ADR-060 §3) | `MUJER` | `MUJER` | `MUJ` |
 | `Person` + `personGender: "m"` (ADR-060 §3) | `HOMBRE` | `HOMB` | `HOM` |
 
+**Por país** (ADR-221 §3): esta tabla es la de `AR`, y `resolveLabelSet` la elige por `detection.country`. En la 1.1 es la única; las de Chile y Uruguay llegan con sus catálogos en la 1.1.1.
+
+**Tipos propios** (ADR-219 §2): `resolveLabelSet` busca la definición entre los tipos guardados y los de la sesión, y arma la escalera así:
+
+| Nivel | Valor |
+|---|---|
+| 0 | `userTypeLabel(name)`: «Historia clínica» → `HISTORIA CLINICA` |
+| 1 | `shortLabels.level1` si existe; si no, las primeras 4 letras o dígitos del nivel 0, sin espacios: `HIST` |
+| 2 | `shortLabels.level2` si existe; si no, las primeras 3: `HIS` |
+
+- Las versiones cortas escritas a mano se pasan a mayúsculas y sin tildes, como el nivel 0.
+- Si el nivel 0 tiene menos de 4 o de 3 letras y dígitos, el nivel automático es el nivel 0 entero (`CBU`, `CBU`, `CBU`), y la selección saltea los niveles repetidos, como con `DNI`.
+
 **Las columnas repetidas son correctas, no un descuido.** Para `DNI`, `CUIT` e `IBAN` el label ya es una sigla y acortarla más produce tokens ilegibles a cambio de un carácter; para `MUJER` pasa lo mismo con el nivel 1. La selección elige el primero que entra, así que los niveles degenerados se saltean solos, sin ninguna rama especial.
 
 **Selección del nivel** (ADR-057 §4):
@@ -875,6 +1061,35 @@ Reglas que la gobiernan:
 - **`mask`, `synthetic` y `redact` no participan** (ADR-057 §6): el formato de `mask` *es* la información que transmite, un `synthetic` abreviado deja de ser plausible y `redact` no tiene texto.
 
 **La resolución del label es por grupo, no por tipo** (ADR-057 §3). El acceso directo a `TYPE_LABEL_ES` se reemplaza por `resolveLabelSet(group)`, que hoy es un lookup por `group.type` y desde ADR-060 considera además `personGender`. La indirección existe para eso: sin ella, el género obligaría a reescribir la escalera entera.
+
+### Desempate entre dos ocurrencias de Regex (ADR-222 §3)
+
+```text
+conflictWinnerIsNew(nueva, registrada):
+  // reglas de siempre: mayor confidence; en empate entre Regex y otra fuente, Regex
+  si las dos son source Regex:
+    si nueva.formatOrigin != registrada.formatOrigin: gana la de "user"
+    si no, si los largos de value difieren: gana la más larga
+    si no: gana la registrada
+```
+
+**El conflicto nace resuelto**, con razón `Overlap`, el tipo de la ganadora en `resolvedType` y los dos candidatos con su `formatId`. ADR-214 (caso 77) no cambia: la perdedora que cubre texto que la ganadora no cubre no se descarta.
+
+Solo llegan acá dos ocurrencias de Regex cuando una es propia, porque `regex-engine` resuelve entre los formatos base (`Regex_Engine.md` §6, ADR-222 §5).
+
+### `formatId` del grupo (ADR-224 §2)
+
+```text
+formatId(g) = el formatId del primer member, en orden documental (pageIndex, bbox.y, bbox.x),
+              cuyo registro de ocurrencia tiene formatId y cuyo entityType del detector == g.type
+              ausente si ningún member cumple
+```
+
+**El tipo que cuenta es el del detector**, que es el que conserva el `SessionOccurrenceRecord` (ADR-082 §3). Por eso un grupo reclasificado a otro tipo pierde el subnivel, y uno que vuelve a su tipo lo recupera.
+
+**Cuándo se recalcula:** donde cambian los `members` o el `type` del grupo, o sea al crear el grupo, al entrar una ocurrencia, al fusionar, al dividir, en `dropOccurrences`, al reclasificar y en `restoreCheckpoint`. Cuando cambia, entra en los `changes` de `ENTITY_GROUP_UPDATED`.
+
+**De dónde sale:** `toOccurrenceRef` copia `Occurrence.formatId` al `OccurrenceRef`, con propagación explícita, como `fragments` (`03_Data_Model.md` §8).
 
 ---
 

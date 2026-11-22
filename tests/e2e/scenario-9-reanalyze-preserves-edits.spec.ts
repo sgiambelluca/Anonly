@@ -53,6 +53,14 @@ test("un reanalyze preserva las ediciones previas del usuario", async ({ page })
     "href",
     "https://creativecommons.org/licenses/by/2.5/ar/",
   );
+  // «Quién lo hace» (ADR-234): el mailto fijo y «Copiar correo» con su aviso.
+  const authorSection = aboutDialog.getByRole("region", { name: "Quién lo hace" });
+  await expect(authorSection.getByRole("link", { name: "Escribirme por mail" })).toHaveAttribute(
+    "href",
+    /^mailto:santinogiambe@gmail\.com\?subject=/,
+  );
+  await authorSection.getByRole("button", { name: "Copiar correo" }).click();
+  await expect(authorSection.getByRole("button", { name: "Copiado" })).toBeVisible();
   await aboutDialog.getByRole("button", { name: "Cerrar" }).first().click();
   await expect(aboutDialog).toHaveCount(0);
 

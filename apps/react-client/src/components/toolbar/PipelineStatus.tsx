@@ -34,6 +34,7 @@
  */
 
 import { PipelineStage } from "@anonly/anonymization-core";
+import { CircleCheckIcon } from "lucide-react";
 
 import { actions } from "../../core-adapter/actions.js";
 import { usePipelineStore } from "../../store/pipeline.store.js";
@@ -43,6 +44,7 @@ import { Button } from "../common/Button.js";
 import { getIncompleteAnalysisNotice } from "./incompleteAnalysisNotice.js";
 import { getPipelineErrorPresentation } from "./pipelineErrorPresentation.js";
 import { getPipelineStageLabel } from "./pipelineStageLabel.js";
+import { SkippedFormatsNotice, useSkippedFormatsNotice } from "./SkippedFormatsNotice.js";
 
 /** Stages en los que el pipeline ya no reporta progreso (ADR-087 §7.1). */
 const TERMINAL_STAGES: ReadonlySet<PipelineStage> = new Set([
@@ -60,6 +62,7 @@ export function PipelineStatus() {
   const exportProgress = usePipelineStore((state) => state.exportProgress);
   const error = usePipelineStore((state) => state.error);
   const failedJobs = usePipelineStore((state) => state.failedJobs);
+  const skippedNotice = useSkippedFormatsNotice();
 
   const errorPresentation = getPipelineErrorPresentation(stage, error);
 
@@ -102,6 +105,13 @@ export function PipelineStatus() {
     );
   }
 
+  /*
+   * ADR-229 §7: un formato del usuario que no se aplicó en alguna página usa la
+   * misma ranura. Va después del análisis incompleto, que es el riesgo mayor
+   * (puede faltar la detección entera); el diálogo de exportar lo repite.
+   */
+  if (skippedNotice) return <SkippedFormatsNotice notice={skippedNotice} />;
+
   const label = getPipelineStageLabel({
     stage,
     progress,
@@ -123,7 +133,13 @@ export function PipelineStatus() {
     // texto por debajo de ~1100 px de ventana y a 900 px la barra quedaba
     // tapada por el botón "Exportar".
     <div className="flex min-w-0 flex-col gap-1" role="status" aria-live="polite">
-      <span className="truncate text-sm font-medium text-text-primary">{label}</span>
+      {/* Components.md §2.3: ícono y texto. Terminado bien, una tilde verde. */}
+      <span className="flex min-w-0 items-center gap-1.5 text-sm font-medium text-text-primary">
+        {stage === PipelineStage.Ready || stage === PipelineStage.Done ? (
+          <CircleCheckIcon className="h-4 w-4 shrink-0 text-success" aria-hidden />
+        ) : null}
+        <span className="truncate">{label}</span>
+      </span>
       {showProgressBar ? (
         <div className="h-1.5 w-full overflow-hidden rounded-full bg-bg-tertiary">
           <div

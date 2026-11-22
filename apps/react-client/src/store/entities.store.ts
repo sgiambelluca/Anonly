@@ -13,12 +13,42 @@ import {
   EntityType,
   type Conflict,
   type EntityGroup,
+  type EntityTypeId,
   type ReplacementMode,
+  type UserEntityTypeDefinition,
+  type UserEntityTypeId,
 } from "@anonly/anonymization-core";
 import { create } from "zustand";
 
+import { reconcileDocumentTypes, type DocumentTypesPort } from "./documentTypes.js";
+
+/**
+ * Los filtros del panel (`React_Client.md` §3.10, ADR-224 §3). Dentro de un
+ * conjunto alcanza con una opción; entre conjuntos hay que cumplir todos.
+ */
+export type ReviewFilter = "disabled" | "conflict" | "manual";
+
+export interface EntityFilters {
+  /** «Tipos»: de base o propios (ADR-229 §5, precisión del 2026-11-21). */
+  readonly types: ReadonlySet<EntityTypeId>;
+  /** «Tus formatos»: solo ids de formatos del usuario (ADR-226 §3). */
+  readonly formatIds: ReadonlySet<string>;
+  /** «Modo de reemplazo». */
+  readonly modes: ReadonlySet<ReplacementMode>;
+  /** «Para revisar». */
+  readonly review: ReadonlySet<ReviewFilter>;
+}
+
+export const NO_FILTERS: EntityFilters = {
+  types: new Set(),
+  formatIds: new Set(),
+  modes: new Set(),
+  review: new Set(),
+};
+
 export interface EntitiesSlice {
-  readonly groupsByType: ReadonlyMap<EntityType, ReadonlyArray<EntityGroup>>;
+  /** Indexado por `EntityTypeId` (ADR-219 §1): los tipos propios se agregan al llegar su primer grupo. */
+  readonly groupsByType: ReadonlyMap<EntityTypeId, ReadonlyArray<EntityGroup>>;
   readonly conflicts: ReadonlyArray<Conflict>;
   addGroup(group: EntityGroup): void;
   updateGroup(group: EntityGroup): void;
@@ -26,7 +56,7 @@ export interface EntitiesSlice {
   updateReplacement(groupId: string, mode: ReplacementMode, value: string): void;
   addConflict(conflict: Conflict): void;
   /** `resolvedType` (ADR-083 §3): el tipo con el que quedó clasificado el grupo. */
-  resolveConflict(conflictId: string, resolvedType?: EntityType): void;
+  resolveConflict(conflictId: string, resolvedType?: EntityTypeId): void;
   /**
    * ADR-169 §2: orden de presentación de las filas. **Solo UI**: no cambia
    * `indexInType` ni emite nada al Core. Vale para todos los tipos y se
@@ -41,7 +71,37 @@ export interface EntitiesSlice {
    */
   readonly flashGroupId: string | null;
   setFlashGroupId(groupId: string | null): void;
+  /** Espejo de `orchestrator.getDocumentEntityTypes(documentId)`, en orden de creación (§3.9). */
+  readonly documentTypes: ReadonlyArray<UserEntityTypeDefinition>;
+  /** Tipos del documento que el usuario guardó durante este documento (ADR-225 §5). */
+  readonly savedDuringDocument: ReadonlySet<UserEntityTypeId>;
+  /**
+   * Vuelve a leer los tipos del documento. El Core no emite eventos por las
+   * definiciones (ADR-225 §6): se llama después de cada acción que las toca y de
+   * `undo`/`redo`. Si una restauración se llevó un tipo que el usuario guardó
+   * durante el documento, lo vuelve a definir (invariante de ADR-225 §6).
+   */
+  refreshDocumentTypes(): void;
+  /** Reemplaza el espejo tal cual: lo usa `refreshDocumentTypes` y las pruebas. */
+  setDocumentTypes(types: ReadonlyArray<UserEntityTypeDefinition>): void;
+  markTypeSaved(id: UserEntityTypeId): void;
+  unmarkTypeSaved(id: UserEntityTypeId): void;
+  /** Filtros del panel (§3.10): de la interfaz, no emiten nada ni entran a la pila de deshacer. */
+  readonly filters: EntityFilters;
+  setFilters(filters: EntityFilters): void;
+  clearFilters(): void;
   reset(): void;
+}
+
+let documentTypesPort: DocumentTypesPort | null = null;
+
+/**
+ * El acceso al Core para leer y volver a definir los tipos del documento. Lo
+ * registra `core-adapter`: este store no importa el adaptador (los workers de
+ * `?worker` no cargan en Node) y se prueba con un puerto falso.
+ */
+export function setDocumentTypesPort(port: DocumentTypesPort | null): void {
+  documentTypesPort = port;
 }
 
 /** `"appearance"` = `indexInType` ascendente; `"alpha"` = `canonicalValue` A–Z (ADR-169 §2). */
@@ -64,15 +124,15 @@ const ENTITY_TYPE_ORDER: ReadonlyArray<EntityType> = [
   EntityType.Custom,
 ];
 
-function emptyGroupsByType(): ReadonlyMap<EntityType, ReadonlyArray<EntityGroup>> {
+function emptyGroupsByType(): ReadonlyMap<EntityTypeId, ReadonlyArray<EntityGroup>> {
   return new Map(ENTITY_TYPE_ORDER.map((type) => [type, []]));
 }
 
 /** Busca en qué bucket de tipo vive un `groupId`; `undefined` si no existe. */
 function findGroupType(
-  groupsByType: ReadonlyMap<EntityType, ReadonlyArray<EntityGroup>>,
+  groupsByType: ReadonlyMap<EntityTypeId, ReadonlyArray<EntityGroup>>,
   groupId: string,
-): EntityType | undefined {
+): EntityTypeId | undefined {
   for (const [type, groups] of groupsByType) {
     if (groups.some((group) => group.id === groupId)) return type;
   }
@@ -87,7 +147,13 @@ function withoutHeldManual(conflict: Conflict): Conflict {
 
 type EntitiesData = Pick<
   EntitiesSlice,
-  "groupsByType" | "conflicts" | "sortOrder" | "flashGroupId"
+  | "groupsByType"
+  | "conflicts"
+  | "sortOrder"
+  | "flashGroupId"
+  | "documentTypes"
+  | "savedDuringDocument"
+  | "filters"
 >;
 
 const initialState: EntitiesData = {
@@ -95,9 +161,12 @@ const initialState: EntitiesData = {
   conflicts: [],
   sortOrder: "appearance",
   flashGroupId: null,
+  documentTypes: [],
+  savedDuringDocument: new Set(),
+  filters: NO_FILTERS,
 };
 
-export const useEntitiesStore = create<EntitiesSlice>((set) => ({
+export const useEntitiesStore = create<EntitiesSlice>((set, get) => ({
   ...initialState,
   addGroup(group) {
     set((state) => {
@@ -124,9 +193,10 @@ export const useEntitiesStore = create<EntitiesSlice>((set) => ({
         );
       }
 
-      const targetBucket = next.get(group.type) ?? [];
+      const targetType = group.type;
+      const targetBucket = next.get(targetType) ?? [];
       next.set(
-        group.type,
+        targetType,
         targetBucket.some((g) => g.id === group.id)
           ? targetBucket.map((existing) => (existing.id === group.id ? group : existing))
           : [...targetBucket, group],
@@ -194,10 +264,42 @@ export const useEntitiesStore = create<EntitiesSlice>((set) => ({
   setFlashGroupId(groupId) {
     set({ flashGroupId: groupId });
   },
+  refreshDocumentTypes() {
+    if (documentTypesPort === null) return;
+    const types = reconcileDocumentTypes(documentTypesPort, get().savedDuringDocument);
+    set({ documentTypes: types });
+  },
+  setDocumentTypes(types) {
+    set({ documentTypes: types });
+  },
+  markTypeSaved(id) {
+    set((state) => ({ savedDuringDocument: new Set([...state.savedDuringDocument, id]) }));
+  },
+  unmarkTypeSaved(id) {
+    set((state) => {
+      if (!state.savedDuringDocument.has(id)) return state;
+      const next = new Set(state.savedDuringDocument);
+      next.delete(id);
+      return { savedDuringDocument: next };
+    });
+  },
+  setFilters(filters) {
+    set({ filters });
+  },
+  clearFilters() {
+    set({ filters: NO_FILTERS });
+  },
   reset() {
     // `sortOrder` se conserva: es una preferencia de la sesión de la app, no
-    // del documento (ADR-169 §2).
-    set({ groupsByType: emptyGroupsByType(), conflicts: [], flashGroupId: null });
+    // del documento (ADR-169 §2). Los filtros duran lo que dura el documento (§3.10).
+    set({
+      groupsByType: emptyGroupsByType(),
+      conflicts: [],
+      flashGroupId: null,
+      documentTypes: [],
+      savedDuringDocument: new Set(),
+      filters: NO_FILTERS,
+    });
   },
 }));
 
@@ -213,7 +315,7 @@ export const useEntitiesStore = create<EntitiesSlice>((set) => ({
  * lo que este mapa contiene ya es "no eliminado".
  */
 export function pageHasEntity(
-  groupsByType: ReadonlyMap<EntityType, ReadonlyArray<EntityGroup>>,
+  groupsByType: ReadonlyMap<EntityTypeId, ReadonlyArray<EntityGroup>>,
   pageIndex: number,
 ): boolean {
   for (const groups of groupsByType.values()) {

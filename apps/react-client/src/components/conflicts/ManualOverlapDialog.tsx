@@ -29,7 +29,7 @@
  * particular vino de "elegir" o de "abandonar".
  */
 
-import type { EntityType } from "@anonly/anonymization-core";
+import type { EntityTypeId } from "@anonly/anonymization-core";
 import { useEffect } from "react";
 import { useShallow } from "zustand/react/shallow";
 
@@ -37,8 +37,9 @@ import { useEntitiesStore } from "../../store/entities.store.js";
 import { Button } from "../common/Button.js";
 import { Dialog } from "../common/Dialog.js";
 import { applyManualOverlapResolution } from "../entities/applyEdits.js";
-import { ENTITY_TYPE_COLOR } from "../entities/entityTypeColors.js";
-import { ENTITY_TYPE_SINGULAR } from "../entities/entityTypeLabels.js";
+import { typeSingular } from "../entities/entityTypeLabels.js";
+import { TypeDot } from "../entities/TypeDot.js";
+import { useUserTypes } from "../entities/useUserTypes.js";
 
 import { conflictsByIds, manualOverlapCandidates } from "./conflictResolution.js";
 
@@ -144,19 +145,16 @@ function CandidateCard({
 }: {
   readonly label: string;
   readonly value: string;
-  readonly type: EntityType;
+  readonly type: EntityTypeId;
 }) {
+  const userTypes = useUserTypes();
   return (
     <div className="flex flex-col gap-1 rounded-lg border border-border bg-bg-secondary px-3.5 py-3">
       <p className="font-semibold text-text-secondary">{label}</p>
       <p className="break-words font-semibold text-text-primary">«{value}»</p>
       <p className="flex items-center gap-2 text-text-secondary">
-        <span
-          aria-hidden
-          className="h-2 w-2 shrink-0 rounded-full"
-          style={{ background: ENTITY_TYPE_COLOR[type] }}
-        />
-        {ENTITY_TYPE_SINGULAR[type]}
+        <TypeDot type={type} />
+        {typeSingular(type, userTypes)}
       </p>
     </div>
   );

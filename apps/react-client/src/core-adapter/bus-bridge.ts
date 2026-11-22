@@ -96,7 +96,25 @@ export function subscribe(bus: IEventBus, stores: Stores): Unsubscribe {
       jobTypeById.clear();
       // ADR-168 §4/§5: el mapa de pasos y la etapa del fallo son del
       // documento que se abre, no del anterior.
-      stores.pipeline.setState({ failedJobs: {}, failedAtStage: null, visitedStages: new Set() });
+      stores.pipeline.setState({
+        failedJobs: {},
+        skippedFormats: [],
+        failedAtStage: null,
+        visitedStages: new Set(),
+      });
+    }),
+  );
+
+  // ─── Regex (canal `regex`) ───
+  //
+  // ADR-220 §6 / ADR-229 §7: los formatos del usuario que no se aplicaron en
+  // alguna página. "Ausente ≡ ninguno" (`04_Event_System.md` §5), así que `?? []`
+  // y no un early-return: un `reanalyze` que ya no falla tiene que poder apagar
+  // el aviso.
+  unsubs.push(
+    bus.on(EventChannel.Regex, EngineEvents.REGEX_FINISHED, (payload) => {
+      if (payload.documentId !== stores.document.getState().id) return;
+      stores.pipeline.setState({ skippedFormats: payload.skippedFormats ?? [] });
     }),
   );
 

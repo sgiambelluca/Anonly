@@ -19,7 +19,7 @@ import { RenderEngine } from "@anonly/render-engine";
 import type { CoreRuntimeOptions, EngineConfigOverrides } from "@anonly/shared";
 
 import { LruCache } from "./cache.js";
-import { mergeEngineConfig } from "./config.js";
+import { mergeEngineConfig, sanitizeDetectionConfig } from "./config.js";
 import { createNullLogger } from "./logger.js";
 import { PipelineOrchestrator } from "./orchestrator.js";
 import type { AnonymizationCoreEngines, IAnonymizationCore } from "./types.js";
@@ -81,8 +81,10 @@ export async function createCore(
   config?: EngineConfigOverrides,
   runtime?: CoreRuntimeOptions,
 ): Promise<IAnonymizationCore> {
-  const mergedConfig = mergeEngineConfig(config);
   const logger = createNullLogger();
+  // ADR-223 §2: el default de `detection` es el de la 1.0.2 y los tipos propios
+  // inválidos se descartan con `warn` antes de repartir la configuración.
+  const mergedConfig = sanitizeDetectionConfig(mergeEngineConfig(config), logger);
   const cache = new LruCache();
   const bus: EventBus = createEventBus({ logger });
 

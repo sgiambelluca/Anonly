@@ -45,7 +45,9 @@ export function Checkbox({
         onCheckedChange={(next) => {
           onCheckedChange(next === true);
         }}
-        className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-sm border border-border bg-bg-primary data-[state=checked]:border-accent data-[state=checked]:bg-accent"
+        // Borde en `text-secondary` y no en `border` (1,2:1 sobre blanco): una
+        // casilla vacía tiene que verse, 3:1 para componentes (`Components.md` §8.4).
+        className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-sm border border-text-secondary bg-bg-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-1 focus-visible:ring-offset-bg-primary data-[state=checked]:border-accent data-[state=checked]:bg-accent data-[state=indeterminate]:border-accent data-[state=indeterminate]:bg-accent"
       >
         <RadixCheckbox.Indicator className="text-accent-foreground">
           {checked === "indeterminate" ? (

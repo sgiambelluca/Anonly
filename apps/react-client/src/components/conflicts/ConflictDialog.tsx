@@ -19,20 +19,29 @@
  * confirmar no cambia datos. Ver `conflictResolution.ts`.
  */
 
-import { ConflictReason, type EntityType } from "@anonly/anonymization-core";
+import { ConflictReason, type EntityTypeId } from "@anonly/anonymization-core";
 import { CheckIcon, InfoIcon } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 
+import { useDetectionStore } from "../../store/detection.store.js";
 import { useEntitiesStore } from "../../store/entities.store.js";
 import { Button } from "../common/Button.js";
 import { Dialog } from "../common/Dialog.js";
 import { applyConflictResolution } from "../entities/applyEdits.js";
-import { ENTITY_TYPE_COLOR } from "../entities/entityTypeColors.js";
-import { ENTITY_TYPE_SINGULAR } from "../entities/entityTypeLabels.js";
+import { typeSingular } from "../entities/entityTypeLabels.js";
+import { TypeDot } from "../entities/TypeDot.js";
+import { useUserTypes } from "../entities/useUserTypes.js";
 import { ConflictSymbol } from "../entities/warningSymbols.js";
 
 import { CONFLICT_REASON_LABEL } from "./conflictLabels.js";
 import { candidateTypes, defaultCandidate, spellingChoices } from "./conflictResolution.js";
+import {
+  FORMAT_CONFLICT_TITLE,
+  FORMAT_ORIGIN_LABEL,
+  formatConflictOptions,
+  formatConflictResolvedNote,
+  isFormatConflict,
+} from "./formatConflict.js";
 
 export interface ConflictDialogProps {
   readonly conflictId: string;
@@ -76,7 +85,9 @@ export function ConflictDialog({
     }
     return undefined;
   });
-  const [selectedType, setSelectedType] = useState<EntityType | null>(null);
+  const [selectedType, setSelectedType] = useState<EntityTypeId | null>(null);
+  const userTypes = useUserTypes();
+  const detection = useDetectionStore((state) => state.saved);
   const [selectedSpelling, setSelectedSpelling] = useState<string | null>(null);
 
   // El default se recalcula al abrir: es el candidato de mayor confidence, o
@@ -91,13 +102,20 @@ export function ConflictDialog({
       .getState()
       .conflicts.find((candidate) => candidate.id === conflictId);
     if (current === undefined) return;
-    setSelectedType(defaultCandidate(current).entityType);
+    // Un conflicto entre dos formatos nace resuelto (ADR-222 §3): lo vigente es
+    // `resolvedType`, y `defaultCandidate` (mayor confianza) no lo elige —los dos
+    // valen 1,0—. El resto, como siempre (ADR-083 §4).
+    const defaultType =
+      isFormatConflict(current) && current.resolvedType !== undefined
+        ? current.resolvedType
+        : defaultCandidate(current).entityType;
+    setSelectedType(defaultType);
     // ADR-106: preselecciona la escritura vigente, para que aplicar sin tocar
     // nada no cambie el valor canónico.
     setSelectedSpelling(
       useEntitiesStore
         .getState()
-        .groupsByType.get(defaultCandidate(current).entityType)
+        .groupsByType.get(defaultType)
         ?.find((group) => group.id === current.groupId)?.canonicalValue ??
         spellingChoices(current)[0] ??
         null,
@@ -132,11 +150,22 @@ export function ConflictDialog({
   // Un solo tipo entre los candidatos ⇒ no hay clasificación en disputa
   // (`low_confidence`, ADR-083 §5): solo se descarta.
   const hasChoice = types.length > 1;
+  // ADR-229 §6: dos formatos reconocen el mismo texto. Nace resuelto, así que
+  // sin cambiar la elección el botón dice «Listo» y solo cierra.
+  const formatConflict = isFormatConflict(conflict);
+  const currentType = group?.type ?? conflict.resolvedType;
+  const unchangedFormatChoice = formatConflict && selectedType === currentType;
+  const formatOptions = formatConflict ? formatConflictOptions(conflict, detection) : [];
+  const resolvedNote = formatConflictResolvedNote(conflict, detection);
 
   // Arrow function, no `function` declaration: preserva el narrowing de
   // `conflict` (por el `if` de arriba) — ver la nota equivalente en
   // `entities/MergeDialog.tsx`.
   const handleApply = (): void => {
+    if (unchangedFormatChoice) {
+      onClose();
+      return;
+    }
     // Elegir la grafía y el tipo es una sola decisión: una entrada de la
     // pila de deshacer (ADR-172 §2). La grafía viaja por
     // `GroupUpdateRequested.patch.canonicalValue`, que existe desde siempre
@@ -146,6 +175,7 @@ export function ConflictDialog({
       groupId: conflict.groupId,
       spelling: hasSpellingChoice ? selectedSpelling : null,
       entityType: selectedType ?? undefined,
+      currentType,
       label: value,
     });
     if (onApplied !== undefined) onApplied();
@@ -178,7 +208,11 @@ export function ConflictDialog({
             </Button>
           ) : null}
           <Button variant="primary" className="min-w-[6rem]" onClick={handleApply}>
-            {hasChoice || hasSpellingChoice ? "Aplicar" : "Descartar"}
+            {unchangedFormatChoice
+              ? "Listo"
+              : hasChoice || hasSpellingChoice
+                ? "Aplicar"
+                : "Descartar"}
           </Button>
         </div>
       }
@@ -190,7 +224,9 @@ export function ConflictDialog({
           </span>
           <div className="flex min-w-0 flex-col gap-0.5">
             <b className="break-words font-semibold text-text-primary">{value}</b>
-            <span className="text-text-secondary">{CONFLICT_REASON_LABEL[conflict.reason]}</span>
+            <span className="text-text-secondary">
+              {formatConflict ? FORMAT_CONFLICT_TITLE : CONFLICT_REASON_LABEL[conflict.reason]}
+            </span>
           </div>
         </div>
 
@@ -214,19 +250,38 @@ export function ConflictDialog({
           </ChoiceGroup>
         ) : hasChoice ? (
           <ChoiceGroup id={`conflict-type-${conflict.id}`} label="¿Con qué se identifica?">
-            {types.map((type) => (
-              <ChoiceOption
-                key={type}
-                name={`conflict-type-${conflict.id}`}
-                value={type}
-                checked={selectedType === type}
-                isCurrent={group?.type === type}
-                dotColor={ENTITY_TYPE_COLOR[type]}
-                onSelect={() => setSelectedType(type)}
-              >
-                {ENTITY_TYPE_SINGULAR[type]}
-              </ChoiceOption>
-            ))}
+            {types.map((type) => {
+              const format = formatOptions.find((option) => option.type === type)?.format ?? null;
+              return (
+                <ChoiceOption
+                  key={type}
+                  name={`conflict-type-${conflict.id}`}
+                  value={type}
+                  checked={selectedType === type}
+                  isCurrent={group?.type === type}
+                  dotType={type}
+                  detail={
+                    format !== null ? (
+                      <>
+                        Formato «{format.name}»
+                        <span
+                          className={`inline-flex h-[18px] items-center rounded-full border px-[7px] text-xs font-semibold ${
+                            format.origin === "user"
+                              ? "border-text-secondary text-text-primary"
+                              : "border-border text-text-secondary"
+                          }`}
+                        >
+                          {FORMAT_ORIGIN_LABEL[format.origin]}
+                        </span>
+                      </>
+                    ) : undefined
+                  }
+                  onSelect={() => setSelectedType(type)}
+                >
+                  {typeSingular(type, userTypes)}
+                </ChoiceOption>
+              );
+            })}
           </ChoiceGroup>
         ) : (
           <p className="flex items-start gap-2 rounded-lg border border-border bg-bg-secondary px-3 py-2.5 text-text-secondary">
@@ -235,11 +290,16 @@ export function ConflictDialog({
           </p>
         )}
 
-        {conflict.resolved ? (
+        {resolvedNote !== null ? (
+          <p className="flex items-start gap-2 leading-snug text-success">
+            <CheckIcon className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+            <span>{resolvedNote}</span>
+          </p>
+        ) : conflict.resolved ? (
           <p className="flex items-center gap-1.5 text-success">
             <CheckIcon className="h-4 w-4 shrink-0" aria-hidden />
             Ya revisado
-            {conflict.resolvedType ? ` (${ENTITY_TYPE_SINGULAR[conflict.resolvedType]})` : ""}.
+            {conflict.resolvedType ? ` (${typeSingular(conflict.resolvedType, userTypes)})` : ""}.
           </p>
         ) : null}
       </div>
@@ -278,7 +338,8 @@ function ChoiceOption({
   value,
   checked,
   isCurrent,
-  dotColor,
+  dotType,
+  detail,
   onSelect,
   children,
 }: {
@@ -287,7 +348,9 @@ function ChoiceOption({
   readonly checked: boolean;
   /** La opción que ya está aplicada en el documento. */
   readonly isCurrent: boolean;
-  readonly dotColor?: string;
+  readonly dotType?: EntityTypeId;
+  /** Segunda línea: el formato y su origen, en un conflicto entre formatos (ADR-229 §6). */
+  readonly detail?: ReactNode;
   readonly onSelect: () => void;
   readonly children: ReactNode;
 }) {
@@ -307,14 +370,15 @@ function ChoiceOption({
         onChange={onSelect}
         className="sr-only"
       />
-      {dotColor !== undefined ? (
-        <span
-          aria-hidden
-          className="h-2 w-2 shrink-0 rounded-full"
-          style={{ background: dotColor }}
-        />
-      ) : null}
-      <span className="min-w-0 flex-1 break-words">{children}</span>
+      {dotType !== undefined ? <TypeDot type={dotType} /> : null}
+      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className="break-words">{children}</span>
+        {detail !== undefined ? (
+          <span className="flex items-center gap-1.5 text-sm font-normal text-text-secondary">
+            {detail}
+          </span>
+        ) : null}
+      </span>
       {isCurrent ? <span className="shrink-0 font-normal text-text-secondary">Actual</span> : null}
       <span
         aria-hidden

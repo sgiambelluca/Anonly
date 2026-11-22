@@ -27,13 +27,14 @@
  * emite y se muestra.
  */
 
-import type { ManualEntityRequest } from "@anonly/anonymization-core";
+import type { ManualEntityRequest, UserEntityTypeDefinition } from "@anonly/anonymization-core";
 
 import { actions } from "../../core-adapter/actions.js";
 import { useEntitiesStore } from "../../store/entities.store.js";
 import { showToast } from "../common/toast.js";
 import { openManualOverlapDialog } from "../conflicts/manualOverlapController.js";
 
+import { TYPE_ACTION_FAILED_TOAST } from "./documentTypeCopy.js";
 import { discardLastEdit, editToast, recordEdit } from "./editHistory.js";
 import {
   describeManualAdd,
@@ -41,11 +42,35 @@ import {
   resolveAddedGroup,
   type ManualEntityFeedback,
 } from "./manualEntityFeedback.js";
+import { currentUserTypes } from "./useUserTypes.js";
 
+/**
+ * Con `newType` es «Crear y agregar» (ADR-229 §2): **una sola** entrada del
+ * deshacer, después `defineDocumentEntityType` y después el agregado
+ * (`React_Client.md` §3.9). `request.entityType` es entonces el id del tipo nuevo.
+ * Si el valor no se encuentra, la entrada se conserva: crear el tipo sí cambió
+ * algo y tiene que poder deshacerse.
+ */
 export async function addManualEntityWithFeedback(
   request: ManualEntityRequest,
+  newType?: UserEntityTypeDefinition,
+  saveNewType = false,
 ): Promise<ManualEntityFeedback> {
   const recorded = recordEdit(`Agregaste «${request.value}»`);
+  if (newType !== undefined) {
+    try {
+      actions.defineDocumentType(newType);
+    } catch {
+      if (recorded) discardLastEdit();
+      showToast({ title: TYPE_ACTION_FAILED_TOAST, tone: "error" });
+      return "error";
+    }
+    // «Guardarlo», tildada en el campo «Nuevo tipo» (ADR-225 §5, precisión del
+    // 2026-11-21): lo mismo que el ⋯ después. El deshacer no lo alcanza.
+    if (saveNewType) actions.saveDocumentType(newType.id);
+  }
+  const keepEntry = newType !== undefined;
+  const userTypes = currentUserTypes();
   const result = await actions.addManualEntity(request);
   const feedback = manualEntityFeedback(result);
 
@@ -70,6 +95,7 @@ export async function addManualEntityWithFeedback(
       entityType: request.entityType,
       occurrenceCount: result.occurrenceCount,
       group,
+      userTypes,
     });
     showToast(
       editToast(
@@ -98,7 +124,7 @@ export async function addManualEntityWithFeedback(
     // rompe el invariante del Core — nunca se dice "no se encontró" sobre
     // algo que el Core sí encontró. Se retira la entrada fantasma, se avisa
     // con un toast de error y se loguea para poder investigarlo.
-    if (recorded) discardLastEdit();
+    if (recorded && !keepEntry) discardLastEdit();
     console.error(
       `No se pudo agregar «${request.value}»: ManualEntityResult rompió su invariante ` +
         "(occurrenceCount > 0 sin heldConflictIds ni groupIds, ADR-175 §3).",
@@ -110,7 +136,7 @@ export async function addManualEntityWithFeedback(
 
   // "not-found" / "no-op" (o, defensivamente, "held"/"added" sin resultado):
   // nada cambió, la entrada que se registró arriba no tiene qué deshacer
-  // (N-3, ronda 1).
-  if (recorded) discardLastEdit();
+  // (N-3, ronda 1). Salvo que se haya creado un tipo: eso sí cambió algo.
+  if (recorded && !keepEntry) discardLastEdit();
   return feedback;
 }

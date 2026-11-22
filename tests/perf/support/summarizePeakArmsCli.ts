@@ -1,0 +1,50 @@
+/**
+ * `tsx tests/perf/support/summarizePeakArmsCli.ts <RUN_DIR> [control] [candidato]` lee
+ * `<RUN_DIR>/runs/*.json` y escribe un `<RUN_DIR>/summary-<perfil>.json` por
+ * perfil (una corrida puede medir P1 y P2), además de imprimir cada corrida.
+ * Solo agrega números ya medidos: no reescribe crudos.
+ */
+import { readFile, readdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+
+import {
+  parseRunFileName,
+  summarizeCampaign,
+  toTemperatureRow,
+  type LabeledReport,
+  type ProfileReportInput,
+} from "./peakArmsSummary.js";
+
+async function main(): Promise<void> {
+  const runDir = process.argv[2];
+  if (runDir === undefined) throw new Error("arnés de pico: falta el directorio de la campaña");
+  const runsDir = join(runDir, "runs");
+  const names = (await readdir(runsDir)).filter((name) => name.endsWith(".json")).sort();
+  const byProfile = new Map<string, LabeledReport[]>();
+  for (const name of names) {
+    const label = parseRunFileName(name);
+    if (label === undefined) continue;
+    const report = JSON.parse(await readFile(join(runsDir, name), "utf8")) as ProfileReportInput;
+    const list = byProfile.get(label.profile) ?? [];
+    list.push({ round: label.round, arm: label.arm, report });
+    byProfile.set(label.profile, list);
+    for (const temperature of ["cold", "hot"] as const) {
+      const row = toTemperatureRow(report[temperature]);
+      process.stdout.write(
+        `${name} ${temperature} ok=${row.ok} peak=${row.peakMb} parse=${row.parsePeakMb} ` +
+          `ocr=${row.ocrPeakMb} tab=${row.tabPeakMb} postReady=${row.postReadyPeakMb} ` +
+          `base=${row.baselineMb} ready=${row.readyMs}ms groups=${row.groupCount} ` +
+          `ocrText=${row.ocrTextSha256.slice(0, 12)}\n`,
+      );
+    }
+  }
+  const control = process.argv[3] ?? "base";
+  const candidate = process.argv[4] ?? "head";
+  for (const [profile, reports] of [...byProfile].sort(([a], [b]) => a.localeCompare(b))) {
+    const summary = summarizeCampaign(reports, control, candidate);
+    await writeFile(join(runDir, `summary-${profile}.json`), JSON.stringify(summary, null, 2));
+    process.stdout.write(`== ${profile}\n${JSON.stringify(summary, null, 2)}\n`);
+  }
+}
+
+await main();

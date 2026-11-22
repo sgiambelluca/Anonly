@@ -2,7 +2,7 @@
 
 # ADR-172 — Deshacer y rehacer exactos
 
-- **Estado**: Accepted
+- **Estado**: Accepted — **extendido por ADR-225** (§1: el punto de restauración incluye las definiciones de los tipos del documento)
 - **Fecha**: 2026-09-23
 - **Decidido por**: El humano: *"al confirmar debe de aparecer el toast de confirmación con la
   posibilidad de deshacer. Lo mismo aplica con el hecho de poder hacer CTRL + Z o CTRL + Y"*. Ante el
