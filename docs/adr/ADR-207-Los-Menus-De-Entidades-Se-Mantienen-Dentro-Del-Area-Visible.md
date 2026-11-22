@@ -34,6 +34,12 @@ viewport de la prueba ni retirar su comprobación de hit testing.
    dependencias nuevas, portal, cambios de roles accesibles ni contratos Core.
    Medir alto intrínseco con las opciones condicionales y evitar que el alto
    limitado se confunda con el intrínseco al recalcular.
+
+   > **Ampliación (2026-11-22, 1.1):** la misma regla y el mismo cálculo
+   > (`observeMenuLayout`) ubican también los globos «Agregar como…»: el de la
+   > selección en el visor (`WordSelectionOverlay`, anclado al recuadro de la
+   > selección) y los dos de la lupa (`DocumentSearchBox`, anclados al campo y
+   > a la lista de resultados). Ver `ui/Components.md` §5.4b y §5.4c.
 5. Recalcular ante cambios de tamaño, scroll y reflow del área que recorta.
    Retirar observadores y listeners al cerrar o desmontar. Conservar cierre
    por click fuera, Escape y selección, y el resaltado del grupo abierto.
