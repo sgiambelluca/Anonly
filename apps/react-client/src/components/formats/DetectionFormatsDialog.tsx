@@ -577,20 +577,24 @@ export function DetectionFormatsDialog({ open, onClose, onSaved }: DetectionForm
         </div>
       </Dialog>
 
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept=".anonly-formatos,application/json,.json"
-        className="hidden"
-        aria-hidden
-        tabIndex={-1}
-        onChange={(event) => {
-          const file = event.target.files?.[0];
-          // Permite elegir de nuevo el mismo archivo.
-          event.target.value = "";
-          if (file !== undefined) void handleFile(file);
-        }}
-      />
+      {/* Solo con el diálogo abierto, que es cuando se usa: cerrado, sería un
+          segundo `input[type=file]` en la pantalla de inicio, junto al del PDF. */}
+      {open ? (
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".anonly-formatos,application/json,.json"
+          className="hidden"
+          aria-hidden
+          tabIndex={-1}
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            // Permite elegir de nuevo el mismo archivo.
+            event.target.value = "";
+            if (file !== undefined) void handleFile(file);
+          }}
+        />
+      ) : null}
 
       <ConfirmDialog
         open={confirmClose}
