@@ -228,10 +228,17 @@ apps/react-client/src/components/
   viajan con la aplicación instalada, en `resources/renderer/licenses/THIRD_PARTY_LICENSES.txt`
   (en macOS, dentro de `Anonly.app/Contents/Resources/`).
   Un test comprueba que cada componente figura en `NOTICE` con la misma licencia (ADR-196 §6).
-- **URLs externas navegables** (ADR-070 §3 extendido por ADR-168 §3): las dos del crédito
-  (`sourceUrl`, `licenseUrl`) más `https://github.com/sgiambelluca/Anonly` (código fuente) y
-  `https://github.com/sgiambelluca/Anonly/issues/new` ("Reportar un problema", en el pie y en
-  `AboutDialog`). Son las **únicas**; cualquier otra necesita ADR.
+  **«Quién lo hace»** (ADR-234 §1 y §2) va entre el párrafo de presentación y «Código fuente»:
+  una tarjeta con las iniciales del mantenedor (decorativas), nombre, rol y ciudad, un texto que
+  invita a escribir, y dos acciones con la dirección visible al lado: «Escribirme por mail»
+  (`mailto:` con asunto que lleva la versión) y «Copiar correo» (`navigator.clipboard`; dice
+  «Copiado» durante 2 s sin cambiar de ancho).
+- **URLs externas navegables** (ADR-070 §3 extendido por ADR-168 §3 y ADR-234 §3): las dos del
+  crédito (`sourceUrl`, `licenseUrl`) más `https://github.com/sgiambelluca/Anonly` (código
+  fuente), `https://github.com/sgiambelluca/Anonly/issues/new` ("Reportar un problema", en el
+  pie y en `AboutDialog`) y `mailto:santinogiambe@gmail.com` («Quién lo hace»). Son las
+  **únicas**; cualquier otra necesita ADR. El shell abre afuera solo `https://` y `mailto:`
+  (ADR-234 §4).
 
 ### 2.9b `ReleaseNotesMenu` (ADR-216)
 
