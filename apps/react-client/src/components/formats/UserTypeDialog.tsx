@@ -60,9 +60,9 @@ export interface UserTypeDialogProps {
   /** Cuántos formatos tiene el tipo que se edita (`saved`): para «Sus N formatos no cambian». */
   readonly formatCount?: number;
   /**
-   * : al crear un tipo del documento, si se tildó «Guardarlo también para
+   * `save`: al crear un tipo del documento, si se tildó «Guardarlo también para
    * los próximos documentos» (ADR-225 §5, precisión del 2026-11-21). En los
-   * otros casos, siempre .
+   * otros casos, siempre `false`.
    */
   readonly onSubmit: (definition: UserEntityTypeDefinition, save: boolean) => void;
   readonly onClose: () => void;

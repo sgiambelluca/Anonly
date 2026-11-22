@@ -161,6 +161,8 @@ export function AddEntityDialog({ open, onClose, initialType }: AddEntityDialogP
             <span
               id={NEW_TYPE_HINT_ID}
               role="alert"
+              // Si no entra en dos renglones, el texto completo queda en `title` (UX §11b.17).
+              title={choice.error}
               className="inline-flex min-w-0 flex-1 items-center gap-2 text-sm font-medium text-error"
             >
               <TriangleAlertIcon className="h-4 w-4 shrink-0" aria-hidden />

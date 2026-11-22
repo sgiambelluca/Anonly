@@ -1,7 +1,7 @@
 /**
  * `PieceInspector` — el ajuste de la pieza elegida (`Components.md` §13b.5,
- * ADR-228 §4). Vive en una caja de **alto fijo**: cambia el contenido, nunca
- * el alto (ADR-169 §1).
+ * ADR-228 §4). Vive en una caja que mide lo que su contenido, sin scroll
+ * propio (ADR-228 §4, precisión del 2026-11-21; `UX_Guidelines.md` §11b.18).
  *
  * Arriba dice qué pieza es y tiene «Mover», a izquierda y a derecha (la
  * alternativa por teclado al arrastre, `UX_Guidelines.md` §11b.6) y «Borrar

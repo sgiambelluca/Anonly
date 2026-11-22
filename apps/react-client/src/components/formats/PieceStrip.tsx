@@ -206,7 +206,8 @@ interface AddPieceMenuProps {
   readonly onAdd: (id: PieceClassId) => void;
   /**
    * El «+» de adentro de una parte opcional: un cubo chico del alto de las
-   * tarjetas de adentro, y solo las cuatro clases que admite (ADR-228 §4).
+   * tarjetas de adentro, y las cinco clases que admite: todas menos otra parte
+   * opcional (ADR-228 §4).
    */
   readonly inside?: boolean;
   /** Arranca abierto: la parte opcional recién creada ofrece su primera pieza en el mismo paso. */
