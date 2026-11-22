@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { CONTENT_SECURITY_POLICY, headersFor, ISOLATION_HEADERS } from "../security";
+import {
+  CONTENT_SECURITY_POLICY,
+  headersFor,
+  ISOLATION_HEADERS,
+  opensExternally,
+} from "../security";
 
 describe("CONTENT_SECURITY_POLICY", () => {
   it("mantiene las directivas que 08_Security_Model.md §3.2 declara", () => {
@@ -87,5 +92,25 @@ describe("headersFor", () => {
     const first = headersFor("/index.html");
     first["Cross-Origin-Embedder-Policy"] = "unsafe-none";
     expect(headersFor("/index.html")["Cross-Origin-Embedder-Policy"]).toBe("require-corp");
+  });
+});
+
+describe("opensExternally", () => {
+  it("le pasa al sistema las https:// y el mailto: de «Acerca de» (ADR-234 §4)", () => {
+    expect(opensExternally("https://github.com/sgiambelluca/Anonly")).toBe(true);
+    expect(opensExternally("mailto:santinogiambe@gmail.com?subject=Anonly")).toBe(true);
+  });
+
+  it("deniega todo otro esquema", () => {
+    for (const url of [
+      "http://example.com",
+      "file:///C:/Windows/System32/calc.exe",
+      "javascript:alert(1)",
+      "app://anonly/index.html",
+      "ms-settings:privacy",
+      "",
+    ]) {
+      expect(opensExternally(url)).toBe(false);
+    }
   });
 });
