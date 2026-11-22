@@ -73,7 +73,7 @@ Salió de publicar la 1.0.0 y actualizar una 0.9.2 de verdad.
   próximo inicio de sesión si no terminó.
 - **El test de fugas corre sus tres casos en paralelo en CI**, y su regla de
   workers deja de depender de una sola muestra (ADR-185, enmienda del
-  2026-10-02).
+  2026-10-02). Desde ADR-235 (2026-11-22) ya no corre en CI: solo en local.
 
 **Pendiente de decidir o de verificar**
 

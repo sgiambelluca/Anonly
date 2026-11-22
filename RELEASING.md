@@ -231,7 +231,8 @@ Los checks se aplican también al administrador y se vinculan a GitHub Actions.
 | Rama actualizada antes del merge                   | requerido                           | no requerido                        |
 | Historial lineal                                   | requerido                           | no requerido                        |
 | Performance                                        | en PR, después de integrar y a mano | en PR, después de integrar y a mano |
-| Memory leak y Stress                               | a mano                              | después de integrar y a mano        |
+| Stress                                             | a mano                              | después de integrar y a mano        |
+| Memory leak (`pnpm test:leak`)                     | solo local (ADR-235)                | solo local (ADR-235)                |
 
 Desde ADR-208 `develop` exige los mismos checks que `main`, y además la rama actualizada, que `main` no exige (ADR-209). `E2E (Playwright)` es el
 check agregador: exige las dos mitades de E2E y `Export verification`, que hoy
