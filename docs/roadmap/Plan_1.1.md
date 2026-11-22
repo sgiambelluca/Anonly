@@ -357,6 +357,22 @@ pantalla, en orden, y cada una deja los gates en verde y va en su commit
 Las cuatro leen además `Contracts.md` §3.5, §5.2 y §6, que son la API del
 façade, las funciones puras y los límites.
 
+**Qué cubre F8** (mantenedor, 2026-11-22). Son tres partes, en este orden:
+
+1. **Línea de base de calidad.** Con Argentina y sin formatos propios,
+   `tests/measure/baseline.spec.ts` y el gate de ADR-147 §5 contra
+   `tests/quality/baselines/reference-v1.json` tienen que dar sin
+   regresiones.
+2. **Un E2E de punta a punta** en `tests/e2e/`, sobre la app Electron:
+   - crear un tipo propio desde «Formatos de detección»;
+   - armar su formato en el generador y guardarlo;
+   - importar un PDF sintético que lo contiene;
+   - ver el grupo del tipo propio en el panel;
+   - exportar y comprobar que el PDF exportado ya no tiene el valor.
+3. **La suite pesada** de una versión menor (`Roadmap_1.x.md` §2): `test:e2e`,
+   `test:perf`, `test:leak` y `test:stress`, de a una y sin una medición en
+   paralelo.
+
 **Cómo se revisa** (decisión del mantenedor, 2026-11-20). Hay un revisor por
 bloque de frentes que comparten spec, no uno por frente. El costo fijo de una
 revisión es leer los specs completos y correr el monorepo, así que se paga
