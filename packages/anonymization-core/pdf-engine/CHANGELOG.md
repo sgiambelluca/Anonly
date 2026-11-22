@@ -1,5 +1,13 @@
 # @anonly/pdf-engine
 
+## 1.1.0
+
+### Patch Changes
+
+- - Baja el pico de memoria del segundo escaneo: el parseo suelta las imágenes de cada página, el kernel de Render suelta la página al terminar y el Orchestrator da de baja el pool ocioso de NER al empezar el OCR (ADR-230 a ADR-232).
+- Updated dependencies
+  - @anonly/shared@1.1.0
+
 ## 1.0.2
 
 ### Patch Changes
