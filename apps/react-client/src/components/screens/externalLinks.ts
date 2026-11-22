@@ -24,3 +24,17 @@ export const REPOSITORY_LABEL = "sgiambelluca/Anonly";
 
 /** Licencia del producto (`LICENSE` en la raíz del repo). */
 export const PRODUCT_LICENSE = "MIT";
+
+/**
+ * Correo del mantenedor, «Quién lo hace» de `AboutDialog` (ADR-234 §3).
+ *
+ * Es la única dirección `mailto:` del producto. El shell la deja pasar al
+ * programa de correo del sistema (ADR-234 §4); no es un request de la app.
+ */
+export const CONTACT_EMAIL = "santinogiambe@gmail.com";
+
+/** `mailto:` de «Escribirme por mail», con un asunto que lleva la versión (ADR-234 §2). */
+export function contactMailtoUrl(version: string): string {
+  const subject = encodeURIComponent(`Anonly ${version}: idea o comentario`);
+  return `mailto:${CONTACT_EMAIL}?subject=${subject}`;
+}
