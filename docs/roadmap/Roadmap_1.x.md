@@ -367,8 +367,9 @@ detalle está en [`Plan_1.1.md`](./Plan_1.1.md).
   país. Los formatos base de pura forma se editan; los que tienen control
   solo se prenden y apagan. Se abre solo desde la pantalla de inicio.
 - **Catálogos por país**: el mecanismo y Argentina. Un país activo, con
-  sus etiquetas y sus sintéticos (ADR-221). Chile y Uruguay salen en la
-  1.1.1 (§4bis).
+  sus etiquetas y sus sintéticos (ADR-221). Los demás países hispanohablantes
+  de Latinoamérica, España y Estados Unidos salen en la 1.1.1 (§4bis,
+  ADR-236).
 - **Tipos de entidad propios**, con nombre e identidad propios. Sus modos
   son etiqueta, máscara y censura total, sin sintético. Los creados desde
   inicio se guardan; los creados con un documento abierto son de ese
@@ -397,9 +398,10 @@ detalle está en [`Plan_1.1.md`](./Plan_1.1.md).
 
 **Lo que quedó resuelto de «Para decidir al llegar»**
 
-- Formatos base por país: un catálogo activo; Argentina en la 1.1, y Chile
-  y Uruguay en la 1.1.1 (ADR-221). El contenido de Chile y Uruguay se
-  investiga y se mide antes de escribirse (ADR-221 §6).
+- Formatos base por país: un catálogo activo; Argentina en la 1.1, y los
+  demás países hispanohablantes de Latinoamérica, España y Estados Unidos en
+  la 1.1.1 (ADR-221, ampliado por ADR-236). El contenido de cada país se investiga y se mide
+  antes de escribirse (ADR-221 §6).
 - Dónde se guardan los formatos y si se exportan: en el equipo, en claro, y
   se exportan e importan (ADR-223).
 - Cómo expresa un formato el generador y qué se configura de los
@@ -414,24 +416,46 @@ detalle está en [`Plan_1.1.md`](./Plan_1.1.md).
 - Modos, agrupación y ciclo de vida de un tipo propio (ADR-219). La
   pregunta de síntesis de `Future_Ideas.md` §5.5 queda fuera de la 1.1.
 
-## 4bis. 1.1.1 — Chile y Uruguay
+## 4bis. 1.1.1 — Veinte países y la interfaz en inglés
 
-**Decidido por el mantenedor el 2026-10-19.** La 1.1 sale con Argentina
-sola, y los catálogos de Chile y Uruguay salen en la 1.1.1. Traen sus
+**Decidido por el mantenedor el 2026-10-19 y ampliado el 2026-11-22**
+(ADR-236). La 1.1 salió con Argentina sola. La 1.1.1 suma diecinueve
+países: Bolivia, Chile, Colombia, Costa Rica, Cuba, Ecuador, El Salvador,
+España, Estados Unidos, Guatemala, Honduras, México, Nicaragua, Panamá,
+Paraguay, Perú, República Dominicana, Uruguay y Venezuela. Cada uno trae sus
 formatos, los nombres de sus tipos (por ejemplo, RUT) y sus generadores
 sintéticos. Con ellos aparecen el selector de país y «agregar desde otro
 país», que en la 1.1 quedan ocultos (ADR-221 §7).
 
-Por §1 correspondería a una versión menor. Va en un parche por esa
-decisión, como «Novedades» en la 1.0.2 (§2ter).
+- **Una sola 1.1.1**, con las tablas aprobadas en seis tandas (ADR-236 §2).
+  El detalle está en [`Plan_1.1.1.md`](./Plan_1.1.1.md).
+- **Cuatro tipos base nuevos**: seguridad social, pasaporte, licencia de
+  conducir y cuenta bancaria. En Argentina, la cuenta bancaria es el CBU y
+  el CVU (ADR-236 §3).
+- **Estados Unidos trae fechas, direcciones y carátula en inglés.** Con un
+  país hispanohablante la detección no cambia, y las variantes en inglés se
+  suman con «agregar desde otro país» (ADR-236 §4).
+- **La app pregunta el país la primera vez que se abre**, con la región del
+  sistema preseleccionada, o Argentina si no es uno de los veinte. Quien
+  actualiza desde la 1.1.0 sigue en Argentina (ADR-236 §5).
+- **La interfaz en inglés**, con el selector de idioma visible. El idioma de
+  la interfaz no cambia la detección (ADR-236 §6 y §7).
+
+Por §1 correspondería a una versión menor. Va en un parche por decisión del
+mantenedor, como «Novedades» en la 1.0.2 (§2ter).
 
 **Para decidir al llegar**
 
-- Las tablas de cada país: formatos, tipo de cada uno, nombres, controles,
+- Las tablas de cada tanda: formatos, tipo de cada uno, nombres, controles,
   máscaras y generadores. El mantenedor las aprueba con su medición antes
   de escribirlas en los specs (ADR-221 §6).
-- No hay documentos reales de Chile ni de Uruguay: el informe dice qué sale
-  solo de sintéticos.
+- No hay documentos reales de ninguno de los diecinueve países: cada informe
+  dice qué sale solo de sintéticos.
+- El diseño de la pantalla de país del primer arranque y de la acción que
+  suma las variantes en inglés.
+- Si un formato universal (fechas, carátula, dirección) falla con algún
+  país hispanohablante (ADR-236 §4).
+- Los textos de la interfaz en inglés.
 
 ## 5. 1.2 — Varios documentos
 
@@ -638,8 +662,8 @@ asignada.
 
 ## 10. Menciones
 
-- **Interfaz en inglés.** Último paso: el público objetivo es argentino, o al
-  menos hispanohablante. El selector de idioma está oculto hasta entonces.
+- ~~**Interfaz en inglés.**~~ Pasó a la 1.1.1, junto con Estados Unidos
+  (§4bis, ADR-236 §7). Decidido por el mantenedor el 2026-11-22.
 
 ## 11. Fuera de la línea 1.x
 
