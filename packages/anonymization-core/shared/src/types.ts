@@ -950,7 +950,7 @@ export interface FormatIssue {
   readonly code: FormatIssueCode;
   /** Ausente = el problema es del formato entero. */
   readonly variantIndex?: number;
-  /** Índice dentro de la variante, contando las piezas de un optional en orden. */
+  /** Índice en preorden dentro de la variante: un optional cuenta, y después sus piezas. */
   readonly pieceIndex?: number;
 }
 
