@@ -53,6 +53,45 @@ export interface ReleaseNotesEntry {
 /** Más nueva primero. */
 export const RELEASE_NOTES: ReadonlyArray<ReleaseNotesEntry> = [
   {
+    version: "1.1.0",
+    date: "2026-11-22",
+    summary: "Detección a medida: tus propios tipos de entidad y formatos.",
+    notes: [
+      {
+        kind: "new",
+        text: "Podés crear tus propios tipos de entidad y armar, pieza por pieza, los formatos que Anonly tiene que reconocer y tapar.",
+      },
+      {
+        kind: "new",
+        text: "Los formatos que trae Anonly se pueden prender y apagar, y algunos se pueden copiar y ajustar a tu caso.",
+      },
+      {
+        kind: "new",
+        text: "Tus formatos se pueden guardar en un archivo para usarlos en otra computadora o compartirlos.",
+      },
+      {
+        kind: "new",
+        text: "Con un documento abierto podés crear un tipo nuevo al vuelo y, si te sirve, guardarlo para los próximos.",
+      },
+      {
+        kind: "improvement",
+        text: "La lista de entidades suma filtros, el visor dice cuál de tus formatos detectó cada dato y Configuración muestra los atajos.",
+      },
+      {
+        kind: "improvement",
+        text: "Un clic sobre un dato resaltado en el documento lo selecciona en la lista de entidades.",
+      },
+      {
+        kind: "improvement",
+        text: "El segundo escaneo de un documento usa menos memoria.",
+      },
+      {
+        kind: "improvement",
+        text: "Mejoras de seguridad y componentes internos actualizados.",
+      },
+    ],
+  },
+  {
     version: "1.0.2",
     date: "2026-10-12",
     notes: [
