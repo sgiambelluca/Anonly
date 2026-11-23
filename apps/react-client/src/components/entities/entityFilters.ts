@@ -243,7 +243,8 @@ export const NO_FILTER_RESULTS_TEXT = "Ninguna entidad cumple los filtros";
 
 /**
  * El nombre de un formato **del usuario** (ADR-226 §1): propio o copia editada
- * (`userFormats`), o —desde la 1.1.1— uno traído de otro país (`catalogRefs`).
+ * (`userFormats`), o —con los demás países (ADR-237)— uno traído de otro país
+ * (`catalogRefs`).
  * `undefined` si el id no es de uno: los formatos base no se pueden filtrar.
  */
 export function userFormatNameOf(state: DetectionState): (formatId: string) => string | undefined {

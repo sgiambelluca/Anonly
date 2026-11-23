@@ -367,8 +367,8 @@ export function parseDetectionState(raw: string): ParsedDetectionState | null {
 
 /**
  * ADR-226 §1: un formato es «del usuario» si su id está en `userFormats` (propios
- * y copias editadas) o en `catalogRefs` (desde la 1.1.1, los traídos de otro
- * país). Los formatos base del país activo no lo son, estén prendidos o
+ * y copias editadas) o en `catalogRefs` (con los demás países, ADR-237, los
+ * traídos de otro país). Los formatos base del país activo no lo son, estén prendidos o
  * apagados. Selector puro: lo usan el subnivel del árbol, el filtro y el tooltip
  * (`React_Client.md` §3.10).
  */
