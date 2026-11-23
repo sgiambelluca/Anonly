@@ -2389,7 +2389,7 @@ describe("Orchestrator — 1.1 F4 (casos límite)", () => {
     expect(orchestrator.getState("doc-1").stage).toBe(PipelineStage.Ready);
   });
 
-  // Caso 52 (ADR-223 §6, precisión del 2026-11-20): un archivo de la 1.1.1 con Chile.
+  // Caso 52 (ADR-223 §6, precisión del 2026-11-20): un archivo posterior con Chile (ADR-237).
   it("validateFormatsFile rejects a reference to an unknown country as a newer version", () => {
     const text = (catalogRefs: ReadonlyArray<unknown>): string =>
       JSON.stringify({ kind: "anonly-formats", version: 1, types: [], formats: [], catalogRefs });

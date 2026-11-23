@@ -38,7 +38,7 @@ const FORMAT_CHAR_CLASSES: ReadonlySet<string> = new Set<FormatCharClass>([
 const FORMAT_SEPARATORS: ReadonlySet<string> = new Set<FormatSeparator>([" ", "-", ".", "/"]);
 
 // La 1.1 sale con "AR" sola (Contracts.md §5.2, `CountryCode`): "CL" y "UY"
-// entran al tipo en la 1.1.1 junto con sus catálogos.
+// entran al tipo con los demás países (sin versión, ADR-237), junto con sus catálogos.
 const COUNTRY_CODES: ReadonlySet<string> = new Set<CountryCode>(["AR"]);
 
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
