@@ -26,6 +26,7 @@ Cada tipo de trabajo tiene su **propio pool**, separado. No se mezclan tipos en 
 | `NerPool` | `ner-page` | `1` a `2` | ONNX Runtime Web con WASM/SIMD: un modelo cargado por worker. Más workers = más RAM. |
 | `RenderPool` | `render-page` (incluye la rasterización para OCR — `RasterizePagePayload`, ADR-034 §1/ADR-036 §4) | `min(max(nCPU-1, 1), 4)` | Canvas + pdfjs son razonablemente paralelizables. |
 | ExportWorker (único, **no** es un pool) | `export-page` | `1` fijo | Ensamblado pdf-lib estrictamente secuencial sobre un solo `PDFDocument` (no thread-safe); una cola multi-worker no aporta. Dueño: lado host de `export-engine` (ADR-036 §1). Desde ADR-047 §2 su transporte es una instancia de `WorkerPool` con `size: 1` construida por el façade — reuso de mensajería, **no** un quinto pool: sigue sin clave propia en `WorkerPoolConfig` y sin cola prioritaria. |
+| ConvertWorker (único, **no** es un pool) | `convert-image` | `1` fijo | ADR-239: un job por documento, con una sola página decodificada a la vez. Mismo transporte que el ExportWorker (`WorkerPool` con `size: 1`, sin clave en `WorkerPoolConfig`). El Orchestrator lo **termina al terminar cada conversión**, con éxito o con error, sin esperar `idleDisposeMs`: su pico (hasta ~1,8 GB con una imagen de 50 MP) vuelve antes del OCR. |
 
 `nCPU = navigator.hardwareConcurrency ?? 4`. Override por config del usuario (setting "Rendimiento"): los perfiles de ADR-194 mandan `ocrPoolSize` de 1, 2, 4 o 6, y los de 4 y 6 suben además `ocr.maxLiveImageBytes`. Los defaults de esta tabla no cambian.
 
@@ -354,6 +355,7 @@ No usar señales de progreso como resultado de orientación.
 Ningún pool se crea al cargar la app. Se crea bajo demanda:
 
 - `PdfPool` se crea al primer `DOCUMENT_IMPORTED`.
+- El **ConvertWorker** se crea cuando el reconocimiento de formato da una imagen (ADR-238 §2, ADR-239 §2), y se termina al final de esa conversión.
 - `OcrPool` se crea si `DOCUMENT_PARSED` indica `textlessPages.length > 0`.
 - `NerPool` se crea si el usuario no desactivó NER en settings y hay texto para analizar.
 - `RenderPool` se crea cuando hay al menos una página lista para preview.

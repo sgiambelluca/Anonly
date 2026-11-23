@@ -45,17 +45,19 @@ Las etapas 1–7 son automáticas. La 8 es automática pero parcial. La 9 es int
 **Entra**: `File | ArrayBuffer` + nombre.
 **Sale**: `DOCUMENT_IMPORTED` evento.
 **Eventos emitidos**: `DOCUMENT_IMPORTED`.
-**Errores**: si el archivo no es un PDF, no se emite `DOCUMENT_IMPORTED` y la UI muestra error local.
+**Errores**: la UI rechaza sin leerlo un archivo cuya extensión no reconoce (ADR-238 §2.3); en ese caso no se emite `DOCUMENT_IMPORTED`. Desde ADR-238, el Core reconoce el formato **por el contenido** después de `DOCUMENT_IMPORTED`, y un archivo que no entra termina en `PIPELINE_FAILED` con `FORMAT_UNSUPPORTED` y su `reason` (`core/Orchestrator.md` §13 caso 4bis).
 **Cancelación**: no aplica (sincrono).
 **Métricas**: `sizeBytes`, `importedAt`.
 
 Notas: el archivo se lee como `ArrayBuffer` en el main thread y se mantiene en memoria hasta `DOCUMENT_CLOSED`. No se persiste.
 
+**Conversión de una imagen suelta** (ADR-239), todavía en `Importing`: el Convert Engine arma un PDF intermedio con una página por imagen, en el ConvertWorker, que se termina al final (`05_Worker_Architecture.md` §1.1). Desde ahí, lo retenido es ese PDF y no la imagen, y la etapa 1 lo lee como cualquier PDF escaneado. El progreso por página sale como `PIPELINE_PROGRESS` de `Importing`.
+
 ---
 
 ## 3. Etapa 1 — Extracción (PDF Engine)
 
-**Entra**: `{ documentId, buffer, password? }` → `PdfPool.dispatch({ type: "pdf-parse", payload })`. El `buffer` se **transfiere** (zero-copy). Lo transferido es una **copia**: el Orchestrator retiene el `ArrayBuffer` original de la etapa 0 para alimentar después `RenderEngine.loadDocument` (ADR-030).
+**Entra**: `{ documentId, buffer, password?, sourceFormat }` → `PdfPool.dispatch({ type: "pdf-parse", payload })`. `sourceFormat` es el reconocido en la etapa 0 (ADR-238 §3), y `buffer` es el PDF intermedio cuando el archivo no era PDF. El `buffer` se **transfiere** (zero-copy). Lo transferido es una **copia**: el Orchestrator retiene el `ArrayBuffer` original de la etapa 0 para alimentar después `RenderEngine.loadDocument` (ADR-030).
 **Sale**: `DocumentModel` con `Page[]` (con `Word[]` y `BoundingBox`), `textlessPages: number[]`, `sourceKind`.
 **Eventos emitidos**: `PAGE_PARSED` (por página), `DOCUMENT_PARSED`, `PDF_PASSWORD_REQUIRED`, `PDF_INVALID`.
 **Errores**:

@@ -2,8 +2,9 @@
 
 # ADR-238 — El formato de origen se reconoce por el contenido y la salida se elige al exportar
 
-- **Estado**: Aceptado por el mantenedor el 2026-11-23. Falta pasarlo a
-  `Contracts.md` y a los specs (`Plan_1.2.md` §9, frente 1).
+- **Estado**: Aceptado por el mantenedor el 2026-11-23. Pasado a
+  `Contracts.md` y a los specs el mismo día; implementación pendiente
+  (`Plan_1.2.md` §9, frente 1).
 - **Fecha**: 2026-11-23.
 - **Decidido por**: el planificador, sobre las decisiones del mantenedor del
   2026-11-23 (`Plan_1.2.md` §3).

@@ -3,8 +3,9 @@
 # ADR-239 — Una imagen suelta entra como un PDF que arma un motor nuevo
 
 - **Estado**: Aceptado por el mantenedor el 2026-11-23, junto con ADR-238,
-  del que depende. Falta pasarlo a `Contracts.md` y a los specs, incluido
-  el spec nuevo del Convert Engine (`Plan_1.2.md` §9, frente 2).
+  del que depende. Pasado a `Contracts.md` y a los specs el mismo día,
+  incluido el spec nuevo `core/Convert_Engine.md`; implementación pendiente
+  (`Plan_1.2.md` §9, frente 2).
 - **Fecha**: 2026-11-23.
 - **Decidido por**: el planificador, sobre las decisiones del mantenedor del
   2026-11-23 (`Plan_1.2.md` §3: los formatos y el tope de 50 MP).

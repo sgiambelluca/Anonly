@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=contratos-base | dependencias=03_Data_Model.md,04_Event_System.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-049-Errores-Cruzando-Worker-Discriminacion-Por-Code.md,adr/ADR-056-RenderRequested-Kind-Por-Panel.md,adr/ADR-061-Agregado-Manual-De-Entidades.md,adr/ADR-065-OCR-Por-Region.md,adr/ADR-066-Texto-De-Anotaciones-Y-Reemplazo-Rotado.md,adr/ADR-074-Una-Entidad-Partida-En-Varias-Lineas.md,adr/ADR-062-Veredicto-De-Degradacion-Hasta-La-UI.md,adr/ADR-086-El-Detector-De-Degradacion-Mide-El-Ancho.md,adr/ADR-109-La-Caja-De-Una-Palabra-Es-Su-Caja-De-Tinta.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,adr/ADR-167-El-Modelo-De-NER-Se-Libera-A-Los-15-s-De-Inactividad.md,adr/ADR-170-Las-Vistas-Previas-De-Edicion-Las-Calcula-El-Core.md,adr/ADR-171-El-Usuario-Puede-Eliminar-Una-Entidad.md,adr/ADR-172-Deshacer-Y-Rehacer-Exactos.md,adr/ADR-173-El-Motor-Rechaza-Fusiones-Y-Divisiones-Invalidas.md,adr/ADR-174-Un-Agregado-Manual-Que-Choca-Se-Resuelve-En-El-Momento.md,adr/ADR-175-Un-Choque-Manual-No-Queda-Colgado.md,adr/ADR-176-Un-Choque-Pendiente-Bloquea-El-Export.md,adr/ADR-204-La-Interaccion-Anonimizada-Usa-La-Geometria-Visible.md,adr/ADR-205-El-Resultado-Exportado-Pertenece-A-Una-Revision.md,adr/ADR-219-Un-Tipo-De-Entidad-Puede-Ser-Del-Usuario.md,adr/ADR-220-Un-Formato-Se-Arma-Con-Piezas-Y-Se-Recorre-En-Tiempo-Lineal.md,adr/ADR-221-Los-Formatos-Base-Salen-De-Un-Catalogo-Por-Pais.md,adr/ADR-222-Dos-Formatos-Que-Se-Pisan-Van-Al-Panel-De-Conflicto.md,adr/ADR-223-Los-Formatos-Se-Configuran-Desde-Inicio-Y-Viajan-En-Un-Archivo.md,adr/ADR-224-Lo-Que-La-1.1-Cambia-En-El-Panel-De-Entidades-Y-El-Visor.md,adr/ADR-225-Un-Tipo-Del-Documento-Se-Edita-Se-Borra-Y-Se-Guarda.md,adr/ADR-233-Una-Variante-Puede-Tener-Nombre.md | audiencia=IA-implementador | fase=3 (fase 10.9: §5 nota de `fragments` junto a `BoundingBox` — el campo va en `Occurrence`/`OccurrenceRef`/`Replacement`, no adentro del rectángulo, ADR-074 §1; §3.5 actualizado en fase 10: CoreRuntimeOptions/WorkerLike/WorkerFactory para transporte de workers —ADR-036 §2—, IPipelineOrchestrator.reanalyze/ReanalyzeConfigPatch —ADR-038 §1—; §6 gana MAX_RENDER_SCALE/PREVIEW_CACHE_MAX_BYTES —ADR-037 §2-3—; §8 RenderRequested.scale —ADR-037 §1—; §4 precisa qué garantiza deserialize() al cruzar el boundary, sin cambio de shape —ADR-049 §2—; fase 11: §8 RenderRequested.kind requerido —ADR-056 §1—; fase 10.5/10.6: §5 AnnotationKind.Degraded —ADR-058 §7— y PersonGender —ADR-060 §2—, §6 REPLACEMENT_FONT_HEIGHT_RATIO/AVG_GLYPH_ADVANCE_RATIO/estimateTokenWidth —ADR-057 §5— y DEGRADED_FONT_RATIO —ADR-058 §7—; fase 10.8: §5 gana los primeros tipos públicos que §10 regla 1 obliga a declarar acá antes que en `shared/src/types.ts` — `BoundingBox.rotation` —ADR-066 §6— y `OcrRegion` —ADR-065 §4—; fase 10.6: §5 `PersonGenderChoice` y §8 `GroupUpdateRequested.patch.personGender` —ADR-069 §4—, §5 `SyntheticRequest` y §6 la declaración de `synthesize` —ADR-072 §2, que la trae al contrato: se exportaba desde `shared` sin estar acá, contra §10 regla 1—; fase 10.7: §6 gana `sharesVerticalBand` y `normalizeForComparison` —ADR-061 §2 errata: dos primitivas que ya estaban duplicadas dentro de motores y façade por no tener lugar donde vivir—, y §3.5 gana `ManualEntityResult` con `addManualEntity` devolviéndolo en vez de `void` —ADR-061 §6 errata: sin eso la UI no puede distinguir "no se encontró" de "agregado"—; post-Hito 10.10: §8 `PreviewUpdated.degraded` —ADR-062, el veredicto de legibilidad sale de Render por acá— y §6 `DEGRADED_FONT_RATIO` con **criterio y valor nuevos** —ADR-086: pasa a medir la razón de ANCHOS y baja a 0,5, porque el cociente de tamaños era estructuralmente inalcanzable en cuerpo de texto—; fase 11: §5 la caja de una palabra pasa a ser su caja de tinta —del descenso al ascenso de su fuente, no de la línea de base hacia arriba por un cuerpo— y §6 `REPLACEMENT_FONT_HEIGHT_RATIO` se recalibra de 0,7 a 0,64 para que el token siga dibujándose igual —ADR-109 §1/§4—; fase 11 (plan de campaña, H-01A): §4 gana `EngineErrorCode.PDF_PAGE_ROTATED` —ADR-140: página con `/Rotate` heredado y texto nativo, rechazo tipado en vez de una geometría equivocada con cara de éxito; retirado por ángulo cuando ADR-141 lo verifique de punta a punta—; fase 11 (plan de campaña, H-09D3-b): §7.1 declara por primera vez `OcrPagePayload` —que se exportaba desde `shared` sin estar acá, contra §10 regla 1— y lo cambia: la imagen del job `ocr-page` viaja **codificada** (PNG) en vez de `ImageData` crudo, ADR-158 §2; fase 12.5 (Hito 12.5): §3.5 gana `previewEdit` con `EditPreviewRequest`/`EditPreview`/`EditPreviewGroup` y §5 `ReplacementPreviews`, nuevo campo requerido de `EntityGroup` —ADR-170: la UI muestra valores exactos antes de aplicar sin reimplementar el motor—; fase 12.5: §2/§8 `GROUP_REMOVE_REQUESTED` + `GroupRemoveRequested`, y §3.5 `addManualEntity` levanta la supresión de un valor eliminado —ADR-171: el usuario elimina una entidad y no vuelve tras un re-análisis—; fase 12.5: §3.5 `createEditCheckpoint`/`restoreEditCheckpoint`/`discardEditCheckpoints` y §6 `MAX_EDIT_CHECKPOINTS` —ADR-172: deshacer exacto por puntos de restauración que guarda el Core—; fase 1.1: §3.1 `EngineConfig.detection` —ADR-223 §2—, §3.5 tipos del documento y funciones puras de formatos —ADR-219 §5, ADR-220 §3, ADR-223 §6—, §5.2 tipos propios, formatos y catálogos —ADR-219 a ADR-224—, §6 límites `FORMAT_*`/`USER_TYPE_*` —ADR-219 §2, ADR-220 §1— y §8 `RegexFinished.skippedFormats` —ADR-220 §6—) -->
+<!-- CONTEXT: scope=contratos-base | dependencias=03_Data_Model.md,04_Event_System.md,adr/ADR-036-Auditoria-Pre-Hito10-React-Client-Workers.md,adr/ADR-037-Zoom-Rerender-RenderRequested-Scale.md,adr/ADR-038-Reanalisis-Parcial-Preservando-Ediciones.md,adr/ADR-049-Errores-Cruzando-Worker-Discriminacion-Por-Code.md,adr/ADR-056-RenderRequested-Kind-Por-Panel.md,adr/ADR-061-Agregado-Manual-De-Entidades.md,adr/ADR-065-OCR-Por-Region.md,adr/ADR-066-Texto-De-Anotaciones-Y-Reemplazo-Rotado.md,adr/ADR-074-Una-Entidad-Partida-En-Varias-Lineas.md,adr/ADR-062-Veredicto-De-Degradacion-Hasta-La-UI.md,adr/ADR-086-El-Detector-De-Degradacion-Mide-El-Ancho.md,adr/ADR-109-La-Caja-De-Una-Palabra-Es-Su-Caja-De-Tinta.md,adr/ADR-164-Un-OSD-Compartido-Por-Core.md,adr/ADR-167-El-Modelo-De-NER-Se-Libera-A-Los-15-s-De-Inactividad.md,adr/ADR-170-Las-Vistas-Previas-De-Edicion-Las-Calcula-El-Core.md,adr/ADR-171-El-Usuario-Puede-Eliminar-Una-Entidad.md,adr/ADR-172-Deshacer-Y-Rehacer-Exactos.md,adr/ADR-173-El-Motor-Rechaza-Fusiones-Y-Divisiones-Invalidas.md,adr/ADR-174-Un-Agregado-Manual-Que-Choca-Se-Resuelve-En-El-Momento.md,adr/ADR-175-Un-Choque-Manual-No-Queda-Colgado.md,adr/ADR-176-Un-Choque-Pendiente-Bloquea-El-Export.md,adr/ADR-204-La-Interaccion-Anonimizada-Usa-La-Geometria-Visible.md,adr/ADR-205-El-Resultado-Exportado-Pertenece-A-Una-Revision.md,adr/ADR-219-Un-Tipo-De-Entidad-Puede-Ser-Del-Usuario.md,adr/ADR-220-Un-Formato-Se-Arma-Con-Piezas-Y-Se-Recorre-En-Tiempo-Lineal.md,adr/ADR-221-Los-Formatos-Base-Salen-De-Un-Catalogo-Por-Pais.md,adr/ADR-222-Dos-Formatos-Que-Se-Pisan-Van-Al-Panel-De-Conflicto.md,adr/ADR-223-Los-Formatos-Se-Configuran-Desde-Inicio-Y-Viajan-En-Un-Archivo.md,adr/ADR-224-Lo-Que-La-1.1-Cambia-En-El-Panel-De-Entidades-Y-El-Visor.md,adr/ADR-225-Un-Tipo-Del-Documento-Se-Edita-Se-Borra-Y-Se-Guarda.md,adr/ADR-233-Una-Variante-Puede-Tener-Nombre.md,adr/ADR-238-El-Formato-De-Origen-Se-Reconoce-Por-El-Contenido-Y-La-Salida-Se-Elige-Al-Exportar.md,adr/ADR-239-Una-Imagen-Suelta-Entra-Como-Un-PDF-Armado-Por-Un-Motor-Nuevo.md | audiencia=IA-implementador | fase=3 (fase 10.9: §5 nota de `fragments` junto a `BoundingBox` — el campo va en `Occurrence`/`OccurrenceRef`/`Replacement`, no adentro del rectángulo, ADR-074 §1; §3.5 actualizado en fase 10: CoreRuntimeOptions/WorkerLike/WorkerFactory para transporte de workers —ADR-036 §2—, IPipelineOrchestrator.reanalyze/ReanalyzeConfigPatch —ADR-038 §1—; §6 gana MAX_RENDER_SCALE/PREVIEW_CACHE_MAX_BYTES —ADR-037 §2-3—; §8 RenderRequested.scale —ADR-037 §1—; §4 precisa qué garantiza deserialize() al cruzar el boundary, sin cambio de shape —ADR-049 §2—; fase 11: §8 RenderRequested.kind requerido —ADR-056 §1—; fase 10.5/10.6: §5 AnnotationKind.Degraded —ADR-058 §7— y PersonGender —ADR-060 §2—, §6 REPLACEMENT_FONT_HEIGHT_RATIO/AVG_GLYPH_ADVANCE_RATIO/estimateTokenWidth —ADR-057 §5— y DEGRADED_FONT_RATIO —ADR-058 §7—; fase 10.8: §5 gana los primeros tipos públicos que §10 regla 1 obliga a declarar acá antes que en `shared/src/types.ts` — `BoundingBox.rotation` —ADR-066 §6— y `OcrRegion` —ADR-065 §4—; fase 10.6: §5 `PersonGenderChoice` y §8 `GroupUpdateRequested.patch.personGender` —ADR-069 §4—, §5 `SyntheticRequest` y §6 la declaración de `synthesize` —ADR-072 §2, que la trae al contrato: se exportaba desde `shared` sin estar acá, contra §10 regla 1—; fase 10.7: §6 gana `sharesVerticalBand` y `normalizeForComparison` —ADR-061 §2 errata: dos primitivas que ya estaban duplicadas dentro de motores y façade por no tener lugar donde vivir—, y §3.5 gana `ManualEntityResult` con `addManualEntity` devolviéndolo en vez de `void` —ADR-061 §6 errata: sin eso la UI no puede distinguir "no se encontró" de "agregado"—; post-Hito 10.10: §8 `PreviewUpdated.degraded` —ADR-062, el veredicto de legibilidad sale de Render por acá— y §6 `DEGRADED_FONT_RATIO` con **criterio y valor nuevos** —ADR-086: pasa a medir la razón de ANCHOS y baja a 0,5, porque el cociente de tamaños era estructuralmente inalcanzable en cuerpo de texto—; fase 11: §5 la caja de una palabra pasa a ser su caja de tinta —del descenso al ascenso de su fuente, no de la línea de base hacia arriba por un cuerpo— y §6 `REPLACEMENT_FONT_HEIGHT_RATIO` se recalibra de 0,7 a 0,64 para que el token siga dibujándose igual —ADR-109 §1/§4—; fase 11 (plan de campaña, H-01A): §4 gana `EngineErrorCode.PDF_PAGE_ROTATED` —ADR-140: página con `/Rotate` heredado y texto nativo, rechazo tipado en vez de una geometría equivocada con cara de éxito; retirado por ángulo cuando ADR-141 lo verifique de punta a punta—; fase 11 (plan de campaña, H-09D3-b): §7.1 declara por primera vez `OcrPagePayload` —que se exportaba desde `shared` sin estar acá, contra §10 regla 1— y lo cambia: la imagen del job `ocr-page` viaja **codificada** (PNG) en vez de `ImageData` crudo, ADR-158 §2; fase 12.5 (Hito 12.5): §3.5 gana `previewEdit` con `EditPreviewRequest`/`EditPreview`/`EditPreviewGroup` y §5 `ReplacementPreviews`, nuevo campo requerido de `EntityGroup` —ADR-170: la UI muestra valores exactos antes de aplicar sin reimplementar el motor—; fase 12.5: §2/§8 `GROUP_REMOVE_REQUESTED` + `GroupRemoveRequested`, y §3.5 `addManualEntity` levanta la supresión de un valor eliminado —ADR-171: el usuario elimina una entidad y no vuelve tras un re-análisis—; fase 12.5: §3.5 `createEditCheckpoint`/`restoreEditCheckpoint`/`discardEditCheckpoints` y §6 `MAX_EDIT_CHECKPOINTS` —ADR-172: deshacer exacto por puntos de restauración que guarda el Core—; fase 1.1: §3.1 `EngineConfig.detection` —ADR-223 §2—, §3.5 tipos del documento y funciones puras de formatos —ADR-219 §5, ADR-220 §3, ADR-223 §6—, §5.2 tipos propios, formatos y catálogos —ADR-219 a ADR-224—, §6 límites `FORMAT_*`/`USER_TYPE_*` —ADR-219 §2, ADR-220 §1— y §8 `RegexFinished.skippedFormats` —ADR-220 §6—) -->
 
 # Anonly — Contratos Base (`@anonly/shared`)
 
@@ -13,6 +13,10 @@
 > **1.1 / precisiones de la auditoría de F4, 2026-11-20**, sin tipos, eventos ni códigos nuevos, todas en §3.5: `addManualEntity` declara el `InvalidInputError` de un tipo propio desconocido (ADR-219 §1); `getDocumentEntityTypes` sin sesión devuelve `[]`, como el motor; `updateDocumentEntityType` nombra el `GROUP_REPLACEMENT_CHANGED` que Grouping emite junto con `ENTITY_GROUP_UPDATED`; y la precondición de `reanalyze` suma `Done`, como decidió ADR-040. Además, por decisión del mantenedor (ADR-223 §6), `validateFormatsFile` rechaza como `version_newer` una referencia a un país que esta versión no conoce.
 
 > **1.1 / ADR-233, aceptado el 2026-11-21**: una variante puede tener nombre. §5.2 gana `FormatDefinition.variantNames` (opcional, en paralelo a `variants`) y dos códigos de `FormatIssueCode`, `variant_name_too_long` y `variant_names_mismatch`, que `testFormat` no cuenta como problema de forma. El nombre no cambia qué se reconoce ni lo que `compareFormat` considera idéntico. Sin eventos ni constantes nuevas.
+
+> **1.2 / ADR-238, aceptado el 2026-11-23**: el formato de origen se reconoce por el contenido y la salida se elige al exportar. §3.5 cambia el comentario de `ImportDocumentInput.buffer`; §4 gana `FORMAT_UNSUPPORTED` y `UnsupportedFormatError`; §5.3 declara `SourceFormat`, `UnsupportedFormatReason`, `ExportOutput`, tres funciones puras y los campos nuevos sobre `Document`, `DocumentMetadata`, `ExportOptions` y `PdfEngineInput`; §8 suma `DocumentParsed.sourceFormat` y `ExportFinished.output`/`pdfA`. **Contrato escrito, implementación pendiente** (frente 1 de `roadmap/Plan_1.2.md`).
+
+> **1.2 / ADR-239, aceptado el 2026-11-23**: una imagen suelta entra como un PDF que arma un motor nuevo, el Convert Engine (`core/Convert_Engine.md`). §1 gana `EngineId.Convert`; §2, `EventChannel.Convert` y `CONVERSION_PAGE_FINISHED`; §3.1, `EngineConfig.convert`; §3.5, `engines.convert`; §4, `IMAGE_TOO_LARGE`, `IMAGE_DECODE_FAILED` y `CONVERT_TIMEOUT`; §5, `WorkerJobType` `"convert-image"`; §6, `ConvertConfig` con `IMAGE_MAX_PIXELS` e `IMAGE_MAX_SIDE`, y los defaults del job; §8, `ConversionPageFinished`. **Contrato escrito, implementación pendiente** (frente 2).
 
 > Define **todos** los tipos, interfaces, enums, error codes y contratos compartidos entre motores. Es el único paquete del que un motor puede importar tipos. Un implementador debe leer este archivo **completo** antes de tocar cualquier motor.
 
@@ -33,6 +37,7 @@ export enum EngineId {
   Grouping = "grouping",
   Render = "render",
   Export = "export",
+  Convert = "convert", // ADR-239 §1: todo formato de origen que no es PDF
 }
 ```
 
@@ -52,6 +57,7 @@ export enum EventChannel {
   Render = "render",
   Export = "export",
   Workers = "workers",
+  Convert = "convert", // ADR-239 §2
 }
 
 export enum EngineEvents {
@@ -69,6 +75,10 @@ export enum EngineEvents {
   DOCUMENT_PARSED = "DOCUMENT_PARSED",
   PDF_PASSWORD_REQUIRED = "PDF_PASSWORD_REQUIRED",
   PDF_INVALID = "PDF_INVALID",
+
+  // Convert (ADR-239 §2): una página convertida; el Orchestrator lo traduce
+  // a PIPELINE_PROGRESS en la etapa Importing.
+  CONVERSION_PAGE_FINISHED = "CONVERSION_PAGE_FINISHED",
 
   // OCR
   OCR_STARTED = "OCR_STARTED",
@@ -162,6 +172,7 @@ export interface EngineConfig {
   readonly render: RenderConfig;
   readonly export: ExportConfig;
   readonly detection: DetectionConfig;   // ADR-223 §2: país, formatos y tipos del usuario (§5.2)
+  readonly convert: ConvertConfig;       // ADR-239 §3: el tope de una imagen (§6)
 }
 ```
 
@@ -249,6 +260,7 @@ export interface IAnonymizationCore {
     readonly grouping: GroupingEngine;
     readonly render: RenderEngine;
     readonly export: ExportEngine;
+    readonly convert: ConvertEngine;   // ADR-239 §1; spec: core/Convert_Engine.md
   };
   readonly orchestrator: IPipelineOrchestrator;
   dispose(): Promise<void>;
@@ -257,7 +269,7 @@ export interface IAnonymizationCore {
 export interface ImportDocumentInput {
   readonly documentId: string;        // UUID v4 generado por el caller
   readonly name: string;
-  readonly buffer: ArrayBuffer;       // PDF binario
+  readonly buffer: ArrayBuffer;       // los bytes del archivo; el Core reconoce el formato por el contenido (ADR-238 §2)
   readonly password?: string;
 }
 
@@ -498,6 +510,14 @@ export enum EngineErrorCode {
   // camino va entero por OCR, cuyo ráster ya está rotado (ADR-140 §3).
   PDF_PAGE_ROTATED = "PDF_PAGE_ROTATED",
   PDF_TIMEOUT = "PDF_TIMEOUT",
+  // Formato (ADR-238 §4): el archivo no se reconoce, o se reconoce como un
+  // formato que no se admite. Lo lanza el Orchestrator, con engineId "core";
+  // details.reason es un UnsupportedFormatReason (§5.3).
+  FORMAT_UNSUPPORTED = "FORMAT_UNSUPPORTED",
+  // Convert (ADR-239 §6), engineId "convert", retryable false
+  IMAGE_TOO_LARGE = "IMAGE_TOO_LARGE",         // details: { reason: "pixels" | "side" | "pages", width?, height?, pageIndex?, pageCount? }
+  IMAGE_DECODE_FAILED = "IMAGE_DECODE_FAILED", // details: { pageIndex }
+  CONVERT_TIMEOUT = "CONVERT_TIMEOUT",         // details: { pageIndex }; plazo por página
   // OCR
   OCR_PAGE_FAILED = "OCR_PAGE_FAILED",
   OCR_TIMEOUT = "OCR_TIMEOUT",
@@ -586,7 +606,7 @@ export interface SerializedEngineError {
 }
 ```
 
-Cada motor define sus subclases concretas en su `<engine>.errors.ts`. Toda subclase setea `code`, `engineId`, `retryable` y `details`. Los errores genéricos compartidos (`EngineNotInitializedError`, `EngineDisposedError`, `InvalidInputError`, `CancelledError`, definidos en `shared/src/errors.ts`) usan `engineId: "core"` porque no pertenecen a ningún motor.
+Cada motor define sus subclases concretas en su `<engine>.errors.ts`. Toda subclase setea `code`, `engineId`, `retryable` y `details`. Los errores genéricos compartidos (`EngineNotInitializedError`, `EngineDisposedError`, `InvalidInputError`, `CancelledError`, definidos en `shared/src/errors.ts`) usan `engineId: "core"` porque no pertenecen a ningún motor. `UnsupportedFormatError` (ADR-238 §4) también vive ahí, con `engineId: "core"`, `retryable: false` y `details: { reason: UnsupportedFormatReason }`. Quien lee `details.reason` lo valida con un guard propio, porque `details` cruza el worker sin tipo.
 
 **Qué se garantiza al cruzar el boundary de un Worker** (ADR-049): un error lanzado dentro de un worker viaja como `SerializedEngineError` (`postMessage` no transporta prototipos) y el host lo reconstruye con `EngineError.deserialize()` como `DeserializedEngineError`. Sobreviven `code`, `engineId`, `message`, `retryable` y `details`; **no sobrevive la clase concreta**. Por lo tanto todo consumidor discrimina por `err.code` — `instanceof EngineError` sigue siendo válido (la jerarquía base sí se conserva), `instanceof <SubclaseConcreta>` no (`ai/Code_Standards.md` §7). Si un motor necesita su subclase concreta río abajo, la reinstancia por `code` en su propio host-bridge (`normalizeNerError`/`normalizeExportError`, ADR-045/ADR-046/ADR-047). `CancelledError` es el único caso exento y por construcción: el transporte tiene un frame `CANCELLED` propio y el host instancia el error localmente, sin pasar por `serialize()`.
 
@@ -812,7 +832,8 @@ export type WorkerJobType =
   | "ocr-orient" // ADR-164: orientación serial compartida, distinta del reconocimiento
   | "ner-page"
   | "render-page"
-  | "export-page";
+  | "export-page"
+  | "convert-image"; // ADR-239 §1: pool propio de un worker
 
 // ADR-091 §1: el léxico de nombres de pila deja de ser de un motor.
 // Claves PRE-NORMALIZADAS con `normalizeForComparison` (§6): quien
@@ -1129,6 +1150,50 @@ export type FormatsFileValidation =
 >
 > **`maskByCharacters(value: string): string`** (ADR-219 §3, ADR-220 §5) — función pura de `@anonly/shared`: cada letra o dígito pasa a `X` y el resto queda. `"0170-0994 11"` → `"XXXX-XXXX XX"`. La usan `grouping-engine` (la máscara de un tipo propio, desde `canonicalValue`) y `regex-engine` (el `maskFormat` de una aparición de un formato propio bajo un tipo base).
 
+### 5.3 Formato de origen y salida (1.2)
+
+ADR-238. Reglas completas del reconocimiento en el ADR, §2.
+
+```ts
+// ADR-238 §1: el formato del archivo que eligió el usuario, no el del PDF
+// intermedio. Un .docx convertido sigue siendo "docx".
+export type SourceFormat =
+  | "pdf"
+  | "docx" | "xlsx" | "pptx"
+  | "png" | "jpeg" | "webp" | "gif" | "bmp" | "tiff" | "avif";
+
+// ADR-238 §4: por qué un archivo no entra. Viaja en
+// UnsupportedFormatError.details.reason.
+export type UnsupportedFormatReason =
+  | "unknown"           // no se reconoce
+  | "office-legacy"     // .doc, .xls, .ppt
+  | "office-variant"    // con macros, plantilla, libro binario o presentación de diapositivas
+  | "opendocument"      // .odt, .ods, .odp
+  | "google-shortcut"   // .gdoc, .gsheet, .gslides: solo el enlace
+  | "heic";             // fotos HEIC: fuera de la 1.2
+
+// ADR-238 §5
+export type ExportOutput = "pdf-image" | "pdf-text" | "docx";
+
+// ADR-238 §6. La tabla de roadmap/Plan_1.2.md §6.6.
+// "docx" → ["docx", "pdf-image", "pdf-text"]; cualquier otro → ["pdf-image", "pdf-text"].
+export function exportOutputsFor(format: SourceFormat): ReadonlyArray<ExportOutput>;
+// "docx" → "docx"; cualquier otro → "pdf-image".
+export function defaultExportOutput(format: SourceFormat): ExportOutput;
+// "pdf-image" y "pdf-text" → ".pdf"; "docx" → ".docx".
+export function exportExtension(output: ExportOutput): ".pdf" | ".docx";
+```
+
+> **Campos nuevos sobre tipos que ya existen** (ADR-238 §3 y §5; declarados acá primero por §10 regla 1):
+>
+> - **`Document.sourceFormat: SourceFormat`**, obligatorio (`03_Data_Model.md` §2). Lo copia el PDF Engine de su entrada.
+> - **`PdfEngineInput.sourceFormat: SourceFormat`**, obligatorio (`core/PDF_Engine.md` §6). Lo pasa el Orchestrator.
+> - **`DocumentMetadata.pdfVersion?: string`** pasa a ser opcional (`03_Data_Model.md` §3). Con `sourceFormat: "pdf"` está siempre. Con otro formato, el PDF Engine deja afuera `pdfVersion`, `title`, `producer` y `creationTool`, que son del PDF intermedio, y `encrypted` y `hasForms` valen `false`.
+> - **`ExportOptions.output: ExportOutput` y `ExportOptions.pdfA: boolean`**, obligatorios (`03_Data_Model.md` §19). El Export Engine rechaza con `InvalidInputError` un `output` fuera de `exportOutputsFor(document.sourceFormat)`, `pdfA: true` con `output: "docx"` y un `filename` que no termina en `exportExtension(output)`, sin importar mayúsculas.
+> - **`Word.source` no cambia**: las palabras del PDF intermedio son `"pdf"`.
+>
+> **Regla de transición** (ADR-238 §5 y §6): mientras un formato admitido no tenga su camino de entrada, el Orchestrator lo rechaza con `FORMAT_UNSUPPORTED` y `reason: "unknown"`, y lo mismo vale para un Office cifrado. Mientras una salida no tenga su ADR, el Export Engine rechaza `pdf-text`, `docx` y `pdfA: true` con `InvalidInputError`. Es un estado de la branch de trabajo; la 1.2 sale junta.
+
 ## 6. Configuración por motor
 
 **ADR-164 (T-5)**: `WorkerJobType` gana `ocr-orient`; los mapas exhaustivos de
@@ -1152,6 +1217,16 @@ El presupuesto puede impedir admitir la tercera imagen y nunca se amplía.
 conoce recibe el default por `mergeConfig`. Reemplaza la baja inmediata de
 ADR-166 §1, que T-8 midió trasladándole ~1,2 s y ~500-600 MB de pico al
 documento siguiente. Sin tipo, evento ni error code nuevo.
+
+**ADR-239 (1.2)**: `WorkerJobType` gana `convert-image`, con defaults
+`timeouts["convert-image"]` **30000** (plazo **por página**, no por documento)
+y `maxRetries["convert-image"]` **0** (decodificar es determinista). El pool
+`convert` tiene tamaño fijo 1 y no agrega clave a `maxQueuePerPool` ni campo
+de tamaño: recibe un job por documento. No usa `idleDisposeMs`: el
+Orchestrator lo termina al terminar cada conversión, para que su memoria
+vuelva antes del OCR. `EngineConfig` gana `convert: ConvertConfig`, con el
+tope de una imagen; la cantidad de páginas de un TIFF usa
+`pdf.maxPageCount`.
 
 ```ts
 export interface WorkerPoolConfig {
@@ -1178,6 +1253,13 @@ export interface WorkerPoolConfig {
 
 export interface PdfEngineConfig {
   readonly maxPageCount: number; // default 10000
+}
+
+// ADR-239 §3: tope de una imagen suelta, por imagen o por página de un TIFF,
+// medido en la cabecera antes de decodificar.
+export interface ConvertConfig {
+  readonly maxImagePixels: number; // default IMAGE_MAX_PIXELS (50 000 000, decisión del mantenedor)
+  readonly maxImageSide: number;   // default IMAGE_MAX_SIDE (16 384, el límite de los canvas de Chromium)
 }
 
 // Rutas del runtime WASM de onnxruntime-web, inyectadas por el host (la app,
@@ -1237,6 +1319,8 @@ export interface ExportConfig {
 | `GROUPING_SIMILARITY_THRESHOLD` | `0.88` | `GroupingConfig.similarityThreshold` |
 | `NER_CONFIDENCE_THRESHOLD` | `0.7` | `NerConfig.confidenceThreshold` |
 | `CANCEL_SLA_MS` | `200` | `WorkerPoolConfig.cancelSlaMs` |
+| `IMAGE_MAX_PIXELS` | `50_000_000` | `ConvertConfig.maxImagePixels` (ADR-239 §3, decisión del mantenedor del 2026-11-23) |
+| `IMAGE_MAX_SIDE` | `16_384` | `ConvertConfig.maxImageSide` (ADR-239 §3: pasarlo da una página en blanco sin error) |
 | `MAX_QUEUE_PER_POOL` | `{ pdf: 32, ocr: 8, ner: 8, render: 32 }` | `WorkerPoolConfig.maxQueuePerPool` (ADR-034 §7) |
 | `PREVIEW_CACHE_PAGES` | `16` | `RenderConfig` |
 | `WORDS_CACHE_PAGES` | `32` | `EngineConfig.cache` |
@@ -1413,9 +1497,10 @@ export interface CancelRequested { readonly documentId: string; readonly jobId?:
 
 // PDF
 export interface PageParsed { readonly documentId: string; readonly pageIndex: number; readonly wordCount: number; readonly requiresOCR: boolean; }
-export interface DocumentParsed { readonly documentId: string; readonly pageCount: number; readonly textlessPages: ReadonlyArray<number>; readonly sourceKind: "text" | "scanned" | "mixed"; }
+export interface DocumentParsed { readonly documentId: string; readonly pageCount: number; readonly textlessPages: ReadonlyArray<number>; readonly sourceKind: "text" | "scanned" | "mixed"; readonly sourceFormat: SourceFormat; } // sourceFormat: ADR-238 §3
 export interface PdfPasswordRequired { readonly documentId: string; }
 export interface PdfInvalid { readonly documentId: string; readonly reason: string; }
+export interface ConversionPageFinished { readonly documentId: string; readonly pageIndex: number; readonly pageCount: number; } // ADR-239 §2
 
 // OCR
 export interface OcrStarted { readonly documentId: string; readonly pagesToProcess: ReadonlyArray<number>; readonly modelLoading?: boolean; }
@@ -1495,7 +1580,7 @@ export interface RenderFailed { readonly documentId: string; readonly error: Ser
 export interface ExportRequested { readonly documentId: string; readonly options: ExportOptions; }
 export interface ExportStarted { readonly documentId: string; }
 export interface ExportProgress { readonly documentId: string; readonly current: number; readonly total: number; }
-export interface ExportFinished { readonly documentId: string; readonly blobUrl: string; readonly sizeBytes: number; readonly durationMs: number; }
+export interface ExportFinished { readonly documentId: string; readonly blobUrl: string; readonly sizeBytes: number; readonly durationMs: number; readonly output: ExportOutput; readonly pdfA: boolean; } // output y pdfA: ADR-238 §5
 export interface ExportFailed { readonly documentId: string; readonly error: SerializedEngineError; }
 
 // Workers
@@ -1551,6 +1636,7 @@ export type EventPayloadMap = {
   [EngineEvents.DOCUMENT_PARSED]: DocumentParsed;
   [EngineEvents.PDF_PASSWORD_REQUIRED]: PdfPasswordRequired;
   [EngineEvents.PDF_INVALID]: PdfInvalid;
+  [EngineEvents.CONVERSION_PAGE_FINISHED]: ConversionPageFinished; // ADR-239 §2
   [EngineEvents.OCR_STARTED]: OcrStarted;
   [EngineEvents.OCR_PAGE_FINISHED]: OcrPageFinished;
   [EngineEvents.OCR_FINISHED]: OcrFinished;

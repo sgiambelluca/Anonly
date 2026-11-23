@@ -159,7 +159,7 @@ export class ExportEngine implements IEngine {
 |---|---|---|---|---|
 | `EXPORT_STARTED` | al iniciar el export | `ExportStarted` | async | sí |
 | `EXPORT_PROGRESS` | por página ensamblada | `ExportProgress` | async | sí |
-| `EXPORT_FINISHED` | al serializar y transferir el PDF final | `ExportFinished` con `blobUrl` | async | sí |
+| `EXPORT_FINISHED` | al serializar y transferir el PDF final | `ExportFinished` con `blobUrl`, y con `output` y `pdfA` copiados de las opciones (ADR-238 §5) | async | sí |
 | `EXPORT_FAILED` | al fallar el export | `ExportFailed` | async | sí |
 
 Canal: `EventChannel.Export`.
@@ -208,6 +208,11 @@ ExportOptions {
 - `options.includeOriginalMetadata` debe ser literalmente `false` (garantía de tipo).
 - `options.coveredPages` (ADR-190 §5), si está, tiene índices enteros en `[0, document.pageCount)`. Un índice fuera de rango o no entero lanza `InvalidInputError`, y los duplicados se ignoran.
 - `renderPageProvider` debe estar poblado.
+- **La salida (ADR-238 §5)**, antes de rasterizar ninguna página. Lanza `InvalidInputError`:
+  - si `options.output` no está en `exportOutputsFor(document.sourceFormat)`;
+  - si `options.pdfA` es `true` con `options.output === "docx"`;
+  - si `options.filename` no termina en `exportExtension(options.output)`, sin importar mayúsculas.
+- **Regla de transición** (ADR-238 §5 y §6): mientras no exista el ADR de cada salida, `output: "pdf-text"`, `output: "docx"` y `pdfA: true` lanzan `InvalidInputError`. Con `output: "pdf-image"` y `pdfA: false`, el export es el de siempre (ADR-009), byte por byte salvo la fecha.
 - Con `options.includeMarkerLegend`, cada tipo propio de un grupo `enabled` en modo `placeholder` tiene su definición en `userTypes` (ADR-219 §6). Si falta, lanza `InvalidInputError` antes de rasterizar ninguna página. Con el Orchestrator no ocurre: pasa los tipos guardados y los del documento, y borrar un tipo del documento borra sus grupos (ADR-225 §4). Sin la leyenda, `userTypes` no se consulta.
 
 ---
@@ -346,6 +351,12 @@ Garantías del PDF final:
 | `absent coveredPages leaves the export unchanged` | `contract.test.ts` | contract | ADR-190 §5: no-regresión |
 | `duplicate coveredPages entries are ignored` | `contract.test.ts` | contract | ADR-190 §5 |
 | `empty coveredPages leaves the export identical to an absent one` | `contract.test.ts` | contract | ADR-190 §5: no-regresión |
+| `EXPORT_FINISHED carries the output and pdfA of the options` | `contract.test.ts` | contract | ADR-238 §5 |
+| `an output the source format does not admit throws InvalidInputError` | `edge.test.ts` | edge | ADR-238 §5: `output: "docx"` con `sourceFormat: "pdf"`, sin render de ninguna página |
+| `pdfA with a docx output throws InvalidInputError` | `edge.test.ts` | edge | ADR-238 §5 |
+| `a filename without the output extension throws InvalidInputError` | `edge.test.ts` | edge | ADR-238 §5: `anonimizado.docx` con `pdf-image`; `ANONIMIZADO.PDF` sí pasa |
+| `outputs without their ADR are rejected` | `edge.test.ts` | edge | regla de transición de ADR-238 §6: `pdf-text`, `docx` y `pdfA: true`; se borra cuando cada salida tiene su ADR |
+| `pdf-image without pdfA exports exactly as before` | `contract.test.ts` | contract | ADR-238 §5: no-regresión contra el export de la 1.1 |
 
 Fixtures: `tests/fixtures/text-10p.pdf`, `text-50p.pdf`, `huge-1000p.pdf`.
 

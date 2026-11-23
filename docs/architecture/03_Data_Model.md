@@ -43,7 +43,7 @@ Conflict                            (discrepancia entre detectores)
 
 ## 2. `Document`
 
-Representa el PDF cargado, ya parseado por el PDF Engine y (opcionalmente) completado por OCR.
+Representa el documento cargado, ya parseado por el PDF Engine y (opcionalmente) completado por OCR. Desde la 1.2 puede venir de otro formato: el PDF Engine lee entonces el PDF intermedio de la conversión (ADR-238, ADR-239).
 
 ```ts
 export interface Document {
@@ -53,6 +53,7 @@ export interface Document {
   readonly pages: ReadonlyArray<Page>;
   readonly metadata: DocumentMetadata;       // solo metadata no sensible
   readonly sourceKind: "text" | "scanned" | "mixed";
+  readonly sourceFormat: SourceFormat;       // ADR-238 §3; core/Contracts.md §5.3
   readonly importedAt: number;               // epoch ms
 }
 ```
@@ -66,7 +67,8 @@ export interface Document {
 | `pageCount` | `number` | ≥ 0. Coincide con `pages.length`. |
 | `pages` | `ReadonlyArray<Page>` | Páginas en orden. |
 | `metadata` | `DocumentMetadata` | Solo metadata **no sensible**. Ver §3. |
-| `sourceKind` | `"text" \| "scanned" \| "mixed"` | `mixed` si al menos una página requirió OCR. |
+| `sourceKind` | `"text" \| "scanned" \| "mixed"` | `mixed` si al menos una página requirió OCR. Una imagen suelta es `scanned`. |
+| `sourceFormat` | `SourceFormat` | El formato del archivo que eligió el usuario, no el del PDF intermedio (ADR-238 §1). Lo copia el PDF Engine de su entrada. |
 | `importedAt` | `number` | Para UX y métricas. |
 
 **Invariantes**
@@ -84,13 +86,14 @@ export interface DocumentMetadata {
   readonly title?: string;       // sanitizado, no sensible
   readonly producer?: string;    // software que generó el PDF
   readonly creationTool?: string;
-  readonly pdfVersion: string;
+  readonly pdfVersion?: string;  // ADR-238 §3: solo con sourceFormat "pdf"
   readonly encrypted: boolean;
   readonly hasForms: boolean;
 }
 ```
 
 **Invariantes**
+- Con `sourceFormat: "pdf"`, `pdfVersion` está siempre. Con otro formato, `pdfVersion`, `title`, `producer` y `creationTool` no están, porque serían del PDF intermedio y no del archivo del usuario, y `encrypted` y `hasForms` valen `false` (ADR-238 §3).
 - `author`, `creator` con nombres reales y campos XMP sensibles **no** se exponen. Se descartan en el PDF Engine y jamás llegan al export.
 - El export genera metadata propia mínima (ver `core/Export_Engine.md`).
 
@@ -851,6 +854,12 @@ export interface ExportOptions {
   // dimensiones, sin pedir su render. Fuera de rango → InvalidInputError;
   // duplicados se ignoran; ausente o vacío → export idéntico al previo.
   readonly coveredPages?: ReadonlyArray<number>;
+  // ADR-238 §5: la salida, obligatoria. Qué salidas admite cada formato de
+  // origen: exportOutputsFor (core/Contracts.md §5.3).
+  readonly output: ExportOutput;
+  // ADR-238 §5: variante PDF/A de una salida PDF. true con output "docx" →
+  // InvalidInputError.
+  readonly pdfA: boolean;
 }
 
 export interface ExportMetadata {
@@ -862,6 +871,13 @@ export interface ExportMetadata {
 ```
 
 Sin `author`, `subject`, `keywords` ni XMP del original (`08_Security_Model.md` §5).
+
+**Validación de la salida** (ADR-238 §5), en el Export Engine, con `InvalidInputError` y sin exportar:
+- un `output` que no está en `exportOutputsFor(document.sourceFormat)`;
+- `pdfA: true` con `output: "docx"`;
+- un `filename` que no termina en `exportExtension(output)`, sin importar mayúsculas.
+
+`filename` sigue siendo el nombre completo; la UI lo arma con el nombre y la extensión elegida. Qué significa cada salida lo fija su ADR: `pdf-image` es el export de ADR-009, sin cambios. Mientras no exista el ADR de una salida, el Export Engine rechaza `pdf-text`, `docx` y `pdfA: true` con `InvalidInputError` (regla de transición de ADR-238 §6).
 
 ---
 

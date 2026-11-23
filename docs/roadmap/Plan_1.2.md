@@ -14,7 +14,9 @@ relevamiento del código y una investigación de librerías (§4 y §5).
 
 - **ADR-238**, el contrato del formato de origen y de la salida, y
   **ADR-239**, las imágenes sueltas y el Convert Engine: aceptados por el
-  mantenedor el 2026-11-23. Falta pasarlos a los contratos y los specs.
+  mantenedor el 2026-11-23, y pasados a los contratos y los specs el mismo
+  día. El spec nuevo es `core/Convert_Engine.md`. Los frentes 1 y 2 se
+  pueden implementar.
 - **Los spikes del conversor de Office y de imágenes**: hechos (§8.1 y
   §8.2). El conversor definitivo espera la decisión del mantenedor (§7).
 - Los demás ADR esperan sus spikes (§10).
@@ -393,7 +395,13 @@ reales.
    admitido»; el formato de salida en `ExportOptions` y en
    `ExportFinished`. Va primero, con su ADR.
 2. **Imágenes sueltas**: es el caso más barato y prueba el camino del
-   formato de origen de punta a punta.
+   formato de origen de punta a punta. Es el octavo motor (ADR-239,
+   `core/Convert_Engine.md`). Al implementarlo hay que actualizar también:
+   - `CLAUDE.md`, que dice «siete motores»;
+   - la descripción de `.claude/agents/implementador.md`, que lista los
+     motores;
+   - el glob de cobertura en `vitest.config.ts` y los `paths` de `tests/`
+     (ADR-033).
 3. **Word**: entrada por el conversor, visor y salida PDF.
 4. **Word limpio**: lectura del XML, alineación, rearmado y su gate.
 5. **Excel y PowerPoint**: entrada por el conversor y paginado.

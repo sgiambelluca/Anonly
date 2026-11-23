@@ -127,8 +127,9 @@ export interface PdfEngineConfig {
 
 export interface PdfEngineInput {
   readonly documentId: string;
-  readonly buffer: ArrayBuffer;         // PDF binario, se transfiere (zero-copy) — en Hito 2 se trata como ArrayBuffer plano (ver §12)
+  readonly buffer: ArrayBuffer;         // PDF binario, se transfiere (zero-copy) — en Hito 2 se trata como ArrayBuffer plano (ver §12). Desde la 1.2 puede ser el PDF intermedio de otro formato (ADR-238, ADR-239)
   readonly password?: string;           // si el PDF está protegido
+  readonly sourceFormat: SourceFormat;  // ADR-238 §3: el formato del archivo del usuario; se copia a Document.sourceFormat
 }
 
 export interface PdfEngineOutput {
@@ -215,7 +216,7 @@ export function decodePdfEngineOutput(value: unknown): PdfEngineOutput;
 | Evento | Cuándo | Payload | Sync/Async | Idempotente |
 |---|---|---|---|---|
 | `PAGE_PARSED` | al finalizar parseo de una página | `PageParsed` | async | sí |
-| `DOCUMENT_PARSED` | al finalizar todas las páginas | `DocumentParsed` | async | sí |
+| `DOCUMENT_PARSED` | al finalizar todas las páginas | `DocumentParsed`, con `sourceFormat` copiado de la entrada (ADR-238 §3) | async | sí |
 | `PDF_PASSWORD_REQUIRED` | PDF protegido sin password o password incorrecto | `PdfPasswordRequired` | async | sí |
 | `PDF_INVALID` | no es un PDF válido o corrupto | `PdfInvalid` | async | sí |
 
@@ -269,6 +270,7 @@ PdfEngineOutput {
 ```
 
 - `document.pages[i].index === i` para todo `i`.
+- **`document.sourceFormat === input.sourceFormat`** (ADR-238 §3). El motor no decide nada con él, salvo los metadatos: con `sourceFormat !== "pdf"`, `document.metadata` sale sin `pdfVersion`, `title`, `producer` ni `creationTool`, con `encrypted: false` y `hasForms: false`. Esos datos serían del PDF intermedio, no del archivo del usuario. Con `"pdf"`, los metadatos salen como hasta la 1.1.
 - `document.pages[i].ocrDpiCap`, cuando existe, es un entero positivo y solo
   aparece en una página `requiresOCR` cuyo contenido pintado es un único ráster
   con dimensiones nativas verificables (ADR-163). Ausente es el caso de reserva
@@ -579,6 +581,9 @@ PdfEngineOutput {
 | `el bbox fusionado por OCR cae dentro del marco rotado (300×200), y el render full dibuja el reemplazo en ese mismo marco` | `tests/integration/scanned-rotated-export.test.ts` | integration | ADR-140 §2, §15 ítem 35: humo de fusión y render `full` sobre una página escaneada con `/Rotate 90` |
 | `parsePage releases the page objects right after reading the operator list (ADR-230)` | `unit.test.ts` | unit | 1.1 | caso 72: con un `PDFPageProxy` doble, `cleanup()` se llama exactamente una vez por página, después de `getOperatorList()` y antes de que `parsePage` resuelva; la `Page` resultante es igual a la que da el mismo doble sin la llamada |
 | `parsing a scanned document never keeps more than one page of decoded objects (ADR-230)` | `edge.test.ts` | edge | 1.1 | caso 72 + caso 2: un documento de varias páginas solo imagen; al pedir el operator list de la página N, las páginas anteriores ya llamaron a `cleanup()` |
+| `copies input.sourceFormat to the document (ADR-238)` | `contract.test.ts` | contract | 1.2 | §10: `document.sourceFormat` es el de la entrada, para `"pdf"` y para un formato que no es PDF |
+| `a non-PDF source drops the intermediate PDF metadata (ADR-238)` | `unit.test.ts` | unit | 1.2 | §10: con `sourceFormat: "docx"` y un PDF intermedio que trae `pdfVersion`, `title`, `producer` y `Creator`, el `Document` sale sin esos cuatro y con `encrypted` y `hasForms` en `false` |
+| `a PDF source keeps its metadata as before (ADR-238)` | `unit.test.ts` | unit | 1.2 | §10: con `sourceFormat: "pdf"`, los metadatos son idénticos a los de la 1.1; `pdfVersion` está |
 | `hoja escaneada con /Rotate 90: la censura cae sobre la entidad y el texto vecino sobrevive (ADR-140 §2, PDF_Engine.md item 35)` | `tests/e2e/scanned-rotated-export.spec.ts` | e2e | ADR-140 §2, §15 ítem 35: export real leído píxel a píxel, con control sobre el original |
 
 **Fixtures**: los binarios `.pdf` siguen el patrón definido en `tests/fixtures/README.md` (source of truth: PDFs < 5 MB commiteados en `tests/fixtures/`, ≥ 5 MB a Git LFS en Hito 11; `generate.ts` ya commiteado en Hito 1). Estado actual en Hito 2: commiteados `text-10p.pdf`, `empty.pdf`, `corrupt.pdf` (generados por `generate.ts`); `protected.pdf` pendiente (Hito 2b, requiere `qpdf`); `huge-1000p.pdf` y resto pendientes Hito 11. Los tests **unit / contract / edge / snapshot** (Hito 2) mockean la frontera `pdfjs-dist` (deterministas, sin wasm, sin dependencia de binarios físicos — consistente con `tests/fixtures/README.md`). Los tests **stress / cancel / perf** (Hito 11) usarán PDFs reales generados por `generate.ts`. `generate.ts` debe saber producir: `text-10p`, `scanned-10p`, `protected` (password "test1234"), `corrupt`, `empty`, `text-50p`, `huge-1000p`, `mixed-30p`.
