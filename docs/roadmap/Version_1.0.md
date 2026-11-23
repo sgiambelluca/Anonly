@@ -133,7 +133,7 @@ Van en las notas de la versión. Cada una tiene su lugar en `Roadmap_1.x.md`.
 | PWA y modo offline | fuera de alcance desde ADR-130: el instalador lo reemplaza |
 | Export a imágenes PNG | descartado |
 | Marca de agua «Anonimizado por Anonly» | descartada |
-| Recall y precisión de NER como gate de release | no se exige para la 1.0; va en la 1.2 (`Roadmap_1.x.md` §5) |
+| Recall y precisión de NER como gate de release | no se exige para la 1.0; va en la 1.3 (`Roadmap_1.x.md` §6) |
 
 ## 6. Cómo se publica
 

@@ -4,7 +4,7 @@
 
 > Pedido del mantenedor (2026-11-05): bajar el pico de memoria, cuidando que
 > nada de lo que se decida choque con trabajar varios documentos a la vez en
-> la 1.2. La campaña midió y propuso tres candidatos, cada uno con su ADR
+> la 1.3. La campaña midió y propuso tres candidatos, cada uno con su ADR
 > (ADR-230 a 232). **El humano los aceptó el 2026-11-05**, y quedaron
 > implementados en `perf/pico-memoria` (§6). La validación en Windows nativo,
 > con NER y con documentos reales, se hizo el 2026-11-19 (§6.3).
@@ -338,7 +338,7 @@ a 216 dpi (P2 de siempre, ~17 MB). Medianas, y entre paréntesis mínimo y máxi
 
 - Los rangos no se solapan. El texto de OCR y los grupos son idénticos.
 - Es el candidato con más efecto de la campaña. También es el que más baja la
-  memoria después de `Ready`, la que cuenta por pestaña en la 1.2.
+  memoria después de `Ready`, la que cuenta por pestaña en la 1.3.
 - Una corrida de 24 falló al arrancar la app, antes de importar (ADR-232).
 - **Alcance a decidir** (ADR-232): limpiar en todos los renders, que es lo
   medido, o solo en el OCR y el export, que es la recomendación y necesita su
@@ -584,7 +584,7 @@ En `base`, P2 caliente llegaba a 2942 MB en este banco, a 58 MB del techo.
   15 s el efecto queda dentro del ruido.
 - El costo de tiempo es de 0,3 s en el segundo escaneo.
 - **El mantenedor decidió mantenerlo (2026-11-19)**, por el procesamiento
-  secuencial de varios documentos de la 1.2.
+  secuencial de varios documentos de la 1.3.
 - C-2b (§6.2) se mide aparte, en §6.4.
 
 ### 6.4 C-2b en Windows (2026-11-19)
@@ -618,7 +618,7 @@ corridas válidas en cada campaña, con texto de OCR y grupos idénticos
   `c2b` no hace nada (en R2 frío, hasta −2,7 s), así que son ruido.
 - **Lectura**: C-2 queda como está y C-2b no se adopta. El brazo `c2b` sigue en
   el arnés: queda como posible optimización a volver a medir con la cola de
-  varios documentos de la 1.2 (`Roadmap_1.x.md` §5).
+  varios documentos de la 1.3 (`Roadmap_1.x.md` §6).
 
 ## 7. Qué falta y quién lo hace
 
@@ -626,9 +626,9 @@ corridas válidas en cada campaña, con texto de OCR y grupos idénticos
 |---|---|---|
 | ~~A/B con NER prendido: `base` contra `head`, y `base` contra `c2` para aislar C-2~~: hecho en Linux (§6.1) y en Windows (§6.3) | — | — |
 | ~~Veredicto contra los techos de ADR-192~~: P1 y P2 debajo, en Windows (§6.3) | — | — |
-| ~~Decidir si C-2 queda o se revierte~~: el humano lo mantiene, con su costo de ~0,3 s (2026-11-19). En la 1.2 la app va a procesar varios documentos en secuencia, y el siguiente que necesite OCR no tiene por qué esperar los 15 s del modelo de NER | — | — |
+| ~~Decidir si C-2 queda o se revierte~~: el humano lo mantiene, con su costo de ~0,3 s (2026-11-19). En la 1.3 la app va a procesar varios documentos en secuencia, y el siguiente que necesite OCR no tiene por qué esperar los 15 s del modelo de NER | — | — |
 | ~~Medir C-2b (§6.2) en Windows: `head` contra `c2b`, sintético y real~~: no suma sobre C-2, no se adopta (§6.4) | — | — |
-| **Pendiente a futuro, en la 1.2**: volver a medir C-2b con la cola de varios documentos, donde el caso caliente pasa a ser el normal (`Roadmap_1.x.md` §5) | el planificador, al implementar la cola | el brazo `c2b` del arnés y la cola de la 1.2 |
+| **Pendiente a futuro, en la 1.3**: volver a medir C-2b con la cola de varios documentos, donde el caso caliente pasa a ser el normal (`Roadmap_1.x.md` §6) | el planificador, al implementar la cola | el brazo `c2b` del arnés y la cola de la 1.3 |
 | ~~Decidir C-4 (ADR-232) y su alcance~~: aceptado con la opción 2 (solo OCR y export) el 2026-11-05 | — | — |
 | **Pendiente a futuro, en Windows**: hilos de NER en los perfiles Alto y Ultra (subirlos, nunca bajarlos). En septiembre, 6 hilos bajaron un 30 % el tiempo de NER en R1 en el Windows del mantenedor y empeoraron en la Mac (`mediciones/ner/Hilos_NER_Medicion.md`); ADR-194 dejó los hilos en automático | el mantenedor, con el arnés portado a Windows | `tests/perf/run-ner-threads.sh` solo corre en macOS y el puerto de septiembre no se commiteó: hay que portarlo. Este banco no sirve (4 CPU y sin el modelo de NER) |
 | **Pendiente a futuro, en Windows**: repetir el empaquetado del modelo de NER con datos externos (ADR-179) con R1. En septiembre bajó la memoria WASM de NER sin superar el ruido del RSS | el mantenedor | el modelo de NER (o `*.hf.co` permitido en este banco) |

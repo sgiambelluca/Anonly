@@ -3,7 +3,10 @@
 # ADR-236 — La 1.1.1 trae veinte países y la interfaz en inglés
 
 - **Estado**: Aceptado por el mantenedor el 2026-11-22, con los detalles
-  técnicos del planificador.
+  técnicos del planificador. **Enmendado por ADR-237** (2026-11-23): todo
+  lo que este ADR ubica en la 1.1.1 queda sin versión, y la interfaz en
+  inglés sigue con los países. Cambian la versión (§2) y quién ve la
+  pantalla de país (§5). El resto sigue vigente.
 - **Fecha**: 2026-11-22.
 - **Decidido por**: el mantenedor, a propuesta del planificador.
 - **Origen**: `Roadmap_1.x.md` §4bis y [`Plan_1.1.1.md`](../roadmap/Plan_1.1.1.md).

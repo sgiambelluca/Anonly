@@ -1022,7 +1022,7 @@ Tabla canónica por `EntityType` — ratifica y completa ADR-012 §"Formato para
 | `Person` + `personGender: "f"` (ADR-060 §3) | `MUJER` | `MUJER` | `MUJ` |
 | `Person` + `personGender: "m"` (ADR-060 §3) | `HOMBRE` | `HOMB` | `HOM` |
 
-**Por país** (ADR-221 §3): esta tabla es la de `AR`, y `resolveLabelSet` la elige por `detection.country`. En la 1.1 es la única; las de Chile y Uruguay llegan con sus catálogos en la 1.1.1.
+**Por país** (ADR-221 §3): esta tabla es la de `AR`, y `resolveLabelSet` la elige por `detection.country`. En la 1.1 es la única; las de Chile y Uruguay llegan con sus catálogos, junto con los demás países (sin versión, ADR-237).
 
 **Tipos propios** (ADR-219 §2): `resolveLabelSet` busca la definición entre los tipos guardados y los de la sesión, y arma la escalera así:
 

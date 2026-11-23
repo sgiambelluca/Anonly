@@ -115,7 +115,7 @@ operator list no decodifica nada.
 3. El caso límite 2 de §13 de `core/PDF_Engine.md` se corrige con lo leído en
    el código de pdf.js (Contexto §2) y lo medido en «A/B medido».
 
-## Compatibilidad con varios documentos (1.2)
+## Compatibilidad con varios documentos (1.3)
 
 | Criterio | Cumple | Por qué |
 |---|---|---|

@@ -88,7 +88,7 @@ No es público objetivo: anonimización en volumen masivo (millones de documento
 
 ### 6.2 Fuera de alcance (MVP y v1.0)
 
-- Formatos distintos a PDF (Word, imágenes, Excel, PowerPoint) — previstos para la 1.3 (`roadmap/Roadmap_1.x.md` §6).
+- Formatos distintos a PDF (Word, imágenes, Excel, PowerPoint) — previstos para la 1.2 (`roadmap/Roadmap_1.x.md` §5).
 - Backend de procesamiento. No existe. Los datos no salen del dispositivo.
 - Persistencia de documentos en servidor. No se almacena nada remotamente.
 - Cuentas de usuario, autenticación ni multi-tenant en el MVP.

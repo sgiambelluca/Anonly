@@ -4,7 +4,7 @@
 
 > **Reescrito el 2026-10-02**, con las decisiones del humano de ese día. La
 > versión anterior definía la 2.0 como «más formatos y más plataformas».
-> Los formatos pasaron a la 1.3 y el escritorio ya es la 1.0, así que la 2.0
+> Los formatos pasaron a la línea 1.x (hoy, la 1.2) y el escritorio ya es la 1.0, así que la 2.0
 > queda para los cambios que rompen algo o que cambian el motor de detección.
 
 **Versión objetivo**: 2.0.0. Sin fecha.
@@ -59,9 +59,9 @@ El humano no les asignó versión. No se planifican hasta que lo haga.
 | Ítem | Dónde quedó |
 |---|---|
 | Aplicación de escritorio | es la 1.0 (ADR-130) |
-| Entrada de Word, imágenes sueltas, Excel y PowerPoint; export a Word | 1.3 (`Roadmap_1.x.md` §6) |
-| Cola de varios documentos | 1.2 (`Roadmap_1.x.md` §5) |
-| Export con texto preservado y PDF/A | 1.3 (`Roadmap_1.x.md` §6) |
+| Entrada de Word, imágenes sueltas, Excel y PowerPoint; export a Word | 1.2 (`Roadmap_1.x.md` §5) |
+| Cola de varios documentos | 1.3 (`Roadmap_1.x.md` §6) |
+| Export con texto preservado y PDF/A | 1.2 (`Roadmap_1.x.md` §5) |
 | Plantillas de reglas | idea sin versión (`Future_Ideas.md` §4.2) |
 | Agrupación por embeddings, comparación de documentos, OCR con WASM multihilo, PDF de más de 1000 páginas, caché de grupos | ideas sin fecha (`Future_Ideas.md`) |
 

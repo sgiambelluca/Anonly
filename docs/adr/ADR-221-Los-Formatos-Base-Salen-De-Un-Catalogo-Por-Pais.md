@@ -9,6 +9,9 @@
   solo Chile y Uruguay, con tablas aprobadas por tandas, y Estados Unidos
   reemplaza universales por sus variantes en inglés. §1, §2, §6 y §7 se leen
   con ese ADR.
+  **Enmendado por ADR-237** (2026-11-23): los países que no son Argentina
+  quedan sin versión. Donde este ADR dice «la 1.1.1», se lee «la versión de
+  los países». La excepción de §7, que la numeraba como parche, no aplica.
 - **Fecha**: 2026-10-19.
 - **Decidido por**: el mantenedor (2026-10-13 y 2026-10-19), a propuesta del
   planificador.

@@ -171,7 +171,7 @@ archivo se llama **`formatos.anonly-formatos`**.
 - **el rechazo**, cuando no entra nada: archivo inválido, versión más nueva
   o un archivo que no es de Anonly. Dice el motivo y ofrece elegir otro.
 
-### 7. El país, en la 1.1.1
+### 7. El país, cuando lleguen los demás países (ADR-237)
 
 En la 1.1 no se ve: hay un solo país (ADR-221 §7).
 

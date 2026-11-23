@@ -1453,7 +1453,8 @@ apps/react-client/src/components/
   (`React_Client.md` §3.8): nada llega a `anonly:detection` hasta «Guardar».
 - **Encabezado**: título, la línea que define tipo y formato, «Importar…», «Exportar…» y cerrar.
 - **Barra**: buscador (por nombre de tipo o de formato, sin mayúsculas ni tildes) y el conteo
-  «N prendidos · N apagados · N tuyos». En la 1.1.1 suma el selector de país y «Sumar un formato
+  «N prendidos · N apagados · N tuyos». Con los demás países (sin versión, ADR-237) suma el
+  selector de país y «Sumar un formato
   de otro país…» (ADR-227 §7); en la 1.1 no se montan.
 - **Tres secciones**: «Tus tipos», «Tipos del catálogo» y «Tipos fijos del catálogo». La tercera
   arranca plegada. Con búsqueda activa, todo se despliega y las secciones sin resultados se

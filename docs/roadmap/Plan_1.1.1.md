@@ -7,6 +7,14 @@
 > en inglés. Las decisiones están en ADR-236; el mecanismo de los catálogos,
 > en ADR-221.
 
+**En pausa y sin versión desde el 2026-11-23** (ADR-237). El mantenedor
+pone el esfuerzo en los otros formatos de documento, que pasan a ser la 1.2
+(`Roadmap_1.x.md` §5). Este plan conserva el número viejo en el nombre para
+no romper enlaces: donde dice «la 1.1.1», se lee «la versión de los
+países». Se retoma por §6. Lo que cambia al retomarlo: el número se decide
+entonces, y la pantalla de país la ve solo quien instala de cero, no quien
+actualiza desde cualquier versión anterior (ADR-237 §2).
+
 **Estado (2026-11-22):** ADR-236 aceptado. La tanda 1 tiene la
 investigación y dos mediciones, pero **su tabla final todavía no está
 aprobada** (§6). Nada implementado en los motores.

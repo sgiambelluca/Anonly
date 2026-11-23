@@ -14,6 +14,7 @@ consulta, salvo que su fila diga otra cosa.
 | [`Version_1.0.md`](./Version_1.0.md) | Qué es la 1.0: qué trae, cómo se midió y qué limitaciones conocidas tiene |
 | [`Roadmap_1.x.md`](./Roadmap_1.x.md) | Qué sigue y en qué orden, versión por versión, y qué hay que decidir al llegar a cada una. **Es el documento que manda para planificar** |
 | [`Plan_1.1.md`](./Plan_1.1.md) | La 1.1: decisiones del mantenedor, ADR-219 a ADR-224 (aceptados), qué falta antes de implementar y los frentes |
+| [`Plan_1.1.1.md`](./Plan_1.1.1.md) | Los veinte países y la interfaz en inglés (ADR-236). **En pausa y sin versión** desde el 2026-11-23 (ADR-237); conserva el número viejo en el nombre |
 | [`Version_2.0.md`](./Version_2.0.md) | Lo que queda para una versión mayor |
 | [`Future_Ideas.md`](./Future_Ideas.md) | Ideas sin versión asignada |
 | [`MVP.md`](./MVP.md) | Cómo se llegó a la 1.0, hito por hito. Registro histórico: no se sigue actualizando |

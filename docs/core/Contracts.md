@@ -887,8 +887,9 @@ façade. Todo es dato serializable a JSON: lo guarda la aplicación (ADR-223
 
 ```ts
 // ─── País (ADR-221 §1) ───
-// La 1.1 sale con "AR" sola; "CL" y "UY" entran al tipo en la 1.1.1 junto con
-// sus catálogos (ADR-221 §7). Hasta entonces el tipo es "AR".
+// La 1.1 sale con "AR" sola; "CL" y "UY" entran al tipo con los demás países
+// (sin versión, ADR-237), junto con sus catálogos (ADR-221 §7). Hasta entonces
+// el tipo es "AR".
 export type CountryCode = "AR";
 
 // ─── Identidad de un tipo (ADR-219 §1) ───
@@ -936,7 +937,7 @@ export const FORMAT_ADMITTING_BASE_TYPES: ReadonlySet<EntityType>;
 export type CatalogFormatKind = "structure" | "control";
 
 export interface CatalogFormatInfo {
-  readonly id: string;                     // "dni-ar", "cuit-ar", …; "cl:…"/"uy:…" desde la 1.1.1
+  readonly id: string;                     // "dni-ar", "cuit-ar", …; "cl:…"/"uy:…" con los demás países (ADR-237)
   readonly country: CountryCode | "universal";
   readonly name: string;                   // nombre para la interfaz: "Celular"
   readonly entityType: EntityType;

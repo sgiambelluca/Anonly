@@ -1023,7 +1023,7 @@ Atajos de teclado:
 | **Formato** | «patrón», «regex», «regla» | Una forma en que ese dato aparece escrito |
 | **Tus tipos** | «tipos custom», «personalizados» | Los tipos propios, guardados y del documento |
 | **Solo en este documento** | «auxiliar», «temporal», «doc.» | El tipo propio creado con el PDF abierto |
-| **Tus formatos** | «formatos de usuario» | Los propios, las copias editadas y, desde la 1.1.1, los traídos de otro país |
+| **Tus formatos** | «formatos de usuario» | Los propios, las copias editadas y, cuando lleguen los demás países (ADR-237), los traídos de otro país |
 | **Formatos de detección** | «configuración de detección» | El diálogo del árbol |
 | **Nuevo formato** / **Nuevo tipo** | «Agregar», «+» solo | Las dos acciones de alta, siempre con su sustantivo |
 

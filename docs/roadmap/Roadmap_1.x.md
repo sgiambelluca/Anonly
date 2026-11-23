@@ -1,4 +1,4 @@
-<!-- CONTEXT: scope=roadmap-1.x | dependencias=roadmap/Plan_1.1.md,adr/ADR-219-Un-Tipo-De-Entidad-Puede-Ser-Del-Usuario.md,adr/ADR-220-Un-Formato-Se-Arma-Con-Piezas-Y-Se-Recorre-En-Tiempo-Lineal.md,adr/ADR-221-Los-Formatos-Base-Salen-De-Un-Catalogo-Por-Pais.md,adr/ADR-222-Dos-Formatos-Que-Se-Pisan-Van-Al-Panel-De-Conflicto.md,adr/ADR-223-Los-Formatos-Se-Configuran-Desde-Inicio-Y-Viajan-En-Un-Archivo.md,adr/ADR-224-Lo-Que-La-1.1-Cambia-En-El-Panel-De-Entidades-Y-El-Visor.md,roadmap/Version_1.0.md,roadmap/Version_2.0.md,roadmap/Future_Ideas.md,roadmap/hitos/Post_Hito10.8_Pendientes.md,RELEASING.md,00_Project_Vision.md,architecture/08_Security_Model.md,adr/ADR-009-Export-Strategy.md,adr/ADR-059-Leyenda-Opcional-De-Marcadores.md,adr/ADR-148-Un-Export-Se-Verifica-Leyendo-El-PDF-Exportado.md,adr/ADR-190-Una-Pagina-Con-Tinta-No-Sale-Vacia-En-Silencio.md,roadmap/hardening/Export_Verificado_ADR148_Plan.md,roadmap/hardening/ADR148_Revision_2026-10-05.md,roadmap/hardening/ADR148_Revision_Sol61_2026-10-05.md,roadmap/ocr/Regiones_Pequenas_Investigacion_Plan.md,adr/ADR-202-El-Minimo-De-Region-OCR-Se-Prueba-A-25pt-Antes-De-Adoptarlo.md,roadmap/ocr/Regiones_Pequenas_25pt_Experimento_Plan.md,roadmap/interaccion/Mejoras_Interaccion_2026-10-05.md,adr/ADR-204-La-Interaccion-Anonimizada-Usa-La-Geometria-Visible.md,adr/ADR-205-El-Resultado-Exportado-Pertenece-A-Una-Revision.md,adr/ADR-206-Una-Busqueda-Omitida-No-Confirma-La-Version.md,roadmap/interaccion/Revision_ADR204_2026-10-07.md,roadmap/hardening/Confianza_1.0.x_Plan.md,roadmap/hardening/Confianza_Cierre_2026-10-08.md,adr/ADR-217-Una-Direccion-Con-Palabra-Clave-Es-Un-Patron.md,roadmap/mediciones/ner/Direcciones_Con_Palabra_Clave_2026-10-08.md,adr/ADR-210-El-Repintado-De-Linea-Desplaza-Los-Pixeles-Del-Renglon.md,adr/ADR-211-El-Email-Tolera-La-Arroba-Leida-Como-Q-En-Texto-De-OCR.md,adr/ADR-212-La-Direccion-Incluye-La-Altura-Que-La-Sigue.md,adr/ADR-213-Cambiar-De-Vista-No-Muestra-Una-Imagen-A-Otra-Escala.md,adr/ADR-214-La-Que-Pierde-Un-Conflicto-No-Se-Descarta-Si-Cubre-Mas-Texto.md,roadmap/mediciones/ocr/Emails_DPI_Nativo_2026-10-07.md,roadmap/mediciones/ner/Altura_De_Direcciones_2026-10-07.md,roadmap/distribucion/SignPath_Postulacion.md,architecture/08_Security_Model.md | audiencia=humanos+IA | fase=12 -->
+<!-- CONTEXT: scope=roadmap-1.x | dependencias=roadmap/Plan_1.1.md,adr/ADR-219-Un-Tipo-De-Entidad-Puede-Ser-Del-Usuario.md,adr/ADR-220-Un-Formato-Se-Arma-Con-Piezas-Y-Se-Recorre-En-Tiempo-Lineal.md,adr/ADR-221-Los-Formatos-Base-Salen-De-Un-Catalogo-Por-Pais.md,adr/ADR-222-Dos-Formatos-Que-Se-Pisan-Van-Al-Panel-De-Conflicto.md,adr/ADR-223-Los-Formatos-Se-Configuran-Desde-Inicio-Y-Viajan-En-Un-Archivo.md,adr/ADR-224-Lo-Que-La-1.1-Cambia-En-El-Panel-De-Entidades-Y-El-Visor.md,adr/ADR-237-Los-Paises-Y-La-Interfaz-En-Ingles-Quedan-Sin-Version.md,roadmap/Version_1.0.md,roadmap/Version_2.0.md,roadmap/Future_Ideas.md,roadmap/hitos/Post_Hito10.8_Pendientes.md,RELEASING.md,00_Project_Vision.md,architecture/08_Security_Model.md,adr/ADR-009-Export-Strategy.md,adr/ADR-059-Leyenda-Opcional-De-Marcadores.md,adr/ADR-148-Un-Export-Se-Verifica-Leyendo-El-PDF-Exportado.md,adr/ADR-190-Una-Pagina-Con-Tinta-No-Sale-Vacia-En-Silencio.md,roadmap/hardening/Export_Verificado_ADR148_Plan.md,roadmap/hardening/ADR148_Revision_2026-10-05.md,roadmap/hardening/ADR148_Revision_Sol61_2026-10-05.md,roadmap/ocr/Regiones_Pequenas_Investigacion_Plan.md,adr/ADR-202-El-Minimo-De-Region-OCR-Se-Prueba-A-25pt-Antes-De-Adoptarlo.md,roadmap/ocr/Regiones_Pequenas_25pt_Experimento_Plan.md,roadmap/interaccion/Mejoras_Interaccion_2026-10-05.md,adr/ADR-204-La-Interaccion-Anonimizada-Usa-La-Geometria-Visible.md,adr/ADR-205-El-Resultado-Exportado-Pertenece-A-Una-Revision.md,adr/ADR-206-Una-Busqueda-Omitida-No-Confirma-La-Version.md,roadmap/interaccion/Revision_ADR204_2026-10-07.md,roadmap/hardening/Confianza_1.0.x_Plan.md,roadmap/hardening/Confianza_Cierre_2026-10-08.md,adr/ADR-217-Una-Direccion-Con-Palabra-Clave-Es-Un-Patron.md,roadmap/mediciones/ner/Direcciones_Con_Palabra_Clave_2026-10-08.md,adr/ADR-210-El-Repintado-De-Linea-Desplaza-Los-Pixeles-Del-Renglon.md,adr/ADR-211-El-Email-Tolera-La-Arroba-Leida-Como-Q-En-Texto-De-OCR.md,adr/ADR-212-La-Direccion-Incluye-La-Altura-Que-La-Sigue.md,adr/ADR-213-Cambiar-De-Vista-No-Muestra-Una-Imagen-A-Otra-Escala.md,adr/ADR-214-La-Que-Pierde-Un-Conflicto-No-Se-Descarta-Si-Cubre-Mas-Texto.md,roadmap/mediciones/ocr/Emails_DPI_Nativo_2026-10-07.md,roadmap/mediciones/ner/Altura_De_Direcciones_2026-10-07.md,roadmap/distribucion/SignPath_Postulacion.md,architecture/08_Security_Model.md | audiencia=humanos+IA | fase=12 -->
 
 # Anonly — Roadmap 1.x
 
@@ -368,8 +368,8 @@ detalle está en [`Plan_1.1.md`](./Plan_1.1.md).
   solo se prenden y apagan. Se abre solo desde la pantalla de inicio.
 - **Catálogos por país**: el mecanismo y Argentina. Un país activo, con
   sus etiquetas y sus sintéticos (ADR-221). Los demás países hispanohablantes
-  de Latinoamérica, España y Estados Unidos salen en la 1.1.1 (§4bis,
-  ADR-236).
+  de Latinoamérica, España y Estados Unidos quedan sin versión (§4bis,
+  ADR-236, ADR-237).
 - **Tipos de entidad propios**, con nombre e identidad propios. Sus modos
   son etiqueta, máscara y censura total, sin sintético. Los creados desde
   inicio se guardan; los creados con un documento abierto son de ese
@@ -399,8 +399,8 @@ detalle está en [`Plan_1.1.md`](./Plan_1.1.md).
 **Lo que quedó resuelto de «Para decidir al llegar»**
 
 - Formatos base por país: un catálogo activo; Argentina en la 1.1, y los
-  demás países hispanohablantes de Latinoamérica, España y Estados Unidos en
-  la 1.1.1 (ADR-221, ampliado por ADR-236). El contenido de cada país se investiga y se mide
+  demás países hispanohablantes de Latinoamérica, España y Estados Unidos
+  después, sin versión (ADR-221, ampliado por ADR-236 y ADR-237). El contenido de cada país se investiga y se mide
   antes de escribirse (ADR-221 §6).
 - Dónde se guardan los formatos y si se exportan: en el equipo, en claro, y
   se exportan e importan (ADR-223).
@@ -416,10 +416,16 @@ detalle está en [`Plan_1.1.md`](./Plan_1.1.md).
 - Modos, agrupación y ciclo de vida de un tipo propio (ADR-219). La
   pregunta de síntesis de `Future_Ideas.md` §5.5 queda fuera de la 1.1.
 
-## 4bis. 1.1.1 — Veinte países y la interfaz en inglés
+## 4bis. Sin versión — Veinte países y la interfaz en inglés
+
+> **En pausa y sin versión desde el 2026-11-23** (ADR-237). El mantenedor
+> pone todo el esfuerzo en los otros formatos (§5) y deja este tema para
+> después. Lo que sigue está decidido y vale igual; solo cambia que no tiene
+> versión. Al retomarlo se le asigna número, que por §1 es una versión menor.
+> El trabajo de la tanda 1 se conserva y se retoma por `Plan_1.1.1.md` §6.
 
 **Decidido por el mantenedor el 2026-10-19 y ampliado el 2026-11-22**
-(ADR-236). La 1.1 salió con Argentina sola. La 1.1.1 suma diecinueve
+(ADR-236). La 1.1 salió con Argentina sola. Este tema suma diecinueve
 países: Bolivia, Chile, Colombia, Costa Rica, Cuba, Ecuador, El Salvador,
 España, Estados Unidos, Guatemala, Honduras, México, Nicaragua, Panamá,
 Paraguay, Perú, República Dominicana, Uruguay y Venezuela. Cada uno trae sus
@@ -427,8 +433,9 @@ formatos, los nombres de sus tipos (por ejemplo, RUT) y sus generadores
 sintéticos. Con ellos aparecen el selector de país y «agregar desde otro
 país», que en la 1.1 quedan ocultos (ADR-221 §7).
 
-- **Una sola 1.1.1**, con las tablas aprobadas en seis tandas (ADR-236 §2).
-  El detalle está en [`Plan_1.1.1.md`](./Plan_1.1.1.md).
+- **Una sola versión**, con las tablas aprobadas en seis tandas (ADR-236 §2).
+  El detalle está en [`Plan_1.1.1.md`](./Plan_1.1.1.md), que conserva el
+  número viejo en el nombre (ADR-237 §3).
 - **Cuatro tipos base nuevos**: seguridad social, pasaporte, licencia de
   conducir y cuenta bancaria. En Argentina, la cuenta bancaria es el CBU y
   el CVU (ADR-236 §3).
@@ -437,12 +444,14 @@ país», que en la 1.1 quedan ocultos (ADR-221 §7).
   suman con «agregar desde otro país» (ADR-236 §4).
 - **La app pregunta el país la primera vez que se abre**, con la región del
   sistema preseleccionada, o Argentina si no es uno de los veinte. Quien
-  actualiza desde la 1.1.0 sigue en Argentina (ADR-236 §5).
+  actualiza desde una versión anterior sigue en Argentina (ADR-236 §5,
+  ADR-237 §2).
 - **La interfaz en inglés**, con el selector de idioma visible. El idioma de
   la interfaz no cambia la detección (ADR-236 §6 y §7).
 
-Por §1 correspondería a una versión menor. Va en un parche por decisión del
-mantenedor, como «Novedades» en la 1.0.2 (§2ter).
+Cuando ADR-236 lo ubicó en la 1.1.1 iba en un parche, por decisión del
+mantenedor. Desde ADR-237 esa excepción no aplica: al retomarlo es una
+versión menor, por §1.
 
 **Para decidir al llegar**
 
@@ -455,45 +464,18 @@ mantenedor, como «Novedades» en la 1.0.2 (§2ter).
   suma las variantes en inglés.
 - Si un formato universal (fechas, carátula, dirección) falla con algún
   país hispanohablante (ADR-236 §4).
-- Los textos de la interfaz en inglés.
+- Los textos de la interfaz en inglés. Para entonces van a incluir los de
+  la 1.2 y la 1.3 (ADR-237, «En contra»).
+- La medición de cada tanda tiene que cubrir también los formatos de
+  documento de la 1.2, no solo PDF (ADR-237, «En contra»).
+- El número de la versión (ADR-237 §1).
 
-## 5. 1.2 — Varios documentos
+## 5. 1.2 — Otros formatos
 
-- **Cola de varios PDF**, procesados de a uno.
-- **Pausa y reanudación** del análisis.
-- **Prueba de WebGPU para el modelo de NER.** Es una campaña de medición: se
-  adopta solo si los números lo justifican, con respaldo en WASM.
-- **Recall y precisión de NER como gate**, en la misma campaña de medición.
-  Recall es qué porcentaje de las entidades reales detecta el modelo;
-  precisión, qué porcentaje de lo que detecta es correcto. Como gate, una
-  versión no se publica si baja de un umbral. Hoy se mide y se informa, sin
-  bloquear.
-
-**Para decidir al llegar**
-
-- Qué se conserva en memoria de cada documento de la cola, y cómo convive con
-  los techos por perfil (ADR-192, ADR-194).
-- Cómo se revisa y se exporta cada documento de la cola: de a uno, o todos
-  con la misma configuración.
-- Qué significa pausar en cada etapa. Hoy cancelar conserva las ediciones
-  (ADR-038); pausar es otra cosa.
-- El gate de NER necesita un conjunto de referencia que lo sostenga: el
-  actual tiene 78 entidades en 26 documentos sintéticos. Hay que decidir el
-  umbral y si el conjunto alcanza.
-- WebGPU: la medición de hilos de NER dio resultados opuestos en macOS y en
-  Windows (`mediciones/ner/Hilos_NER_Medicion.md`). La de WebGPU también
-  puede depender del equipo, y tocaría los perfiles.
-- **C-2b, posible optimización de la cola.** Con la cola, el documento
-  siguiente arranca con el modelo de NER del anterior cargado: es el caso
-  caliente. C-2 (ADR-231) suelta el modelo al empezar el OCR. La variante C-2b
-  lo suelta antes, en la primera página que pide OCR.
-  - En Linux bajó el pico caliente entre 200 y 266 MB más que C-2. En Windows
-    no sumó nada medible.
-  - Por eso no se adoptó
-    (`memoria/Reduccion_De_Pico_Nube_2026-11.md` §6.2 y §6.4).
-  - Se vuelve a medir con la cola real, sobre el brazo `c2b` del arnés de pico.
-
-## 6. 1.3 — Otros formatos
+> **Próxima versión, decidida por el mantenedor el 2026-11-23.** Pasó
+> delante de la de varios documentos para que la app tome más tipos de
+> archivo además de PDF. Todo el esfuerzo va acá: los países y la interfaz
+> en inglés quedan sin versión (§4bis, ADR-237).
 
 - **Word (`.docx`)**: entrada y salida. Es el primer paso.
 - **Imágenes sueltas, Excel y PowerPoint** como entrada.
@@ -523,6 +505,50 @@ mantenedor, como «Novedades» en la 1.0.2 (§2ter).
 - Orden interno sugerido por el planificador, sin decidir: Word, imágenes
   sueltas (es el caso más barato: OCR directo), y después Excel y
   PowerPoint.
+- Esta versión sale antes que la cola de varios documentos (§6). Lo que se
+  decida sobre memoria y sobre el visor tiene que dejar lugar a la cola, como
+  lo pidió la campaña de pico de memoria para ADR-230 a ADR-232.
+
+## 6. 1.3 — Varios documentos
+
+> **Pasó de la 1.2 a la 1.3 el 2026-11-23**, por decisión del mantenedor:
+> primero van los otros formatos (§5).
+
+- **Cola de varios documentos**, procesados de a uno. Desde la 1.2 ya no
+  son solo PDF.
+- **Pausa y reanudación** del análisis.
+- **Prueba de WebGPU para el modelo de NER.** Es una campaña de medición: se
+  adopta solo si los números lo justifican, con respaldo en WASM.
+- **Recall y precisión de NER como gate**, en la misma campaña de medición.
+  Recall es qué porcentaje de las entidades reales detecta el modelo;
+  precisión, qué porcentaje de lo que detecta es correcto. Como gate, una
+  versión no se publica si baja de un umbral. Hoy se mide y se informa, sin
+  bloquear.
+
+**Para decidir al llegar**
+
+- Qué se conserva en memoria de cada documento de la cola, y cómo convive con
+  los techos por perfil (ADR-192, ADR-194).
+- Cómo conviven en una misma cola documentos de formatos distintos (§5).
+- Cómo se revisa y se exporta cada documento de la cola: de a uno, o todos
+  con la misma configuración.
+- Qué significa pausar en cada etapa. Hoy cancelar conserva las ediciones
+  (ADR-038); pausar es otra cosa.
+- El gate de NER necesita un conjunto de referencia que lo sostenga: el
+  actual tiene 78 entidades en 26 documentos sintéticos. Hay que decidir el
+  umbral y si el conjunto alcanza.
+- WebGPU: la medición de hilos de NER dio resultados opuestos en macOS y en
+  Windows (`mediciones/ner/Hilos_NER_Medicion.md`). La de WebGPU también
+  puede depender del equipo, y tocaría los perfiles.
+- **C-2b, posible optimización de la cola.** Con la cola, el documento
+  siguiente arranca con el modelo de NER del anterior cargado: es el caso
+  caliente. C-2 (ADR-231) suelta el modelo al empezar el OCR. La variante C-2b
+  lo suelta antes, en la primera página que pide OCR.
+  - En Linux bajó el pico caliente entre 200 y 266 MB más que C-2. En Windows
+    no sumó nada medible.
+  - Por eso no se adoptó
+    (`memoria/Reduccion_De_Pico_Nube_2026-11.md` §6.2 y §6.4).
+  - Se vuelve a medir con la cola real, sobre el brazo `c2b` del arnés de pico.
 
 ## 7. 1.4 — Trabajo con IA
 
@@ -598,8 +624,10 @@ ante la justicia…».
 
 - Filtros en el árbol: 1.1 (§4). La búsqueda con regex se retiró el
   2026-10-19 (ADR-224 §1).
-- Recall y precisión de NER como gate: 1.2 (§5).
-- Export con texto preservado y PDF/A: 1.3 (§6).
+- Recall y precisión de NER como gate: 1.2 (§5). Desde el 2026-11-23, 1.3
+  (§6), junto con la cola de varios documentos.
+- Export con texto preservado y PDF/A: 1.3 (§6). Desde el 2026-11-23, 1.2
+  (§5), junto con los otros formatos.
 - «Validar muestra»: se ubicó en 1.0.x el 2026-10-02; **retirada del roadmap
   el 2026-10-11**, sin desarrollo previsto.
 - Plantillas de reglas: idea sin versión (`Future_Ideas.md` §4.2).
@@ -663,7 +691,8 @@ asignada.
 ## 10. Menciones
 
 - ~~**Interfaz en inglés.**~~ Pasó a la 1.1.1, junto con Estados Unidos
-  (§4bis, ADR-236 §7). Decidido por el mantenedor el 2026-11-22.
+  (§4bis, ADR-236 §7). Decidido por el mantenedor el 2026-11-22. Desde el
+  2026-11-23 queda sin versión, con los países (ADR-237).
 
 ## 11. Fuera de la línea 1.x
 

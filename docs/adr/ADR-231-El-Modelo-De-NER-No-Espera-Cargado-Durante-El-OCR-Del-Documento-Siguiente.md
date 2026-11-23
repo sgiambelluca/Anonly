@@ -10,7 +10,7 @@
   −449 / −477 / −462 MB por ronda contra `base`, más que el ruido, con P1 quieto y
   ~0,3 s más en el segundo escaneo. Con un escaneo real (R2) baja entre 2 y 84 MB,
   dentro del ruido (`Reduccion_De_Pico_Nube_2026-11.md` §6.3). **El humano lo
-  mantiene (2026-11-19)**, porque en la 1.2 la app va a procesar varios
+  mantiene (2026-11-19)**, porque en la 1.3 la app va a procesar varios
   documentos en secuencia, y el siguiente que necesite OCR no tiene por qué
   esperar los 15 s del modelo de NER del anterior. La variante C-2b, que suelta
   el modelo en la primera página con OCR, no baja más el pico en Windows, así
@@ -91,7 +91,7 @@ este ADR (R-2, R-19).
 - **Calidad**: ninguna, por construcción. Es el mismo modelo y la misma
   inferencia; solo cambia cuándo se carga.
 
-## Compatibilidad con varios documentos (1.2)
+## Compatibilidad con varios documentos (1.3)
 
 | Criterio | Cumple | Por qué |
 |---|---|---|
@@ -100,7 +100,7 @@ este ADR (R-2, R-19).
 | Libera al terminar una etapa, no al cerrar | sí | se dispara al empezar la etapa de OCR del documento que llega |
 | Se mide en frío y en caliente | sí | §5 exige los dos; la ganancia esperada es solo en caliente |
 
-Con una cola de documentos procesados de a uno, que es lo que prevé la 1.2, el
+Con una cola de documentos procesados de a uno, que es lo que prevé la 1.3, el
 caso caliente pasa a ser el normal: es justo donde ayuda.
 
 ## 5. Cómo se verifica antes de aceptarlo

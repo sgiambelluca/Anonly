@@ -93,7 +93,7 @@ entre paréntesis mínimo y máximo:
 - **Todo el efecto está en el proceso Tab** (renderer y workers): a 144 dpi,
   1011 → 645 MB en la muestra del pico.
 - **La memoria después de `Ready` baja casi tanto como el pico**, entre 184 y
-  405 MB. Es la que se suma por cada pestaña abierta en la 1.2.
+  405 MB. Es la que se suma por cada pestaña abierta en la 1.3.
 - **Calidad**: el texto de OCR (hash de las palabras de las 50 páginas) y la
   cantidad de grupos son idénticos en todas las importaciones.
 - **Tiempo**: sin cambio a 144 dpi; a 216 dpi, entre 0,3 y 1,1 s más sobre unos
@@ -156,7 +156,7 @@ el costo no medido del preview y apunta a donde está la acumulación.
 En las dos: no cambia `Page`, ni eventos, ni contratos, ni tamaños de pool, ni
 el DPI. Es un cambio interno del kernel de Render (R-1).
 
-## Compatibilidad con varios documentos (1.2)
+## Compatibilidad con varios documentos (1.3)
 
 | Criterio | Cumple | Por qué |
 |---|---|---|
