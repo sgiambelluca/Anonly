@@ -45,7 +45,11 @@ const md = (
 ): string => {
   const head = `| ${headers.join(" | ")} |`;
   const sep = `|${headers.map(() => "---").join("|")}|`;
-  const body = rows.map((r) => `| ${r.map((c) => String(c).replace(/\|/g, "\\|")).join(" | ")} |`);
+  // Primero la barra invertida y después la vertical: si no, un `\` del dato
+  // (los patrones traen `\d`, `\s`) se come el escape de la `|` que le sigue.
+  const cell = (c: string | number): string =>
+    String(c).replace(/\\/g, "\\\\").replace(/\|/g, "\\|");
+  const body = rows.map((r) => `| ${r.map(cell).join(" | ")} |`);
   return [head, sep, ...body].join("\n");
 };
 
