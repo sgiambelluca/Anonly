@@ -14,6 +14,7 @@ consulta, salvo que su fila diga otra cosa.
 | [`Version_1.0.md`](./Version_1.0.md) | Qué es la 1.0: qué trae, cómo se midió y qué limitaciones conocidas tiene |
 | [`Roadmap_1.x.md`](./Roadmap_1.x.md) | Qué sigue y en qué orden, versión por versión, y qué hay que decidir al llegar a cada una. **Es el documento que manda para planificar** |
 | [`Plan_1.1.md`](./Plan_1.1.md) | La 1.1: decisiones del mantenedor, ADR-219 a ADR-224 (aceptados), qué falta antes de implementar y los frentes |
+| [`Plan_1.2.md`](./Plan_1.2.md) | La 1.2, otros formatos: decisiones del mantenedor, arquitectura propuesta, decisiones abiertas, spikes y frentes. **Borrador**, sin ADR todavía |
 | [`Plan_1.1.1.md`](./Plan_1.1.1.md) | Los veinte países y la interfaz en inglés (ADR-236). **En pausa y sin versión** desde el 2026-11-23 (ADR-237); conserva el número viejo en el nombre |
 | [`Version_2.0.md`](./Version_2.0.md) | Lo que queda para una versión mayor |
 | [`Future_Ideas.md`](./Future_Ideas.md) | Ideas sin versión asignada |
@@ -40,6 +41,7 @@ hasta terminar implementación, validaciones y revisión.
 | Cierre del gate de export (ADR-203, local y CI verde) | Política 100 pt, mixed elegible versionado y pequeño histórico preservado; 21/21 Windows/macOS, R-16 verde, Sol APPROVED local y CI completa success | [`ADR148_Cierre_ADR203_2026-10-05.md`](./hardening/ADR148_Cierre_ADR203_2026-10-05.md) |
 | [`interaccion/`](./interaccion/), revisión de ADR-204 (2026-10-07) | El resaltado y la selección sobre el PDF anonimizado, medidos contra la tinta. Validados; hallazgo abierto sobre el repintado de línea | [`Revision_ADR204_2026-10-07.md`](./interaccion/Revision_ADR204_2026-10-07.md) |
 | [`distribucion/`](./distribucion/) | La postulación a SignPath para la firma de código de Windows. **Cerrada**: enviada el 2026-10-02 y rechazada (informado el 2026-10-07). Windows sigue sin Authenticode | [`SignPath_Postulacion.md`](./distribucion/SignPath_Postulacion.md) |
+| [`formatos/`](./formatos/) | El trabajo de la 1.2: investigación de librerías por formato, spikes y mediciones del conversor | [`Investigacion_Librerias_2026-11-23.md`](./formatos/Investigacion_Librerias_2026-11-23.md) |
 | [`mediciones/`](./mediciones/) | Los informes de cada medición, por motor. Cómo correr los arneses: `tests/perf/README.md` | [`mediciones/README.md`](./mediciones/README.md) |
 
 ## Campaña de interacción implementada y revisada
