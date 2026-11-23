@@ -9,17 +9,22 @@
 > tiene fecha es propuesta.
 
 **Estado (2026-11-23):** borrador. El mantenedor puso la 1.2 como próxima
-versión (ADR-237) y tomó las primeras decisiones de alcance (§3). Hay un
-relevamiento del código y una investigación de librerías (§4 y §5). Todavía
-no hay ningún ADR de la 1.2: antes hacen falta las decisiones que quedan en
-§7 y los spikes de §8. El primero es el del conversor de Office.
+versión (ADR-237) y tomó las decisiones de alcance (§3). Hay un
+relevamiento del código y una investigación de librerías (§4 y §5).
+
+- **ADR-238**, el contrato del formato de origen y de la salida, y
+  **ADR-239**, las imágenes sueltas y el Convert Engine: aceptados por el
+  mantenedor el 2026-11-23. Falta pasarlos a los contratos y los specs.
+- **Los spikes del conversor de Office y de imágenes**: hechos (§8.1 y
+  §8.2). El conversor definitivo espera la decisión del mantenedor (§7).
+- Los demás ADR esperan sus spikes (§10).
 
 ## 1. Alcance
 
 | Punto del roadmap (`Roadmap_1.x.md` §5) | Queda en la 1.2 |
 |---|---|
 | Word (`.docx`): entrada y salida | Sí. Sale el mismo Word, limpio (§3) |
-| Imágenes sueltas como entrada | Sí: PNG, JPEG, WebP, GIF, BMP, TIFF y HEIC (§3) |
+| Imágenes sueltas como entrada | Sí: PNG, JPEG, WebP, GIF, BMP, TIFF y AVIF (§3) |
 | Excel (`.xlsx`) como entrada | Sí, como páginas impresas (§3) |
 | PowerPoint (`.pptx`) como entrada | Sí |
 | El formato de salida se elige en el diálogo de exportar | Sí |
@@ -59,9 +64,19 @@ trabajo, no entregas.
 | Un Excel se ve y se exporta **como páginas impresas**, en el mismo visor | 11-23 |
 | **El conversor de Office que se prueba primero es LibreOffice en WASM** (ZetaOffice), con un spike (§8). Si falla, el planificador vuelve con los números antes de elegir otro | 11-23 |
 | **Las imágenes adentro de un Word o un PowerPoint pasan por OCR y sus datos se tapan.** En el Word limpio, la imagen se reemplaza por su versión tapada | 11-23 |
-| **Imágenes sueltas: PNG, JPEG, WebP, GIF, BMP, TIFF y HEIC.** HEIC suma una librería LGPL que depende de un códec con patentes: su ADR revisa las dos cosas, y si no se pueden resolver sin costo, vuelve al mantenedor | 11-23 |
+| **Imágenes sueltas: PNG, JPEG, WebP, GIF, BMP, TIFF y AVIF.** HEIC queda afuera: si hay riesgo de que las patentes de su códec (HEVC) terminen en un cobro, el mantenedor prefiere que el usuario pase la foto a otro formato. AVIF se suma porque Electron lo abre solo y su formato es libre de regalías | 11-23 |
+| **Tope de una imagen: 50 megapíxeles**, por imagen o por página de un TIFF, medido antes de abrirla. Si se pasa, la app avisa y no la abre | 11-23 |
 | **Si una detección no se puede ubicar en el XML del Word, el Word no se exporta.** La app dice qué dato no pudo ubicar y ofrece exportar en PDF. Nunca sale un Word con un dato a la vista | 11-23 |
 | **Todo sale junto en una sola 1.2**, como dice el roadmap §2 | 11-23 |
+| **Un Office con contraseña de apertura se trata como el PDF de hoy**: la app la pide y lo abre. El spike confirma cómo se descifra (§8) | 11-23 |
+| **Los Office con macros y las plantillas no entran**: `.docm`, `.dotx`, `.xlsm`, `.xltx`, `.pptm` y `.potx`. El aviso dice que se guarde como documento normal desde Office | 11-23 |
+| **En el Word limpio, los comentarios y el control de cambios se borran.** Los cambios pendientes quedan aceptados y lo borrado no viaja en el archivo | 11-23 |
+| **La salida que viene elegida al exportar es el formato que entró**: un Word sale como Word limpio, y todo lo demás como PDF imagen | 11-23 |
+| **En el diálogo de exportar, el nombre y la salida van en una fila**: un campo más corto con el nombre solo («anonimizado» o el que se elija), y a la derecha un desplegable con la extensión («.docx», «.pdf»…) donde se elige la salida | 11-23 |
+| El acceso directo de Google tiene su propio aviso, que explica cómo descargarlo (§3.1) | 11-23 |
+| **El tamaño del instalador no es un problema**: es un costo aceptado, sea cual sea | 11-23 |
+| **El LibreOffice de escritorio queda descartado como conversor**: la app no depende de otro programa de escritorio | 11-23 |
+| **Para redistribuir el conversor alcanza con sus licencias de código abierto** (MPL 2.0 y LGPL), cumpliendo lo que piden en el aviso de licencias de la app. No se consulta a allotropia | 11-23 |
 
 ### 3.1 Google Docs, Sheets y Slides
 
@@ -80,10 +95,10 @@ algo de formato. **No son un formato nuevo**:
   cambios. Por eso el corpus de prueba de cada formato lleva archivos
   exportados desde Google, además de los de Office (§8).
 
-**Propuesta del planificador:** si el usuario suelta un `.gdoc`, `.gsheet` o
-`.gslides`, la zona de carga no dice solo «formato no admitido»: explica que
-se descarga desde Google como Word, Excel o PowerPoint. Pendiente de la
-aprobación del mantenedor (§7).
+**Aprobado por el mantenedor el 2026-11-23:** si el usuario suelta un
+`.gdoc`, `.gsheet` o `.gslides`, la zona de carga no dice solo «formato no
+admitido»: explica que se descarga desde Google como Word, Excel o
+PowerPoint.
 
 ## 4. Cómo está hoy
 
@@ -201,8 +216,9 @@ Word hay que saber en qué pedazo del XML está cada detección.
 
 ### 6.3 «No recuperable» en el Word limpio
 
-El mantenedor eligió el rearmado con una lista cerrada de partes (§3). La
-propuesta de qué entra y qué no:
+El mantenedor eligió el rearmado con una lista cerrada de partes, y que los
+comentarios y el control de cambios se borren (§3). La propuesta de qué
+entra y qué no:
 
 - **Entra**: el cuerpo, los estilos, la numeración, la tabla de fuentes, los
   encabezados y pies, y las notas, todo con los datos reemplazados.
@@ -261,38 +277,114 @@ con la app.
 ## 7. Decisiones abiertas para el mantenedor
 
 Resueltas el 2026-11-23, y pasadas a §3: el conversor que se prueba
-primero, las imágenes adentro de un documento, los formatos de imagen y la
-detección que no se ubica en el XML del Word.
+primero, las imágenes adentro de un documento, los formatos de imagen, la
+detección que no se ubica en el XML del Word, el aviso de Google, los
+Office con contraseña, los Office con macros y las plantillas, los
+comentarios y el control de cambios, y la salida por defecto.
 
 Quedan:
 
-1. **El aviso de los accesos directos de Google** (§3.1).
-2. **Cómo se elige la salida en el diálogo de exportar**, y si «PDF con
-   texto» o «PDF imagen» es el valor por defecto. Va con un lienzo de
-   diseño, en claro y en oscuro.
-3. **El conversor definitivo**, con los números del spike de ZetaOffice. Si
-   el spike falla, la elección entre LibreOffice empaquetado y
-   renderizadores en JavaScript vuelve al mantenedor, con su peso de
-   instalador y su fidelidad.
+1. **El diseño del diálogo de exportar**, con un lienzo en claro y en
+   oscuro. El mantenedor fijó la fila del nombre con el desplegable de la
+   salida (§3). Falta:
+   - cómo se nombran en el desplegable las dos salidas que terminan en
+     `.pdf`, la imagen y la que lleva texto;
+   - dónde se elige PDF/A;
+   - qué muestra el diálogo cuando el Word limpio no se puede exportar.
+2. **El conversor definitivo**, con los números del spike de ZetaOffice
+   (§8.1). Las opciones, con sus pros y contras:
+   [`formatos/Opciones_Conversor_2026-11-23.md`](./formatos/Opciones_Conversor_2026-11-23.md).
+   El spike anduvo, con tres costos: `unsafe-eval`, la memoria y la espera
+   por documento.
 
 ## 8. Spikes y mediciones antes de los ADR
 
-- **Conversor**: probar ZetaOffice bajo la CSP y `app://`, con su peso real,
-  el tiempo de conversión en el banco Windows y la fidelidad. La fidelidad se
+- **Conversor** (hecho, §8.1): probar ZetaOffice bajo la CSP y `app://`,
+  con su peso real, el tiempo de conversión en el banco Windows y la
+  fidelidad. La fidelidad se
   mide sobre un corpus sintético de Word, Excel y PowerPoint hecho con
   Office y exportado desde Google.
 - **Alineación XML–página del Word** (§6.2): sobre el mismo corpus, cuántas
   detecciones se ubican en el XML y cuáles no.
+- **Office con contraseña**: si el conversor abre un Office cifrado con la
+  contraseña pasada desde memoria, y si el `.docx` se puede descifrar con
+  WebCrypto sin el conversor, porque el Word limpio parte del `.docx`.
 - **PDF/A**: un PDF imagen y uno con texto, armados con pdf-lib y validados
   con veraPDF.
 - **CSP**: confirmar que ninguna librería candidata ejecuta código dinámico
   bajo la CSP sin `unsafe-eval`.
-- **Imágenes**: qué decodifica el Electron real (`ImageDecoder.isTypeSupported`),
-  un TIFF de varias páginas, y HEIC con su WASM bajo la CSP.
+- **Imágenes** (hecho, §8.2): qué decodifica el Electron real
+  (`ImageDecoder.isTypeSupported`), un TIFF de varias páginas, y HEIC con
+  su WASM bajo la CSP.
 - **Memoria**: el pico de un documento convertido. El conversor suma su
   propia memoria a la del pipeline, y los techos de ADR-192 son por perfil.
 - **Documentos reales**: además de los sintéticos, por `ANONLY_REAL_DOC_*`.
   Cada informe dice qué sale solo de sintéticos.
+
+### 8.1 Resultado del spike del conversor (2026-11-23)
+
+Informe completo:
+[`formatos/Spike_ZetaOffice_2026-11-23.md`](./formatos/Spike_ZetaOffice_2026-11-23.md).
+Todo sale de un corpus sintético hecho con librerías, no con Office ni con
+Google, y sin documentos reales.
+
+- **Lo que funciona.**
+  - Convierte Word, Excel y PowerPoint a PDF con texto real.
+  - En el corpus, todo el texto visible llega al PDF, y respeta los tamaños
+    Carta, A4 y Oficio, las secciones apaisadas y el área de impresión.
+  - Es rápido: entre 0,05 y 0,6 s por documento, después de un arranque de
+    2,6 s.
+  - No hace ningún intento de red y no deja contenido del documento en
+    disco.
+- **Lo que choca con la app.**
+  - **Necesita `unsafe-eval`**, que la CSP de la app no admite. Tampoco
+    corre dentro de un Worker, porque este build necesita un documento.
+  - **Usa unos 1,2 GB más de memoria**, y solo los devuelve al destruir la
+    ventana. Con los techos de ADR-192 (2,0 y 3,0 GB) no puede convivir con
+    el pipeline: tiene que terminar y cerrarse antes de que empiece el OCR.
+  - **Pesa 250 MB instalado y unos 50 MB en el instalador.**
+  - **No hay términos escritos de redistribución de los binarios.** Salen
+    de LibreOffice (MPL 2.0) y Qt 5.15 (LGPL, enlazado estático).
+- **No descifra un Office con contraseña**: al build le falta NSS. El
+  descifrado se hace en JS antes de convertir (ECMA-376 Agile, con
+  WebCrypto). Así el Word limpio también parte del archivo en claro.
+- **Muestra el control de cambios**: el texto borrado sale tachado y entra
+  al PDF. Con la decisión del mantenedor (§3), el conversor recibe el Word
+  con los cambios aceptados y sin comentarios, para que el visor muestre lo
+  mismo que va a tener el Word limpio.
+- **Lo que el PDF no muestra no está en el PDF**: comentarios, notas del
+  orador, texto oculto, hojas ocultas y el texto recortado de una celda. En
+  las salidas PDF eso no viaja. En el Word limpio lo resuelve la lista
+  cerrada de partes (§6.3).
+- **Un archivo cualquiera con extensión `.docx` se abre como texto plano.**
+  El reconocimiento por contenido de ADR-238 §2 va antes del conversor.
+
+### 8.2 Resultado del spike de imágenes (2026-11-23)
+
+Informe completo:
+[`formatos/Spike_Imagenes_2026-11-23.md`](./formatos/Spike_Imagenes_2026-11-23.md).
+Todo sale de un corpus sintético y de muestras de terceros, sin documentos
+reales.
+
+- **Electron abre solo, en un Worker con CSP**: PNG, JPEG (gris, CMYK y
+  progresivo), WebP, GIF, BMP (todas sus variantes) y AVIF. Aplica solo la
+  orientación EXIF, y de un GIF o un WebP animado toma el primer cuadro.
+  No abre TIFF ni HEIC, ni un JPEG aritmético.
+- **TIFF con `utif2`** (MIT, 39 KB gzip, sin `eval`): lee todas las
+  compresiones probadas, varias páginas y la resolución declarada. No
+  aplica la orientación TIFF, y su conversión CMYK busca `window`, que en un
+  Worker no existe.
+- **Armar el PDF** con el `pdf-lib` del repo da exactamente lo que pide
+  ADR-163: una imagen por página, con sus píxeles nativos, cubriendo la
+  página entera.
+  - Un JPEG con orientación 1 pasa tal cual: unos 20 ms.
+  - Lo demás se recodifica sin pérdida, y cuesta entre 1 y 3 s por página
+    A4.
+  - El fork `@cantoo/pdf-lib` corre con el mismo código, y es hasta 25 %
+    más rápido y entre 5 y 15 % más chico.
+- **Bombas**: ninguna colgó la app, pero un PNG de 400 KB ocupó 1,5 GB.
+  De ahí el tope de 50 MP (§3), medido en la cabecera antes de decodificar.
+- **HEIC con `libheif-js`** anduvo, pero quedó afuera (§3).
 
 ## 9. Frentes, orden tentativo
 
@@ -317,9 +409,9 @@ Se numeran al escribirse.
 
 | Tema | Modifica |
 |---|---|
-| El formato de origen y el formato de salida en el contrato | `Contracts.md`, `03_Data_Model.md` |
+| El formato de origen y el formato de salida en el contrato: **ADR-238**, aceptado | `Contracts.md`, `03_Data_Model.md`, `PDF_Engine.md`, `Orchestrator.md`, `Export_Engine.md` |
 | El conversor de Office y dónde corre | `05_Worker_Architecture.md`, `08_Security_Model.md` si toca disco |
-| Imágenes sueltas: qué formatos y cómo se decodifican | PDF Engine o un motor nuevo |
+| Imágenes sueltas: qué formatos y cómo se decodifican: **ADR-239**, aceptado | `Contracts.md`, `Convert_Engine.md` (nuevo), `Orchestrator.md`, `05_Worker_Architecture.md`, `06_Pipeline.md` |
 | Qué significa «no recuperable» en un Word, y su gate | ADR-009, `08_Security_Model.md` |
 | El PDF con texto preservado | ADR-004, ADR-009, ADR-059 §4, `08_Security_Model.md` S-3 |
 | PDF/A | ADR-009 |
@@ -332,6 +424,7 @@ Cada dependencia nueva lleva su ADR (R-12).
 ## 11. Fuera de la 1.2
 
 - Los binarios viejos de Office y OpenDocument (§3).
+- HEIC (§3).
 - Excel y PowerPoint como **salida**: solo salen como PDF.
 - Abrir documentos de Google sin descargarlos (§3.1).
 - La cola de varios documentos: es la 1.3.

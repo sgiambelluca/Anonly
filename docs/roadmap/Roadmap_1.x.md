@@ -530,6 +530,22 @@ versión menor, por §1.
 - Qué se conserva en memoria de cada documento de la cola, y cómo convive con
   los techos por perfil (ADR-192, ADR-194).
 - Cómo conviven en una misma cola documentos de formatos distintos (§5).
+- **Cuándo se convierte cada Office de la cola.** En la 1.2 el conversor
+  usa ~1,2 GB mientras convierte y se cierra antes de que empiece el
+  análisis, así que no se suma al pico (`roadmap/Plan_1.2.md` §8.1). Con
+  la cola, convertir el siguiente documento mientras se analiza el anterior
+  sí se sumaría. Señalado por el mantenedor el 2026-11-23, que propuso
+  además el camino: **convertir todos los Office de la cola antes de
+  empezar a analizar**.
+  - El conversor se abre una sola vez, convierte toda la cola, se cierra,
+    y recién después arrancan el OCR y la detección. El arranque de ~2,6 s
+    se paga una vez, y su memoria nunca coincide con el pico del análisis.
+  - Los PDF convertidos esperan en memoria. Los de Office pesan poco: en el
+    spike, entre 13 KB y 334 KB.
+  - Las imágenes no necesitan esa ventana: se convierten cuando les toca,
+    porque un PDF intermedio de una foto puede pesar 25 MB.
+  - Falta decidir qué pasa si el usuario suma documentos con la cola ya
+    andando: se vuelve a abrir el conversor, o se espera al final.
 - Cómo se revisa y se exporta cada documento de la cola: de a uno, o todos
   con la misma configuración.
 - Qué significa pausar en cada etapa. Hoy cancelar conserva las ediciones
