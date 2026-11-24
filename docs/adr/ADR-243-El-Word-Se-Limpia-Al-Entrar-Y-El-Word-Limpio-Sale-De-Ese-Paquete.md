@@ -2,8 +2,8 @@
 
 # ADR-243 — El Word se limpia al entrar, y el Word limpio sale de ese paquete
 
-- **Estado**: Borrador del planificador. Espera la medición de escritura
-  (`Plan_1.2.md` §8.9) y después la decisión del mantenedor.
+- **Estado**: Propuesto. Con la medición de escritura hecha
+  (`Plan_1.2.md` §8.9), espera la decisión del mantenedor.
 - **Fecha**: 2026-11-24.
 - **Decidido por**: el planificador, sobre las decisiones del mantenedor de
   `Plan_1.2.md` §3.
@@ -79,7 +79,25 @@ La lista es cerrada: lo que no está en «queda» no entra.
   `titlePg` y `evenAndOddHeaders`;
 - las notas al pie y al final que alguna referencia usa;
 - las imágenes ráster, **recodificadas desde los píxeles**, sin EXIF, XMP
-  ni perfil de color;
+  ni perfil de color:
+  - el codificador JPEG de Chromium agrega un perfil sRGB, así que
+    después de codificar se sacan los segmentos `APP1` a `APP15` y `COM`;
+  - un GIF pasa a PNG con su primer cuadro;
+  - una imagen con `a:srcRect` se recorta de verdad y pierde el
+    `srcRect`, para que lo recortado no quede dentro del archivo;
+  - un TIFF pasa a PNG con `utif2`, que el Convert Engine ya tiene
+    (ADR-239 §7);
+- las imágenes vectoriales (EMF, WMF, SVG) **quedan como vectoriales**,
+  sin sus metadatos: en un EMF se vacía la descripción de la cabecera y se
+  quitan los comentarios que no son EMF+, y en un SVG, `metadata`,
+  `title`, `desc` y los comentarios. No se rasterizan, porque su texto
+  dejaría de ser texto: en los documentos de prueba que tienen
+  vectoriales, se perdía el 58 % de las palabras de las páginas, que solo
+  vería el OCR a 96 dpi, también en el PDF (§8.9). Una tapa sobre el
+  texto de una vectorial no se puede aplicar adentro del Word, así que ese
+  Word no se exporta (§5). La limpieza de los metadatos de una vectorial
+  no se midió: la cubren los tests de la implementación, comparando la
+  página convertida antes y después;
 - los gráficos, sin su libro incrustado;
 - los diagramas (SmartArt);
 - `[Content_Types].xml` y las relaciones, rearmados con lo que queda.
@@ -99,9 +117,18 @@ La lista es cerrada: lo que no está en «queda» no entra.
 - de `settings.xml`: `w:rsids`, `w:docVars`, `w:attachedTemplate`,
   `w:mailMerge` y la protección con su hash;
 - el texto oculto, también el que se oculta por estilo;
-- los destinos externos de los hipervínculos (el texto queda);
-- los marcadores;
-- el texto alternativo de las imágenes (`descr` y `title`).
+- los destinos externos de los hipervínculos (el texto queda), como en el
+  PDF, que sale sin anotaciones (ADR-240 §3);
+- los marcadores, salvo los que referencia un `w:anchor`: esos quedan con
+  nombres neutros (`_bm1`, `_bm2`…), para que no se pierda la navegación
+  de un índice. En la medición resolvieron las 282 anclas de los 51
+  documentos que tenían. Se pierden los enlaces que generaba un campo
+  congelado, como el del número de página de un índice;
+- el texto alternativo de las imágenes (`descr` y `title`), y el nombre
+  de cada objeto, que pasa a ser «Objeto N» porque puede traer el nombre
+  de un archivo;
+- las partes de un tipo de relación que la lista no conoce
+  (`stylesWithEffects`, por ejemplo).
 
 **Se resuelve:**
 
@@ -121,8 +148,20 @@ conversión falla cerrada con `details.phase: "preprocess"`.
 Con un Word con contraseña (ADR-242), lo que se limpia es el paquete
 descifrado, y lo que la app guarda es el paquete limpio.
 
-[Medición pendiente, §8.9: cuánto tarda la limpieza, si LibreOffice abre
-siempre el paquete limpio y cuánto baja el texto sin par.]
+Lo medido (`Plan_1.2.md` §8.9):
+
+- **La limpieza tarda 3,4 ms de mediana** y 43 ms en el p99, en un Worker
+  con CSP estricta.
+- **LibreOffice abre 2.089 de 2.090 paquetes limpios.** El que no abre
+  tampoco abría como original.
+- **Desaparece por construcción** el texto que ninguna página podía
+  mostrar: los encabezados que no se usan, las notas sin referencia y el
+  `mc:Fallback`.
+- **También desaparecen los 10 Word** en que LibreOffice aceptaba los
+  cambios distinto y dejaba a la vista texto borrado (§8.8). Ahora acepta
+  nuestro código.
+- **El texto que LibreOffice no dibuja de verdad se queda**: los
+  caracteres sin par bajan solo del 4,1 al 3,4 %. Eso lo cubre §4.
 
 ### 2. El código vive en un paquete puro nuevo
 
@@ -152,12 +191,24 @@ pasadas, como en el spike:
    quedó sin par, por unidad. Una unidad que aparece en muchas páginas,
    como un encabezado, apunta siempre al mismo lugar del XML.
 
-Lo que no se puede decidir no se elige: queda ambiguo. Una detección
+Sobre el paquete limpio, el 93,9 % de las palabras de las páginas se ubica
+en un solo lugar del XML (§8.9). Lo que no se puede decidir no se elige:
+queda ambiguo. Una detección
 ambigua entre copias idénticas se resuelve con el reemplazo por valor
 (§5).
 
-Para que la memoria no crezca con el documento, se alinea por tramos de
-páginas. [Medición pendiente, §8.9: tamaño del tramo y exactitud.]
+**Se alinea el documento completo de una vez.** En el Worker, alinear
+tarda unos 0,7 s y ocupa unos 240 MB por millón de caracteres, y crece
+lineal. Alinear por tramos de páginas no se adopta: bajaba el tiempo en
+los sintéticos, pero en los documentos de prueba el orden de las páginas
+no siempre sigue al del XML, y varios caían al 60 u 80 % de caracteres
+bien ubicados (§8.9).
+
+**Techo: un millón de caracteres.** Es un libro de unas 300 páginas. Por
+encima, el documento entra igual, con sus salidas de PDF, pero sin el Word
+limpio (§7). El techo se confirma con la medición de memoria con
+documentos convertidos (`Plan_1.2.md` §8), porque mientras se alinea
+también está vivo el Worker de LibreOffice, que ocupa unos 600 MB.
 
 ### 4. Las páginas del texto que no se ve
 
@@ -166,8 +217,13 @@ LibreOffice no dibuja: un cuadro o una forma, un marco recortado, una celda
 girada, el marcador de un control vacío.
 
 - El Convert Engine arma un documento chico con ese texto, un párrafo por
-  pedazo y una etiqueta corta de dónde viene («Cuadro de texto», «Forma»,
-  «Celda»…), y lo convierte con LibreOffice.
+  pedazo y una etiqueta corta de dónde viene («Cuadro de texto»,
+  «Celda», «Encabezado», «Nota al pie», «Texto que no se dibujó»…).
+- Lo convierte **el mismo Worker de LibreOffice** que convirtió el
+  documento, que el Orchestrator deja vivo hasta este paso y termina
+  después. Con un Worker nuevo, el arranque sumaría 2,7 s.
+- Los resultados guardados de `PAGE`, `NUMPAGES`, `SECTIONPAGES` y
+  `SECTION` no cuentan como pedazos: son números de página.
 - Sus páginas se suman al final del documento, marcadas con
   `Page.origin: "unseen-text"`. Un `Page` sin `origin` es una página del
   documento, así que todo `Page` de hoy sigue valiendo.
@@ -178,8 +234,19 @@ girada, el marcador de un control vacío.
   convertidas, que no tienen ese texto.
 - Cómo las distingue el visor va en el ADR de la interfaz de la 1.2.
 
-[Medición pendiente, §8.9: si conviene convertir con el mismo Worker o con
-uno nuevo, cuánto suma, y cuántos documentos tienen estas páginas.]
+Lo medido (`Plan_1.2.md` §8.9):
+
+- **Tienen estas páginas el 15,9 % de los Word de prueba.** Casi siempre
+  es una página, y como mucho fueron 16.
+- **Con el mismo Worker vivo, convertirlas suma 35 ms** de mediana y
+  85 ms en el p99, sin memoria medible. Sumarlas al PDF con `pdf-lib`
+  tarda 9 ms de mediana.
+- **La limpieza de metadatos del PDF intermedio (ADR-240 §3) cubre también
+  esas páginas.**
+- **Su texto vuelve a su lugar del XML**: de 28.561 caracteres que se
+  alinean, uno solo volvió mal. Lo que no se alinea es texto en
+  escrituras no latinas, que LibreOffice no dibuja ni ahí. Es la
+  limitación conocida de `Plan_1.2.md` §3: un dato ahí no se detecta.
 
 ### 5. El Word limpio al exportar
 
@@ -201,9 +268,25 @@ el paquete limpio, las palabras de las páginas, el mapa de §4 y los
 5. **Imágenes**: una imagen con una tapa se reemplaza por su versión tapada.
    La dibuja el Render Engine, que ya tapa imágenes, por el mismo puerto
    por el que el Export Engine le pide las páginas (ADR-059 §5). El Export
-   Engine sigue sin rasterizar nada. [Medición pendiente, §8.9: cómo se
-   ubica cada imagen de la página en el paquete, y qué pasa con las
-   vectoriales.]
+   Engine sigue sin rasterizar nada.
+   - **Cómo se ubica la imagen.** Cada imagen que dibuja el PDF se compara
+     con las partes de `word/media` por una miniatura de 16×16, probando
+     los 8 giros y espejos, porque LibreOffice hornea el giro y el espejo
+     en los píxeles. Un giro que no es múltiplo de 90° se toma del XML.
+   - La tapa se pasa a los píxeles de la parte con la transformación
+     inversa. Si la misma parte se usa en dos dibujos, queda tapada en los
+     dos.
+   - Medido (§8.9): se ubica sin ambigüedad el 75,9 % de las imágenes
+     reales. Casi todas las ambiguas son la misma imagen guardada en dos o
+     tres partes iguales, y se tapan todas. En los sintéticos se taparon
+     14 de 15 casos, incluidos JPEG, GIF, agrupaciones, VML y formas con
+     relleno de imagen.
+   - **Una imagen con una tapa que no se ubica cuenta como un reemplazo
+     sin ubicar** (paso 2). En el corpus hubo alguna imagen así en el
+     8,7 % de los documentos con imágenes: casi todas tienen sombra,
+     mosaico o transparencia.
+   - **Una tapa sobre el texto de una imagen vectorial también cuenta como
+     sin ubicar**: ese texto está adentro de la imagen (§1).
 6. **El texto del reemplazo** es el `replacementValue` del grupo, el mismo
    que dibuja el PDF.
    - En modo `redact` («Tapar con negro») ese valor es vacío. En el Word
@@ -212,6 +295,16 @@ el paquete limpio, las palabras de las páginas, el mapa de §4 y los
    - Lo decidió el mantenedor el 2026-11-24, para que se parezca lo más
      posible a la caja negra del PDF: un bloque de largo fijo queda muy
      corto con un dato largo y muy largo con uno corto.
+   - LibreOffice dibuja el `█` como un bloque continuo, con Liberation o
+     DejaVu. Como la caja del PDF, deja ver el largo del dato.
+   - Un reemplazo de otro largo que el dato mueve el texto. Medido (§8.9):
+     con `█`, cambia la cantidad de páginas el 3,0 % de los documentos de
+     prueba con detecciones; con fichas como `[DNI-01]`, el 4,9 %.
+7. **El reemplazo por valor y la verificación tienen que ser lineales**:
+   cada valor se busca solo donde empieza un token igual a su primer
+   token. Buscar cada valor en cada texto es cuadrático: a 2 millones de
+   caracteres, la verificación tardaba casi un minuto, y con el índice,
+   129 ms.
 
 ### 6. La verificación del Word limpio
 
@@ -219,26 +312,84 @@ Al terminar de escribir, el Export Engine **relee el Word limpio** y no lo
 entrega si falla algo. Es el equivalente, en cada export, de lo que
 ADR-148 verifica en los tests para el PDF:
 
-- **Ningún valor original**: en todas las partes, en todo nodo de texto y en
-  todo valor de atributo, se busca cada `originalValue` de los reemplazos,
-  normalizado (NFKC, minúsculas, espacios colapsados; en los números,
-  también solo los dígitos).
+- **Ningún valor original**: se busca cada `originalValue` de los
+  reemplazos, normalizado (NFKC, minúsculas, espacios colapsados).
+  - **Dónde**: en todo nodo de texto de todas las partes, salvo una lista
+    cerrada de nodos que no son texto (`w:instrText`, posiciones de
+    dibujo, fórmulas de gráfico); en el texto de cada párrafo, cruzando
+    runs; y en los atributos que llevan texto (`v:textpath@string`,
+    `w:alias`, `w:tag`, `w:lvlText`, `w:listItem`). Un nodo de texto que
+    el lector no conoce cuenta igual.
+  - **Qué es un hallazgo**: una coincidencia con límites. Para un valor
+    con letras, que no tenga letra ni número a los costados; para uno
+    numérico, se comparan solo sus dígitos y no tiene que haber otro
+    dígito a los costados. Una subcadena de una
+    palabra más larga no es hallazgo, y tampoco un valor de enumeración o
+    el nombre de una parte.
 - **Solo la lista cerrada**: ninguna parte fuera de §1, ninguna relación
   externa, ningún `w:rsid*`, `w:ins`, `w:del` ni comentario.
+- **Es independiente del lector.** Recorre todas las partes con su propio
+  paso por el XML, sin usar el modelo de texto del lector. En la medición,
+  así encontró la única fuga real: el texto de las ecuaciones partido en
+  varios runs, que el lector no leía (§8.9).
 
 Si falla, el export falla cerrado y no se escribe ningún archivo. Además,
 la suite de seguridad corre la misma verificación sobre los sintéticos,
 como ADR-148 con el PDF.
 
-[Medición pendiente, §8.9: falsos positivos de la verificación, y si
-LibreOffice abre el Word limpio con el mismo texto salvo los reemplazos.]
+Lo medido (`Plan_1.2.md` §8.9):
+
+- **En los sintéticos desaparecen los 224 datos**, incluidos los 42 que
+  ninguna página muestra.
+- **En el corpus no quedó ninguna fuga.** Aplicada al paquete sin
+  reemplazar, la verificación sí encuentra los datos: no es un gate
+  vacío (ADR-149).
+- **LibreOffice abre los 2.089 Word limpios.** El 96,6 % tiene la misma
+  cantidad de páginas que el paquete limpio, y el resto cambia porque el
+  reemplazo ocupa distinto que el dato.
+- **El validador de Microsoft da en el Word limpio los mismos errores que
+  en el paquete limpio**: el escritor no agrega ninguno. Lo que haría Word
+  no se pudo probar.
+- **Con esa regla pasa el 99,86 % del corpus** (2.086 de 2.089). Los 3
+  que no pasan son documentos de prueba hechos de la letra `x`, y no
+  tienen ningún dato. Sin reemplazar, la verificación encuentra los datos
+  en 1.441 de 1.449 documentos con detecciones; los 8 restantes los tienen
+  solo dentro de palabras más largas.
+- **Lo que la verificación no ve**: un dato pegado adentro de un token
+  más largo sin espacios, como una URL. En los documentos de prueba son
+  cadenas de teclado; en documentos reales no se midió.
+- **En el Worker**, escribir tarda 2,6 ms de mediana y verificar 2,0 ms,
+  con el mismo `.docx` byte a byte que en Node.
 
 ### 7. Trabajos, plazos y errores
 
-- **Al entrar**: la limpieza va dentro del trabajo `convert-office`
-  (ADR-240 §2). La alineación y el documento chico de §4 son un trabajo
-  nuevo del Convert Engine, después de que el PDF Engine lee las páginas.
-  [Nombre, plazo y si carga LibreOffice de nuevo: según §8.9.]
+- **Al entrar**, para un Word:
+  1. el trabajo `convert-office` (ADR-240 §2) limpia, convierte y
+     devuelve el PDF. Con un Word, el Orchestrator **no termina el Worker**
+     todavía;
+  2. el PDF Engine lee las páginas, como con cualquier PDF;
+  3. el trabajo nuevo `align-docx`, en el mismo Worker, recibe las
+     palabras de las páginas, alinea, arma el documento chico de §4 y lo
+     convierte. Devuelve el PDF de las páginas extra, si hay, y el mapa de
+     §4;
+  4. el PDF Engine lee esas páginas, el Orchestrator las suma al final con
+     `origin: "unseen-text"` y termina el Worker.
+- `align-docx` no carga nada de nuevo. Su plazo, `timeouts["align-docx"]`,
+  es de 60.000 ms, con `maxRetries` 0. Con el techo de §3, alinear tarda
+  menos de 1 s.
+- **Cuando el Word limpio no se ofrece.** Si el texto del paquete pasa el
+  techo de §3, o si `align-docx` falla, el documento entra igual, sin
+  páginas extra, y lleva `Document.docxUnavailable: "too-large" |
+  "align-failed"`.
+  - Ausente, el Word limpio se ofrece como dice ADR-238 §5.
+  - Presente, la salida `docx` no se ofrece, y un `ExportOptions` con
+    `output: "docx"` para ese documento es un `InvalidInputError`.
+  - Qué le dice la interfaz al usuario va en el ADR de la interfaz.
+- Las palabras de las páginas son siempre las del PDF Engine, así que el
+  Convert Engine sigue sin `pdfjs-dist` (`Convert_Engine.md` §5).
+- Que el Worker de LibreOffice siga vivo mientras el PDF Engine lee las
+  páginas suma memoria al pico. Lo mide la medición de memoria con
+  documentos convertidos (`Plan_1.2.md` §8).
 - **Al exportar**: el Word limpio es un camino nuevo del Export Engine para
   `output: "docx"`, en su mismo Worker.
 - **Errores nuevos** del Export Engine:
@@ -249,8 +400,10 @@ LibreOffice abre el Word limpio con el mismo texto salvo los reemplazos.]
 - Al entrar, una falla de la limpieza es `OFFICE_CONVERT_FAILED` con
   `details.phase: "clean"`, que se suma a las fases de ADR-240 §8.
 
-[Verificar antes de publicar: que los códigos nuevos no choquen con
-`Contracts.md` ni con `shared/src/enums.ts`.]
+Ninguno de los nombres nuevos (`EXPORT_DOCX_UNLOCATED`,
+`EXPORT_DOCX_VERIFY_FAILED`, `Page.origin`, `Document.docxUnavailable`,
+`align-docx`, la fase `"clean"`) existe hoy en `Contracts.md` ni en
+`shared/src`.
 
 ### 8. Lo que este ADR no decide
 
@@ -264,8 +417,9 @@ LibreOffice abre el Word limpio con el mismo texto salvo los reemplazos.]
 
 Cambian, después de que el mantenedor acepte:
 
-- `Contracts.md` y `03_Data_Model.md`: `Page.origin`, los dos errores
-  nuevos y la fase `"clean"`.
+- `Contracts.md` y `03_Data_Model.md`: `Page.origin`,
+  `Document.docxUnavailable`, los dos errores nuevos, la fase `"clean"` y
+  el plazo de `align-docx`.
 - `Convert_Engine.md`: la limpieza, la alineación y el documento chico;
   `@anonly/ooxml` en sus dependencias permitidas.
 - `Export_Engine.md`: el camino de `output: "docx"` y su verificación;
@@ -288,4 +442,7 @@ Cambian, después de que el mantenedor acepte:
 | **Borrar el texto sin par y avisar** | Se pierde contenido que el usuario ve en Word. El mantenedor eligió mostrarlo (§3). |
 | **Dibujar las páginas de §4 con `pdf-lib`** | Con sus fuentes de serie solo hay WinAnsi; para incrustar una fuente hace falta `@pdf-lib/fontkit`, una dependencia nueva. LibreOffice ya tiene las fuentes. |
 | **Un lector de XML de terceros** (`sax`, `@xmldom/xmldom`) | Es una dependencia nueva para algo que el spike resolvió con unas 100 líneas. |
+| **Rasterizar las imágenes vectoriales al entrar** | Su texto pasa a ser píxeles que solo ve el OCR, también en el PDF: se perdía el 58 % de las palabras de esos documentos. La ruta fiel de LibreOffice da 96 dpi, y las que dan más resolución no dibujan igual (§8.9). |
+| **Quitar las imágenes vectoriales** | Es lo que hacía el prototipo: la vista previa y el Word quedan iguales, pero se pierde contenido que el usuario ve en Word, como un gráfico pegado desde Excel. |
+| **Alinear por tramos de páginas** | Bajaba el tiempo y un 20 % la memoria en los sintéticos, pero en los documentos de prueba varios caían al 60 u 80 % de caracteres bien ubicados (§8.9). |
 | **Reemplazar solo en el lugar, sin buscar por valor** | Deja en claro las copias idénticas que se dibujan menos veces, y lo que la alineación deja ambiguo (§8.8). |

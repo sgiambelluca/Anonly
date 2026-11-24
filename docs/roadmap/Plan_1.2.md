@@ -28,6 +28,10 @@ relevamiento del código y una investigación de librerías (§4 y §5).
   los contratos y los specs.
 - **ADR-241**: la 1.2 sigue con `pdf-lib`. Lo aceptó el mantenedor el
   2026-11-24, como decisión reabrible en el ADR de PDF/A.
+- **ADR-243**, el Word limpio: el Word se limpia al entrar, y el Word
+  limpio sale de ese paquete con una verificación al exportar. Está
+  propuesto, con las dos rondas de medición hechas (§8.9), y espera la
+  decisión del mantenedor.
 - Los demás ADR esperan sus spikes (§10).
 - **El mantenedor pidió cerrar todos los puntos de la 1.2 en los docs**
   (mediciones, ADR y specs) antes de abrir el PR de docs a develop y de
@@ -413,6 +417,9 @@ Para el ADR del conversor, el planificador propone además:
     de agua con el texto que tiene encima.
 - **Alineación XML–página del Word** (hecho, §8.8; §6.2): sobre el mismo corpus, cuántas
   detecciones se ubican en el XML y cuáles no.
+- **Escritura y verificación del Word limpio** (hecho, §8.9, en dos
+  rondas): limpiar al entrar, escribir el Word limpio,
+  verificarlo, las páginas extra y las imágenes.
 - **Office con contraseña** (hecho, §8.7): si el conversor abre un Office
   cifrado con la contraseña pasada desde memoria, y si el `.docx` se puede
   descifrar con WebCrypto sin el conversor, porque el Word limpio parte
@@ -850,6 +857,115 @@ son los de documentos comunes.
   - varios casos de texto oculto por estilo de tabla o de numeración;
   - lectores de XML de terceros, para comparar.
 
+### 8.9 Word limpio: limpiar al entrar, escribir y verificar (2026-11-24)
+
+Informe completo:
+[`formatos/Word_Limpio_Escritura_2026-11-24.md`](./formatos/Word_Limpio_Escritura_2026-11-24.md).
+Mismo corpus que §8.8, sin documentos reales. No hay Word en la máquina,
+así que lo que haría Word queda sin confirmar. Hay un validador OOXML de
+Microsoft en disco, que sí se usó.
+
+Se probó el diseño de ADR-243: el Word se limpia al entrar, LibreOffice
+convierte el paquete limpio, y el Word limpio sale de ese paquete.
+
+- **La limpieza al entrar se sostiene.**
+  - Tarda 3,4 ms de mediana y 43 ms en el p99, en un Worker con CSP
+    estricta.
+  - LibreOffice abre 2.089 de 2.090 paquetes limpios. El que no abre
+    tampoco abría como original.
+  - Lo que más tira: `docProps` (2.045 documentos), `webSettings` (1.727),
+    los `w:rsid*` (1.704), los marcadores (1.154) y `customXml` (472).
+  - Como nuestro código acepta los cambios, desaparecen los 10 documentos
+    de §8.8 en que LibreOffice dejaba a la vista texto borrado.
+- **El texto sin par baja solo en lo estructural.**
+  - Los encabezados que no se usan, las notas sin referencia y el
+    `mc:Fallback` pasan a cero.
+  - El texto que LibreOffice no dibuja de verdad se queda: los caracteres
+    sin par pasan del 4,1 al 3,4 %. Eso es lo que cubren las páginas
+    extra.
+  - Las palabras de las páginas que se ubican en un solo lugar del XML
+    pasan del 91,3 al 93,9 %.
+- **El Word limpio no deja ningún dato.**
+  - En los sintéticos desaparecen los 224 datos, incluidos los 42 que
+    ninguna página muestra.
+  - En el corpus no hubo ninguna fuga confirmada. La verificación encontró
+    una fuga real en la primera vuelta: el texto de las ecuaciones partido
+    en varios runs, que el lector no leía. Se corrigió. Por eso la
+    verificación tiene que ser independiente del lector.
+  - La verificación tiene falsos positivos: una palabra que también es un
+    valor de enumeración, como `left`. Con ellos descontados, pasa el
+    93,3 % del corpus. La regla fina se mide en la ronda 2.
+  - Escribir tarda 3,6 ms de mediana y verificar 2,2 ms, medidos en Node.
+- **LibreOffice abre los 2.089 Word limpios.**
+  - El 96,6 % tiene la misma cantidad de páginas. El resto cambia porque
+    la ficha ocupa distinto que el dato.
+  - El validador de Microsoft da los mismos errores en el Word limpio que
+    en el paquete limpio, y en 46 de 302 documentos menos errores que en
+    el original.
+- **Las páginas extra son baratas.**
+  - Las tiene el 15,9 % de los documentos de prueba: casi siempre una
+    página, y como mucho 16.
+  - Con el mismo Worker de LibreOffice vivo, convertirlas suma 35 ms y no
+    suma memoria medible. Con un Worker nuevo suma 2,7 s, casi todo
+    arranque.
+  - La limpieza de metadatos del PDF cubre también esas páginas.
+  - Su texto vuelve a su lugar del XML, salvo el de las escrituras no
+    latinas, que no se dibuja ni ahí.
+- **Imágenes.**
+  - En los sintéticos se taparon bien los 10 casos: en línea, flotante,
+    recortada, girada, espejada, repetida y en un encabezado.
+  - Con un recorte, lo recortado sigue dentro del `.docx`.
+  - En el corpus, solo por tamaño y orden, se ubica sin ambigüedad el
+    36 % de las imágenes que dibuja el PDF. Casi la mitad de las que no se
+    ubican son rellenos que dibuja LibreOffice y no están en el XML.
+  - Las imágenes vectoriales (EMF, WMF) y las TIFF no se pueden
+    recodificar desde los píxeles. Están en el 2,8 % de los documentos de
+    prueba, y el prototipo las quitaba.
+- **Alinear por tramos no anduvo**: la versión probada no baja la memoria.
+
+La ronda 2 midió lo que la primera dejó abierto:
+
+- **Recortar las imágenes de verdad anda.** El recorte da los mismos
+  píxeles que el original. En un solo documento, con el texto ajustado al
+  contorno de la imagen, el texto se reparte distinto.
+- **Los marcadores de los hipervínculos internos**, con nombres neutros,
+  resuelven las 282 anclas de los 51 documentos que tenían. Se pierden
+  los enlaces que generaba un campo congelado, como el número de página
+  de un índice.
+- **Con la regla fina, la verificación pasa el 99,86 % del corpus**, sin
+  ninguna fuga. Los 3 que no pasan son documentos hechos de la letra `x`.
+  - La regla: coincidencias con límites de palabra, en los nodos de texto
+    y en los atributos que llevan texto.
+  - Sin reemplazar, la verificación encuentra los datos en 1.441 de 1.449
+    documentos.
+- **El `█` de «Tapar con negro»** lo dibuja LibreOffice como un bloque
+  continuo. Cambia la cantidad de páginas en el 3,0 % de los documentos
+  con detecciones; con fichas como `[DNI-01]`, en el 4,9 %.
+- **Con parecido de píxeles se ubica sin ambigüedad el 75,9 % de las
+  imágenes reales.**
+  - La mitad «sin dibujo» de la ronda 1 eran baldosas de un relleno de
+    patrón en 4 documentos.
+  - Queda alguna imagen sin ubicar en el 8,7 % de los documentos con
+    imágenes, casi siempre con sombra, mosaico o transparencia.
+  - En los sintéticos se taparon 14 de 15 casos.
+- **Las imágenes vectoriales se pueden rasterizar con LibreOffice**, las
+  156 partes. Pero su texto pasa a ser píxeles: se pierde el 58 % de las
+  palabras de esos documentos.
+  - La ruta fiel da solo 96 dpi, y las que dan más resolución no dibujan
+    igual.
+  - Los TIFF pasan a PNG con `utif2`, que el Convert Engine ya tiene.
+- **En el Worker, alinear crece lineal**: 0,6 s y 350 MB con un millón de
+  caracteres, y 2,9 s y 975 MB con cuatro millones.
+  - La verificación, tal como estaba, era cuadrática. Con un índice por
+    token baja a 129 ms con 2 millones de caracteres.
+  - Alinear por tramos ubicados por orden de páginas es frágil en los
+    documentos de prueba.
+- **Las 15 detecciones con su valor en las páginas del Word limpio no son
+  fugas**: el valor se reemplazó, y lo que queda en la página son pedazos
+  de una cadena más larga, como `xxxx…`, que LibreOffice corta en líneas.
+- **Sin medir**: Word, documentos reales, y la memoria con el Worker de
+  LibreOffice vivo mientras se alinea.
+
 ## 9. Frentes, orden tentativo
 
 1. **Contrato**: el formato de origen en `ImportDocumentInput`, `Document` y
@@ -883,7 +999,7 @@ Se numeran al escribirse.
 | El conversor de Office y dónde corre, con el preproceso y el paginado de Excel y de PowerPoint: **ADR-240**, aceptado | `Contracts.md`, `Convert_Engine.md`, `Orchestrator.md`, `05_Worker_Architecture.md`, `06_Pipeline.md` |
 | Office con contraseña, con el descifrado, el evento y el reintento: **ADR-242**, aceptado | `Contracts.md`, `Orchestrator.md`, `Convert_Engine.md` |
 | Imágenes sueltas: qué formatos y cómo se decodifican: **ADR-239**, aceptado | `Contracts.md`, `Convert_Engine.md` (nuevo), `Orchestrator.md`, `05_Worker_Architecture.md`, `06_Pipeline.md` |
-| El Word limpio: se limpia al entrar, qué significa «no recuperable» y su verificación: **ADR-243**, borrador que espera la medición de escritura | ADR-009, ADR-240 §5, ADR-242, `Contracts.md`, `Convert_Engine.md`, `Export_Engine.md`, `Render_Engine.md`, `Orchestrator.md`, `08_Security_Model.md`, `core/OOXML.md` (nuevo) |
+| El Word limpio: se limpia al entrar, qué significa «no recuperable» y su verificación: **ADR-243**, propuesto | ADR-009, ADR-240 §5, ADR-242, `Contracts.md`, `Convert_Engine.md`, `Export_Engine.md`, `Render_Engine.md`, `Orchestrator.md`, `08_Security_Model.md`, `core/OOXML.md` (nuevo) |
 | El PDF con texto preservado | ADR-004, ADR-009, ADR-059 §4, `08_Security_Model.md` S-3 |
 | PDF/A, con la decisión reabierta de ADR-241 | ADR-009 |
 | Seguir con pdf-lib o pasar al fork: **ADR-241**, aceptado. Sigue `pdf-lib`, y se reabre en el ADR de PDF/A | — |
