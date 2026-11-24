@@ -492,7 +492,8 @@ los datos entre motores, sin cambiar nada de lo que el usuario ve.
    limpio: cada palabra de esa página cuenta como un reemplazo en modo
    `redact`, y cada imagen que dibuja, como una tapa entera. Es lo que hace
    la página tapada en el PDF, llevado al Word. Lo que no se ubique es un
-   reemplazo sin ubicar, y el Word no sale (§5, paso 2).
+   reemplazo sin ubicar, y el Word no sale (§5, paso 2). Lo confirmó el
+   mantenedor el 2026-11-24.
 8. **Un Word limpio que no sale no traba el documento.** Con
    `EXPORT_DOCX_UNLOCATED` o `EXPORT_DOCX_VERIFY_FAILED`, el Orchestrator no
    emite `PIPELINE_FAILED`: el documento vuelve a la etapa en que estaba,
