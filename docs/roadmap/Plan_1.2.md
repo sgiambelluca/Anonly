@@ -23,7 +23,12 @@ relevamiento del código y una investigación de librerías (§4 y §5).
   una comparación de calidad contra ZetaOffice antes de adoptarlo (§3).
   La comparación está hecha (§8.4), y también las pruebas de casos borde
   que pidió después (§8.5).
+- **ADR-240**, el conversor de Office: propuesto. Espera un spike del
+  preproceso y de la contraseña (ADR-240 §9).
 - Los demás ADR esperan sus spikes (§10).
+- **El mantenedor pidió cerrar todos los puntos de la 1.2 en los docs**
+  (mediciones, ADR y specs) antes de abrir el PR de docs a develop y de
+  empezar a implementar.
 
 ## 1. Alcance
 
@@ -696,13 +701,14 @@ Se numeran al escribirse.
 | Tema | Modifica |
 |---|---|
 | El formato de origen y el formato de salida en el contrato: **ADR-238**, aceptado | `Contracts.md`, `03_Data_Model.md`, `PDF_Engine.md`, `Orchestrator.md`, `Export_Engine.md` |
-| El conversor de Office y dónde corre | `05_Worker_Architecture.md`, `08_Security_Model.md` si toca disco |
+| El conversor de Office y dónde corre, con el paginado de Excel y de PowerPoint: **ADR-240**, propuesto; espera el spike del preproceso y la contraseña | `Contracts.md`, `Convert_Engine.md`, `Orchestrator.md`, `05_Worker_Architecture.md`, `06_Pipeline.md` |
+| Office con contraseña: el descifrado, el evento y el reintento | `Contracts.md`, `Orchestrator.md`, `Convert_Engine.md` |
+| El OCR de la marca de agua y el WordArt | `PDF_Engine.md`, `Orchestrator.md` |
 | Imágenes sueltas: qué formatos y cómo se decodifican: **ADR-239**, aceptado | `Contracts.md`, `Convert_Engine.md` (nuevo), `Orchestrator.md`, `05_Worker_Architecture.md`, `06_Pipeline.md` |
 | Qué significa «no recuperable» en un Word, y su gate | ADR-009, `08_Security_Model.md` |
 | El PDF con texto preservado | ADR-004, ADR-009, ADR-059 §4, `08_Security_Model.md` S-3 |
 | PDF/A | ADR-009 |
 | Seguir con pdf-lib o pasar al fork mantenido | Export Engine |
-| El paginado de Excel y de PowerPoint | — |
 | La interfaz de carga y de exportar en la 1.2 | `Components.md`, `UX_Guidelines.md` |
 
 Cada dependencia nueva lleva su ADR (R-12).
