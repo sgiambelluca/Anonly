@@ -237,7 +237,7 @@ En **código de producción**, `as unknown as` tiene una única excepción (ADR-
 | # | Regla |
 |---|---|
 | P-1 | El Core **nunca** importa de `apps/react-client` ni de `react`, `react-dom`, `react/jsx-runtime`. |
-| P-2 | Un motor **nunca** importa directamente de otro motor. Comunicación solo por eventos y tipos de `@anonly/shared`. |
+| P-2 | Un motor **nunca** importa directamente de otro motor. Comunicación solo por eventos y tipos de `@anonly/shared`. Un **paquete puro** que no es motor puede importarse desde un motor: `@anonly/ooxml` (ADR-243 §2, `core/OOXML.md`), que no emite eventos, no recibe `ctx` y no hace E/S. Un paquete puro nunca importa un motor. |
 | P-3 | **Nunca** `any` ni `@ts-ignore` sin issue asociado. |
 | P-4 | **Nunca** `console.*` en `packages/`. |
 | P-5 | **Nunca** mutar props de entrada en funciones públicas del Core. |

@@ -33,6 +33,7 @@ Dónde está el estado real:
 - **Nunca importar un motor desde otro motor**, ni React desde `packages/`, ni `@anonly/event-system` directo desde un motor (P-1, P-2; para `@anonly/event-system`, `ai/Code_Standards.md` §12).
   - ESLint lo bloquea con los patrones `@anonly/*-engine` y `@anonly/event-system` en `no-restricted-imports`, salvo en los `__tests__` de cada paquete.
   - Solo el façade `packages/anonymization-core/src/` importa motores. Los motores usan el `IEventBus` que reciben por `ctx`.
+  - Un motor sí puede importar un paquete puro que no es motor, como `@anonly/ooxml` (ADR-243 §2, `core/OOXML.md`).
 - **Prohibiciones de código** (R-6 a R-11):
   - sin `any`;
   - sin `@ts-ignore` que no tenga issue;
