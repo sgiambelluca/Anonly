@@ -54,6 +54,7 @@ export interface Document {
   readonly metadata: DocumentMetadata;       // solo metadata no sensible
   readonly sourceKind: "text" | "scanned" | "mixed";
   readonly sourceFormat: SourceFormat;       // ADR-238 §3; core/Contracts.md §5.3
+  readonly docxUnavailable?: DocxUnavailableReason; // ADR-243 §7; solo con sourceFormat "docx"
   readonly importedAt: number;               // epoch ms
 }
 ```
@@ -69,10 +70,12 @@ export interface Document {
 | `metadata` | `DocumentMetadata` | Solo metadata **no sensible**. Ver §3. |
 | `sourceKind` | `"text" \| "scanned" \| "mixed"` | `mixed` si al menos una página requirió OCR. Una imagen suelta es `scanned`. |
 | `sourceFormat` | `SourceFormat` | El formato del archivo que eligió el usuario, no el del PDF intermedio (ADR-238 §1). Lo copia el PDF Engine de su entrada. |
+| `docxUnavailable` | `"too-large" \| "align-failed"` | Solo en un Word que entró sin el Word limpio como salida: su texto pasa el techo, o la alineación falló (ADR-243 §7). Ausente, el Word limpio se ofrece. Lo pone el Orchestrator. |
 | `importedAt` | `number` | Para UX y métricas. |
 
 **Invariantes**
-- `pageCount === pages.length`.
+- `pageCount === pages.length`. Incluye las páginas de `origin: "unseen-text"` (§4).
+- Las páginas de `origin: "unseen-text"` van todas al final, solo en un Word, y nunca con `docxUnavailable` presente: si la alineación no se hizo, no hay páginas extra (ADR-243 §7).
 - `pages[i].index === i` para todo `i`.
 - `id` es único dentro de la sesión.
 - `metadata` no contiene texto del documento, ni autor original, ni XMP sensible (ver `08_Security_Model.md`).
@@ -112,8 +115,17 @@ export interface Page {
   readonly ocrCompleted: boolean;            // true si OCR ya completó esta página
   readonly dpi?: number;                     // si fue OCR-ada
   readonly ocrDpiCap?: number;               // cap seguro derivado del único ráster fuente (ADR-163)
+  readonly origin?: "unseen-text";           // ADR-243 §4; ausente ≡ página del documento
 }
 ```
+
+**`origin`** (ADR-243 §4): una página que la app suma al final de un Word, con
+el texto del paquete limpio que LibreOffice no dibuja (un cuadro, una forma,
+una celda girada…). Los detectores la leen como a cualquier página, y el
+usuario tapa ahí como en cualquier página. Lo tapado se reemplaza en su lugar
+del Word limpio. **Ninguna salida PDF la lleva**: el PDF sale de las páginas
+del documento, que no tienen ese texto. Un `Page` sin `origin` es una página
+del documento, así que todo `Page` previo sigue valiendo.
 
 **Invariantes**
 - `words` está **agrupado en renglones** y, dentro de cada renglón, ordenado por `bbox.x` asc (ADR-110 §1). No hay una clave escalar con tolerancia: un word entra al renglón vigente si su centro vertical cae dentro de la banda de ese renglón (mediana de sus centros ± 0,5 × la mediana de sus altos), y si no, abre uno nuevo. Hasta ADR-110 el orden salía de un comparador con tolerancia, que **no es transitivo** — sobre un escaneo eso rompía uno de cada tres pares de palabras consecutivos. **ADR-067**: los words con `bbox.rotation` 90/180/270 se agrupan en *runs* —misma coordenada transversal (tolerancia 1) y contiguos sobre el eje de avance (hueco ≤ 2 cuerpos)—, cada run se ordena en su dirección de avance, y los runs se emiten **enteros y contiguos, en una pasada aparte después de todo el texto horizontal** (nunca intercalados: intercalarlos parte una línea horizontal al medio, porque el comparador con tolerancia no es transitivo). Para `rotation` ausente o `0` el orden es literalmente el de la primera oración, en **cualquier** página tenga o no texto rotado.

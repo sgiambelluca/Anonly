@@ -40,6 +40,20 @@
 | `PDF_PASSWORD_REQUIRED` | PDF Engine | UI, Orchestrator | `{ documentId }` | async | sí | none | La UI se suscribe directo al canal `pdf` y pide el password (`retryWithPassword`); el Orchestrator solo deja el stage en `Extracting` a la espera (ADR-034 §4). |
 | `PDF_INVALID` | PDF Engine | Orchestrator | `{ documentId, reason }` | async | sí | none | Aborta pipeline. |
 
+**ADR-243 §9 (1.2)**: con las páginas extra de un Word, el PDF Engine emite
+`PAGE_PARSED` con el índice final de cada página y no emite un segundo
+`DOCUMENT_PARSED`. El `pageCount` del `DOCUMENT_PARSED` de un Word no cuenta
+esas páginas, que se suman después.
+
+---
+
+## 3bis. Eventos de Convert Engine (canal `convert`)
+
+| Evento | Emisor | Receptores | Payload | Timing | Idempotente | Orden | Notas |
+|---|---|---|---|---|---|---|---|
+| `CONVERSION_PAGE_FINISHED` | Convert Engine | Orchestrator | `{ documentId, pageIndex, pageCount }` | async | sí | por-página | Solo imágenes (ADR-239 §2). El Orchestrator lo traduce a `PIPELINE_PROGRESS` en `Importing`. Un Office no lo emite (ADR-240 §7). |
+| `OFFICE_PASSWORD_REQUIRED` | Convert Engine | UI, Orchestrator | `{ documentId, incorrect }` | async | sí | none | Un Office cifrado (ADR-242 §3). La UI pide la contraseña, como con el PDF, y llama `retryWithPassword`; `incorrect: true` si la que llegó no es la correcta. El Orchestrator deja el stage en `Importing` a la espera. |
+
 ---
 
 ## 4. Eventos de OCR Engine (canal `ocr`)

@@ -18,6 +18,8 @@
 
 > **1.2 / ADR-239, aceptado el 2026-11-23**: una imagen suelta entra como un PDF que arma un motor nuevo, el Convert Engine (`core/Convert_Engine.md`). §1 gana `EngineId.Convert`; §2, `EventChannel.Convert` y `CONVERSION_PAGE_FINISHED`; §3.1, `EngineConfig.convert`; §3.5, `engines.convert`; §4, `IMAGE_TOO_LARGE`, `IMAGE_DECODE_FAILED` y `CONVERT_TIMEOUT`; §5, `WorkerJobType` `"convert-image"`; §6, `ConvertConfig` con `IMAGE_MAX_PIXELS` e `IMAGE_MAX_SIDE`, y los defaults del job; §8, `ConversionPageFinished`. **Contrato escrito, implementación pendiente** (frente 2).
 
+> **1.2 / ADR-240, ADR-242 y ADR-243, aceptados el 2026-11-24**: Word, Excel y PowerPoint entran por un LibreOffice compilado por nosotros, un Office con contraseña se descifra antes de convertir, y el Word se limpia al entrar y el Word limpio sale de ese paquete. §2 gana `OFFICE_PASSWORD_REQUIRED`; §3.5 nombra el caso de Office en `retryWithPassword`; §4, `OFFICE_CONVERT_FAILED`, `OFFICE_PASSWORD_REQUIRED`, `EXPORT_DOCX_UNLOCATED` y `EXPORT_DOCX_VERIFY_FAILED`, y los `details` de `CONVERT_TIMEOUT` pasan a opcionales; §5, `WorkerJobType` `"convert-office"`, `"decrypt-office"` y `"align-docx"`, y `Page.origin`; §5.3, `UnsupportedFormatReason` `"office-encryption"`, `DocxUnavailableReason`, `DrawnImage`, `Document.docxUnavailable`, y los campos nuevos de `PdfEngineInput` y `PdfEngineOutput` (precisiones de ADR-243 §9); §6, `ConvertConfig.officeAssetsBase`, `docxCloseWorkerChars` y `docxMaxChars`, y los defaults de los tres jobs; §8, `OfficePasswordRequired`. El paquete puro `@anonly/ooxml` tiene su spec, `core/OOXML.md`. **Contrato escrito, implementación pendiente** (frentes 3 a 5).
+
 > Define **todos** los tipos, interfaces, enums, error codes y contratos compartidos entre motores. Es el único paquete del que un motor puede importar tipos. Un implementador debe leer este archivo **completo** antes de tocar cualquier motor.
 
 **Paquete**: `@anonly/shared`
@@ -79,6 +81,9 @@ export enum EngineEvents {
   // Convert (ADR-239 §2): una página convertida; el Orchestrator lo traduce
   // a PIPELINE_PROGRESS en la etapa Importing.
   CONVERSION_PAGE_FINISHED = "CONVERSION_PAGE_FINISHED",
+  // ADR-242 §3: un Office cifrado necesita contraseña, o la que llegó no es
+  // la correcta. El Orchestrator espera retryWithPassword, como con el PDF.
+  OFFICE_PASSWORD_REQUIRED = "OFFICE_PASSWORD_REQUIRED",
 
   // OCR
   OCR_STARTED = "OCR_STARTED",
@@ -299,6 +304,8 @@ export interface ManualEntityResult {
 
 export interface IPipelineOrchestrator {
   importDocument(input: ImportDocumentInput): Promise<void>;   // etapas 0..7 (hasta Ready)
+  // Un PDF protegido (ADR-050) o un Office cifrado (ADR-242 §3), con la misma
+  // firma. Con un Office, la contraseña no se retiene (ADR-242 §3, paso 6).
   retryWithPassword(documentId: string, password: string): Promise<void>;
   // Re-corre detección (Regex/NER) y/o re-OCR sobre un documento ya cargado sin
   // perder las ediciones manuales del usuario (grupos, reglas, conflictos
@@ -517,7 +524,10 @@ export enum EngineErrorCode {
   // Convert (ADR-239 §6), engineId "convert", retryable false
   IMAGE_TOO_LARGE = "IMAGE_TOO_LARGE",         // details: { reason: "pixels" | "side" | "pages", width?, height?, pageIndex?, pageCount? }
   IMAGE_DECODE_FAILED = "IMAGE_DECODE_FAILED", // details: { pageIndex }
-  CONVERT_TIMEOUT = "CONVERT_TIMEOUT",         // details: { pageIndex }; plazo por página
+  CONVERT_TIMEOUT = "CONVERT_TIMEOUT",         // details: { pageIndex? }; con pageIndex en una imagen (plazo por página), {} en un Office (plazo por documento, ADR-240 §8)
+  // Convert, Office (ADR-240 §8, ADR-242 §4, ADR-243 §7), engineId "convert", retryable false
+  OFFICE_CONVERT_FAILED = "OFFICE_CONVERT_FAILED",       // details: { phase: "decrypt" | "clean" | "load" | "preprocess" | "export" | "align" }
+  OFFICE_PASSWORD_REQUIRED = "OFFICE_PASSWORD_REQUIRED", // details: { incorrect: boolean }; no lo reintenta el pool (ADR-049 §4)
   // OCR
   OCR_PAGE_FAILED = "OCR_PAGE_FAILED",
   OCR_TIMEOUT = "OCR_TIMEOUT",
@@ -543,6 +553,10 @@ export enum EngineErrorCode {
   // ADR-176 §1: runExport con conflictos sin resolver. Solo viaja en la metadata
   // de un warn (patrón de EXPORT_NO_ENABLED_GROUPS): sin clase ni evento.
   EXPORT_UNRESOLVED_CONFLICTS = "EXPORT_UNRESOLVED_CONFLICTS",
+  // ADR-243 §5 y §7, el Word limpio, retryable false. Ninguno de los dos
+  // lleva un valor original en details.
+  EXPORT_DOCX_UNLOCATED = "EXPORT_DOCX_UNLOCATED",         // details: { replacements: ReadonlyArray<{ pageIndex: number; bbox: BoundingBox }> }
+  EXPORT_DOCX_VERIFY_FAILED = "EXPORT_DOCX_VERIFY_FAILED", // details: { check: "value" | "part" | "structure" }
   // Generic
   ENGINE_NOT_INITIALIZED = "ENGINE_NOT_INITIALIZED",
   ENGINE_DISPOSED = "ENGINE_DISPOSED",
@@ -648,6 +662,11 @@ export interface Page {
   readonly ocrCompleted: boolean;
   readonly dpi?: number;
   readonly ocrDpiCap?: number;
+  // ADR-243 §4: una página que la app suma al final de un Word con el texto
+  // que LibreOffice no dibuja. Ausente ≡ una página del documento, así que
+  // todo Page previo sigue valiendo. Los detectores la leen como a las demás;
+  // ninguna salida PDF la lleva.
+  readonly origin?: "unseen-text";
 }
 
 /**
@@ -833,7 +852,10 @@ export type WorkerJobType =
   | "ner-page"
   | "render-page"
   | "export-page"
-  | "convert-image"; // ADR-239 §1: pool propio de un worker
+  | "convert-image" // ADR-239 §1: pool propio de un worker
+  | "convert-office" // ADR-240 §2: limpia (ADR-243 §1) y convierte, en el pool convert
+  | "decrypt-office" // ADR-242 §1: descifra sin cargar el conversor, en el pool convert
+  | "align-docx"; // ADR-243 §7: alinea y convierte las páginas del texto que no se ve
 
 // ADR-091 §1: el léxico de nombres de pila deja de ser de un motor.
 // Claves PRE-NORMALIZADAS con `normalizeForComparison` (§6): quien
@@ -1170,7 +1192,23 @@ export type UnsupportedFormatReason =
   | "office-variant"    // con macros, plantilla, libro binario o presentación de diapositivas
   | "opendocument"      // .odt, .ods, .odp
   | "google-shortcut"   // .gdoc, .gsheet, .gslides: solo el enlace
-  | "heic";             // fotos HEIC: fuera de la 1.2
+  | "heic"              // fotos HEIC: fuera de la 1.2
+  | "office-encryption"; // ADR-242 §2: cifrado Extensible, RC4 de CryptoAPI o IRM
+
+// ADR-243 §9, punto 3: una imagen que dibuja una página de un Word, como la
+// informa el PDF Engine. Solo con sourceFormat "docx". align-docx la compara
+// con las partes de word/media para tapar la imagen adentro del Word.
+export interface DrawnImage {
+  readonly pageIndex: number;
+  readonly bbox: BoundingBox;   // la caja en la página, en el marco de §6 de 03_Data_Model.md
+  readonly transform: readonly [number, number, number, number, number, number]; // matriz de la imagen en la página, con el giro y el espejo
+  readonly thumbnail: Uint8Array; // 16 × 16 RGBA, 1024 bytes, sin girar
+}
+
+// ADR-243 §7: por qué un Word entró sin el Word limpio como salida.
+export type DocxUnavailableReason =
+  | "too-large"     // el texto del paquete limpio pasa el techo de ADR-243 §3
+  | "align-failed"; // el trabajo align-docx falló o venció su plazo
 
 // ADR-238 §5
 export type ExportOutput = "pdf-image" | "pdf-text" | "docx";
@@ -1191,6 +1229,10 @@ export function exportExtension(output: ExportOutput): ".pdf" | ".docx";
 > - **`DocumentMetadata.pdfVersion?: string`** pasa a ser opcional (`03_Data_Model.md` §3). Con `sourceFormat: "pdf"` está siempre. Con otro formato, el PDF Engine deja afuera `pdfVersion`, `title`, `producer` y `creationTool`, que son del PDF intermedio, y `encrypted` y `hasForms` valen `false`.
 > - **`ExportOptions.output: ExportOutput` y `ExportOptions.pdfA: boolean`**, obligatorios (`03_Data_Model.md` §19). El Export Engine rechaza con `InvalidInputError` un `output` fuera de `exportOutputsFor(document.sourceFormat)`, `pdfA: true` con `output: "docx"` y un `filename` que no termina en `exportExtension(output)`, sin importar mayúsculas.
 > - **`Word.source` no cambia**: las palabras del PDF intermedio son `"pdf"`.
+> - **`Document.docxUnavailable?: DocxUnavailableReason`** (ADR-243 §7; `03_Data_Model.md` §2). Solo con `sourceFormat: "docx"`. Ausente, el Word limpio se ofrece. Presente, la salida `docx` no se ofrece, y el Export Engine rechaza `output: "docx"` con `InvalidInputError`. `exportOutputsFor` no cambia: quien arma la lista de salidas de un documento le saca `docx` cuando el campo está.
+> - **`PdfEngineInput.pageIndexOffset?: number` y `PdfEngineInput.pageOrigin?: "unseen-text"`** (ADR-243 §9, punto 2; `core/PDF_Engine.md` §6). Los pasa el Orchestrator cuando lee las páginas extra de un Word: el motor numera las páginas desde `pageIndexOffset`, les pone ese `origin`, y no emite `DOCUMENT_PARSED`. Ausentes, el motor hace lo de siempre.
+> - **`PdfEngineOutput.drawnImages?: ReadonlyArray<DrawnImage>`** (ADR-243 §9, punto 3). Solo con `sourceFormat: "docx"` y sin `pageOrigin`; con otro formato queda ausente.
+> - **`Page.origin?: "unseen-text"`** (ADR-243 §4; `03_Data_Model.md` §4). Esas páginas van siempre al final de `Document.pages`, después de todas las del documento, y solo en un Word. Cuentan en `Document.pageCount`, pero no en el `DocumentParsed.pageCount` del documento, que se emite antes de que existan; sus `PAGE_PARSED` llegan después, con su índice final (`core/Orchestrator.md`). No salen en ninguna salida PDF (`core/Export_Engine.md`).
 >
 > **Regla de transición** (ADR-238 §5 y §6): mientras un formato admitido no tenga su camino de entrada, el Orchestrator lo rechaza con `FORMAT_UNSUPPORTED` y `reason: "unknown"`, y lo mismo vale para un Office cifrado. Mientras una salida no tenga su ADR, el Export Engine rechaza `pdf-text`, `docx` y `pdfA: true` con `InvalidInputError`. Es un estado de la branch de trabajo; la 1.2 sale junta.
 
@@ -1228,6 +1270,22 @@ vuelva antes del OCR. `EngineConfig` gana `convert: ConvertConfig`, con el
 tope de una imagen; la cantidad de páginas de un TIFF usa
 `pdf.maxPageCount`.
 
+**ADR-240, ADR-242 y ADR-243 (1.2)**: `WorkerJobType` gana tres trabajos del
+mismo pool `convert`, con estos defaults:
+
+| Trabajo | `timeouts` | `maxRetries` | Plazo |
+|---|---|---|---|
+| `convert-office` | **120000** | **0** | por documento (ADR-240 §7) |
+| `decrypt-office` | **60000** | **0** | por intento (ADR-242 §4) |
+| `align-docx` | **60000** | **0** | por documento (ADR-243 §7) |
+
+Con un Word, el Orchestrator deja vivo el pool entre `convert-office` y
+`align-docx`, y lo termina después (ADR-243 §7). `ConvertConfig` gana
+`officeAssetsBase`, la ruta de los archivos del conversor, que inyecta el
+host como `NerWasmPaths`, y los dos números del Word limpio,
+`docxCloseWorkerChars` y `docxMaxChars` (ADR-243 §9), que esperan la medición
+de memoria.
+
 ```ts
 export interface WorkerPoolConfig {
   readonly pdfPoolSize: number;
@@ -1260,6 +1318,16 @@ export interface PdfEngineConfig {
 export interface ConvertConfig {
   readonly maxImagePixels: number; // default IMAGE_MAX_PIXELS (50 000 000, decisión del mantenedor)
   readonly maxImageSide: number;   // default IMAGE_MAX_SIDE (16 384, el límite de los canvas de Chromium)
+  // ADR-243 §3 y §9: los dos números del Word limpio, en caracteres del
+  // texto del paquete limpio. Los fija la medición de memoria con documentos
+  // convertidos (roadmap/Plan_1.2.md §8); hasta entonces no tienen default y
+  // el frente del Word limpio no se cierra.
+  readonly docxCloseWorkerChars: number; // desde acá, el Worker se cierra antes de alinear
+  readonly docxMaxChars: number;         // por encima, docxUnavailable: "too-large"
+  // ADR-240 §6: prefijo same-origin de soffice.js, soffice.wasm y
+  // soffice.data, que sirve el host desde app://, nunca un CDN. Solo un
+  // string (EngineConfig viaja al worker en INIT). Ausente → "/lowa/".
+  readonly officeAssetsBase?: string;
 }
 
 // Rutas del runtime WASM de onnxruntime-web, inyectadas por el host (la app,
@@ -1501,6 +1569,7 @@ export interface DocumentParsed { readonly documentId: string; readonly pageCoun
 export interface PdfPasswordRequired { readonly documentId: string; }
 export interface PdfInvalid { readonly documentId: string; readonly reason: string; }
 export interface ConversionPageFinished { readonly documentId: string; readonly pageIndex: number; readonly pageCount: number; } // ADR-239 §2
+export interface OfficePasswordRequired { readonly documentId: string; readonly incorrect: boolean; } // ADR-242 §3: incorrect es true si llegó una contraseña y no es la correcta
 
 // OCR
 export interface OcrStarted { readonly documentId: string; readonly pagesToProcess: ReadonlyArray<number>; readonly modelLoading?: boolean; }
@@ -1637,6 +1706,7 @@ export type EventPayloadMap = {
   [EngineEvents.PDF_PASSWORD_REQUIRED]: PdfPasswordRequired;
   [EngineEvents.PDF_INVALID]: PdfInvalid;
   [EngineEvents.CONVERSION_PAGE_FINISHED]: ConversionPageFinished; // ADR-239 §2
+  [EngineEvents.OFFICE_PASSWORD_REQUIRED]: OfficePasswordRequired; // ADR-242 §3
   [EngineEvents.OCR_STARTED]: OcrStarted;
   [EngineEvents.OCR_PAGE_FINISHED]: OcrPageFinished;
   [EngineEvents.OCR_FINISHED]: OcrFinished;

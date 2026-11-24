@@ -434,6 +434,51 @@ Ninguno de los nombres nuevos (`EXPORT_DOCX_UNLOCATED`,
 - El Word como salida de un Excel o un PowerPoint: no existe (`Plan_1.2.md`
   §11).
 
+### 9. Precisiones del pase a los specs (2026-11-24)
+
+Las agregó el planificador al pasar este ADR a los specs. Fijan cómo viajan
+los datos entre motores, sin cambiar nada de lo que el usuario ve.
+
+1. **Lo que el Orchestrator retiene de un Word** son dos `ArrayBuffer`: el
+   paquete limpio y la alineación. La alineación la codifica y la decodifica
+   `@anonly/ooxml` (`core/OOXML.md`). El Orchestrator no la lee, y no
+   retiene el original ni los bytes cifrados.
+2. **El visor ve las páginas extra en el mismo PDF.** `align-docx` recibe
+   también el PDF intermedio. Devuelve dos PDF: el de las páginas extra, y
+   el intermedio con esas páginas sumadas al final con `pdf-lib`, que son
+   los 9 ms de §4.
+   - El PDF Engine lee solo el de las páginas extra, con dos campos nuevos
+     de su entrada: el índice de la primera página y el origen
+     `"unseen-text"`. Así emite `PAGE_PARSED` con el índice final, y no
+     emite un segundo `DOCUMENT_PARSED`.
+   - Lo que el Orchestrator retiene para el Render Engine es el intermedio
+     con las páginas extra. Se lo pasa antes de que el Render Engine cargue
+     el documento, porque `align-docx` corre en la etapa `Extracting`.
+3. **Las imágenes que dibuja cada página las informa el PDF Engine**, solo
+   con `sourceFormat: "docx"`. Por cada imagen da su caja, su matriz y su
+   miniatura de 16×16, que el PDF Engine ya puede leer con pdfjs.
+   - `align-docx` compara esas miniaturas con las de las partes de
+     `word/media` (§5, paso 5). El Convert Engine decodifica imágenes desde
+     ADR-239.
+   - El resultado va adentro de la alineación.
+4. **El Render Engine tapa una parte de imagen** con un método nuevo del
+   puerto del export (ADR-059 §5). Recibe los bytes de la parte, su tipo y
+   las tapas en píxeles de la parte. Las dibuja como en una página, con la
+   caja y el texto del reemplazo, y devuelve la imagen codificada de nuevo.
+5. **Si `align-docx` falla**, el Convert Engine lanza
+   `OFFICE_CONVERT_FAILED` con `details.phase: "align"`, o
+   `CONVERT_TIMEOUT`. El Orchestrator no lo propaga: el documento sigue sin
+   páginas extra y con `docxUnavailable: "align-failed"`.
+6. **Los dos números de §3** van en `ConvertConfig` cuando los fije la
+   medición de memoria:
+   - `docxCloseWorkerChars`, a partir del cual se cierra el Worker antes de
+     alinear;
+   - `docxMaxChars`, el techo.
+
+   `convert-office` devuelve el largo del texto del paquete limpio, y el
+   Orchestrator lo compara con los dos. Hasta la medición, el frente del
+   Word limpio no se cierra.
+
 ## Consecuencias
 
 Cambian, después de que el mantenedor acepte:
@@ -446,6 +491,8 @@ Cambian, después de que el mantenedor acepte:
 - `Export_Engine.md`: el camino de `output: "docx"` y su verificación;
   `@anonly/ooxml` en sus dependencias permitidas.
 - `Render_Engine.md`: tapar una imagen del Word por el puerto del export.
+- `PDF_Engine.md`: las páginas extra con su índice y su origen, y las
+  imágenes que dibuja cada página de un Word (§9).
 - `Orchestrator.md`: guarda el paquete limpio en lugar del original, el
   trabajo nuevo al entrar y las páginas de §4 fuera del PDF.
 - Un spec nuevo, `core/OOXML.md`, para el paquete puro.

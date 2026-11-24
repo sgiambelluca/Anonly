@@ -465,6 +465,10 @@ Para el ADR del conversor, el planificador propone además:
   entran en los 3,0 GB.
 - **Documentos reales**: además de los sintéticos, por `ANONLY_REAL_DOC_*`.
   Cada informe dice qué sale solo de sintéticos.
+  - Ninguna medición de la 1.2 usó documentos reales todavía.
+  - El mantenedor va a conseguir Word, Excel y PowerPoint reales
+    (2026-11-24). Entran en la medición de memoria y en una pasada de
+    cierre de las mediciones que deciden producto.
 
 ### 8.1 Resultado del spike del conversor (2026-11-23)
 
