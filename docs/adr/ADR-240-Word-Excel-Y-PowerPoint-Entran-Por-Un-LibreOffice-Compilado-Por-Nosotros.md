@@ -2,8 +2,9 @@
 
 # ADR-240 — Word, Excel y PowerPoint entran por un LibreOffice compilado por nosotros
 
-- **Estado**: Propuesto. Tiene dos puntos que esperan una medición: el
-  preproceso del §5 y la contraseña del §9.
+- **Estado**: Propuesto. El preproceso del §5 y la contraseña del §9 ya
+  están medidos (`Plan_1.2.md` §8.7); la contraseña tiene su propio ADR,
+  ADR-242.
 - **Fecha**: 2026-11-24.
 - **Decidido por**: el planificador, sobre las decisiones del mantenedor del
   2026-11-23 y el 2026-11-24 (`Plan_1.2.md` §3): el conversor propio, las
@@ -51,7 +52,9 @@ exacta es la de `formatos/Spike_LOWA_2026-11-23.md` §1:
   `--with-wasm-module="calc impress writer"`.
 - **Sin código dinámico**: se enlaza con `-sDYNAMIC_EXECUTION=0`, para que
   corra sin `unsafe-eval`.
-- **Sin NSS**: el conversor no descifra. El descifrado es del §9.
+- **Sin NSS, pero con OpenSSL**: el conversor podría descifrar un Office
+  con contraseña (§8.7 del plan). No recibe contraseñas: descifra el
+  Convert Engine antes de convertir (ADR-242).
 - Sin Java, sin scripting, sin ayuda y sin diccionarios.
 
 La receta vive en el repo, en `tools/lowa/`:
@@ -122,6 +125,15 @@ Worker sin `document`.
 
    Quedan las páginas con su contenido, sus recursos y sus cajas.
 
+   **Quitar la referencia no alcanza.** `pdf-lib` guarda igual los objetos
+   que quedaron sin referencia, y con ellos la metadata y las
+   anotaciones. La limpieza barre los objetos huérfanos antes de guardar.
+
+   **Lo que midió el spike** (§8.7 del plan): el texto, la imagen, las
+   páginas y las cajas quedan idénticos. En los bytes no queda el título,
+   el autor, ninguna dirección ni la palabra «LibreOffice». Limpiar tarda
+   de 1 a 16 ms hasta 10 páginas, y 1,25 s con 500.
+
 El paginado es el de LibreOffice:
 
 - **Un Word** sale con sus páginas, sus secciones y sus tamaños.
@@ -186,11 +198,52 @@ Antes de exportar, el conversor:
 Así el visor muestra lo mismo que va a tener el Word limpio (`Plan_1.2.md`
 §3 y §6.3). Lo borrado no entra a la app.
 
-**Falta medir el mecanismo.** La vía propuesta es la API de LibreOffice
-dentro del mismo conversor: aceptar todos los cambios y borrar todas las
-anotaciones del documento abierto. Si esa vía no anda en el build sin
-interfaz, el preproceso se hace sobre el XML del `.docx` antes de
-convertir. Lo decide la medición del §9.
+**El preproceso es obligatorio.** Sin él, el texto borrado de un Word y
+las notas visibles de un Excel salen en el PDF aunque los `FilterData`
+digan otra cosa (§8.7 del plan).
+
+**El mecanismo es la API de LibreOffice, dentro del mismo conversor**,
+medido en el build sin interfaz y en un Worker:
+
+1. **Antes de tocar nada:**
+   - `RecordChanges` en `false`; si no, borrar un comentario queda
+     registrado como un cambio y el comentario sigue ahí;
+   - se vacía `RedlineProtectionKey`; si no, un documento con el control
+     de cambios protegido no acepta y traba la instancia.
+2. **Aceptar los cambios de un Word**, con `.uno:AcceptAllTrackedChanges`
+   por el despachador. Con el documento abierto oculto hay frame.
+   - Es asíncrono: se espera hasta que `getRedlines().hasElements()` dé
+     `false`, cediendo el bucle de eventos.
+   - **Falla cerrado**: si al vencer el plazo quedan cambios, la
+     conversión falla con `OFFICE_CONVERT_FAILED` y
+     `details.phase: "preprocess"`.
+   - La API de lectura (`XRedlinesSupplier`) no sirve para aceptar.
+3. **Borrar los comentarios.**
+   - **Word**: se borran los campos de anotación con `dispose()`, con sus
+     respuestas.
+   - **Excel**: `removeByIndex`. Los comentarios en hilo entran como
+     notas, así que se borran igual.
+     - En una hoja protegida con contraseña no borra nada. Ahí se vacía
+       el texto de la nota, se la oculta y se pone `PrintAnnotations` en
+       `false`.
+     - Todo bucle de borrado tiene un tope de vueltas, porque sin tope se
+       cuelga en ese caso.
+   - **PowerPoint**: `removeAnnotation`. LibreOffice 26.8 no importa los
+     comentarios modernos de PowerPoint, así que no llegan.
+
+Lo medido:
+
+- **En el árbol de LibreOffice**, 113 de 113 Word quedaron sin cambios
+  pendientes.
+- **Con el preproceso y los `FilterData`**, salieron correctos los 10
+  sintéticos y los 189 archivos del árbol, contando la hoja protegida con
+  su vía aparte.
+- **En 6.000 cambios, esperar tardó 0,93 s.**
+
+**Un caso donde LibreOffice acepta distinto que Word**
+(`n830205.docx`): queda a la vista el texto de un párrafo cuya marca de
+párrafo estaba borrada. Ese texto está en la página, así que se detecta y
+se tapa: es una diferencia de fidelidad, no una fuga.
 
 ### 6. Distribución
 
@@ -235,7 +288,9 @@ verifica, como los modelos de Tesseract (ADR-018).
 ### 8. Errores
 
 - **`OFFICE_CONVERT_FAILED`**, nuevo, con `details: { phase: "load" |
-  "export" }`. Cubre tres casos:
+  "preprocess" | "export" }`. ADR-242 le suma `"decrypt"`. Cubre estos
+  casos:
+  - quedan cambios sin aceptar al vencer el plazo (§5);
   - LibreOffice no abre el archivo: `loadComponentFromURL` devuelve
     `null`;
   - falla al exportar;
@@ -247,23 +302,16 @@ verifica, como los modelos de Tesseract (ADR-018).
 - **`CONVERT_TIMEOUT`** se reusa. Sus `details` pasan a ser opcionales:
   `{ pageIndex }` para una imagen (ADR-239) y `{}` para Office.
 - **`FORMAT_UNSUPPORTED`** queda como está (ADR-238). Un Office cifrado
-  sigue en `reason: "unknown"` hasta el §9.
+  lo resuelve ADR-242.
 
-### 9. Lo que espera una medición
+### 9. La contraseña
 
-Un spike, el siguiente del plan, mide dos cosas:
+Lo que ADR-238 §7 le dejó al ADR del conversor, un Office con contraseña,
+se decidió aparte en ADR-242, con la medición del §8.7 del plan:
 
-- **El preproceso del §5** con la API de LibreOffice en el build sin
-  interfaz.
-- **Un Office con contraseña**, que es lo que ADR-238 §7 le deja al ADR del
-  conversor:
-  - si el descifrado propio en JS, con WebCrypto, abre el cifrado Agile de
-    Office 2010 en adelante;
-  - y qué pasa con el cifrado Standard de Office 2007, que usa AES-ECB, un
-    modo que WebCrypto no tiene.
-
-El evento que pide la contraseña, el reintento y el error de contraseña
-equivocada van en un ADR propio, con esos números.
+- descifra el Convert Engine con código propio y WebCrypto, antes de
+  convertir;
+- el conversor nunca recibe la contraseña.
 
 ### 10. Lo que este ADR no decide
 

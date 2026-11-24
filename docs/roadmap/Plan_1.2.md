@@ -23,8 +23,9 @@ relevamiento del código y una investigación de librerías (§4 y §5).
   una comparación de calidad contra ZetaOffice antes de adoptarlo (§3).
   La comparación está hecha (§8.4), y también las pruebas de casos borde
   que pidió después (§8.5).
-- **ADR-240**, el conversor de Office: propuesto. Espera un spike del
-  preproceso y de la contraseña (ADR-240 §9).
+- **ADR-240**, el conversor de Office, **ADR-241**, el fork de pdf-lib, y
+  **ADR-242**, el Office con contraseña: propuestos, con sus mediciones
+  hechas.
 - Los demás ADR esperan sus spikes (§10).
 - **El mantenedor pidió cerrar todos los puntos de la 1.2 en los docs**
   (mediciones, ADR y specs) antes de abrir el PR de docs a develop y de
@@ -379,9 +380,10 @@ Para el ADR del conversor, el planificador propone además:
     de agua con el texto que tiene encima.
 - **Alineación XML–página del Word** (§6.2): sobre el mismo corpus, cuántas
   detecciones se ubican en el XML y cuáles no.
-- **Office con contraseña**: si el conversor abre un Office cifrado con la
-  contraseña pasada desde memoria, y si el `.docx` se puede descifrar con
-  WebCrypto sin el conversor, porque el Word limpio parte del `.docx`.
+- **Office con contraseña** (hecho, §8.7): si el conversor abre un Office
+  cifrado con la contraseña pasada desde memoria, y si el `.docx` se puede
+  descifrar con WebCrypto sin el conversor, porque el Word limpio parte
+  del `.docx`. Se midió junto con el preproceso de ADR-240 §5.
 - **PDF/A**: un PDF imagen y uno con texto, armados con pdf-lib y validados
   con veraPDF.
 - **CSP**: confirmar que ninguna librería candidata ejecuta código dinámico
@@ -720,6 +722,41 @@ en XML, no guardados por Word. El OCR es el de la app: Tesseract, `spa` y
   - documentos de varias páginas;
   - los tiempos dentro de la app.
 
+### 8.7 Preproceso del conversor y Office con contraseña (2026-11-24)
+
+Informe completo:
+[`formatos/Preproceso_Y_Cifrado_2026-11-24.md`](./formatos/Preproceso_Y_Cifrado_2026-11-24.md).
+No hay documentos reales. Se usaron sintéticos y los documentos de prueba
+de LibreOffice. Lo decidido está en ADR-240 §3 y §5, y en ADR-242.
+
+- **El preproceso es obligatorio.** Sin él, el texto borrado de un Word y
+  las notas visibles de un Excel salen en el PDF, aunque los `FilterData`
+  pidan lo contrario.
+- **Aceptar los cambios anda con el despachador** de LibreOffice, con dos
+  trampas resueltas: el control de cambios protegido y el registro de
+  cambios activo.
+  - 113 de 113 Word del árbol quedaron sin cambios pendientes.
+  - 6.000 cambios se aceptan en 0,93 s.
+- **Borrar los comentarios anda** en Word, Excel y PowerPoint. Una hoja de
+  Excel protegida necesita una vía aparte, también medida.
+- **La limpieza del PDF intermedio anda**, si barre los objetos que quedan
+  sin referencia: el texto y la imagen quedan idénticos, y no queda ningún
+  metadato ni anotación.
+- **El conversor abre un Office cifrado**: trae OpenSSL aunque no tenga
+  NSS.
+  - Pero no distingue una contraseña equivocada de un archivo que no
+    puede abrir.
+  - Y solo devuelve el documento guardado de nuevo, no el paquete
+    original que necesita el Word limpio.
+- **El descifrador propio** (OLE, ECMA-376 Agile y Standard, WebCrypto)
+  abre los cuatro Word cifrados del árbol de LibreOffice.
+  - Detecta siempre una contraseña equivocada antes de descifrar.
+  - Deriva la clave en 0,37 s.
+  - Descifra 250 MB en 0,8 s.
+- **Sin probar**:
+  - Excel y PowerPoint cifrados guardados por Office;
+  - el cifrado Extensible, el RC4 y el IRM.
+
 ## 9. Frentes, orden tentativo
 
 1. **Contrato**: el formato de origen en `ImportDocumentInput`, `Document` y
@@ -750,8 +787,8 @@ Se numeran al escribirse.
 | Tema | Modifica |
 |---|---|
 | El formato de origen y el formato de salida en el contrato: **ADR-238**, aceptado | `Contracts.md`, `03_Data_Model.md`, `PDF_Engine.md`, `Orchestrator.md`, `Export_Engine.md` |
-| El conversor de Office y dónde corre, con el paginado de Excel y de PowerPoint: **ADR-240**, propuesto; espera el spike del preproceso y la contraseña | `Contracts.md`, `Convert_Engine.md`, `Orchestrator.md`, `05_Worker_Architecture.md`, `06_Pipeline.md` |
-| Office con contraseña: el descifrado, el evento y el reintento | `Contracts.md`, `Orchestrator.md`, `Convert_Engine.md` |
+| El conversor de Office y dónde corre, con el preproceso y el paginado de Excel y de PowerPoint: **ADR-240**, propuesto | `Contracts.md`, `Convert_Engine.md`, `Orchestrator.md`, `05_Worker_Architecture.md`, `06_Pipeline.md` |
+| Office con contraseña, con el descifrado, el evento y el reintento: **ADR-242**, propuesto | `Contracts.md`, `Orchestrator.md`, `Convert_Engine.md` |
 | Imágenes sueltas: qué formatos y cómo se decodifican: **ADR-239**, aceptado | `Contracts.md`, `Convert_Engine.md` (nuevo), `Orchestrator.md`, `05_Worker_Architecture.md`, `06_Pipeline.md` |
 | Qué significa «no recuperable» en un Word, y su gate | ADR-009, `08_Security_Model.md` |
 | El PDF con texto preservado | ADR-004, ADR-009, ADR-059 §4, `08_Security_Model.md` S-3 |
