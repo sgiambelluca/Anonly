@@ -21,8 +21,8 @@ relevamiento del código y una investigación de librerías (§4 y §5).
   ZetaOffice (§8.1), el de imágenes (§8.2) y el de compilar LibreOffice
   nosotros (§8.3). El mantenedor eligió el compilado por nosotros, con
   una comparación de calidad contra ZetaOffice antes de adoptarlo (§3).
-  La comparación está hecha (§8.4). Faltan las pruebas de casos borde que
-  pidió después (§8).
+  La comparación está hecha (§8.4), y también las pruebas de casos borde
+  que pidió después (§8.5).
 - Los demás ADR esperan sus spikes (§10).
 
 ## 1. Alcance
@@ -225,9 +225,9 @@ Word hay que saber en qué pedazo del XML está cada detección.
 - El caso inverso también es un riesgo: **texto del XML que no aparece en
   las páginas**.
   - Lo que el conversor no dibuja no se detecta, y el gate de §6.3 busca
-    solo los valores detectados. En la comparación de calidad (§8.4) pasó
-    con una celda de texto girado y con el chino, el japonés y el
-    tailandés.
+    solo los valores detectados. Pasó con una celda de texto girado y con
+    el chino, el japonés y el tailandés (§8.4), y con la marca de agua y
+    el WordArt, que se ven pero no son texto (§8.5).
   - Propuesta: la alineación también cuenta el texto del XML que va a
     quedar en el Word limpio y no tiene par en las páginas. Si hay, el
     Word no se exporta, con la misma regla de §3.
@@ -311,10 +311,20 @@ Queda:
    - dónde se elige PDF/A;
    - qué muestra el diálogo cuando el Word limpio no se puede exportar.
 
-Para el ADR del conversor, el planificador propone además que el PDF
-intermedio salga sin etiquetas (`UseTaggedPDF=false`). Las etiquetas lo
-multiplican por treinta en una hoja grande (§8.3), pierden texto en
-algunas hojas de cálculo (§8.4), y el visor no las usa.
+Para el ADR del conversor, el planificador propone además:
+
+- **Que el PDF intermedio salga sin etiquetas** (`UseTaggedPDF=false`).
+  Las etiquetas lo multiplican por treinta en una hoja grande (§8.3),
+  pierden texto en algunas hojas de cálculo (§8.4), y el visor no las usa.
+- **El recorte `rec-C`**, con Lucida Console como monoespaciada (§8.5).
+- **Que el PDF intermedio no lleve lo que va por fuera de la página**.
+  - Son los metadatos del documento y las anotaciones con texto:
+    comentarios, notas de celda, textos de ayuda y direcciones de
+    enlaces.
+  - Se quitan en el conversor o justo después, y el export nunca los
+    copia.
+  - Nada de eso se muestra ni se detecta (§8.5), así que no puede llegar a
+    una salida.
 
 ## 8. Spikes y mediciones antes de los ADR
 
@@ -336,7 +346,7 @@ algunas hojas de cálculo (§8.4), y el visor no las usa.
   - El corpus suma los documentos de prueba de Word, Excel y PowerPoint
     que trae el propio código de LibreOffice, además de los sintéticos.
   - Se mide también qué pasa con un documento en escrituras no latinas.
-- **Casos borde del conversor** (pendiente). El mantenedor lo pidió
+- **Casos borde del conversor** (hecho, §8.5). El mantenedor lo pidió
   después de §8.4, antes de adoptar el nuestro.
   - Se convierte con los dos un corpus de texto girado o vertical: celdas
     de Word con dirección de texto, celdas de Excel giradas y cuadros de
@@ -573,6 +583,79 @@ etiquetas.
   - el orden de lectura del árabe y el hebreo;
   - las páginas después de la octava;
   - los archivos de más de 5 MB.
+
+### 8.5 Casos borde del conversor (2026-11-24)
+
+Informe completo:
+[`formatos/Casos_Borde_Conversor_2026-11-24.md`](./formatos/Casos_Borde_Conversor_2026-11-24.md).
+No hay documentos reales. Se usaron corpus sintéticos armados para cada
+caso y los 2.913 documentos de prueba de LibreOffice. El nuestro va con el
+recorte `rec-C` y sin etiquetas.
+
+- **El recorte `rec-C` corrige las fuentes sin recompilar.**
+  - Suma la fuente matemática y el `fc_local.conf`, que `rec-B` había
+    perdido sin querer. Sin ese archivo, un texto en la fuente `Symbol`
+    salía con caracteres corruptos.
+  - Sus alias de fontconfig hacen que las sans que LibreOffice no conoce
+    (Verdana, Tahoma, Segoe UI, Aptos y otras) caigan en Noto Sans, y
+    Consolas en DejaVu Sans Mono, como en ZetaOffice.
+  - La tabla de reemplazo del registro de LibreOffice no sirvió, porque
+    manda fontconfig.
+  - Pesa 0,6 MB más que `rec-B`. Falta medir el arranque.
+  - Lucida Console quedó como sans por un error del pedido: es
+    monoespaciada y va con Consolas.
+- **El corpus entero de LibreOffice, 2.913 archivos.**
+  - El nuestro convierte 2.893 y ZetaOffice 2.885.
+    - 2.883 los convierten los dos.
+    - 10 solo el nuestro: 6 donde ZetaOffice se cuelga y 4 donde se cae o
+      no carga.
+    - 2 solo ZetaOffice.
+    - 18 ninguno, entre ellos 4 Word cifrados.
+  - El nuestro no tuvo ningún timeout, y ZetaOffice tuvo 6.
+  - **El nuestro pierde contenido real en 4 archivos**, revisados con su
+    imagen:
+    - la celda girada de §8.4;
+    - un texto condicional que sale de un campo de propiedad del
+      documento;
+    - el texto de ejemplo de un control de contenido;
+    - un gráfico de cascada, que no soporta.
+  - ZetaOffice pierde contenido real en otros 4, y le quedan 37 archivos
+    sin revisar.
+  - El resto de las diferencias de texto son de formato, o de archivos que
+    no tienen ese texto en el origen.
+- **Texto girado.**
+  - De 36 casos armados desde cero, 33 salen igual en los dos, celdas
+    giradas y combinadas incluidas.
+  - La celda de §8.4 sigue fallando en su archivo original, sin causa
+    conocida.
+  - El WordArt no llega como texto en ninguno de los dos.
+- **Lugares donde un dato se esconde**: 153 de 162 marcadores dan lo mismo
+  en los dos conversores.
+  - **Llegan como texto visible**: cuadros de texto, encabezados y pies de
+    primera página y de pares e impares, notas, controles de contenido,
+    formas y grupos, gráficos, tablas, patrón y diseño.
+  - **Quedan afuera en los dos**: texto oculto, hojas, filas y columnas
+    ocultas, lo que está fuera del área de impresión, diapositivas ocultas
+    y notas del orador.
+  - **Se ven pero no son texto**: la marca de agua de Word y el WordArt.
+    Ahí la app no puede detectar un dato.
+  - **Los valores se actualizan distinto**: los campos de Word (fecha,
+    referencias, página) se recalculan, y los números en caché de Excel no.
+  - **Llegan por fuera de la página**:
+    - En los dos conversores: las propiedades del documento (título,
+      autor) quedan en los metadatos del PDF, y las direcciones de los
+      enlaces, en sus anotaciones.
+    - Solo el nuestro escribe además como anotaciones los comentarios de
+      Word con su autor, la nota de una celda de Excel y el texto de ayuda
+      de un enlace.
+- **Árabe y hebreo.**
+  - El orden de lectura se respeta, igual en los dos.
+  - Se pierde el espacio entre un tramo en esas escrituras y un número o
+    una palabra latina.
+  - Una ligadura sale invertida.
+- **Documentos grandes**, sintéticos de 6 a 11 MB: convierten en los dos
+  con tiempos parecidos. El Excel de 60.000 filas tarda unos 22 s en cada
+  uno.
 
 ## 9. Frentes, orden tentativo
 
