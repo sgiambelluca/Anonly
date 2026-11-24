@@ -7,8 +7,8 @@
 - **Fecha**: 2026-11-24.
 - **Decidido por**: el planificador, sobre las decisiones del mantenedor del
   2026-11-23 y el 2026-11-24 (`Plan_1.2.md` §3): el conversor propio, las
-  fuentes no latinas fuera, el chino, el japonés y el tailandés como
-  limitación conocida, y el OCR de la marca de agua y el WordArt.
+  fuentes no latinas fuera, y el chino, el japonés, el tailandés, la marca
+  de agua y el WordArt como limitaciones conocidas.
 - **Origen**: `Plan_1.2.md` §9, frentes 3 y 5, y los spikes de §8.1, §8.3,
   §8.4 y §8.5.
 
@@ -171,6 +171,9 @@ hojas, filas y columnas ocultas.
   llegan al PDF (§3 del plan).
 - En el árabe y el hebreo, el texto extraído pierde el espacio entre un
   tramo en esas escrituras y un número o una palabra latina.
+- La marca de agua y el WordArt se dibujan como figuras, no como texto:
+  un dato escrito ahí no se detecta y se tapa a mano. El mantenedor lo
+  dejó para una versión posterior (`Plan_1.2.md` §3, §8.6 y §11).
 
 ### 5. El preproceso: cambios aceptados y sin comentarios
 
@@ -264,8 +267,6 @@ equivocada van en un ADR propio, con esos números.
 
 ### 10. Lo que este ADR no decide
 
-- **El OCR de la marca de agua y el WordArt** (decisión del mantenedor,
-  `Plan_1.2.md` §3). Tiene su propio ADR después de su medición.
 - **El Word limpio**, su alineación y su gate (`Plan_1.2.md` §6.2 y §6.3).
 - **La interfaz** de la espera y de los errores.
 

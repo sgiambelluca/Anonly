@@ -76,7 +76,8 @@ trabajo, no entregas.
 | **El conversor de Office que se prueba primero es LibreOffice en WASM** (ZetaOffice), con un spike (§8). Si falla, el planificador vuelve con los números antes de elegir otro | 11-23 |
 | **El conversor de Office es LibreOffice compilado por nosotros a WASM**, sin interfaz gráfica, en un Worker y sin `unsafe-eval` (§8.3). ZetaOffice no se integra. Antes de adoptarlo, se compara la calidad de su salida con la de ZetaOffice (§8). Con la comparación hecha (§8.4), el mantenedor ve mejor el nuestro y pidió más pruebas de casos borde antes de cerrarlo | 11-23 |
 | **La adopción del conversor compilado por nosotros queda cerrada**, con los casos borde hechos (§8.5) | 11-24 |
-| **Si un Word tiene marca de agua o WordArt, esas páginas pasan también por OCR**, para que se detecte lo que dicen: el conversor los dibuja como figuras, no como texto (§8.5). Antes se mide si el OCR los lee (§8) | 11-24 |
+| ~~Si un Word tiene marca de agua o WordArt, esas páginas pasan también por OCR~~. Reemplazada el mismo día por la fila siguiente, con la medición hecha (§8.6) | 11-24 |
+| **En la 1.2, un dato en una marca de agua o un WordArt es una limitación conocida**: el conversor los dibuja como figuras y la app no los detecta; se tapan a mano. Se trabaja en una versión posterior, con las dos vías medidas en §8.6 (§11). En el Word limpio no hay fuga: lo frena la regla del texto sin par (§6.2) | 11-24 |
 | **El chino, el japonés y el tailandés son una limitación conocida**: el conversor no suma una fuente que los cubra, y esos caracteres no llegan al PDF (§8.4) | 11-23 |
 | **Las fuentes no latinas salen del conversor** (árabe, hebreo y las demás escrituras que no son latinas), para que cada conversión arranque 0,6 s antes. Un documento escrito en esas escrituras puede convertirse mal y sus datos quedar sin detectar: es una limitación conocida, y la comparación de calidad mide qué pasa | 11-23 |
 | **Las imágenes adentro de un Word o un PowerPoint pasan por OCR y sus datos se tapan.** En el Word limpio, la imagen se reemplaza por su versión tapada | 11-23 |
@@ -751,7 +752,6 @@ Se numeran al escribirse.
 | El formato de origen y el formato de salida en el contrato: **ADR-238**, aceptado | `Contracts.md`, `03_Data_Model.md`, `PDF_Engine.md`, `Orchestrator.md`, `Export_Engine.md` |
 | El conversor de Office y dónde corre, con el paginado de Excel y de PowerPoint: **ADR-240**, propuesto; espera el spike del preproceso y la contraseña | `Contracts.md`, `Convert_Engine.md`, `Orchestrator.md`, `05_Worker_Architecture.md`, `06_Pipeline.md` |
 | Office con contraseña: el descifrado, el evento y el reintento | `Contracts.md`, `Orchestrator.md`, `Convert_Engine.md` |
-| El OCR de la marca de agua y el WordArt | `PDF_Engine.md`, `Orchestrator.md` |
 | Imágenes sueltas: qué formatos y cómo se decodifican: **ADR-239**, aceptado | `Contracts.md`, `Convert_Engine.md` (nuevo), `Orchestrator.md`, `05_Worker_Architecture.md`, `06_Pipeline.md` |
 | Qué significa «no recuperable» en un Word, y su gate | ADR-009, `08_Security_Model.md` |
 | El PDF con texto preservado | ADR-004, ADR-009, ADR-059 §4, `08_Security_Model.md` S-3 |
@@ -765,6 +765,9 @@ Cada dependencia nueva lleva su ADR (R-12).
 
 - Los binarios viejos de Office y OpenDocument (§3).
 - HEIC (§3).
+- Detectar un dato en una marca de agua o un WordArt (§3 y §8.6). Las dos
+  vías medidas son el OCR de la región, enderezada y sin el texto nativo,
+  o leer el texto de la figura desde el XML y tapar la figura entera.
 - Excel y PowerPoint como **salida**: solo salen como PDF.
 - Abrir documentos de Google sin descargarlos (§3.1).
 - La cola de varios documentos: es la 1.3.
