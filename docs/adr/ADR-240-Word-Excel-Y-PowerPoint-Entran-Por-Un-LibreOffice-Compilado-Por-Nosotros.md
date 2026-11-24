@@ -189,6 +189,26 @@ hojas, filas y columnas ocultas.
 
 ### 5. El preproceso: cambios aceptados y sin comentarios
 
+> **Enmienda del 2026-11-24, decisión del mantenedor.** Un Word entra a la
+> app **solo con su última versión**. Nuestro código acepta los cambios y
+> borra los comentarios en el XML del `.docx` **antes de convertir**. Es el
+> mismo código que arma el Word limpio (`Plan_1.2.md` §6.3), así que
+> LibreOffice nunca recibe el historial, y la página que ve la app y el
+> Word limpio salen del mismo texto.
+>
+> El motivo es la medición de `Plan_1.2.md` §8.8: en 10 de 106 Word con
+> cambios, LibreOffice aceptaba distinto que Word y dejaba a la vista
+> texto borrado.
+>
+> Lo que sigue en esta sección vale así:
+>
+> - **Para Excel y PowerPoint, sin cambios**: el conversor borra los
+>   comentarios por la API.
+> - **Para Word, el paso por la API queda como control**: si el documento
+>   que recibe el conversor todavía tiene cambios, la conversión falla
+>   cerrada con `details.phase: "preprocess"`. Las dos trampas del paso 1
+>   (`RecordChanges` y `RedlineProtectionKey`) se siguen aplicando.
+
 Antes de exportar, el conversor:
 
 - **acepta el control de cambios**: aplica las inserciones y descarta lo
