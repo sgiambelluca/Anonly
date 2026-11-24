@@ -81,7 +81,7 @@ trabajo, no entregas.
 | **La adopción del conversor compilado por nosotros queda cerrada**, con los casos borde hechos (§8.5) | 11-24 |
 | **Un Word entra a la app solo con su última versión.** Nada del historial (lo borrado, los comentarios) llega a la vista ni a ninguna salida. Nuestro código acepta los cambios y borra los comentarios antes de convertir, y LibreOffice nunca recibe el historial (§8.8, enmienda a ADR-240 §5) | 11-24 |
 | **Las escrituras no latinas no son una preocupación de la 1.2**: el chino, el japonés, el coreano, el tailandés, el árabe y el hebreo quedan como limitación conocida, también en el Word limpio | 11-24 |
-| **El texto del Word que LibreOffice no dibuja se muestra en la vista previa, y no se borra ni frena el Word.** Puede ser un encabezado que no se usa, el valor guardado de un campo, el texto de una forma o de un cuadro, o una nota sin referencia. La app lo suma en páginas al final del documento, así el usuario lo ve y lo tapa a mano si quiere. Lo que tapa ahí se reemplaza en su lugar del Word limpio, y lo que no tapa queda como está. Esas páginas no salen en el PDF, porque el PDF no tiene ese texto (§6.2). Falta decidir si la app también busca datos en esas páginas (§7) | 11-24 |
+| **El texto del Word que LibreOffice no dibuja se muestra en la vista previa, y no se borra ni frena el Word.** Puede ser un encabezado que no se usa, el valor guardado de un campo, el texto de una forma o de un cuadro, o una nota sin referencia. La app lo suma en páginas al final del documento, así el usuario lo ve. Los detectores también buscan datos ahí y proponen taparlos, como en el resto del documento, y el usuario tapa a mano lo demás si quiere. Lo que se tapa ahí se reemplaza en su lugar del Word limpio, y lo que no se tapa queda como está. Esas páginas no salen en el PDF, porque el PDF no tiene ese texto (§6.2) | 11-24 |
 | ~~Si un Word tiene marca de agua o WordArt, esas páginas pasan también por OCR~~. Reemplazada el mismo día por la fila siguiente, con la medición hecha (§8.6) | 11-24 |
 | **En la 1.2, un dato en una marca de agua o un WordArt es una limitación conocida**: el conversor los dibuja como figuras y la app no los detecta; se tapan a mano. Se trabaja en una versión posterior, con las dos vías medidas en §8.6 (§11). En el Word limpio, su texto aparece en las páginas que suma la vista previa con el texto que LibreOffice no dibuja (fila de arriba, §6.2) | 11-24 |
 | **El chino, el japonés y el tailandés son una limitación conocida**: el conversor no suma una fuente que los cubra, y esos caracteres no llegan al PDF (§8.4) | 11-23 |
@@ -251,9 +251,11 @@ Word hay que saber en qué pedazo del XML está cada detección.
     - La alineación lo junta, y la app lo suma en páginas al final de la
       vista previa. Cada pedazo dice en qué lugar del Word está: un
       encabezado que no se usa, un campo, una forma, un cuadro, una nota.
-    - El usuario lo ve y lo tapa a mano si quiere. Lo que tapa ahí se
-      reemplaza en su lugar del XML; lo que no tapa queda en el Word limpio
-      como está.
+    - Los detectores también buscan datos en esas páginas y proponen
+      taparlos, como en el resto del documento. El usuario tapa a mano lo
+      demás si quiere.
+    - Lo que se tapa ahí se reemplaza en su lugar del XML; lo que no se
+      tapa queda en el Word limpio como está.
     - Esas páginas no salen en el PDF: el PDF sale de las páginas
       convertidas, que no tienen ese texto.
   - Para el ADR del Word limpio queda:
@@ -265,7 +267,6 @@ Word hay que saber en qué pedazo del XML está cada detección.
     - Qué cuenta como texto sin par. Las copias idénticas que se dibujan
       menos veces no entran, porque el reemplazo por valor en todo el XML
       ya las cubre.
-    - Si la app también busca datos en esas páginas (§7).
 
 ### 6.3 «No recuperable» en el Word limpio
 
@@ -336,6 +337,11 @@ Office con contraseña, los Office con macros y las plantillas, los
 comentarios y el control de cambios, la salida por defecto, el conversor
 definitivo y las fuentes no latinas del conversor.
 
+Resueltas el 2026-11-24, y pasadas a §3: la adopción del conversor, la
+marca de agua y el WordArt, la última versión del Word, las escrituras no
+latinas, y el texto que LibreOffice no dibuja, que se muestra en la vista
+previa y donde los detectores también buscan.
+
 Queda:
 
 1. **El diseño del diálogo de exportar**, con un lienzo en claro y en
@@ -345,11 +351,6 @@ Queda:
      `.pdf`, la imagen y la que lleva texto;
    - dónde se elige PDF/A;
    - qué muestra el diálogo cuando el Word limpio no se puede exportar.
-2. **Si la app busca datos en las páginas del texto que LibreOffice no
-   dibuja** (§6.2). El mantenedor decidió que se muestren en la vista
-   previa para taparlas a mano. Falta decidir si los detectores también
-   corren sobre ellas y proponen tapar lo que encuentran, como en el resto
-   del documento, o si ahí se tapa solo a mano.
 
 Para el ADR del conversor, el planificador propone además:
 
