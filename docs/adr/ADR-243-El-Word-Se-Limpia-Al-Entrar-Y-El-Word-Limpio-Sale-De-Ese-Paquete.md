@@ -475,9 +475,17 @@ los datos entre motores, sin cambiar nada de lo que el usuario ve.
      alinear;
    - `docxMaxChars`, el techo.
 
-   `convert-office` devuelve el largo del texto del paquete limpio, y el
-   Orchestrator lo compara con los dos. Hasta la medición, el frente del
-   Word limpio no se cierra.
+   `convert-office` devuelve el largo del texto del paquete limpio.
+   - El Orchestrator lo compara con `docxMaxChars`: por encima, no despacha
+     `align-docx`.
+   - El Convert Engine lo compara con `docxCloseWorkerChars`. LibreOffice
+     corre en un Worker clásico anidado adentro del Worker del pool
+     `convert`, porque `soffice.js` es un script clásico. El motor cierra
+     ese Worker anidado al terminar de convertir y lo vuelve a abrir solo
+     si hay páginas extra. Es «cerrar el Worker de LibreOffice» de §3, sin
+     perder el resto del motor.
+
+   Hasta la medición, el frente del Word limpio no se cierra.
 
 ## Consecuencias
 
