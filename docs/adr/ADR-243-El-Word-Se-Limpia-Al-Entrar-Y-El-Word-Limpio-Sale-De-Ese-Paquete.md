@@ -2,8 +2,9 @@
 
 # ADR-243 — El Word se limpia al entrar, y el Word limpio sale de ese paquete
 
-- **Estado**: Propuesto. Con la medición de escritura hecha
-  (`Plan_1.2.md` §8.9), espera la decisión del mantenedor.
+- **Estado**: Aceptado por el mantenedor el 2026-11-24, salvo el techo
+  de tamaño de §3, que se revisa porque el mantenedor lo ve como una
+  limitación importante. Falta pasarlo a los contratos y los specs.
 - **Fecha**: 2026-11-24.
 - **Decidido por**: el planificador, sobre las decisiones del mantenedor de
   `Plan_1.2.md` §3.
@@ -95,7 +96,8 @@ La lista es cerrada: lo que no está en «queda» no entra.
   vectoriales, se perdía el 58 % de las palabras de las páginas, que solo
   vería el OCR a 96 dpi, también en el PDF (§8.9). Una tapa sobre el
   texto de una vectorial no se puede aplicar adentro del Word, así que ese
-  Word no se exporta (§5). La limpieza de los metadatos de una vectorial
+  Word no se exporta (§5). El mantenedor aceptó ese costo el 2026-11-24.
+  La limpieza de los metadatos de una vectorial
   no se midió: la cubren los tests de la implementación, comparando la
   página convertida antes y después;
 - los gráficos, sin su libro incrustado;
@@ -204,7 +206,8 @@ los sintéticos, pero en los documentos de prueba el orden de las páginas
 no siempre sigue al del XML, y varios caían al 60 u 80 % de caracteres
 bien ubicados (§8.9).
 
-**Techo: un millón de caracteres.** Es un libro de unas 300 páginas. Por
+**Techo: un millón de caracteres.** [En revisión: el mantenedor no lo
+aceptó todavía.] Es un libro de unas 300 páginas. Por
 encima, el documento entra igual, con sus salidas de PDF, pero sin el Word
 limpio (§7). El techo se confirma con la medición de memoria con
 documentos convertidos (`Plan_1.2.md` §8), porque mientras se alinea
