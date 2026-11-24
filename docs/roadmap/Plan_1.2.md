@@ -26,8 +26,8 @@ relevamiento del código y una investigación de librerías (§4 y §5).
 - **ADR-240**, el conversor de Office, y **ADR-242**, el Office con
   contraseña: aceptados por el mantenedor el 2026-11-24. Falta pasarlos a
   los contratos y los specs.
-- **ADR-241**, el fork de pdf-lib: propuesto. El mantenedor preguntó por
-  qué hace falta el cambio, si la salida es la misma.
+- **ADR-241**: la 1.2 sigue con `pdf-lib`. Lo aceptó el mantenedor el
+  2026-11-24, como decisión reabrible en el ADR de PDF/A.
 - Los demás ADR esperan sus spikes (§10).
 - **El mantenedor pidió cerrar todos los puntos de la 1.2 en los docs**
   (mediciones, ADR y specs) antes de abrir el PR de docs a develop y de
@@ -387,7 +387,8 @@ Para el ADR del conversor, el planificador propone además:
   descifrar con WebCrypto sin el conversor, porque el Word limpio parte
   del `.docx`. Se midió junto con el preproceso de ADR-240 §5.
 - **PDF/A**: un PDF imagen y uno con texto, armados con pdf-lib y validados
-  con veraPDF.
+  con veraPDF. Se prueba también `convertToPDFA()` del fork
+  `@cantoo/pdf-lib`, porque ADR-241 se reabre con este ADR.
 - **CSP**: confirmar que ninguna librería candidata ejecuta código dinámico
   bajo la CSP sin `unsafe-eval`.
 - **Imágenes** (hecho, §8.2): qué decodifica el Electron real
@@ -794,8 +795,8 @@ Se numeran al escribirse.
 | Imágenes sueltas: qué formatos y cómo se decodifican: **ADR-239**, aceptado | `Contracts.md`, `Convert_Engine.md` (nuevo), `Orchestrator.md`, `05_Worker_Architecture.md`, `06_Pipeline.md` |
 | Qué significa «no recuperable» en un Word, y su gate | ADR-009, `08_Security_Model.md` |
 | El PDF con texto preservado | ADR-004, ADR-009, ADR-059 §4, `08_Security_Model.md` S-3 |
-| PDF/A | ADR-009 |
-| Pasar al fork mantenido de pdf-lib: **ADR-241**, propuesto | `Export_Engine.md`, `Convert_Engine.md` |
+| PDF/A, con la decisión reabierta de ADR-241 | ADR-009 |
+| Seguir con pdf-lib o pasar al fork: **ADR-241**, aceptado. Sigue `pdf-lib`, y se reabre en el ADR de PDF/A | — |
 | La interfaz de carga y de exportar en la 1.2 | `Components.md`, `UX_Guidelines.md` |
 
 Cada dependencia nueva lleva su ADR (R-12).
