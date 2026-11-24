@@ -4,7 +4,9 @@
 
 - **Estado**: Aceptado por el mantenedor el 2026-11-24, junto con
   ADR-242. El preproceso del §5 y la contraseña del §9 están medidos
-  (`Plan_1.2.md` §8.7). Falta pasarlo a los contratos y los specs.
+  (`Plan_1.2.md` §8.7). Pasado a los contratos y los specs el mismo día
+  (`core/Convert_Engine.md` §6.4 a §6.6), con la enmienda de ADR-243 §1:
+  el preproceso en el XML de un Word es parte de la limpieza al entrar.
 - **Fecha**: 2026-11-24.
 - **Decidido por**: el planificador, sobre las decisiones del mantenedor del
   2026-11-23 y el 2026-11-24 (`Plan_1.2.md` §3): el conversor propio, las
@@ -199,6 +201,9 @@ hojas, filas y columnas ocultas.
 > El motivo es la medición de `Plan_1.2.md` §8.8: en 10 de 106 Word con
 > cambios, LibreOffice aceptaba distinto que Word y dejaba a la vista
 > texto borrado.
+>
+> **Desde ADR-243 §1**, ese código es la limpieza al entrar: LibreOffice
+> convierte el paquete limpio, que ya no tiene cambios ni comentarios.
 >
 > Lo que sigue en esta sección vale así:
 >

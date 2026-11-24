@@ -3,8 +3,10 @@
 # ADR-243 — El Word se limpia al entrar, y el Word limpio sale de ese paquete
 
 - **Estado**: Aceptado por el mantenedor el 2026-11-24, con el techo de
-  tamaño de §3 por memoria en lugar de por caracteres. Falta pasarlo a
-  los contratos y los specs.
+  tamaño de §3 por memoria en lugar de por caracteres. Pasado a los
+  contratos y los specs el mismo día, con las precisiones de §9 y el spec
+  nuevo `core/OOXML.md`. Los dos números de §3 esperan la medición de
+  memoria.
 - **Fecha**: 2026-11-24.
 - **Decidido por**: el planificador, sobre las decisiones del mantenedor de
   `Plan_1.2.md` §3.
@@ -486,6 +488,16 @@ los datos entre motores, sin cambiar nada de lo que el usuario ve.
      perder el resto del motor.
 
    Hasta la medición, el frente del Word limpio no se cierra.
+7. **Una página tapada entera** (`coveredPages`, ADR-190 §5) en un Word
+   limpio: cada palabra de esa página cuenta como un reemplazo en modo
+   `redact`, y cada imagen que dibuja, como una tapa entera. Es lo que hace
+   la página tapada en el PDF, llevado al Word. Lo que no se ubique es un
+   reemplazo sin ubicar, y el Word no sale (§5, paso 2).
+8. **Un Word limpio que no sale no traba el documento.** Con
+   `EXPORT_DOCX_UNLOCATED` o `EXPORT_DOCX_VERIFY_FAILED`, el Orchestrator no
+   emite `PIPELINE_FAILED`: el documento vuelve a la etapa en que estaba,
+   para que el usuario pueda exportar en PDF, que es lo que ofrece §5,
+   paso 2.
 
 ## Consecuencias
 

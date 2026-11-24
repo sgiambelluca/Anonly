@@ -24,14 +24,17 @@ relevamiento del código y una investigación de librerías (§4 y §5).
   La comparación está hecha (§8.4), y también las pruebas de casos borde
   que pidió después (§8.5).
 - **ADR-240**, el conversor de Office, y **ADR-242**, el Office con
-  contraseña: aceptados por el mantenedor el 2026-11-24. Falta pasarlos a
-  los contratos y los specs.
+  contraseña: aceptados por el mantenedor el 2026-11-24, y pasados a los
+  contratos y los specs el mismo día.
 - **ADR-241**: la 1.2 sigue con `pdf-lib`. Lo aceptó el mantenedor el
   2026-11-24, como decisión reabrible en el ADR de PDF/A.
 - **ADR-243**, el Word limpio: el Word se limpia al entrar, y el Word
   limpio sale de ese paquete con una verificación al exportar. Lo aceptó
   el mantenedor el 2026-11-24, con el techo de tamaño por memoria (§3).
-  Falta pasarlo a los contratos y los specs.
+  Pasado a los contratos y los specs el mismo día, con el spec nuevo
+  `core/OOXML.md` y las precisiones de su §9. Los dos números del techo
+  esperan la medición de memoria.
+- **Falta auditar los specs** de los ADR-238 a 243 antes de implementar.
 - Los demás ADR esperan sus spikes (§10).
 - **El mantenedor pidió cerrar todos los puntos de la 1.2 en los docs**
   (mediciones, ADR y specs) antes de abrir el PR de docs a develop y de
