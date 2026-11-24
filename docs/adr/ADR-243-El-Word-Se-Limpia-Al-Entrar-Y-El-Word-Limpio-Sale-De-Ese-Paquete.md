@@ -2,9 +2,9 @@
 
 # ADR-243 — El Word se limpia al entrar, y el Word limpio sale de ese paquete
 
-- **Estado**: Aceptado por el mantenedor el 2026-11-24, salvo el techo
-  de tamaño de §3, que se revisa porque el mantenedor lo ve como una
-  limitación importante. Falta pasarlo a los contratos y los specs.
+- **Estado**: Aceptado por el mantenedor el 2026-11-24, con el techo de
+  tamaño de §3 por memoria en lugar de por caracteres. Falta pasarlo a
+  los contratos y los specs.
 - **Fecha**: 2026-11-24.
 - **Decidido por**: el planificador, sobre las decisiones del mantenedor de
   `Plan_1.2.md` §3.
@@ -206,12 +206,28 @@ los sintéticos, pero en los documentos de prueba el orden de las páginas
 no siempre sigue al del XML, y varios caían al 60 u 80 % de caracteres
 bien ubicados (§8.9).
 
-**Techo: un millón de caracteres.** [En revisión: el mantenedor no lo
-aceptó todavía.] Es un libro de unas 300 páginas. Por
-encima, el documento entra igual, con sus salidas de PDF, pero sin el Word
-limpio (§7). El techo se confirma con la medición de memoria con
-documentos convertidos (`Plan_1.2.md` §8), porque mientras se alinea
-también está vivo el Worker de LibreOffice, que ocupa unos 600 MB.
+**Techo: el Word más grande que entre en el techo de memoria de la app**,
+que es de 3,0 GB (perfil P2 de ADR-192). Lo decidió el mantenedor el
+2026-11-24, en lugar del millón de caracteres que proponía el borrador:
+un número fijo era una limitación importante.
+
+- **Para que entre el Word más grande posible:**
+  - en un Word grande, el Orchestrator cierra el Worker de LibreOffice
+    antes de alinear, lo que libera unos 600 MB, y `align-docx` lo vuelve
+    a abrir solo si hacen falta páginas extra (§4). Eso suma unos 2,7 s,
+    solo en esos documentos;
+  - el alineador de la implementación tiene que ocupar menos memoria que
+    el del prototipo, que no estaba optimizado.
+- **El número sale de una medición.** La medición de memoria con
+  documentos convertidos (`Plan_1.2.md` §8) fija dos números, que van al
+  spec:
+  - a partir de qué tamaño se cierra el Worker antes de alinear;
+  - cuántos caracteres entran en los 3,0 GB.
+- **Es por documento.** Cada Word se alinea solo, en su Worker, que
+  devuelve la memoria al terminar. Con varios documentos cuenta el más
+  grande, no la suma. Los PDF no se alinean.
+- **Por encima del techo**, el documento entra igual, con sus salidas de
+  PDF, pero sin el Word limpio (§7).
 
 ### 4. Las páginas del texto que no se ve
 
@@ -377,9 +393,11 @@ Lo medido (`Plan_1.2.md` §8.9):
      §4;
   4. el PDF Engine lee esas páginas, el Orchestrator las suma al final con
      `origin: "unseen-text"` y termina el Worker.
-- `align-docx` no carga nada de nuevo. Su plazo, `timeouts["align-docx"]`,
-  es de 60.000 ms, con `maxRetries` 0. Con el techo de §3, alinear tarda
-  menos de 1 s.
+- Con un Word grande, el Worker se cierra antes del paso 3, y
+  `align-docx` lo vuelve a abrir solo si hay páginas extra (§3).
+- El plazo de `align-docx`, `timeouts["align-docx"]`, es de 60.000 ms,
+  con `maxRetries` 0. Alinear tarda unos 0,7 s por millón de caracteres, y
+  volver a abrir el Worker, unos 2,7 s.
 - **Cuando el Word limpio no se ofrece.** Si el texto del paquete pasa el
   techo de §3, o si `align-docx` falla, el documento entra igual, sin
   páginas extra, y lleva `Document.docxUnavailable: "too-large" |
@@ -447,5 +465,6 @@ Cambian, después de que el mantenedor acepte:
 | **Un lector de XML de terceros** (`sax`, `@xmldom/xmldom`) | Es una dependencia nueva para algo que el spike resolvió con unas 100 líneas. |
 | **Rasterizar las imágenes vectoriales al entrar** | Su texto pasa a ser píxeles que solo ve el OCR, también en el PDF: se perdía el 58 % de las palabras de esos documentos. La ruta fiel de LibreOffice da 96 dpi, y las que dan más resolución no dibujan igual (§8.9). |
 | **Quitar las imágenes vectoriales** | Es lo que hacía el prototipo: la vista previa y el Word quedan iguales, pero se pierde contenido que el usuario ve en Word, como un gráfico pegado desde Excel. |
+| **Un techo fijo de un millón de caracteres** | Lo proponía el borrador. El mantenedor lo vio como una limitación importante, y el techo pasó a ser el de memoria (§3). |
 | **Alinear por tramos de páginas** | Bajaba el tiempo y un 20 % la memoria en los sintéticos, pero en los documentos de prueba varios caían al 60 u 80 % de caracteres bien ubicados (§8.9). |
 | **Reemplazar solo en el lugar, sin buscar por valor** | Deja en claro las copias idénticas que se dibujan menos veces, y lo que la alineación deja ambiguo (§8.8). |

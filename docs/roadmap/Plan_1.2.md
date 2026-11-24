@@ -30,8 +30,8 @@ relevamiento del código y una investigación de librerías (§4 y §5).
   2026-11-24, como decisión reabrible en el ADR de PDF/A.
 - **ADR-243**, el Word limpio: el Word se limpia al entrar, y el Word
   limpio sale de ese paquete con una verificación al exportar. Lo aceptó
-  el mantenedor el 2026-11-24, salvo el techo de tamaño, que se revisa
-  (§3). Falta pasarlo a los contratos y los specs.
+  el mantenedor el 2026-11-24, con el techo de tamaño por memoria (§3).
+  Falta pasarlo a los contratos y los specs.
 - Los demás ADR esperan sus spikes (§10).
 - **El mantenedor pidió cerrar todos los puntos de la 1.2 en los docs**
   (mediciones, ADR y specs) antes de abrir el PR de docs a develop y de
@@ -86,7 +86,9 @@ trabajo, no entregas.
 | **Un Word entra a la app solo con su última versión.** Nada del historial (lo borrado, los comentarios) llega a la vista ni a ninguna salida. Nuestro código acepta los cambios y borra los comentarios antes de convertir, y LibreOffice nunca recibe el historial (§8.8, enmienda a ADR-240 §5) | 11-24 |
 | **Las escrituras no latinas no son una preocupación de la 1.2**: el chino, el japonés, el coreano, el tailandés, el árabe y el hebreo quedan como limitación conocida, también en el Word limpio | 11-24 |
 | **El texto del Word que LibreOffice no dibuja se muestra en la vista previa, y no se borra ni frena el Word.** Puede ser un encabezado que no se usa, el valor guardado de un campo, el texto de una forma o de un cuadro, o una nota sin referencia. La app lo suma en páginas al final del documento, así el usuario lo ve. Los detectores también buscan datos ahí y proponen taparlos, como en el resto del documento, y el usuario tapa a mano lo demás si quiere. Lo que se tapa ahí se reemplaza en su lugar del Word limpio, y lo que no se tapa queda como está. Esas páginas no salen en el PDF, porque el PDF no tiene ese texto (§6.2) | 11-24 |
-| **ADR-243 queda aceptado**: el Word se limpia al entrar y el Word limpio sale de ese paquete, con su verificación (§8.9). Las imágenes vectoriales quedan como vectoriales, para que los detectores vean su texto; si hay que tapar algo adentro de una, ese Word no se exporta y se ofrece el PDF. El techo de tamaño de ADR-243 §3 queda en revisión: el mantenedor lo ve como una limitación importante | 11-24 |
+| **ADR-243 queda aceptado**: el Word se limpia al entrar y el Word limpio sale de ese paquete, con su verificación (§8.9). Las imágenes vectoriales quedan como vectoriales, para que los detectores vean su texto; si hay que tapar algo adentro de una, ese Word no se exporta y se ofrece el PDF | 11-24 |
+| **El techo del Word limpio es el de memoria de la app** (3,0 GB, ADR-192), no un número fijo de caracteres: el millón que proponía el borrador era una limitación importante. En un Word grande se cierra el conversor antes de alinear, y el alineador de la implementación ocupa menos que el del prototipo. El número sale de la medición de memoria con documentos convertidos (§8). Es por documento y no se acumula (ADR-243 §3) | 11-24 |
+| **En la 1.2, el conversor tiene que andar; optimizarlo viene después.** Hacer LibreOffice más rápido y liviano según lo que la app necesita es trabajo de una versión posterior (§11) | 11-24 |
 | **En el Word limpio, «Tapar con negro» escribe un bloque del largo del original**: tantos `█` como caracteres tiene el dato, espacios incluidos, para que se parezca lo más posible a la caja negra del PDF. Un bloque de largo fijo quedaría muy corto con un dato largo y muy largo con uno corto (ADR-243 §5) | 11-24 |
 | ~~Si un Word tiene marca de agua o WordArt, esas páginas pasan también por OCR~~. Reemplazada el mismo día por la fila siguiente, con la medición hecha (§8.6) | 11-24 |
 | **En la 1.2, un dato en una marca de agua o un WordArt es una limitación conocida**: el conversor los dibuja como figuras y la app no los detecta; se tapan a mano. Se trabaja en una versión posterior, con las dos vías medidas en §8.6 (§11). En el Word limpio, su texto aparece en las páginas que suma la vista previa con el texto que LibreOffice no dibuja (fila de arriba, §6.2) | 11-24 |
@@ -435,6 +437,9 @@ Para el ADR del conversor, el planificador propone además:
   su WASM bajo la CSP.
 - **Memoria**: el pico de un documento convertido. El conversor suma su
   propia memoria a la del pipeline, y los techos de ADR-192 son por perfil.
+  Fija también los dos números del Word limpio (ADR-243 §3): a partir de
+  qué tamaño se cierra el conversor antes de alinear, y cuántos caracteres
+  entran en los 3,0 GB.
 - **Documentos reales**: además de los sintéticos, por `ANONLY_REAL_DOC_*`.
   Cada informe dice qué sale solo de sintéticos.
 
@@ -1000,7 +1005,7 @@ Se numeran al escribirse.
 | El conversor de Office y dónde corre, con el preproceso y el paginado de Excel y de PowerPoint: **ADR-240**, aceptado | `Contracts.md`, `Convert_Engine.md`, `Orchestrator.md`, `05_Worker_Architecture.md`, `06_Pipeline.md` |
 | Office con contraseña, con el descifrado, el evento y el reintento: **ADR-242**, aceptado | `Contracts.md`, `Orchestrator.md`, `Convert_Engine.md` |
 | Imágenes sueltas: qué formatos y cómo se decodifican: **ADR-239**, aceptado | `Contracts.md`, `Convert_Engine.md` (nuevo), `Orchestrator.md`, `05_Worker_Architecture.md`, `06_Pipeline.md` |
-| El Word limpio: se limpia al entrar, qué significa «no recuperable» y su verificación: **ADR-243**, aceptado salvo el techo de tamaño | ADR-009, ADR-240 §5, ADR-242, `Contracts.md`, `Convert_Engine.md`, `Export_Engine.md`, `Render_Engine.md`, `Orchestrator.md`, `08_Security_Model.md`, `core/OOXML.md` (nuevo) |
+| El Word limpio: se limpia al entrar, qué significa «no recuperable» y su verificación: **ADR-243**, aceptado | ADR-009, ADR-240 §5, ADR-242, `Contracts.md`, `Convert_Engine.md`, `Export_Engine.md`, `Render_Engine.md`, `Orchestrator.md`, `08_Security_Model.md`, `core/OOXML.md` (nuevo) |
 | El PDF con texto preservado | ADR-004, ADR-009, ADR-059 §4, `08_Security_Model.md` S-3 |
 | PDF/A, con la decisión reabierta de ADR-241 | ADR-009 |
 | Seguir con pdf-lib o pasar al fork: **ADR-241**, aceptado. Sigue `pdf-lib`, y se reabre en el ADR de PDF/A | — |
@@ -1016,5 +1021,7 @@ Cada dependencia nueva lleva su ADR (R-12).
   vías medidas son el OCR de la región, enderezada y sin el texto nativo,
   o leer el texto de la figura desde el XML y tapar la figura entera.
 - Excel y PowerPoint como **salida**: solo salen como PDF.
+- Optimizar el conversor según lo que la app necesita, para que sea más
+  rápido y ocupe menos (§3). En la 1.2 alcanza con que funcione.
 - Abrir documentos de Google sin descargarlos (§3.1).
 - La cola de varios documentos: es la 1.3.
