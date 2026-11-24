@@ -444,7 +444,7 @@ Para el ADR del conversor, el planificador propone además:
   cifrado con la contraseña pasada desde memoria, y si el `.docx` se puede
   descifrar con WebCrypto sin el conversor, porque el Word limpio parte
   del `.docx`. Se midió junto con el preproceso de ADR-240 §5.
-- **Texto preservado** (en curso; §6.4). Mide:
+- **Texto preservado** (hecho, §8.10; §6.4). Mide:
   - de dónde sale el texto de la capa: las palabras del PDF tal cual, las
     que pasan una prueba de visibilidad, o un OCR de la imagen tapada. Para
     cada fuente cuenta lo que se fuga, sobre un corpus de texto escondido,
@@ -1002,6 +1002,59 @@ La ronda 2 midió lo que la primera dejó abierto:
   de una cadena más larga, como `xxxx…`, que LibreOffice corta en líneas.
 - **Sin medir**: Word, documentos reales, y la memoria con el Worker de
   LibreOffice vivo mientras se alinea.
+
+### 8.10 Texto preservado: de dónde sale el texto de la capa (2026-11-24)
+
+Informe completo:
+[`formatos/Texto_Preservado_2026-11-24.md`](./formatos/Texto_Preservado_2026-11-24.md).
+Todo sale de sintéticos y de los documentos de prueba, sin documentos
+reales: 279 páginas, 15.927 palabras y 647 tapas, con 18 páginas trampa de
+texto escondido. Las palabras salen del PDF Engine real.
+
+- **Con las palabras de la página tal cual, el texto escondido se fuga**:
+  14 de las 15 palabras escondidas que lee el PDF Engine llegan a la capa,
+  incluido el texto blanco sobre blanco de un Word convertido. El texto
+  fuera de la página o del recorte ya no llega: el motor lo descarta.
+- **La prueba de visibilidad las frena todas.** Dibuja la página dos veces,
+  con el texto y sin él, y una palabra entra solo si su tinta cambia la
+  imagen.
+  - Pierde el 0,67 % de las palabras, casi todas sin tinta de verdad.
+  - Cuesta un segundo dibujo por página: unos 10 ms a 150 dpi, 30 ms en una
+    página densa.
+  - Funciona tocando una parte interna de pdfjs, así que una actualización
+    de pdfjs la puede romper.
+- **El punto débil es un escaneo que ya trae su capa de texto invisible.**
+  La prueba la tira entera, porque esa capa no tiene tinta propia. Si se
+  la acepta cuando hay tinta debajo, pasa también una capa falsa, con otro
+  texto alineado con la imagen. Sin OCR no se pueden distinguir.
+- **El OCR de la imagen ya tapada no fuga nada**, pero es lo menos fiel.
+  - En texto latino horizontal acierta el 82 % de las palabras.
+  - El texto del reemplazo lo lee exacto en algo más de la mitad de las
+    tapas.
+  - Tarda de 1,2 a 1,9 s por página, y de 4 a 5 s en una página densa.
+- **En las páginas escaneadas, el OCR que la app ya hizo del original** no
+  tiene fuga, porque sale de la tinta, y es más fiel que volver a hacer OCR.
+  No cuesta nada.
+- **La regla de las tapas**: una palabra que toca una tapa, aunque sea un
+  poco, no entra. Así no queda ninguna palabra tapada en la capa, y se
+  pierde el 0,12 % de las vecinas. Las reglas más flojas dejan en la capa
+  palabras con letras tapadas.
+- **Cómo se escribe la capa**: con una fuente sin glifos propia, de 412
+  bytes, y no con la Helvetica estándar.
+  - La estándar no codifica el 1,7 % de las palabras del corpus, todas en
+    escrituras no latinas, y `pdf-lib` corta con un error.
+  - La propia se relee en su lugar: coincidencia de cajas de 0,99 contra
+    0,81.
+  - Las dos las leen pdfjs y poppler. La imagen queda idéntica a la del PDF
+    imagen en 558 de 558 páginas, y el archivo crece un 3 %.
+- **La verificación al exportar todavía no sirve tal cual.** Relee el PDF y
+  busca palabras bajo las tapas. Encuentra las 80 páginas armadas mal a
+  propósito, pero marca de más en 23 de 279 páginas limpias. Las causas son
+  tapas que se pisan entre sí, y el texto de un reemplazo en una caja
+  angosta, que pdfjs lee partido. Con una capa que sale del OCR no sirve.
+- **Sin medir**: documentos reales, Acrobat, Chrome y el visor de la app,
+  PDF/A, el render real de Electron y el OCR con su detección de
+  orientación.
 
 ## 9. Frentes, orden tentativo
 
