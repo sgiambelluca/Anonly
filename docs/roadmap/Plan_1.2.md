@@ -20,8 +20,9 @@ relevamiento del código y una investigación de librerías (§4 y §5).
 - **Los spikes del conversor de Office y de imágenes**: hechos. Son el de
   ZetaOffice (§8.1), el de imágenes (§8.2) y el de compilar LibreOffice
   nosotros (§8.3). El mantenedor eligió el compilado por nosotros, con
-  una comparación de calidad contra ZetaOffice antes de adoptarlo (§3 y
-  §8).
+  una comparación de calidad contra ZetaOffice antes de adoptarlo (§3).
+  La comparación está hecha (§8.4). Faltan las pruebas de casos borde que
+  pidió después (§8).
 - Los demás ADR esperan sus spikes (§10).
 
 ## 1. Alcance
@@ -68,7 +69,8 @@ trabajo, no entregas.
 | Cuando entra un Word, sale **el mismo Word, limpio**: conserva el diseño, los estilos y las tablas, con los datos reemplazados. Se rearma con una lista cerrada de partes y se borra lo que esconde datos | 11-23 |
 | Un Excel se ve y se exporta **como páginas impresas**, en el mismo visor | 11-23 |
 | **El conversor de Office que se prueba primero es LibreOffice en WASM** (ZetaOffice), con un spike (§8). Si falla, el planificador vuelve con los números antes de elegir otro | 11-23 |
-| **El conversor de Office es LibreOffice compilado por nosotros a WASM**, sin interfaz gráfica, en un Worker y sin `unsafe-eval` (§8.3). ZetaOffice no se integra. Antes de adoptarlo, se compara la calidad de su salida con la de ZetaOffice (§8) | 11-23 |
+| **El conversor de Office es LibreOffice compilado por nosotros a WASM**, sin interfaz gráfica, en un Worker y sin `unsafe-eval` (§8.3). ZetaOffice no se integra. Antes de adoptarlo, se compara la calidad de su salida con la de ZetaOffice (§8). Con la comparación hecha (§8.4), el mantenedor ve mejor el nuestro y pidió más pruebas de casos borde antes de cerrarlo | 11-23 |
+| **El chino, el japonés y el tailandés son una limitación conocida**: el conversor no suma una fuente que los cubra, y esos caracteres no llegan al PDF (§8.4) | 11-23 |
 | **Las fuentes no latinas salen del conversor** (árabe, hebreo y las demás escrituras que no son latinas), para que cada conversión arranque 0,6 s antes. Un documento escrito en esas escrituras puede convertirse mal y sus datos quedar sin detectar: es una limitación conocida, y la comparación de calidad mide qué pasa | 11-23 |
 | **Las imágenes adentro de un Word o un PowerPoint pasan por OCR y sus datos se tapan.** En el Word limpio, la imagen se reemplaza por su versión tapada | 11-23 |
 | **Imágenes sueltas: PNG, JPEG, WebP, GIF, BMP, TIFF y AVIF.** HEIC queda afuera: si hay riesgo de que las patentes de su códec (HEVC) terminen en un cobro, el mantenedor prefiere que el usuario pase la foto a otro formato. AVIF se suma porque Electron lo abre solo y su formato es libre de regalías | 11-23 |
@@ -220,6 +222,15 @@ Word hay que saber en qué pedazo del XML está cada detección.
 - Una detección que no se puede ubicar en el XML **no puede quedar en
   claro**. El mantenedor decidió que en ese caso el Word no se exporta y se
   ofrece el PDF (§3).
+- El caso inverso también es un riesgo: **texto del XML que no aparece en
+  las páginas**.
+  - Lo que el conversor no dibuja no se detecta, y el gate de §6.3 busca
+    solo los valores detectados. En la comparación de calidad (§8.4) pasó
+    con una celda de texto girado y con el chino, el japonés y el
+    tailandés.
+  - Propuesta: la alineación también cuenta el texto del XML que va a
+    quedar en el Word limpio y no tiene par en las páginas. Si hay, el
+    Word no se exporta, con la misma regla de §3.
 
 ### 6.3 «No recuperable» en el Word limpio
 
@@ -302,7 +313,8 @@ Queda:
 
 Para el ADR del conversor, el planificador propone además que el PDF
 intermedio salga sin etiquetas (`UseTaggedPDF=false`). Las etiquetas lo
-multiplican por treinta en una hoja grande (§8.3), y el visor no las usa.
+multiplican por treinta en una hoja grande (§8.3), pierden texto en
+algunas hojas de cálculo (§8.4), y el visor no las usa.
 
 ## 8. Spikes y mediciones antes de los ADR
 
@@ -314,7 +326,7 @@ multiplican por treinta en una hoja grande (§8.3), y el visor no las usa.
 - **Conversor compilado por nosotros** (hecho, §8.3): compilar LibreOffice
   a WASM con la receta oficial, sin interfaz y sin código dinámico, y
   medirlo contra ZetaOffice.
-- **Calidad de la salida, el nuestro contra ZetaOffice** (pendiente; lo
+- **Calidad de la salida, el nuestro contra ZetaOffice** (hecho, §8.4; lo
   pidió el mantenedor para adoptar el nuestro, §3).
   - Se convierte el mismo corpus con los dos y se compara página por
     página: cantidad y tamaño de las páginas, el texto que se extrae, la
@@ -324,6 +336,22 @@ multiplican por treinta en una hoja grande (§8.3), y el visor no las usa.
   - El corpus suma los documentos de prueba de Word, Excel y PowerPoint
     que trae el propio código de LibreOffice, además de los sintéticos.
   - Se mide también qué pasa con un documento en escrituras no latinas.
+- **Casos borde del conversor** (pendiente). El mantenedor lo pidió
+  después de §8.4, antes de adoptar el nuestro.
+  - Se convierte con los dos un corpus de texto girado o vertical: celdas
+    de Word con dirección de texto, celdas de Excel giradas y cuadros de
+    texto girados en Word y PowerPoint.
+  - Se convierten también los lugares donde un dato se esconde fácil:
+    - en Word: cuadros de texto, encabezados y pies distintos por página,
+      notas, campos, ecuaciones, controles de contenido y objetos
+      incrustados;
+    - en Excel: fórmulas, celdas combinadas o con ajuste de texto, filas y
+      columnas ocultas, áreas de impresión y escalado;
+    - en PowerPoint: textos de patrón y diseño, formas agrupadas, tablas,
+      gráficos y diapositivas ocultas.
+  - El corpus de prueba de LibreOffice entra entero, sin el tope de 5 MB.
+  - Se prueba la tabla de reemplazo de fuentes de LibreOffice en nuestro
+    build, para que las sans que no conoce caigan en una sans.
 - **Alineación XML–página del Word** (§6.2): sobre el mismo corpus, cuántas
   detecciones se ubican en el XML y cuáles no.
 - **Office con contraseña**: si el conversor abre un Office cifrado con la
@@ -473,6 +501,78 @@ reales.
   - documentos reales;
   - escrituras no latinas;
   - el arranque con la caché de disco fría.
+
+### 8.4 Calidad de la salida, el nuestro contra ZetaOffice (2026-11-23)
+
+Informe completo:
+[`formatos/Calidad_Conversor_2026-11-23.md`](./formatos/Calidad_Conversor_2026-11-23.md).
+No hay documentos reales. El corpus son los 9 sintéticos más 310
+documentos de prueba del código de LibreOffice (150 Word, 80 Excel y 80
+PowerPoint), elegidos por hash. Las diferencias se miden entre los dos
+conversores, no contra Office. El nuestro va sin fuentes no latinas y sin
+etiquetas.
+
+- **Convierte lo mismo o más.**
+  - ZetaOffice convierte 317 de 319 archivos, y el nuestro 318.
+  - El que solo convierte el nuestro es un PowerPoint que hace caer a
+    ZetaOffice (`memory access out of bounds`). El otro no lo abre
+    ninguno.
+  - El nuestro no tuvo timeouts ni caídas.
+- **Las mismas páginas.** Coinciden en 315 de 317 archivos, y todas tienen
+  el mismo tamaño. Las dos diferencias son:
+  - un Word donde ZetaOffice repite contenido; el nuestro coincide con el
+    origen;
+  - un Excel roto a propósito.
+- **El texto, que es lo que la app detecta.**
+  - Es idéntico por palabras en 137 de 150 Word, 66 de 79 Excel, 79 de 80
+    PowerPoint y los 8 sintéticos.
+  - Casi todas las diferencias son de formato: puntuación pegada,
+    números, los puntos guía de un índice, la numeración y los códigos de
+    error de una celda.
+  - En 11 Excel el nuestro tiene más texto: encabezados de tabla y de
+    página que ZetaOffice no imprime.
+  - **Hay un solo caso de texto perdido**: un Word con texto girado en una
+    celda combinada verticalmente. El nuestro dibuja la celda vacía. Falta
+    saber si pasa con todo texto girado (§8, pendiente).
+- **La imagen.**
+  - La mediana de píxeles distintos es de 0,01 % o menos, y el p90 está
+    entre 0,6 y 2,5 %.
+  - Los peores casos son tablas flotantes, alturas de fila, texturas de
+    fondo y el Word donde ZetaOffice repite contenido.
+- **Las etiquetas también pierden texto.**
+  - Con etiquetas, el nuestro pierde texto en 5 de 87 hojas de cálculo, y
+    los PDF pesan 4,6 veces más.
+  - Sin etiquetas, el texto coincide con el de ZetaOffice. Es una razón
+    más para la propuesta de §7.
+- **Las fuentes.**
+  - Las de métrica compatible caen igual que en ZetaOffice: Arial,
+    Calibri, Cambria, Times New Roman y Courier New.
+  - LibreOffice 26.8 reemplaza por Noto Serif, una fuente con serifa, las
+    sans que no conoce. Entre ellas están Verdana, Tahoma, Segoe UI y
+    Aptos, que es la fuente por defecto del Office actual.
+  - Consolas ya no cae en una monoespaciada.
+  - Esos dos cambios son de la versión, no del recorte. En nuestro build se
+    corrigen con la tabla de reemplazos de LibreOffice, pero falta probarlo
+    (§8, pendiente).
+  - El recorte sacó la fuente matemática, así que `Cambria Math` y
+    `Symbol` cambian de reemplazo. Propuesta: conservarla en el recorte,
+    porque no es la fuente de una escritura no latina.
+- **Las escrituras.**
+  - Árabe, hebreo, cirílico, griego y devanagari: el texto y los glifos
+    salen bien, con el recorte y sin él. Sacar las fuentes no latinas no
+    cambió nada en el documento de prueba.
+  - **Chino, japonés y tailandés se pierden en los dos conversores.**
+    Ninguno trae una fuente que los cubra, y el texto sale sin esos
+    caracteres, así que la app no puede detectar un dato en esas
+    escrituras.
+  - Solo en nuestro build se puede sumar una fuente que los cubra. El
+    mantenedor decidió no sumarla (§3).
+- **Sin medir**:
+  - documentos reales;
+  - la comparación contra Office;
+  - el orden de lectura del árabe y el hebreo;
+  - las páginas después de la octava;
+  - los archivos de más de 5 MB.
 
 ## 9. Frentes, orden tentativo
 
