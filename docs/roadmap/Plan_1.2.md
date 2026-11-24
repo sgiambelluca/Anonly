@@ -369,7 +369,7 @@ Para el ADR del conversor, el planificador propone además:
   - El corpus de prueba de LibreOffice entra entero, sin el tope de 5 MB.
   - Se prueba la tabla de reemplazo de fuentes de LibreOffice en nuestro
     build, para que las sans que no conoce caigan en una sans.
-- **OCR de la marca de agua y el WordArt** (pendiente, decisión del
+- **OCR de la marca de agua y el WordArt** (hecho, §8.6; decisión del
   mantenedor en §3).
   - Se mide si el OCR de la app lee lo que el conversor dibuja como
     figura: marcas de agua de texto en diagonal y en horizontal, claras y
@@ -670,6 +670,54 @@ recorte `rec-C` y sin etiquetas.
 - **Documentos grandes**, sintéticos de 6 a 11 MB: convierten en los dos
   con tiempos parecidos. El Excel de 60.000 filas tarda unos 22 s en cada
   uno.
+
+### 8.6 OCR de la marca de agua y el WordArt (2026-11-24)
+
+Informe completo:
+[`formatos/OCR_Marcas_2026-11-24.md`](./formatos/OCR_Marcas_2026-11-24.md).
+No hay documentos reales. El corpus son 50 casos sintéticos armados a mano
+en XML, no guardados por Word. El OCR es el de la app: Tesseract, `spa` y
+`eng`, `PSM.SPARSE_TEXT`.
+
+- **El OCR de la página entera, como lo hace hoy la app, no alcanza.**
+  - Lee la marca de agua y el WordArt horizontales: 6 a 7 de 8 casos con
+    los cuatro datos exactos.
+  - Con la figura girada lee 0 de 8, y con la marca de agua sobre una
+    página con texto, 0 de 16.
+  - Además duplica el texto nativo y suma palabras basura.
+- **Lo que sí lee** es el OCR de la región de la figura, enderezada por su
+  ángulo, y rasterizada sin el texto nativo de la página.
+  - Sobre una página vacía lee los cuatro datos en 6 a 7 de 8 casos. En
+    los otros, acierta el 99 % de los caracteres.
+  - Sobre una página con texto, los lee en 12 de 16 casos.
+  - Lo que falla es el correo en letra chica: el `@` sale como otra letra.
+  - Subir el contraste no ayuda, y el gris claro se lee igual que el
+    oscuro.
+- **La región se ubica desde el PDF.**
+  - Se toman los trazados rellenos o con contorno de la página, con
+    `getOperatorList` de pdf.js, y cubren el 100 % de la tinta en los 50
+    casos.
+  - El ángulo sale de la tinta con un error de 0,2 a 0,3°, y hace falta
+    menos de 3°.
+  - Un logo o un gráfico también son trazados: un falso positivo cuesta
+    tiempo de OCR.
+- **El raster sin el texto nativo** se arma reescribiendo el PDF con
+  `pdf-lib` sin los bloques de texto. pdf.js no tiene una opción para eso.
+- **El tiempo**: de 0,05 a 0,35 s por región, contra 0,6 a 2,6 s de una
+  página entera.
+- **Hay otra vía, sin OCR**: el texto de la marca de agua y del WordArt
+  está escrito en el XML del archivo.
+  - Se puede leer de ahí y detectar sobre ese texto exacto.
+  - Si tiene un dato, se tapa la región de la figura entera.
+  - El spike midió que la región del XML y la del PDF coinciden (IoU de
+    0,77 a 0,998).
+- **Sin medir**:
+  - archivos guardados por Word;
+  - WordArt deformado (en arco, en ola);
+  - marcas de agua de varios renglones o de imagen;
+  - páginas con logos y gráficos;
+  - documentos de varias páginas;
+  - los tiempos dentro de la app.
 
 ## 9. Frentes, orden tentativo
 
