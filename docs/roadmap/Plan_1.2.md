@@ -319,6 +319,19 @@ página.
   cambio de garantía que el export a `.md` de la 1.4.
 - Enmienda ADR-004, ADR-009 y ADR-059 §4, y S-3 de `08_Security_Model.md`.
   El test «export has no text layer» pasa a valer solo para el PDF imagen.
+- **El riesgo: el texto que el PDF de entrada tiene y no se ve.** Las
+  palabras de una página con texto nativo incluyen texto que no se ve:
+  - texto blanco sobre blanco;
+  - texto debajo de una imagen o de un rectángulo, que es la tachadura mal
+    hecha clásica, con la caja negra dibujada encima del texto;
+  - texto invisible, recortado o fuera de la página.
+  Hoy no sale, porque el export es una imagen. Si la capa se arma con esas
+  palabras tal cual, ese texto vuelve a poder copiarse. Por eso el texto de
+  la capa tiene que salir de lo que se ve. Un spike (§8) compara dos
+  fuentes:
+  - las palabras del PDF que pasan una prueba de visibilidad sobre la
+    página dibujada;
+  - un OCR de la imagen ya tapada.
 
 ### 6.5 PDF/A
 
@@ -427,6 +440,16 @@ Para el ADR del conversor, el planificador propone además:
   cifrado con la contraseña pasada desde memoria, y si el `.docx` se puede
   descifrar con WebCrypto sin el conversor, porque el Word limpio parte
   del `.docx`. Se midió junto con el preproceso de ADR-240 §5.
+- **Texto preservado** (en curso; §6.4). Mide:
+  - de dónde sale el texto de la capa: las palabras del PDF tal cual, las
+    que pasan una prueba de visibilidad, o un OCR de la imagen tapada. Para
+    cada fuente cuenta lo que se fuga, sobre un corpus de texto escondido,
+    y la fidelidad;
+  - cuántas palabras vecinas se pierden con la regla de que una palabra
+    que toca una tapa no entra;
+  - cómo se escribe la capa: con la Helvetica estándar o con una fuente
+    sin glifos propia, leída con dos lectores independientes;
+  - el tamaño, el tiempo y una verificación al exportar.
 - **PDF/A**: un PDF imagen y uno con texto, armados con pdf-lib y validados
   con veraPDF. Se prueba también `convertToPDFA()` del fork
   `@cantoo/pdf-lib`, porque ADR-241 se reabre con este ADR.
