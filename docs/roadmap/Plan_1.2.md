@@ -23,9 +23,11 @@ relevamiento del código y una investigación de librerías (§4 y §5).
   una comparación de calidad contra ZetaOffice antes de adoptarlo (§3).
   La comparación está hecha (§8.4), y también las pruebas de casos borde
   que pidió después (§8.5).
-- **ADR-240**, el conversor de Office, **ADR-241**, el fork de pdf-lib, y
-  **ADR-242**, el Office con contraseña: propuestos, con sus mediciones
-  hechas.
+- **ADR-240**, el conversor de Office, y **ADR-242**, el Office con
+  contraseña: aceptados por el mantenedor el 2026-11-24. Falta pasarlos a
+  los contratos y los specs.
+- **ADR-241**, el fork de pdf-lib: propuesto. El mantenedor preguntó por
+  qué hace falta el cambio, si la salida es la misma.
 - Los demás ADR esperan sus spikes (§10).
 - **El mantenedor pidió cerrar todos los puntos de la 1.2 en los docs**
   (mediciones, ADR y specs) antes de abrir el PR de docs a develop y de
@@ -787,8 +789,8 @@ Se numeran al escribirse.
 | Tema | Modifica |
 |---|---|
 | El formato de origen y el formato de salida en el contrato: **ADR-238**, aceptado | `Contracts.md`, `03_Data_Model.md`, `PDF_Engine.md`, `Orchestrator.md`, `Export_Engine.md` |
-| El conversor de Office y dónde corre, con el preproceso y el paginado de Excel y de PowerPoint: **ADR-240**, propuesto | `Contracts.md`, `Convert_Engine.md`, `Orchestrator.md`, `05_Worker_Architecture.md`, `06_Pipeline.md` |
-| Office con contraseña, con el descifrado, el evento y el reintento: **ADR-242**, propuesto | `Contracts.md`, `Orchestrator.md`, `Convert_Engine.md` |
+| El conversor de Office y dónde corre, con el preproceso y el paginado de Excel y de PowerPoint: **ADR-240**, aceptado | `Contracts.md`, `Convert_Engine.md`, `Orchestrator.md`, `05_Worker_Architecture.md`, `06_Pipeline.md` |
+| Office con contraseña, con el descifrado, el evento y el reintento: **ADR-242**, aceptado | `Contracts.md`, `Orchestrator.md`, `Convert_Engine.md` |
 | Imágenes sueltas: qué formatos y cómo se decodifican: **ADR-239**, aceptado | `Contracts.md`, `Convert_Engine.md` (nuevo), `Orchestrator.md`, `05_Worker_Architecture.md`, `06_Pipeline.md` |
 | Qué significa «no recuperable» en un Word, y su gate | ADR-009, `08_Security_Model.md` |
 | El PDF con texto preservado | ADR-004, ADR-009, ADR-059 §4, `08_Security_Model.md` S-3 |

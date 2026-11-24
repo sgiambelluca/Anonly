@@ -2,7 +2,8 @@
 
 # ADR-242 — Un Office con contraseña se descifra antes de convertir
 
-- **Estado**: Propuesto.
+- **Estado**: Aceptado por el mantenedor el 2026-11-24, junto con ADR-240.
+  Falta pasarlo a los contratos y los specs.
 - **Fecha**: 2026-11-24.
 - **Decidido por**: el planificador, sobre la decisión del mantenedor del
   2026-11-23: un Office con contraseña se trata como el PDF de hoy, la app

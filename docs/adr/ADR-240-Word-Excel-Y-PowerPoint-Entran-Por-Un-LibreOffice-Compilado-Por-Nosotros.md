@@ -2,9 +2,9 @@
 
 # ADR-240 — Word, Excel y PowerPoint entran por un LibreOffice compilado por nosotros
 
-- **Estado**: Propuesto. El preproceso del §5 y la contraseña del §9 ya
-  están medidos (`Plan_1.2.md` §8.7); la contraseña tiene su propio ADR,
-  ADR-242.
+- **Estado**: Aceptado por el mantenedor el 2026-11-24, junto con
+  ADR-242. El preproceso del §5 y la contraseña del §9 están medidos
+  (`Plan_1.2.md` §8.7). Falta pasarlo a los contratos y los specs.
 - **Fecha**: 2026-11-24.
 - **Decidido por**: el planificador, sobre las decisiones del mantenedor del
   2026-11-23 y el 2026-11-24 (`Plan_1.2.md` §3): el conversor propio, las
