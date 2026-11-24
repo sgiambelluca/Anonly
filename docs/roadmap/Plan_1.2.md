@@ -380,7 +380,7 @@ Para el ADR del conversor, el planificador propone además:
     oscuras, y WordArt con y sin efectos.
   - Se mide también cuánto tarda por página, y si el OCR confunde la marca
     de agua con el texto que tiene encima.
-- **Alineación XML–página del Word** (§6.2): sobre el mismo corpus, cuántas
+- **Alineación XML–página del Word** (hecho, §8.8; §6.2): sobre el mismo corpus, cuántas
   detecciones se ubican en el XML y cuáles no.
 - **Office con contraseña** (hecho, §8.7): si el conversor abre un Office
   cifrado con la contraseña pasada desde memoria, y si el `.docx` se puede
@@ -759,6 +759,65 @@ de LibreOffice. Lo decidido está en ADR-240 §3 y §5, y en ADR-242.
 - **Sin probar**:
   - Excel y PowerPoint cifrados guardados por Office;
   - el cifrado Extensible, el RC4 y el IRM.
+
+### 8.8 Word limpio: la alineación entre las páginas y el XML (2026-11-24)
+
+Informe completo:
+[`formatos/Word_Limpio_Alineacion_2026-11-24.md`](./formatos/Word_Limpio_Alineacion_2026-11-24.md).
+No hay documentos reales. El corpus son 8 sintéticos con 224 datos
+marcados en 56 lugares, y los 2.104 Word de prueba de LibreOffice. Ese
+corpus está hecho de casos raros a propósito, así que sus porcentajes no
+son los de documentos comunes.
+
+- **Un lector y un alineador propios, sin dependencias.**
+  - Son unas 800 líneas: el ZIP se lee con `DecompressionStream`, y el XML
+    con un tokenizador propio, porque en un Worker no hay `DOMParser`.
+  - Leer el XML tarda 1 ms de mediana, y 9 ms en el p99. Alinear el
+    documento más grande del corpus tarda 50 ms.
+  - Con millones de caracteres la memoria crece mucho: 8 millones piden
+    unos 2 GB. Hay que alinear por tramos de páginas.
+- **Página → XML: se ubica casi todo.**
+  - En los sintéticos, todo dato que el XML conserva y la página dibuja se
+    ubica en su lugar. Las tres excepciones tienen explicación.
+  - En el corpus, el 91,3 % de las palabras se ubica en un solo lugar y el
+    1,7 % en varios, porque es una copia idéntica. El 6,3 % no se ubica.
+    - Lo que no se ubica es texto que el XML no tiene: los números de
+      lista, el texto de las imágenes vectoriales (WMF y EMF), que
+      LibreOffice dibuja como texto, y el de los gráficos y diagramas, que
+      el lector todavía no lee.
+  - De 254 datos con forma de DNI, CUIT o correo, 230 se ubican en un solo
+    lugar, 22 en varios (copias idénticas) y ninguno queda sin ubicar.
+- **XML → página: la regla propuesta en §6.2 bloquea bastante.**
+  - El 4,1 % de los caracteres del XML que quedarían en el Word limpio no
+    tiene par en las páginas.
+  - Según cuánto se cuente, la regla bloquearía el Word en el 22,4 % de
+    los documentos (cualquier carácter), el 11,3 % (alguna palabra) o el
+    8,6 % (alguna palabra, sin contar los campos, los encabezados que no
+    se usan, los marcadores de los controles ni las notas sin
+    referencia).
+  - Las causas principales son texto de cuadros y formas que LibreOffice
+    no dibuja, copias que se dibujan menos veces, árabe, hebreo y
+    escrituras sin fuente, campos con un valor guardado distinto del que
+    dibuja LibreOffice, y encabezados de un tipo que no se usa.
+  - Entre lo que no tiene par hay texto real que LibreOffice no dibuja:
+    un marco recortado y la celda girada de §8.4.
+- **El control de cambios no coincide siempre.**
+  - En 10 de 106 Word con cambios, LibreOffice deja a la vista texto que
+    el XML aceptado borra, casi siempre cuando se borró y además se cambió
+    el formato. Es un 9 %, no un caso aislado como decía ADR-240 §5.
+  - No es una fuga: ese texto no está en el Word limpio. Es un bloqueo de
+    más.
+- **Hallazgos nuevos:**
+  - LibreOffice empareja las notas al pie con sus referencias por orden, no
+    por identificador. Con identificadores salteados dibuja una nota que
+    nadie referencia. La regla XML → página lo detecta.
+  - El texto de una imagen vectorial no tiene dónde reemplazarse en el
+    XML: está dentro de la imagen.
+- **Sin medir**:
+  - documentos reales de Word;
+  - el corte automático de palabras;
+  - varios casos de texto oculto por estilo de tabla o de numeración;
+  - lectores de XML de terceros, para comparar.
 
 ## 9. Frentes, orden tentativo
 
