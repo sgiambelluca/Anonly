@@ -7,6 +7,8 @@
 **EngineId**: `pdf` (valor del enum `EngineId`)
 **Versión del spec**: 1.21.0 (ADR-230: el parseo suelta las imágenes de cada página)
 
+> **Nota (v1.22.0, ADR-243 §9, 2026-11-24 — el Word limpio)**: `PdfEngineInput` gana `pageIndexOffset` y `pageOrigin`, para leer las páginas del texto que LibreOffice no dibuja: numera desde el offset, les pone `origin: "unseen-text"` y no emite `DOCUMENT_PARSED`. `PdfEngineOutput` gana `drawnImages`, solo con `sourceFormat: "docx"`: por cada imagen que dibuja una página, su caja, su matriz y una miniatura de 16×16, leída de `pageProxy.objs` **antes** del `cleanup()` de ADR-230. Sin errores ni configuración nuevos. Ver §6, §10, §13 casos y §14.
+
 > **Nota (v1.21.0, ADR-230, 2026-11-05 — el parseo suelta las imágenes de cada página al terminar de leerla)**: `parsePage` llama a `pageProxy.cleanup()` apenas termina de recibir `getOperatorList()`, antes de recorrerlo. En pdfjs-dist 4.10.38 armar el operator list de una página escaneada decodifica su imagen, que queda en `pageProxy.objs`, y `PDFDocumentProxy` conserva cada página en `#pageCache` hasta `destroy()`: el parseo acumulaba las imágenes de **todas** las páginas escaneadas. Medido con A/B intercalado (P2 sin NER, Linux): −620 MB de pico del parseo, el mismo texto de OCR y los mismos grupos (`roadmap/memoria/Reduccion_De_Pico_Nube_2026-11.md`). El recorrido del operator list no usa `objs`, y `rotate`/viewport siguen disponibles. Sin cambios de `Page`, eventos, errores ni configuración. Corrige §13 caso 2, que suponía que pdf.js descartaba las páginas procesadas.
 **Última actualización**: 2026-10-05
 
@@ -130,6 +132,9 @@ export interface PdfEngineInput {
   readonly buffer: ArrayBuffer;         // PDF binario, se transfiere (zero-copy) — en Hito 2 se trata como ArrayBuffer plano (ver §12). Desde la 1.2 puede ser el PDF intermedio de otro formato (ADR-238, ADR-239)
   readonly password?: string;           // si el PDF está protegido
   readonly sourceFormat: SourceFormat;  // ADR-238 §3: el formato del archivo del usuario; se copia a Document.sourceFormat
+  // ADR-243 §9, punto 2: las páginas extra de un Word. Juntos o ninguno.
+  readonly pageIndexOffset?: number;    // índice de la primera página que se lee
+  readonly pageOrigin?: "unseen-text";  // se copia a Page.origin de cada página
 }
 
 export interface PdfEngineOutput {
@@ -142,6 +147,9 @@ export interface PdfEngineOutput {
   // ningún pageIndex aparece en los dos. Como máximo una región por página
   // (ADR-065 §2). Vacío es el caso normal.
   readonly ocrRegions: ReadonlyArray<OcrRegion>;
+  // ADR-243 §9, punto 3: solo con sourceFormat "docx" y sin pageOrigin. Las
+  // imágenes que dibuja cada página, en orden de página y de dibujo.
+  readonly drawnImages?: ReadonlyArray<DrawnImage>;
 }
 
 export class PdfEngine implements IEngine {
@@ -269,7 +277,8 @@ PdfEngineOutput {
 }
 ```
 
-- `document.pages[i].index === i` para todo `i`.
+- `document.pages[i].index === i` para todo `i`. **Con `pageIndexOffset`** (ADR-243 §9), `document.pages[i].index === pageIndexOffset + i`, cada `Word.pageIndex` y cada `PAGE_PARSED` llevan ese mismo índice, cada página lleva `origin: pageOrigin`, y **no se emite `DOCUMENT_PARSED`**: el `Document` que devuelve es parcial y el Orchestrator suma sus páginas al documento. `pageIndexOffset` sin `pageOrigin`, o al revés, es `InvalidInputError`.
+- **`drawnImages`** (ADR-243 §9, punto 3), solo con `sourceFormat: "docx"` y sin `pageOrigin`. Por cada `paintImageXObject` (y sus variantes en línea) del operator list: la caja en el marco de la página (ADR-141 §1), la matriz completa con su giro y su espejo, y una miniatura de 16 × 16 RGBA sin girar, promediando los píxeles de la imagen decodificada en `pageProxy.objs`. Se lee **antes** de `pageProxy.cleanup()` (ADR-230), y solo en un Word, así que el pico de un PDF no cambia. Una máscara sin color, o una imagen que pdfjs no decodifica, se omite. Con cualquier otro formato, `drawnImages` queda ausente.
 - **`document.sourceFormat === input.sourceFormat`** (ADR-238 §3). El motor no decide nada con él, salvo los metadatos: con `sourceFormat !== "pdf"`, `document.metadata` sale sin `pdfVersion`, `title`, `producer` ni `creationTool`, con `encrypted: false` y `hasForms: false`. Esos datos serían del PDF intermedio, no del archivo del usuario. Con `"pdf"`, los metadatos salen como hasta la 1.1.
 - `document.pages[i].ocrDpiCap`, cuando existe, es un entero positivo y solo
   aparece en una página `requiresOCR` cuyo contenido pintado es un único ráster
@@ -584,6 +593,11 @@ PdfEngineOutput {
 | `copies input.sourceFormat to the document (ADR-238)` | `contract.test.ts` | contract | 1.2 | §10: `document.sourceFormat` es el de la entrada, para `"pdf"` y para un formato que no es PDF |
 | `a non-PDF source drops the intermediate PDF metadata (ADR-238)` | `unit.test.ts` | unit | 1.2 | §10: con `sourceFormat: "docx"` y un PDF intermedio que trae `pdfVersion`, `title`, `producer` y `Creator`, el `Document` sale sin esos cuatro y con `encrypted` y `hasForms` en `false` |
 | `a PDF source keeps its metadata as before (ADR-238)` | `unit.test.ts` | unit | 1.2 | §10: con `sourceFormat: "pdf"`, los metadatos son idénticos a los de la 1.1; `pdfVersion` está |
+| `pages read with an offset carry the final index and origin (ADR-243)` | `contract.test.ts` | contract | 1.2 | §10: índices de página, de `Word.pageIndex` y de `PAGE_PARSED` desde el offset, `origin: "unseen-text"`, sin `DOCUMENT_PARSED` |
+| `an offset without an origin is rejected (ADR-243)` | `edge.test.ts` | edge | 1.2 | §10: `InvalidInputError` en los dos sentidos |
+| `a Word reports the images each page draws (ADR-243)` | `unit.test.ts` | unit | 1.2 | §10: caja, matriz con giro y espejo, miniatura de 1024 bytes |
+| `drawn images are read before the page cleanup (ADR-243, ADR-230)` | `unit.test.ts` | unit | 1.2 | §10: el mock registra el orden `getOperatorList` → `objs.get` → `cleanup` |
+| `a non-Word source has no drawnImages (ADR-243)` | `unit.test.ts` | unit | 1.2 | §10: con `"pdf"` y con `"xlsx"` el campo está ausente y `objs` no se lee |
 | `hoja escaneada con /Rotate 90: la censura cae sobre la entidad y el texto vecino sobrevive (ADR-140 §2, PDF_Engine.md item 35)` | `tests/e2e/scanned-rotated-export.spec.ts` | e2e | ADR-140 §2, §15 ítem 35: export real leído píxel a píxel, con control sobre el original |
 
 **Fixtures**: los binarios `.pdf` siguen el patrón definido en `tests/fixtures/README.md` (source of truth: PDFs < 5 MB commiteados en `tests/fixtures/`, ≥ 5 MB a Git LFS en Hito 11; `generate.ts` ya commiteado en Hito 1). Estado actual en Hito 2: commiteados `text-10p.pdf`, `empty.pdf`, `corrupt.pdf` (generados por `generate.ts`); `protected.pdf` pendiente (Hito 2b, requiere `qpdf`); `huge-1000p.pdf` y resto pendientes Hito 11. Los tests **unit / contract / edge / snapshot** (Hito 2) mockean la frontera `pdfjs-dist` (deterministas, sin wasm, sin dependencia de binarios físicos — consistente con `tests/fixtures/README.md`). Los tests **stress / cancel / perf** (Hito 11) usarán PDFs reales generados por `generate.ts`. `generate.ts` debe saber producir: `text-10p`, `scanned-10p`, `protected` (password "test1234"), `corrupt`, `empty`, `text-50p`, `huge-1000p`, `mixed-30p`.

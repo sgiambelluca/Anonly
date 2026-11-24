@@ -53,6 +53,13 @@ Notas: el archivo se lee como `ArrayBuffer` en el main thread y se mantiene en m
 
 **Conversión de una imagen suelta** (ADR-239), todavía en `Importing`: el Convert Engine arma un PDF intermedio con una página por imagen, en el ConvertWorker, que se termina al final (`05_Worker_Architecture.md` §1.1). Desde ahí, lo retenido es ese PDF y no la imagen, y la etapa 1 lo lee como cualquier PDF escaneado. El progreso por página sale como `PIPELINE_PROGRESS` de `Importing`.
 
+**Conversión de un Office** (ADR-240, ADR-242 y ADR-243), también en `Importing`:
+
+1. **Si está cifrado**, `decrypt-office` sin contraseña. Con `OFFICE_PASSWORD_REQUIRED`, el documento espera `retryWithPassword` en `Importing`, como el PDF protegido en `Extracting`. Con el paquete en claro, el reconocimiento de formato corre sobre él. La contraseña no se retiene.
+2. **`convert-office`**: con un Word, primero el paquete limpio (ADR-243 §1); después, LibreOffice convierte y el PDF intermedio se limpia de lo que va por fuera de la página. El progreso sale de 0 a 1. El archivo del usuario se suelta: lo retenido es el PDF intermedio y, con un Word, el paquete limpio.
+3. **Con un Excel o un PowerPoint**, el ConvertWorker se termina y la etapa 1 lee el intermedio.
+4. **Con un Word**, la etapa 1 lee el intermedio y, todavía en `Extracting`, `align-docx` alinea el paquete con las páginas. Si hay texto que LibreOffice no dibuja, sus páginas se leen y se suman al final del documento con `origin: "unseen-text"`, y lo retenido pasa a ser el intermedio con esas páginas. Después se termina el ConvertWorker. Un Word demasiado grande, o una alineación que falla, sigue sin el Word limpio (`Document.docxUnavailable`).
+
 ---
 
 ## 3. Etapa 1 — Extracción (PDF Engine)
@@ -259,6 +266,8 @@ Render/Orchestrator, sin una nueva etapa del pipeline.
 - No se conserva ninguna capa de texto del original.
 - No se conserva metadata sensible del original (ver `08_Security_Model.md`).
 - No se conservan bookmarks, JavaScript embebido, ni forms del original (se descartan).
+
+**El Word limpio** (ADR-243, `output: "docx"`): entra el paquete limpio y la alineación que retiene el Orchestrator, y sale el `.docx`. No se rasteriza ninguna página: solo las imágenes que llevan una tapa, por `RenderPageProvider.coverImagePart`. Si un reemplazo no se ubica en el XML (`EXPORT_DOCX_UNLOCATED`) o la verificación encuentra algo (`EXPORT_DOCX_VERIFY_FAILED`), no se escribe ningún archivo, el documento vuelve a la etapa en que estaba y el usuario puede exportar en PDF. Las salidas PDF de un Word no llevan las páginas de `origin: "unseen-text"`.
 
 **Etapa siguiente**: `Done`. El documento sigue cargado para más ediciones/exports.
 
