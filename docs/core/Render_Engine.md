@@ -5,7 +5,9 @@
 > Renderiza páginas del PDF (original o anonimado) a imágenes usando OffscreenCanvas en Web Workers. Produce highlight de grupos habilitados y aplica reemplazos visualmente según `ReplacementMode`. Soporta preview incremental y render full para export.
 
 **EngineId**: `render`
-**Versión del spec**: 1.21.1
+**Versión del spec**: 1.22.0
+
+> **Nota (v1.22.0, ADR-243 §9, 2026-11-24 — tapar una imagen del Word)**: el motor gana `coverImagePart`, que tapa una parte de imagen de un Word para el Word limpio, con el mismo kernel que pinta los reemplazos de una página. Mismo perfil que `renderLegendPages`: sin documento, sin eventos, sin cache y sin supersede. Cruza como sexto caso de `render-page`. Lo invoca el Orchestrator para `RenderPageProvider.coverImagePart`. Ver §6 y §14.
 
 > **Nota (v1.21.1, ADR-219 §6, 2026-11-20 — precisiones de la auditoría de F4b, sin conducta nueva)**: el ítem 1.1 de §15 tenía el número 8f, repetido con un ítem viejo, y pasa a 8h. El caso 40 nombra la única excepción a «cada fila entera», que §6 ya describía (una fila más alta que la página va sola y se recorta), y suma su fila de §14. El ítem 8e aclara que desde la 1.1 el método es `renderLegendPages`.
 
@@ -238,6 +240,20 @@ Semántica de `renderLegendPages` (ADR-059 §5, ADR-219 §6):
 - **Quién lo invoca**: el Orchestrator, implementando `RenderPageProvider.renderLegend` para `export-engine` — que no puede importar este motor (P-1). Solo se invoca con `ExportOptions.includeMarkerLegend` activo.
 - Cruza al RenderWorker como `RenderLegendPayload` bajo `jobType: "render-page"`, sin `WorkerJobType` nuevo; el entry-point lo discrimina por forma como quinto caso del orden de ADR-043 §4.
 - Un fallo se propaga como `RenderPageFailedError` y el Export lo trata como fallo de página (retry, y si persiste `EXPORT_FAILED`): una leyenda que no se pudo dibujar **no** degrada a "export sin leyenda" en silencio (`Export_Engine.md` §13 caso 25).
+
+Semántica de `coverImagePart` (ADR-243 §5, paso 5, y §9, punto 4):
+
+```ts
+coverImagePart(input: CoverImagePartInput, ctx: EngineContext): Promise<CoveredImagePart>;
+// CoverImagePartInput y CoveredImagePart: core/Export_Engine.md §6.
+```
+
+- Tapa una **parte de imagen de un Word** (`word/media`) para el Word limpio. Decodifica los bytes con `createImageBitmap`, los dibuja en un `OffscreenCanvas` del tamaño de la imagen, pinta cada tapa en píxeles de la parte **con el mismo kernel que pinta los reemplazos de una página** (caja opaca y, salvo `redact`, el texto del reemplazo una vez, con el mismo shrink-to-fit y la misma rotación), y devuelve la imagen codificada de nuevo.
+- **Formato**: un JPEG sigue JPEG, con calidad 0,92; cualquier otro formato sale PNG. Los metadatos de la imagen no se copian: el canvas no los tiene. Quien la recibe vuelve a sacar los segmentos de `core/OOXML.md` §6.2.
+- **Mismo perfil que `renderLegendPages`**: no requiere `loadDocument`, no toca `pageProxy` ni pdfjs, no emite eventos, no toca el cache LRU y no participa del supersede.
+- **Quién lo invoca**: el Orchestrator, implementando `RenderPageProvider.coverImagePart` para `export-engine` (P-1). Solo con `ExportOptions.output: "docx"`.
+- Cruza al RenderWorker como `CoverImagePartPayload` bajo `jobType: "render-page"`, sin `WorkerJobType` nuevo: el entry-point lo discrimina por forma, como sexto caso del orden de ADR-043 §4. Los bytes se clonan, como en `rasterizePage`.
+- Una imagen que `createImageBitmap` no decodifica, o una tapa fuera de la imagen, es `RenderPageFailedError`, y el Export lo trata como fallo del export, sin reintentos (`Export_Engine.md` §10.1).
 
 Semántica de `loadDocument`/`unloadDocument` (ADR-030; precisiones de modo worker por ADR-043 §3-§5):
 
@@ -538,6 +554,11 @@ RenderPageOutput {
 | `una fila que se parte en varias líneas empuja a la siguiente hacia abajo` | `unit.test.ts` | unit | §13 caso 29: el alto de fila sigue al contenido |
 | `en una página angosta ningún texto se dibuja fuera de la página` | `unit.test.ts` | unit | §13 caso 29: offsets como fracción del ancho útil. Reemplaza a un test que usaba 400 pt y afirmaba el conteo de `fillText` — pasaba mientras la tercera columna se dibujaba **entera fuera** de la página |
 | `worker entry-point discriminates RenderLegendPayload without colliding with the other four render-page shapes` | `unit.test.ts` | unit | ADR-043 §4, quinto caso |
+| `worker entry-point discriminates CoverImagePartPayload as the sixth render-page shape` | `unit.test.ts` | unit | ADR-043 §4, sexto caso (ADR-243 §9) |
+| `coverImagePart paints each cover like a page replacement` | `unit.test.ts` | unit | ADR-243 §9, punto 4: caja opaca y texto una vez; `redact` sin texto |
+| `coverImagePart keeps JPEG as JPEG and turns anything else into PNG` | `unit.test.ts` | unit | ADR-243 §9, punto 4 |
+| `coverImagePart needs no loaded document and emits nothing` | `unit.test.ts` | unit | mismo perfil que `renderLegendPages` |
+| `coverImagePart rejects an undecodable image or a cover outside it` | `edge.test.ts` | edge | `RenderPageFailedError` |
 | `PREVIEW_UPDATED carries the Degraded annotations of that render, with groupId and occurrenceId` | `unit.test.ts` | unit | ADR-062 §1. **El `occurrenceId` viaja en `Annotation.id`**: `Annotation` (`Contracts.md` §5) no tiene un campo con ese nombre y el kernel pone ahí el de la ocurrencia. El nombre del test se conserva tal cual — es el que este spec fijó — pero la aserción es sobre `id`. |
 | `a render without degradation emits an empty degraded array` | `unit.test.ts` | unit | ADR-062 §2 — ni ausente por accidente ni poblado |
 | **`a cache hit emits the same degraded as the miss that populated it`** | `unit.test.ts` | unit | ADR-062 §4 — **el test del modo de falla**: sin él la marca de la UI se apaga al volver a una página ya vista y reaparece al invalidar, sin causa aparente |

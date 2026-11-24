@@ -18,7 +18,8 @@
 | S-4 | Los modelos IA entran al producto por una vía verificada. | sha256 por asset en `assets.lock.json`, verificado al mirrorearlos y al armar el instalador (ADR-018). **Ya no es SRI**: no hay `<script>` remoto que verificar — todo se sirve desde el propio paquete (ADR-132 §5). |
 | S-5 | No se conservan metadatos sensibles del PDF original en el export. | test de metadata del export. |
 | S-6 | El procesamiento ocurre en Web Workers con CSP estricta, y el renderer no llega al sistema. | CSP `worker-src 'self' blob:` + `script-src` con `'wasm-unsafe-eval'` acotado a compilar WASM (nunca `'unsafe-eval'` completo — ver §3.2). En el contenedor además `contextIsolation`/`sandbox` activos y `nodeIntegration` apagado, con `require`/`process` inalcanzables desde el renderer (gate `webprefs-locked`, ADR-132 §3). |
-| S-7 | Passwords de PDFs protegidos no se persisten ni loguean. | grep automatizado + test de logger. |
+| S-3bis | El Word limpio no permite recuperar la información original (ADR-243). | se arma desde un paquete con una lista cerrada de partes, y en cada export se relee y se verifica antes de entregarlo; si falla, no sale (§4.6). La suite de seguridad corre la misma verificación sobre los sintéticos. |
+| S-7 | Passwords de PDFs y de Office protegidos no se persisten ni loguean. Una contraseña de Office ni siquiera se retiene en memoria después de abrir (ADR-242 §3). | grep automatizado + test de logger. |
 | S-8 | Supply chain auditada: dependencias con hash, sin `postinstall` opaco. | `pnpm audit`, `pnpm-lock.yaml` inmutable, review de `postinstall`. |
 
 ---
@@ -186,6 +187,35 @@ recordarlo, y que su valor queda suprimido por sesión para que un re-análisis 
 Por eso la confirmación lo dice con esas palabras, la acción se puede deshacer (ADR-172) y el
 pre-flight del export no cambia. No es una fuga: es la decisión explícita del usuario de que ese texto
 no es un dato personal.
+
+### 4.6 El Word limpio (ADR-243)
+
+Cuando entra un Word, sale el mismo Word con los datos reemplazados. No es
+una imagen, así que la garantía es otra que la del PDF, y se sostiene así:
+
+1. **El Word se limpia al entrar.** El Convert Engine arma un paquete con una
+   lista cerrada de partes y descarta el original. Se van los metadatos, los
+   comentarios, el historial de cambios, el texto oculto, los objetos
+   incrustados, las macros y los identificadores de edición; las imágenes se
+   recodifican desde los píxeles (`core/OOXML.md` §6.2). Lo que la app
+   muestra sale de ese paquete.
+2. **Cada reemplazo se ubica en el XML**, y además cada valor se reemplaza en
+   todo el XML que queda. Si un reemplazo no se ubica, el Word no se exporta
+   y se ofrece el PDF.
+3. **Al exportar, el Word se relee con un paso propio**, independiente del
+   que escribió, y no sale si aparece un valor original, una parte fuera de
+   la lista o una estructura prohibida (`EXPORT_DOCX_VERIFY_FAILED`).
+
+**Lo que la verificación no ve**, como limitación conocida:
+
+- un valor pegado adentro de una palabra más larga, sin espacios, como en
+  una URL;
+- un valor que no está como texto del XML, por ejemplo adentro de una
+  imagen vectorial. Una tapa ahí frena el Word: se ofrece el PDF.
+
+El texto que LibreOffice no dibuja se muestra en páginas extra de la vista
+previa, para que se detecte y se tape (ADR-243 §4). Esas páginas no van a
+ningún PDF.
 
 ## 5. Metadatos sensibles
 

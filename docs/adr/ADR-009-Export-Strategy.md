@@ -7,6 +7,12 @@
 - **Decidido por**: Planificación inicial
 - **Relacionado con**: ADR-004-Rendering
 
+> **1.2, ADR-238 y ADR-243 (2026-11-24)**: el export gana una salida que no
+> es un PDF, el Word limpio, cuando entra un Word. Este ADR sigue definiendo el
+> PDF imagen sin cambios. Las garantías del Word limpio son otras y están en
+> ADR-243 §5 y §6 y en `08_Security_Model.md` §4.6. El PDF con texto
+> preservado y el PDF/A tendrán sus propios ADR.
+
 ## Contexto
 
 Definir cómo el `Export Engine` produce el PDF final. ADR-004 decidió reconstrucción (no redacción in-place); este ADR define los detalles operativos: formato de imagen, DPI, metadata, opciones al usuario, y garantías.

@@ -5,8 +5,10 @@
 > Construye el PDF final reconstruido desde cero, adjuntando las imágenes renderizadas (lado anonimizado) como páginas con pdf-lib. Garantiza no-recuperabilidad y metadata mínima.
 
 **EngineId**: `export`
-**Versión del spec**: 1.4.1
-**Última actualización**: 2026-11-20
+**Versión del spec**: 1.5.0
+**Última actualización**: 2026-11-24
+
+> **Nota (v1.5.0, ADR-243, 2026-11-24 — el Word limpio)**: con `output: "docx"`, el motor escribe el Word limpio desde el paquete limpio retenido, con `@anonly/ooxml` (`core/OOXML.md`), en vez de armar un PDF. Ubica cada reemplazo en el XML; si alguno no se ubica, falla con `EXPORT_DOCX_UNLOCATED` y la lista de los que no se ubicaron. Las imágenes tapadas las dibuja el Render Engine por `RenderPageProvider.coverImagePart`. Antes de entregar, relee el Word y falla cerrado con `EXPORT_DOCX_VERIFY_FAILED`. En las salidas PDF, las páginas de `origin: "unseen-text"` no se exportan. Se retira de la regla de transición de ADR-238 §6 la salida `docx`. Ver §2, §6, §9, §10, §11, §13 casos 26 a 33 y §14.
 
 > **Nota (v1.4.1, ADR-219 §6, 2026-11-20 — precisiones de la auditoría de F4b)**: §9 lista `userTypes` entre las entradas, como ya hacía §6. El caso 22 fija el orden de las filas de tipos propios (`localeCompare(…, "es")` y después `id`), y §9 rechaza con `InvalidInputError` un tipo propio de la leyenda sin definición en `userTypes`, que con el Orchestrator no ocurre. Dos filas nuevas de §14. El ítem 27 de §15 aclara que desde la 1.1 el Orchestrator delega en `renderLegendPages` (ítem 28b).
 
@@ -47,6 +49,8 @@ Ejecutar el flujo de export al ser invocado por el Orchestrator (que escucha `EX
 - Serializar el `PDFDocument` a `ArrayBuffer` y transferirlo al host.
 - Emitir `EXPORT_STARTED`, `EXPORT_PROGRESS`, `EXPORT_FINISHED`, `EXPORT_FAILED`.
 - Garantizar no-recuperabilidad (sin capas de texto, sin bookmarks, sin JS, sin forms, sin XMP del original).
+- **En las salidas PDF, no exportar las páginas de `origin: "unseen-text"`** (ADR-243 §4): el PDF sale de las páginas del documento.
+- **Con `output: "docx"`, escribir el Word limpio** (ADR-243 §5 y §6, §10 de este spec): ubicar los reemplazos, pedir las imágenes tapadas, escribir y verificar, con `@anonly/ooxml`.
 
 ---
 
@@ -66,7 +70,8 @@ Ejecutar el flujo de export al ser invocado por el Orchestrator (que escucha `EX
 
 - `@anonly/shared`
 - `pdf-lib` (ADR-001, ADR-009)
-- Tipos de `core/Contracts.md`: `IEngine`, `EngineContext`, `Document`, `Page`, `EntityGroup`, `Replacement`, `ExportOptions`, `ExportMetadata`, `ExportConfig`, `Rule`
+- `@anonly/ooxml` (ADR-243 §2, `core/OOXML.md`): el plan, la escritura y la verificación del Word limpio. Es un paquete puro, no un motor.
+- Tipos de `core/Contracts.md`: `IEngine`, `EngineContext`, `Document`, `Page`, `EntityGroup`, `Replacement`, `ExportOptions`, `ExportMetadata`, `ExportConfig`, `Rule`, `BoundingBox`, `ReplacementMode`
 - `architecture/04_Event_System.md`: `EXPORT_STARTED`, `EXPORT_PROGRESS`, `EXPORT_FINISHED`, `EXPORT_FAILED` (solo emisión; Export no consume eventos — ADR-032 §2)
 - ~~Sintetizadores: `shared/synthesizer.ts` para valores sintéticos deterministas por seed.~~ **Retirado por ADR-072 §2**: este motor nunca lo usó y no debe usarlo. El valor sintético llega ya resuelto en `Replacement.replacementValue`; recomputarlo acá sería una segunda fuente de verdad capaz de discrepar del preview. Ver §"Sintetizadores (referencia)".
 
@@ -105,6 +110,27 @@ export interface ExportEngineInput {
   // ADR-219 §6: tipos propios guardados y del documento, para nombrar sus filas
   // en la hoja de referencia. Los pasa el Orchestrator.
   readonly userTypes: ReadonlyArray<UserEntityTypeDefinition>;
+  // ADR-243 §5 y §9: solo con options.output "docx". Copias de lo que retiene
+  // el Orchestrator de un Word; se transfieren.
+  readonly docx?: {
+    readonly cleanPackage: ArrayBuffer;
+    readonly alignment: ArrayBuffer;   // formato de core/OOXML.md §6.5
+  };
+}
+
+// ADR-243 §9, punto 4: una parte de imagen del Word, tapada.
+export interface CoverImagePartInput {
+  readonly bytes: ArrayBuffer;
+  readonly mime: string;              // el de la parte: image/png, image/jpeg…
+  readonly covers: ReadonlyArray<{    // en píxeles de la parte
+    readonly bbox: BoundingBox;
+    readonly replacementValue: string;
+    readonly mode: ReplacementMode;
+  }>;
+}
+export interface CoveredImagePart {
+  readonly bytes: ArrayBuffer;
+  readonly mime: "image/png" | "image/jpeg";
 }
 
 export interface EncodedPageImage {
@@ -123,11 +149,15 @@ export interface RenderPageProvider {
   // Render no ve EntityType ni EntityGroup. Solo se invoca con includeMarkerLegend.
   // ADR-219 §6: una o más páginas, en orden; las pagina Render.
   renderLegend(rows: ReadonlyArray<MarkerLegendRow>, abortSignal: AbortSignal): Promise<ReadonlyArray<EncodedPageImage>>;
+  // ADR-243 §9, punto 4: tapar una parte de imagen del Word. La dibuja Render
+  // como una página, con la caja y el texto del reemplazo, y la devuelve en el
+  // mismo formato (JPEG sigue JPEG; lo demás, PNG). Solo con output "docx".
+  coverImagePart(input: CoverImagePartInput, abortSignal: AbortSignal): Promise<CoveredImagePart>;
 }
 
 export interface ExportEngineOutput {
   readonly documentId: string;
-  readonly buffer: ArrayBuffer;    // PDF final, transferido
+  readonly buffer: ArrayBuffer;    // PDF final, o el Word limpio con output "docx"; transferido
   readonly sizeBytes: number;
   readonly durationMs: number;
 }
@@ -212,7 +242,11 @@ ExportOptions {
   - si `options.output` no está en `exportOutputsFor(document.sourceFormat)`;
   - si `options.pdfA` es `true` con `options.output === "docx"`;
   - si `options.filename` no termina en `exportExtension(options.output)`, sin importar mayúsculas.
-- **Regla de transición** (ADR-238 §5 y §6): mientras no exista el ADR de cada salida, `output: "pdf-text"`, `output: "docx"` y `pdfA: true` lanzan `InvalidInputError`. Con `output: "pdf-image"` y `pdfA: false`, el export es el de siempre (ADR-009), byte por byte salvo la fecha.
+- **Regla de transición** (ADR-238 §5 y §6): mientras no exista el ADR de cada salida, `output: "pdf-text"` y `pdfA: true` lanzan `InvalidInputError`. Con `output: "pdf-image"` y `pdfA: false`, el export es el de siempre (ADR-009), byte por byte salvo la fecha. La salida `docx` tiene su ADR desde ADR-243.
+- **Con `output: "docx"`** (ADR-243 §7), además lanza `InvalidInputError`:
+  - si `document.docxUnavailable` está;
+  - si falta `input.docx`.
+- **Las páginas de `origin: "unseen-text"`** en las salidas PDF: no se rasterizan ni se exportan, y `coveredPages` puede nombrarlas sin efecto en el PDF.
 - Con `options.includeMarkerLegend`, cada tipo propio de un grupo `enabled` en modo `placeholder` tiene su definición en `userTypes` (ADR-219 §6). Si falta, lanza `InvalidInputError` antes de rasterizar ninguna página. Con el Orchestrator no ocurre: pasa los tipos guardados y los del documento, y borrar un tipo del documento borra sus grupos (ADR-225 §4). Sin la leyenda, `userTypes` no se consulta.
 
 ---
@@ -234,6 +268,25 @@ Garantías del PDF final:
 - Sin XMP ni metadata sensible del original.
 - Metadata propia: `producer = "Anonly"`, `creator = "Anonly"`, `creationDate = now`, `title` opcional.
 - Cada página es una imagen a `options.dpi` con `options.imageFormat`.
+- Las páginas de `origin: "unseen-text"` no están (ADR-243 §4).
+
+### 10.1 El Word limpio (`output: "docx"`)
+
+ADR-243 §5 y §6. El buffer de salida es el Word limpio, no un PDF.
+
+1. **Plan**, en el ExportWorker: `planDocxReplacements` (`core/OOXML.md` §6.6) con el paquete limpio, la alineación, `document.pages` y los `Replacement` de todos los grupos `enabled`.
+   - **Con `coveredPages`** (ADR-190 §5): cada palabra de esa página cuenta como un reemplazo en modo `redact`, y cada imagen que dibuja, como una tapa entera. Es lo que hace una página tapada en el PDF, llevado al Word (ADR-243 §9, punto 7).
+2. **Si `unlocated` no está vacío**, falla con `EXPORT_DOCX_UNLOCATED` y esa lista en `details.replacements`, sin escribir nada. La interfaz los muestra y ofrece el PDF.
+3. **Imágenes**: por cada `imageCovers[i]`, `renderPageProvider.coverImagePart`, de a una.
+4. **Escritura**, en el ExportWorker: `writeCleanDocx` (`core/OOXML.md` §6.7).
+5. **Verificación**, en el ExportWorker: `verifyCleanDocx` con los `originalValue` de los reemplazos, sin repetir (§6.8 de `core/OOXML.md`). Si da `{ ok: false }`, falla con `EXPORT_DOCX_VERIFY_FAILED` y su `check`, sin entregar el archivo.
+6. **Entrega** el Word limpio en `ExportEngineOutput.buffer`, con su blob URL.
+
+- **El transporte** es el mismo ExportWorker, con dos operaciones nuevas bajo `jobType: "export-page"`, sin `WorkerJobType` nuevo (mismo criterio que ADR-059 §5): `plan-docx`, que retiene el plan por `documentId` como hoy retiene el `PDFDocument`, y `write-docx`, que escribe, verifica, devuelve el `ArrayBuffer` transferido y limpia el estado. `CANCEL` descarta el plan.
+- **Plazo**: `timeouts["export-page"]` por operación. **Sin reintentos** en el camino del Word: escribir y verificar es determinista, y un reintento no cambia el resultado.
+- **Progreso**: `EXPORT_PROGRESS` con `total` = cantidad de imágenes tapadas + 2, una vez después del plan, una por imagen y una al escribir.
+- **Metadata**: el Word limpio no lleva `docProps` (ADR-243 §1). `options.title` no se escribe en el Word.
+- **Lo que no hace**: rasterizar páginas, llamar a `renderFull` o `renderLegend`. `includeMarkerLegend` no aplica al Word.
 
 ---
 
@@ -243,7 +296,9 @@ Garantías del PDF final:
 |---|---|---|---|---|
 | `EXPORT_FAILED` | `ExportFailedError` | error fatal durante ensamblado o serialización | sí | reintentar 1 vez; si persiste, `EXPORT_FAILED` |
 | `EXPORT_NO_ENABLED_GROUPS` | `ExportNoEnabledGroupsError` | ningún grupo `enabled`. `export()` **no la lanza**: loguea warn con el code en metadata y continúa (ADR-032 §3). La clase es el tipo de la validación **pre-export** del Orchestrator (Hito 9), donde el usuario confirma | no | warning al usuario en el flujo pre-export; si confirma, export = original reconstruido |
-| `EXPORT_TIMEOUT` | `ExportTimeoutError` | timeout (default 30 s por página) | sí | reintentar 1 vez |
+| `EXPORT_TIMEOUT` | `ExportTimeoutError` | timeout (default 30 s por página) | sí | reintentar 1 vez; en el camino del Word, sin reintento (§10.1) |
+| `EXPORT_DOCX_UNLOCATED` | `ExportDocxUnlocatedError` | §10.1, paso 2. `details: { replacements: { pageIndex, bbox }[] }`, sin valores | no | la interfaz muestra los reemplazos y ofrece el PDF (ADR-243 §5) |
+| `EXPORT_DOCX_VERIFY_FAILED` | `ExportDocxVerifyFailedError` | §10.1, paso 5. `details: { check: "value" \| "part" \| "structure" }`, sin el valor | no | la interfaz ofrece el PDF; no se escribe ningún archivo |
 | `ENGINE_NOT_INITIALIZED` | `EngineNotInitializedError` | `export` antes de `init` | no | bug del caller |
 | `ENGINE_DISPOSED` | `EngineDisposedError` | `export` tras `dispose` | no | bug del caller |
 | `INVALID_INPUT` | `InvalidInputError` | input null/undefined o `options` inválidas | no | bug del caller |
@@ -297,6 +352,13 @@ Garantías del PDF final:
 
 ---
 26. **Página tapada entera (ADR-190 §4-§5)**: con `pageIndex ∈ options.coveredPages`, esa página se exporta como un rectángulo **negro lleno** con las mismas dimensiones que la página del documento. **No se invoca `renderPageProvider.renderFull`** para esa página, así que ningún píxel original llega al archivo. El resto de las páginas se exporta igual que siempre, y la leyenda (caso 21) no cambia. Con `coveredPages` ausente o vacío, el export es bit a bit el mismo que antes.
+27. **Un Word con páginas `unseen-text` exportado a PDF**: el PDF tiene solo las páginas del documento; ninguna página extra se rasteriza.
+28. **Word limpio sin reemplazos sin ubicar**: §10.1 completo; la salida abre en LibreOffice y pasa su propia verificación.
+29. **Un reemplazo sin ubicar** (una tapa sobre una vectorial, una imagen sin ubicar): `EXPORT_DOCX_UNLOCATED` con su página y su caja; ningún archivo, ninguna llamada a `coverImagePart`.
+30. **La verificación falla**: `EXPORT_DOCX_VERIFY_FAILED` con su `check` y sin valor; ningún archivo ni blob URL.
+31. **Una imagen tapada**: `coverImagePart` una vez por parte, y la parte nueva reemplaza a la vieja.
+32. **`coveredPages` con `output: "docx"`**: todas las palabras de esa página se reemplazan por `█` del largo de cada una, y sus imágenes se tapan enteras; lo que no se ubique es un reemplazo sin ubicar (§10.1, paso 1).
+33. **`output: "docx"` con `docxUnavailable`, o sin `input.docx`**: `InvalidInputError` antes de cualquier trabajo (§9).
 
 
 ## 14. Casos de prueba
@@ -355,7 +417,17 @@ Garantías del PDF final:
 | `an output the source format does not admit throws InvalidInputError` | `edge.test.ts` | edge | ADR-238 §5: `output: "docx"` con `sourceFormat: "pdf"`, sin render de ninguna página |
 | `pdfA with a docx output throws InvalidInputError` | `edge.test.ts` | edge | ADR-238 §5 |
 | `a filename without the output extension throws InvalidInputError` | `edge.test.ts` | edge | ADR-238 §5: `anonimizado.docx` con `pdf-image`; `ANONIMIZADO.PDF` sí pasa |
-| `outputs without their ADR are rejected` | `edge.test.ts` | edge | regla de transición de ADR-238 §6: `pdf-text`, `docx` y `pdfA: true`; se borra cuando cada salida tiene su ADR |
+| `outputs without their ADR are rejected` | `edge.test.ts` | edge | regla de transición de ADR-238 §6: `pdf-text` y `pdfA: true` (`docx` tiene su ADR desde ADR-243); se borra cuando cada salida tiene su ADR |
+| `unseen-text pages are left out of every PDF output` | `contract.test.ts` | contract | caso 27 (ADR-243 §4): `renderFull` no se llama para esas páginas |
+| `a docx export writes and verifies the clean Word` | `contract.test.ts` | contract | §10.1, caso 28, con `@anonly/ooxml` real y un paquete sintético |
+| `a docx export with an unlocated replacement fails with its page and box` | `contract.test.ts` | contract | caso 29: `EXPORT_DOCX_UNLOCATED`, sin `coverImagePart` ni archivo |
+| `a failed verification throws EXPORT_DOCX_VERIFY_FAILED without the value` | `edge.test.ts` | edge | caso 30: con un plan alterado en el test para dejar un valor |
+| `image covers go through coverImagePart once per part` | `unit.test.ts` | unit | caso 31 |
+| `covered pages in a docx export redact every word and image of the page` | `unit.test.ts` | unit | caso 32 (ADR-243 §9, punto 7) |
+| `docx output is rejected with docxUnavailable or without the retained package` | `edge.test.ts` | edge | caso 33 |
+| `the docx path does not retry and reports progress per step` | `unit.test.ts` | unit | §10.1: plazo, sin reintento, `EXPORT_PROGRESS` con `total` = imágenes + 2 |
+| `cancel during a docx export discards the plan` | `edge.test.ts` | edge | §10.1: `CANCEL` en el ExportWorker |
+| `un Word se exporta como Word limpio y se abre sin ningún dato` | `tests/security/docx-clean.test.ts` | security | ADR-243 §6: la misma verificación sobre los sintéticos, como ADR-148 con el PDF |
 | `pdf-image without pdfA exports exactly as before` | `contract.test.ts` | contract | ADR-238 §5: no-regresión contra el export de la 1.1 |
 
 Fixtures: `tests/fixtures/text-10p.pdf`, `text-50p.pdf`, `huge-1000p.pdf`.
