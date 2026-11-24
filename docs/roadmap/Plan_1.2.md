@@ -756,7 +756,7 @@ Se numeran al escribirse.
 | Qué significa «no recuperable» en un Word, y su gate | ADR-009, `08_Security_Model.md` |
 | El PDF con texto preservado | ADR-004, ADR-009, ADR-059 §4, `08_Security_Model.md` S-3 |
 | PDF/A | ADR-009 |
-| Seguir con pdf-lib o pasar al fork mantenido | Export Engine |
+| Pasar al fork mantenido de pdf-lib: **ADR-241**, propuesto | `Export_Engine.md`, `Convert_Engine.md` |
 | La interfaz de carga y de exportar en la 1.2 | `Components.md`, `UX_Guidelines.md` |
 
 Cada dependencia nueva lleva su ADR (R-12).
