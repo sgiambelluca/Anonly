@@ -70,6 +70,8 @@ trabajo, no entregas.
 | Un Excel se ve y se exporta **como páginas impresas**, en el mismo visor | 11-23 |
 | **El conversor de Office que se prueba primero es LibreOffice en WASM** (ZetaOffice), con un spike (§8). Si falla, el planificador vuelve con los números antes de elegir otro | 11-23 |
 | **El conversor de Office es LibreOffice compilado por nosotros a WASM**, sin interfaz gráfica, en un Worker y sin `unsafe-eval` (§8.3). ZetaOffice no se integra. Antes de adoptarlo, se compara la calidad de su salida con la de ZetaOffice (§8). Con la comparación hecha (§8.4), el mantenedor ve mejor el nuestro y pidió más pruebas de casos borde antes de cerrarlo | 11-23 |
+| **La adopción del conversor compilado por nosotros queda cerrada**, con los casos borde hechos (§8.5) | 11-24 |
+| **Si un Word tiene marca de agua o WordArt, esas páginas pasan también por OCR**, para que se detecte lo que dicen: el conversor los dibuja como figuras, no como texto (§8.5). Antes se mide si el OCR los lee (§8) | 11-24 |
 | **El chino, el japonés y el tailandés son una limitación conocida**: el conversor no suma una fuente que los cubra, y esos caracteres no llegan al PDF (§8.4) | 11-23 |
 | **Las fuentes no latinas salen del conversor** (árabe, hebreo y las demás escrituras que no son latinas), para que cada conversión arranque 0,6 s antes. Un documento escrito en esas escrituras puede convertirse mal y sus datos quedar sin detectar: es una limitación conocida, y la comparación de calidad mide qué pasa | 11-23 |
 | **Las imágenes adentro de un Word o un PowerPoint pasan por OCR y sus datos se tapan.** En el Word limpio, la imagen se reemplaza por su versión tapada | 11-23 |
@@ -362,6 +364,13 @@ Para el ADR del conversor, el planificador propone además:
   - El corpus de prueba de LibreOffice entra entero, sin el tope de 5 MB.
   - Se prueba la tabla de reemplazo de fuentes de LibreOffice en nuestro
     build, para que las sans que no conoce caigan en una sans.
+- **OCR de la marca de agua y el WordArt** (pendiente, decisión del
+  mantenedor en §3).
+  - Se mide si el OCR de la app lee lo que el conversor dibuja como
+    figura: marcas de agua de texto en diagonal y en horizontal, claras y
+    oscuras, y WordArt con y sin efectos.
+  - Se mide también cuánto tarda por página, y si el OCR confunde la marca
+    de agua con el texto que tiene encima.
 - **Alineación XML–página del Word** (§6.2): sobre el mismo corpus, cuántas
   detecciones se ubican en el XML y cuáles no.
 - **Office con contraseña**: si el conversor abre un Office cifrado con la
