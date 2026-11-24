@@ -27,10 +27,10 @@
 |---|---|---|---|---|
 | Fidelidad | Alta (motor de LibreOffice), medida en sintéticos | Alta, la misma | Alta, la misma | Baja en Word, sin opción seria en Excel, dudosa en PowerPoint |
 | El documento queda solo en RAM | Sí, medido | Sí | **No**: archivos temporales en disco | Sí |
-| Excepción de seguridad | **`unsafe-eval`**, solo en esa ventana | Probablemente ninguna (sin confirmar) | Ninguna en Chromium; suma un proceso nativo | Ninguna |
-| Memoria extra al convertir | ~1,2 GB, medido, antes del pico del análisis | Probablemente menos (sin medir) | Unos cientos de MB, estimado | Poca |
-| Espera por documento | ~2,6 s de arranque + 0,05–0,6 s, medido | Parecida (sin medir) | Unos segundos de arranque, estimado | Poca |
-| Esfuerzo para empezar | Bajo: el binario ya existe | **Alto e incierto**: horas de compilación, puede no salir | Medio: empaquetar por sistema y controlar un proceso | **Alto**: mucho código propio, sobre todo Excel |
+| Excepción de seguridad | **`unsafe-eval`**, solo en esa ventana | Ninguna: corre en un Worker con la CSP de la app (medido, spike de LOWA) | Ninguna en Chromium; suma un proceso nativo | Ninguna |
+| Memoria extra al convertir | ~1,2 GB, medido, antes del pico del análisis | ~0,75 GB, y vuelve a cero al terminar el Worker (medido) | Unos cientos de MB, estimado | Poca |
+| Espera por documento | ~2,6 s de arranque + 0,05–0,6 s, medido | ~2,9 s de arranque + 0,04–0,8 s, medido | Unos segundos de arranque, estimado | Poca |
+| Esfuerzo para empezar | Bajo: el binario ya existe | Bajo: ya compiló, en 75 a 85 min y sin tocar código (medido) | Medio: empaquetar por sistema y controlar un proceso | **Alto**: mucho código propio, sobre todo Excel |
 | Mantenimiento | Depende de las versiones de allotropia (la última es de 2025-05) | Nuestro: recompilar con cada versión de LibreOffice | Bajo: LibreOffice publica seguido | Alto |
 | Contraseña de Office | JS propio | Podría hacerla el conversor (con NSS) | La hace el conversor | JS propio |
 
@@ -73,6 +73,18 @@ Electron que se abre para convertir y se cierra al terminar.
 El mismo LibreOffice, compilado desde su código fuente con la receta
 oficial ("LOWA"), con opciones que el binario de allotropia no trae: sin
 interfaz gráfica y sin código dinámico.
+
+**Lo que midió el spike** (2026-11-23,
+[`Spike_LOWA_2026-11-23.md`](./Spike_LOWA_2026-11-23.md), con corpus
+sintético):
+- **Compiló a la primera**, en 75 a 85 minutos en esta máquina.
+- **Corre en un Worker con la CSP de la app**, sin `unsafe-eval`.
+- **Gasta menos memoria que la 1**, y la devuelve entera al terminar el
+  Worker.
+- **Las mismas páginas que la 1.** El PDF sale etiquetado y mucho más
+  pesado, salvo con `UseTaggedPDF=false`. Las fuentes de reemplazo cambian.
+
+Los «sin confirmar» de la lista de abajo quedaron respondidos en el spike.
 
 **A favor**
 - Misma fidelidad que la 1.
@@ -151,11 +163,21 @@ y Electron la imprime a PDF.
 
 ## Recomendación del planificador
 
-**La 1 ahora, y la 2 como mejora posterior.**
+**Revisada el 2026-11-23, con el spike de LOWA: la 2, directamente.**
 
-- La 1 deja avanzar Word, Excel y PowerPoint ya, con lo medido.
-- La 2 le puede sacar la excepción de seguridad y la ventana aparte sin
-  tocar el resto, porque es el mismo motor con la misma API.
+- La 2 ya compiló y anduvo sin la excepción de seguridad, en un Worker
+  como el resto del Core, con menos memoria y sin ventana aparte.
+- Pasar primero por la 1 sería integrar dos veces lo mismo, con una ventana
+  y un `unsafe-eval` que después se tiran.
+- El costo que queda es nuestro: recompilar con cada versión de
+  LibreOffice. Son entre 75 y 85 minutos en esta máquina, y el CI gratuito
+  está sin probar.
+
+La recomendación anterior era la 1 ahora y la 2 como mejora posterior,
+porque no se sabía si la 2 compilaba.
+
+**Decisión del mantenedor (2026-11-23): la 2.** Antes de adoptarla se
+compara la calidad de su salida con la de la 1 (`Plan_1.2.md` §3 y §8).
 - La 3 cambia una garantía central de la app, el documento solo en RAM, a
   cambio de evitar `unsafe-eval` en una ventana aislada.
 - La 4 no llega a la fidelidad que pide un Excel como páginas impresas.

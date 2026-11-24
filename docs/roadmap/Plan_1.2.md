@@ -17,8 +17,11 @@ relevamiento del código y una investigación de librerías (§4 y §5).
   mantenedor el 2026-11-23, y pasados a los contratos y los specs el mismo
   día. El spec nuevo es `core/Convert_Engine.md`. Los frentes 1 y 2 se
   pueden implementar.
-- **Los spikes del conversor de Office y de imágenes**: hechos (§8.1 y
-  §8.2). El conversor definitivo espera la decisión del mantenedor (§7).
+- **Los spikes del conversor de Office y de imágenes**: hechos. Son el de
+  ZetaOffice (§8.1), el de imágenes (§8.2) y el de compilar LibreOffice
+  nosotros (§8.3). El mantenedor eligió el compilado por nosotros, con
+  una comparación de calidad contra ZetaOffice antes de adoptarlo (§3 y
+  §8).
 - Los demás ADR esperan sus spikes (§10).
 
 ## 1. Alcance
@@ -65,6 +68,8 @@ trabajo, no entregas.
 | Cuando entra un Word, sale **el mismo Word, limpio**: conserva el diseño, los estilos y las tablas, con los datos reemplazados. Se rearma con una lista cerrada de partes y se borra lo que esconde datos | 11-23 |
 | Un Excel se ve y se exporta **como páginas impresas**, en el mismo visor | 11-23 |
 | **El conversor de Office que se prueba primero es LibreOffice en WASM** (ZetaOffice), con un spike (§8). Si falla, el planificador vuelve con los números antes de elegir otro | 11-23 |
+| **El conversor de Office es LibreOffice compilado por nosotros a WASM**, sin interfaz gráfica, en un Worker y sin `unsafe-eval` (§8.3). ZetaOffice no se integra. Antes de adoptarlo, se compara la calidad de su salida con la de ZetaOffice (§8) | 11-23 |
+| **Las fuentes no latinas salen del conversor** (árabe, hebreo y las demás escrituras que no son latinas), para que cada conversión arranque 0,6 s antes. Un documento escrito en esas escrituras puede convertirse mal y sus datos quedar sin detectar: es una limitación conocida, y la comparación de calidad mide qué pasa | 11-23 |
 | **Las imágenes adentro de un Word o un PowerPoint pasan por OCR y sus datos se tapan.** En el Word limpio, la imagen se reemplaza por su versión tapada | 11-23 |
 | **Imágenes sueltas: PNG, JPEG, WebP, GIF, BMP, TIFF y AVIF.** HEIC queda afuera: si hay riesgo de que las patentes de su códec (HEVC) terminen en un cobro, el mantenedor prefiere que el usuario pase la foto a otro formato. AVIF se suma porque Electron lo abre solo y su formato es libre de regalías | 11-23 |
 | **Tope de una imagen: 50 megapíxeles**, por imagen o por página de un TIFF, medido antes de abrirla. Si se pasa, la app avisa y no la abre | 11-23 |
@@ -282,9 +287,10 @@ Resueltas el 2026-11-23, y pasadas a §3: el conversor que se prueba
 primero, las imágenes adentro de un documento, los formatos de imagen, la
 detección que no se ubica en el XML del Word, el aviso de Google, los
 Office con contraseña, los Office con macros y las plantillas, los
-comentarios y el control de cambios, y la salida por defecto.
+comentarios y el control de cambios, la salida por defecto, el conversor
+definitivo y las fuentes no latinas del conversor.
 
-Quedan:
+Queda:
 
 1. **El diseño del diálogo de exportar**, con un lienzo en claro y en
    oscuro. El mantenedor fijó la fila del nombre con el desplegable de la
@@ -293,11 +299,10 @@ Quedan:
      `.pdf`, la imagen y la que lleva texto;
    - dónde se elige PDF/A;
    - qué muestra el diálogo cuando el Word limpio no se puede exportar.
-2. **El conversor definitivo**, con los números del spike de ZetaOffice
-   (§8.1). Las opciones, con sus pros y contras:
-   [`formatos/Opciones_Conversor_2026-11-23.md`](./formatos/Opciones_Conversor_2026-11-23.md).
-   El spike anduvo, con tres costos: `unsafe-eval`, la memoria y la espera
-   por documento.
+
+Para el ADR del conversor, el planificador propone además que el PDF
+intermedio salga sin etiquetas (`UseTaggedPDF=false`). Las etiquetas lo
+multiplican por treinta en una hoja grande (§8.3), y el visor no las usa.
 
 ## 8. Spikes y mediciones antes de los ADR
 
@@ -306,6 +311,19 @@ Quedan:
   fidelidad. La fidelidad se
   mide sobre un corpus sintético de Word, Excel y PowerPoint hecho con
   Office y exportado desde Google.
+- **Conversor compilado por nosotros** (hecho, §8.3): compilar LibreOffice
+  a WASM con la receta oficial, sin interfaz y sin código dinámico, y
+  medirlo contra ZetaOffice.
+- **Calidad de la salida, el nuestro contra ZetaOffice** (pendiente; lo
+  pidió el mantenedor para adoptar el nuestro, §3).
+  - Se convierte el mismo corpus con los dos y se compara página por
+    página: cantidad y tamaño de las páginas, el texto que se extrae, la
+    imagen renderizada y las fuentes que usa.
+  - El nuestro va con la configuración que se adopta: sin fuentes no
+    latinas y sin etiquetas.
+  - El corpus suma los documentos de prueba de Word, Excel y PowerPoint
+    que trae el propio código de LibreOffice, además de los sintéticos.
+  - Se mide también qué pasa con un documento en escrituras no latinas.
 - **Alineación XML–página del Word** (§6.2): sobre el mismo corpus, cuántas
   detecciones se ubican en el XML y cuáles no.
 - **Office con contraseña**: si el conversor abre un Office cifrado con la
@@ -387,6 +405,74 @@ reales.
 - **Bombas**: ninguna colgó la app, pero un PNG de 400 KB ocupó 1,5 GB.
   De ahí el tope de 50 MP (§3), medido en la cabecera antes de decodificar.
 - **HEIC con `libheif-js`** anduvo, pero quedó afuera (§3).
+
+### 8.3 Resultado del spike de compilar LibreOffice (2026-11-23)
+
+Informe completo:
+[`formatos/Spike_LOWA_2026-11-23.md`](./formatos/Spike_LOWA_2026-11-23.md).
+Todo sale del corpus sintético del spike de ZetaOffice, sin documentos
+reales.
+
+- **Compila sin tocar el código.**
+  - Se usó la receta oficial: LibreOffice 26.8.3.1 y Emscripten 4.0.10.
+  - El único cambio es una línea en el makefile de la plataforma, para
+    pasarle flags al enlace.
+  - En el banco Windows (WSL, 12 hilos) tarda entre 75 y 85 minutos, y el
+    árbol ocupa 9,5 GB.
+- **Corre sin interfaz y dentro de un Worker.** La variante sin interfaz
+  gráfica (`--disable-gui`, sin Qt) convierte Word, Excel y PowerPoint en un
+  Worker que no tiene `document`.
+- **No necesita `unsafe-eval`.**
+  - Enlazado con `-sDYNAMIC_EXECUTION=0`, corre bajo la CSP de la app sin
+    violaciones, y su JS no tiene `new Function`.
+  - Reenlazar cuesta 11 minutos, no una compilación entera, y no pierde
+    velocidad.
+- **Contra ZetaOffice**, con el mismo harness y en el mismo día:
+
+  | | ZetaOffice | Compilado por nosotros, recortado, en Worker |
+  |---|---|---|
+  | CSP | necesita `unsafe-eval` | la de la app |
+  | Dónde corre | una ventana aparte | un Worker |
+  | Instalado / en el instalador | 262 / 52 MB | 191 / ~41 MB |
+  | Arranque | 2,6 s | 2,9 s |
+  | Pico de memoria de la app | 1,46–1,50 GB | 1,22–1,24 GB |
+  | Memoria 10 s después de terminar | 1,15 GB | ~0,47 GB, lo que usaba antes de cargarlo |
+
+- **Convierte igual de rápido**, salvo los archivos grandes: la hoja de 162
+  páginas tarda entre 0,8 y 0,9 s, contra 0,57 s.
+- **Mismas páginas y tamaños que ZetaOffice** en los 9 archivos. Hay dos
+  diferencias:
+  - **El PDF sale etiquetado.** LibreOffice 26.8 etiqueta el PDF por
+    defecto, y la hoja de 162 páginas pasa de 334 KB a 10,1 MB. Sin
+    etiquetas (`UseTaggedPDF=false`) da 346 KB. Falta confirmar que sin
+    etiquetas el texto salga idéntico.
+  - **Las fuentes de reemplazo cambian.** La fuente que usa en lugar de
+    cada fuente de Windows sin métrica compatible no es la de ZetaOffice.
+    Falta revisarlo fuente por fuente.
+- **Se recorta sin recompilar.**
+  - `soffice.data` baja de 97 a 36 MB y salen los mismos PDF. Se sacan la
+    interfaz que sobra, los íconos y las fuentes no latinas.
+  - Las escrituras no latinas (árabe, hebreo y otras) se quedan sin fuente
+    propia. No se probó ningún documento en esas escrituras.
+- **No descifra**: el build no trae NSS, aunque no se probó. El descifrado
+  sigue en JS.
+- **Mantenimiento.**
+  - Cada versión de LibreOffice que se quiera seguir es una recompilación.
+  - En un runner gratuito de CI de 4 núcleos se estiman entre 3 y 4 horas,
+    sin probar. En uno privado de 2 núcleos no entra.
+  - La alternativa es compilarlo en esta máquina y publicar los cuatro
+    archivos.
+- **Licencias**: sin Qt, ya no hay LGPL por Qt estático. Quedan la MPL 2.0
+  de LibreOffice y las licencias de lo que trae adentro. Es conocimiento
+  previo, no una consulta.
+- **Sin verificar**:
+  - una compilación desde cero cronometrada entera;
+  - el pico de memoria del enlace;
+  - la corrida en CI;
+  - un Office cifrado;
+  - documentos reales;
+  - escrituras no latinas;
+  - el arranque con la caché de disco fría.
 
 ## 9. Frentes, orden tentativo
 
