@@ -3,10 +3,9 @@
 # ADR-244 — El PDF con texto lleva solo el texto que se ve
 
 - **Estado**: Borrador del planificador, 2026-11-25, con las rondas 1 y 2
-  del spike. Esperan dos cosas:
-  - la tercera ronda, que fija la regla de la palabra que pisa a otra (§3)
-    y mide la calidad de detección en los escaneos con capa invisible;
-  - la decisión del mantenedor sobre esos escaneos para la 1.2 (§4).
+  del spike, y la decisión del mantenedor sobre los escaneos con capa
+  invisible (§4). Espera la tercera ronda, que fija la regla de la palabra
+  que pisa a otra (§3) y mide la calidad de detección en esos escaneos.
 - **Fecha**: 2026-11-25.
 - **Decidido por**: el planificador, sobre la decisión del mantenedor del
   2026-11-23 de que el texto preservado entra en la 1.2 (`Plan_1.2.md` §3).
@@ -86,7 +85,7 @@ y en el lugar de cada tapa va lo que la imagen muestra ahí.
 |---|---|
 | Con texto nativo (PDF digital, Word, Excel, PowerPoint) | las palabras de `source: "pdf"` que pasan la prueba de visibilidad (§3) |
 | Escaneada, o una región que pasó por OCR (ADR-065) | las palabras de `source: "ocr"` que la app ya tiene: salen de la tinta y no necesitan la prueba |
-| Un escaneo que ya trae una capa invisible | **pendiente** (§4) |
+| Un escaneo que ya trae una capa invisible | **ninguno en la 1.2**: la página sale solo como imagen (§4) |
 
 Una imagen suelta es una página escaneada (ADR-239).
 
@@ -145,21 +144,34 @@ diciendo ese nombre.
   la segunda ronda cayeron las 2 páginas trampa y las 8 armadas para esto, y
   ninguna otra. Equivocarse nunca fuga: una página que no cae pierde su
   capa por la prueba de §3, y una que cae de más sale con OCR.
-- **Cómo se decide** (mantenedor, 2026-11-25): el mantenedor elige una
-  salida para la 1.2 con los datos que hay, y se miden las dos en tiempo,
-  memoria y calidad de detección (`Plan_1.2.md` §8).
+- **Decisión del mantenedor para la 1.2 (2026-11-25): esas páginas salen
+  sin texto.** Van solo como imagen, aunque se elija el PDF con texto. Es
+  más peligroso arriesgar que un dato se filtre por una capa invisible que
+  no poder buscar o copiar en esas páginas. Pasan a llevar texto solo si se
+  demuestra que una vía con OCR es segura del todo.
+  - **No necesita OCR al exportar**: la prueba de §3 ya descarta esa capa,
+    porque no tiene tinta propia. La regla de abajo, la que reconoce estas
+    páginas, sirve para que el diálogo de exportar avise cuántas páginas
+    salen sin texto. Cómo lo dice va en el ADR de la interfaz.
+  - **Se sigue buscando una vía mejor.** La que más promete es leer esas
+    páginas con OCR al importar, como un escaneo sin capa: tendrían texto
+    con las mismas garantías y la misma verificación que cualquier escaneo,
+    y los detectores leerían lo que se ve. La tercera ronda del spike mide
+    su calidad de detección y su costo.
+- **Cómo se siguió midiendo** (mantenedor, 2026-11-25): las dos salidas se
+  miden en tiempo, memoria y calidad de detección (`Plan_1.2.md` §8).
 - **Es una decisión reabrible.** Se revisa al diseñar los varios documentos
   de la 1.3: con varios documentos en memoria, volver a cargar el OCR al
   exportar puede no ser eficiente (`Roadmap_1.x.md` §6). El ADR de la 1.3
   que la revise enmienda este punto.
-- **Qué texto lleva**: lo decide el mantenedor entre dos salidas seguras.
-  - **OCR al exportar**, que propone el planificador: la capa sale del OCR
-    de la imagen ya tapada. Solo puede leer lo que se ve después de las
-    tapas: en la segunda ronda no fugó nada, tampoco de las capas falsas.
-    Cuesta de 0,3 a 4,4 s por página a 150 dpi, según cuántas palabras
-    tenga, y acierta el 80 % de las palabras de una capa buena.
-  - **Sin texto**: esas páginas salen solo como imagen, como en el PDF
-    imagen.
+- **Las dos salidas que se compararon**:
+  - **OCR al exportar**: la capa sale del OCR de la imagen ya tapada. En la
+    segunda ronda no fugó nada, tampoco de las capas falsas. Cuesta de 0,3
+    a 4,4 s por página a 150 dpi, según cuántas palabras tenga, y acierta
+    el 80 % de las palabras de una capa buena. Su verificación es más débil
+    que la del resto (§7): solo compara con lo planeado. Por eso no entra en
+    la 1.2.
+  - **Sin texto**: la que eligió el mantenedor.
 
 ### 5. Las tapas
 
@@ -216,11 +228,10 @@ lo entrega si algo no da. Es independiente de quien la escribió.
   - **Lo medido**: cero falsas alarmas en las 279 páginas limpias, también
     con tapas que se pisan, y las 100 páginas malas marcadas, incluida una
     palabra del original pegada al reemplazo.
-  - **En las páginas de §4 con OCR** solo vale la comparación con lo
+  - **Una capa hecha con OCR de la imagen ya tapada**, la vía que no entra
+    en la 1.2 (§4), solo se podría verificar con la comparación con lo
     planeado: el OCR no relee el reemplazo exacto, así que la regla de las
-    tapas marcaría casi todo. Esa capa sale de la imagen ya tapada, así que
-    no puede llevar texto que la imagen no tiene, salvo un defecto del
-    escritor, y eso lo ve la comparación.
+    tapas marcaría casi todo.
 - **Qué la lee**: el PDF Engine, que ya tiene pdfjs, por un puerto que
   implementa el Orchestrator, como `RenderPageProvider` (ADR-059 §5). El
   Export Engine sigue sin pdfjs.
@@ -257,8 +268,8 @@ vista previa y el PDF imagen no cambian.
   palabra que necesita §7. El dibujo y el JPEG de la imagen ya cuestan unos
   43 ms, así que el export con texto tarda algo más del doble por página.
 - **Página escaneada**: casi nada.
-- **Escaneo con capa invisible, con OCR al exportar**: de 0,3 a 4,4 s más
-  por página a 150 dpi.
+- **Escaneo con capa invisible**: nada más que la prueba de §3, porque sale
+  sin texto (§4).
 
 ### 10. Lo que este ADR no decide
 
@@ -283,7 +294,7 @@ Cambian, después de que el mantenedor acepte:
   verificación de §7. Se retira `pdf-text` de la regla de transición de
   ADR-238 §6.
 - `PDF_Engine.md`: la relectura del PDF exportado para §7.
-- `Orchestrator.md`: el puerto de §7 y, según §4, el OCR al exportar.
+- `Orchestrator.md`: el puerto de §7.
 - `08_Security_Model.md` y ADR-004, ADR-009 y ADR-059 §4: la excepción de
   `pdf-text`.
 
@@ -292,7 +303,8 @@ Cambian, después de que el mantenedor acepte:
 | Alternativa | Por qué no |
 |---|---|
 | Las palabras de la página tal cual | Fuga 14 de 15 palabras escondidas, incluido el texto debajo de una caja negra (§3 del Contexto) |
-| El OCR de la imagen tapada para todas las páginas | No fuga, pero acierta el 82 % de las palabras y suma de 1,2 a 1,9 s por página. Se usa solo donde no hay otra fuente segura (§4) |
+| El OCR de la imagen tapada para todas las páginas | No fuga, pero acierta el 82 % de las palabras, suma de 1,2 a 1,9 s por página, y su verificación es más débil (§7) |
+| El OCR de la imagen tapada en los escaneos con capa invisible | El mantenedor prefirió que esas páginas salgan sin texto en la 1.2, hasta demostrar que una vía con OCR es segura del todo (§4) |
 | Aceptar la capa invisible de un escaneo si hay tinta debajo | Deja pasar una capa falsa: el nombre tachado con una caja negra sobre el escaneo seguiría en la capa |
 | Una regla más floja para las tapas (más del 10 % del área, o el centro adentro) | Deja en la capa palabras con letras tapadas: con «centro adentro», la palabra entera en 89 de 186 tapas de media palabra |
 | Reemplazar el texto escondido por `[####]` de su largo | Avisa que había algo escondido y cuánto medía, y suma un texto que la imagen no muestra |
