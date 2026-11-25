@@ -2,10 +2,11 @@
 
 # ADR-244 — El PDF con texto lleva solo el texto que se ve
 
-- **Estado**: Borrador del planificador, 2026-11-25. Esperan dos cosas:
-  - la segunda ronda del spike, que mide la verificación al exportar y los
-    escaneos que ya traen una capa invisible (§4 y §7);
-  - la decisión del mantenedor sobre esos escaneos (§4).
+- **Estado**: Borrador del planificador, 2026-11-25, con las rondas 1 y 2
+  del spike. Esperan dos cosas:
+  - la tercera ronda, que fija la regla de la palabra que pisa a otra (§3)
+    y mide la calidad de detección en los escaneos con capa invisible;
+  - la decisión del mantenedor sobre esos escaneos para la 1.2 (§4).
 - **Fecha**: 2026-11-25.
 - **Decidido por**: el planificador, sobre la decisión del mantenedor del
   2026-11-23 de que el texto preservado entra en la 1.2 (`Plan_1.2.md` §3).
@@ -101,15 +102,35 @@ Una palabra nativa entra solo si su tinta cambia la imagen de la página.
   alto. Con un umbral de luma de 32 se perdía una marca de agua pálida.
 - **Dónde**: en el mismo trabajo `render-page` del export, a la escala del
   export. No es un trabajo nuevo.
-- **Cuesta** un segundo dibujo por página: unos 10 ms a 150 dpi y 30 ms en
-  una página densa, medido en Node.
-- **Falla cerrada.** Sacar el texto del segundo dibujo exige tocar una parte
-  interna de pdfjs 4.10 (`_intentStates`), que una actualización puede
-  romper. Si el filtro no saca el texto, toda palabra parecería visible. Por
-  eso cada página comprueba que el segundo dibujo de verdad no tiene texto,
-  y si no lo puede comprobar, el export falla. **Cómo se comprueba lo fija
-  la segunda ronda del spike.** Además, un test fija la versión de pdfjs: al
-  actualizarla, el test tiene que pasar de nuevo.
+- **Cuesta** un segundo dibujo por página, con las comprobaciones de abajo:
+  unos 16 ms a 150 dpi, medido en Node.
+- **El orden importa.** Sacar el texto del segundo dibujo deja la página de
+  pdfjs sin texto hasta que se limpia (`cleanup()`). El dibujo de la imagen
+  del export va antes, o con otra página; si no, la imagen sale sin texto,
+  que es lo que le pasó al arnés de la primera ronda.
+- **Falla cerrada.** Sacar el texto exige tocar una parte interna de pdfjs
+  4.10 (`_intentStates`), que una actualización puede romper. Cada página
+  comprueba cuatro cosas, medidas en la segunda ronda:
+  1. la lista filtrada no tiene operaciones de texto;
+  2. se sacaron tantas operaciones de texto como cuenta la API pública
+     `getOperatorList()`;
+  3. las demás operaciones no cambiaron;
+  4. un cuadradito testigo, agregado a la lista filtrada, aparece en el
+     segundo dibujo y no en el primero: prueba que ese dibujo salió de la
+     lista que se filtró.
+
+  Si una falla, o si la parte interna no existe, el export con texto falla
+  con el error de §7, y se puede exportar el PDF imagen. En el corpus no
+  dispararon nunca, y dispararon en todas las fallas simuladas: el filtro
+  que no se aplica, los códigos corridos, el campo que desaparece, otra
+  lista, y el filtro que saca de más, que es el que sí fugaría. Además, un
+  test fija la versión de pdfjs: al actualizarla, tiene que pasar de nuevo.
+- **Una palabra que pisa a otra.** Una palabra invisible cuya caja pisa
+  texto visible pasa la prueba, porque al sacar todo el texto su caja
+  cambia igual (fuga en 2 de 2 páginas armadas). Descartar toda palabra
+  cuya caja se pisa con otra lo cierra, a costa del 1,5 % de las palabras.
+  **La regla la fija la tercera ronda**, que mide una más fina: mirar solo
+  la parte de la caja que no pisa ninguna otra palabra.
 
 ### 4. El escaneo que ya trae una capa invisible
 
@@ -119,9 +140,11 @@ descarta entera. Y no se puede confiar en ella sin leer la foto: si alguien
 tachó un nombre dibujando una caja negra sobre el escaneo, la capa sigue
 diciendo ese nombre.
 
-- **Cómo se reconoce la página** (lo mide la segunda ronda): la prueba
-  rechaza al menos una palabra que tiene tinta debajo, y una imagen cubre al
-  menos el 80 % de la página.
+- **Cómo se reconoce la página**: la prueba rechaza al menos una palabra que
+  tiene tinta debajo, y una imagen cubre al menos el 80 % de la página. En
+  la segunda ronda cayeron las 2 páginas trampa y las 8 armadas para esto, y
+  ninguna otra. Equivocarse nunca fuga: una página que no cae pierde su
+  capa por la prueba de §3, y una que cae de más sale con OCR.
 - **Cómo se decide** (mantenedor, 2026-11-25): el mantenedor elige una
   salida para la 1.2 con los datos que hay, y se miden las dos en tiempo,
   memoria y calidad de detección (`Plan_1.2.md` §8).
@@ -132,8 +155,9 @@ diciendo ese nombre.
 - **Qué texto lleva**: lo decide el mantenedor entre dos salidas seguras.
   - **OCR al exportar**, que propone el planificador: la capa sale del OCR
     de la imagen ya tapada. Solo puede leer lo que se ve después de las
-    tapas. Cuesta de 1 a 2 s más por cada una de esas páginas, y el OCR se
-    equivoca en algunas palabras.
+    tapas: en la segunda ronda no fugó nada, tampoco de las capas falsas.
+    Cuesta de 0,3 a 4,4 s por página a 150 dpi, según cuántas palabras
+    tenga, y acierta el 80 % de las palabras de una capa buena.
   - **Sin texto**: esas páginas salen solo como imagen, como en el PDF
     imagen.
 
@@ -147,6 +171,9 @@ diciendo ese nombre.
   fragmento más ancho, como lo dibuja la imagen (ADR-074 §4). En el orden de
   lectura va donde estaba la primera palabra tapada.
 - **`redact` no lleva texto**: en la imagen hay una caja negra sin nada.
+- **Cada caja se recorta a la página.** pdfjs descarta el texto que cae
+  fuera de la hoja, así que un reemplazo que se sale perdería letras al
+  releerlo (segunda ronda).
 - **El texto escondido no deja marca.** Una palabra que no pasa la prueba de
   §3 no se reemplaza por nada, ni por `[####]`: una marca avisaría que ahí
   había algo escondido, y cuánto medía, y sumaría a la capa un texto que la
@@ -167,7 +194,7 @@ Con `pdf-lib` 1.17.1, sin dependencias nuevas (ADR-241):
 - **Contenido comprimido.**
 - **Lo medido**: la capa se relee en su lugar, con una coincidencia de cajas
   de 0,99; la leen pdfjs y poppler; la imagen queda idéntica a la del PDF
-  imagen en 558 de 558 páginas, y el archivo crece un 3 %.
+  imagen en 558 de 558 páginas, y el archivo crece un 1,2 %.
 - **Se descartó la Helvetica estándar**: no codifica el 1,7 % de las
   palabras del corpus, todas en escrituras no latinas, y `pdf-lib` corta con
   un error. Se relee peor: 0,81.
@@ -177,22 +204,32 @@ Con `pdf-lib` 1.17.1, sin dependencias nuevas (ADR-241):
 Antes de entregar el archivo, la app relee la capa del PDF exportado y no
 lo entrega si algo no da. Es independiente de quien la escribió.
 
-- **Qué verifica**:
-  - ninguna palabra releída cae sobre una tapa, salvo el texto del reemplazo
-    de esa tapa;
-  - el texto releído es el que se planeó.
+- **Qué verifica**, con las reglas que midió la segunda ronda:
+  - **Ninguna palabra del original queda bajo una tapa.** Una palabra
+    releída que cae sobre una o más tapas pasa solo si es el reemplazo de
+    alguna de ellas, un pedazo contiguo de ese reemplazo (pdfjs relee
+    partido el texto de una caja angosta), o una palabra planeada vecina que
+    pdfjs le pegó al reemplazo. En `redact`, ninguna.
+  - **El texto releído es el planeado**, comparado como bolsa de
+    caracteres: pdfjs pega palabras y reordena el texto bidireccional, así
+    que una comparación exacta marca de más.
+  - **Lo medido**: cero falsas alarmas en las 279 páginas limpias, también
+    con tapas que se pisan, y las 100 páginas malas marcadas, incluida una
+    palabra del original pegada al reemplazo.
+  - **En las páginas de §4 con OCR** solo vale la comparación con lo
+    planeado: el OCR no relee el reemplazo exacto, así que la regla de las
+    tapas marcaría casi todo. Esa capa sale de la imagen ya tapada, así que
+    no puede llevar texto que la imagen no tiene, salvo un defecto del
+    escritor, y eso lo ve la comparación.
 - **Qué la lee**: el PDF Engine, que ya tiene pdfjs, por un puerto que
   implementa el Orchestrator, como `RenderPageProvider` (ADR-059 §5). El
   Export Engine sigue sin pdfjs.
 - **Si falla**, el export falla con un error nuevo,
   `EXPORT_PDF_TEXT_VERIFY_FAILED`, sin el valor, y el documento vuelve a la
   etapa en que estaba, como el Word limpio (ADR-243 §9, punto 8).
-- **Lo que falta**: en la primera ronda marcó de más en 23 de 279 páginas
-  limpias. Las causas fueron tapas que se pisan y el texto de un reemplazo
-  en una caja angosta, que pdfjs relee partido. **La regla exacta la fija la
-  segunda ronda del spike**, con cero falsos positivos como condición. Para
-  las páginas de §4 con OCR, la verificación es otra, y también la fija la
-  ronda.
+- **Lo que no ve**: una palabra del original que además es un pedazo del
+  texto del reemplazo. Pasó en 1 de 461 tapas, con un nombre inventado que
+  repetía un apellido; esa palabra ya está a la vista en el reemplazo.
 
 ### 8. La garantía
 
@@ -214,11 +251,14 @@ lo entrega si algo no da. Es independiente de quien la escribió.
 Solo al exportar, y solo con `pdf-text`. La importación, el análisis, la
 vista previa y el PDF imagen no cambian.
 
-- **Página con texto nativo**: unos 12 ms más por página, con el segundo
-  dibujo, la capa y la verificación, medido en Node.
+- **Página con texto nativo**: unos 50 ms más por página, medido en Node.
+  Son 16 ms del segundo dibujo con sus comprobaciones, menos de 1 ms de la
+  capa, y 35 ms de releer la página con el PDF Engine, que da las cajas por
+  palabra que necesita §7. El dibujo y el JPEG de la imagen ya cuestan unos
+  43 ms, así que el export con texto tarda algo más del doble por página.
 - **Página escaneada**: casi nada.
-- **Escaneo con capa invisible, con OCR al exportar**: de 1 a 2 s más por
-  página.
+- **Escaneo con capa invisible, con OCR al exportar**: de 0,3 a 4,4 s más
+  por página a 150 dpi.
 
 ### 10. Lo que este ADR no decide
 

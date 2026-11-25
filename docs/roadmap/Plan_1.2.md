@@ -1065,7 +1065,8 @@ texto escondido. Las palabras salen del PDF Engine real.
   - La propia se relee en su lugar: coincidencia de cajas de 0,99 contra
     0,81.
   - Las dos las leen pdfjs y poppler. La imagen queda idéntica a la del PDF
-    imagen en 558 de 558 páginas, y el archivo crece un 3 %.
+    imagen en 558 de 558 páginas, y el archivo crece un 1,2 % (la ronda 1
+    decía 3 %; lo corrigió la ronda 2).
 - **La verificación al exportar todavía no sirve tal cual.** Relee el PDF y
   busca palabras bajo las tapas. Encuentra las 80 páginas armadas mal a
   propósito, pero marca de más en 23 de 279 páginas limpias. Las causas son
@@ -1074,6 +1075,43 @@ texto escondido. Las palabras salen del PDF Engine real.
 - **Sin medir**: documentos reales, Acrobat, Chrome y el visor de la app,
   PDF/A, el render real de Electron y el OCR con su detección de
   orientación.
+
+**Ronda 2 (2026-11-25)**, informe en
+[`formatos/Texto_Preservado_R2_2026-11-25.md`](./formatos/Texto_Preservado_R2_2026-11-25.md):
+
+- **La verificación queda sin falsas alarmas.** Una palabra releída sobre
+  una tapa pasa si es el reemplazo de alguna de las tapas que la cubren, un
+  pedazo de ese reemplazo que pdfjs partió, o una palabra vecina que pdfjs
+  le pegó. Así no marca ninguna de las 279 páginas limpias, y sigue
+  marcando las 100 malas, también una palabra del original pegada al
+  reemplazo. Comparar el texto releído con el planeado letra por letra, sin
+  mirar el orden, tampoco da falsas alarmas.
+- **Una tapa que se sale de la hoja pierde su texto**: pdfjs descarta lo que
+  cae afuera. La capa recorta cada caja a la página.
+- **Los escaneos con capa invisible se reconocen** (la prueba rechaza una
+  palabra con tinta debajo, y una imagen cubre el 80 % de la página): caen
+  las 2 páginas trampa y las 8 armadas para esto, y ninguna otra. Con el OCR
+  de la imagen tapada en esas páginas no se fuga nada, ni de las capas
+  falsas. La fidelidad en las capas buenas baja a 0,80. Cuesta de 0,3 a
+  4,4 s por página a 150 dpi, según cuántas palabras tenga.
+- **La prueba de visibilidad puede fallar cerrada.** Cuatro comprobaciones
+  por página, una de ellas con un cuadradito testigo que solo tiene que
+  aparecer en el segundo dibujo. No disparan en el corpus y disparan en
+  todas las fallas simuladas. La prueba pasa de 10 a 16 ms por página.
+  - Si el filtro no saca el texto, la capa queda vacía, sin fuga. La fuga
+    aparece si saca de más, y ahí también disparan.
+  - El segundo dibujo deja la página de pdfjs sin texto hasta limpiarla.
+    El dibujo del export tiene que ir antes, o con otra página.
+- **Una fuga nueva**: una palabra invisible cuya caja pisa texto visible
+  pasa como visible, porque al sacar todo el texto su caja cambia igual.
+  Descartar las palabras que se pisan con otra lo cierra, a costa del 1,5 %
+  de las palabras. Una regla más fina la mide la ronda 3.
+- **Correcciones a la ronda 1**: las imágenes del primer arnés salieron sin
+  texto. Con las buenas, la capa suma el 1,2 % al archivo y no el 3 %.
+
+**Ronda 3** (en curso): la calidad de detección en los escaneos con capa
+invisible, buena, mala y falsa, leyendo la capa o la imagen con OCR; y una
+regla más fina para la palabra invisible que pisa texto visible.
 
 ## 9. Frentes, orden tentativo
 
