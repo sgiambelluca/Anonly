@@ -35,6 +35,9 @@ relevamiento del código y una investigación de librerías (§4 y §5).
   `core/OOXML.md` y las precisiones de su §9. Los dos números del techo
   esperan la medición de memoria.
 - **Falta auditar los specs** de los ADR-238 a 243 antes de implementar.
+- **ADR-244**, el PDF con texto: borrador del planificador, 2026-11-25.
+  Espera la segunda ronda del spike y la decisión del mantenedor sobre los
+  escaneos que ya traen una capa invisible (§8.10).
 - Los demás ADR esperan sus spikes (§10).
 - **El mantenedor pidió cerrar todos los puntos de la 1.2 en los docs**
   (mediciones, ADR y specs) antes de abrir el PR de docs a develop y de
@@ -336,6 +339,11 @@ página.
   - las palabras del PDF que pasan una prueba de visibilidad sobre la
     página dibujada;
   - un OCR de la imagen ya tapada.
+- **Hallazgo aparte, que pasa desde la 1.0** (§8.10): en un escaneo que ya
+  trae una capa de texto invisible, los detectores leen esa capa y no lo que
+  se ve en la imagen. Con una capa falsa o mala, un dato visible puede
+  quedar sin detectar, también en el PDF imagen. No es del ADR del texto
+  preservado; falta decidir cuándo se trata.
 
 ### 6.5 PDF/A
 
@@ -1090,7 +1098,7 @@ Se numeran al escribirse.
 | Office con contraseña, con el descifrado, el evento y el reintento: **ADR-242**, aceptado | `Contracts.md`, `Orchestrator.md`, `Convert_Engine.md` |
 | Imágenes sueltas: qué formatos y cómo se decodifican: **ADR-239**, aceptado | `Contracts.md`, `Convert_Engine.md` (nuevo), `Orchestrator.md`, `05_Worker_Architecture.md`, `06_Pipeline.md` |
 | El Word limpio: se limpia al entrar, qué significa «no recuperable» y su verificación: **ADR-243**, aceptado | ADR-009, ADR-240 §5, ADR-242, `Contracts.md`, `Convert_Engine.md`, `Export_Engine.md`, `Render_Engine.md`, `Orchestrator.md`, `08_Security_Model.md`, `core/OOXML.md` (nuevo) |
-| El PDF con texto preservado | ADR-004, ADR-009, ADR-059 §4, `08_Security_Model.md` S-3 |
+| El PDF con texto preservado: **ADR-244**, borrador | ADR-004, ADR-009, ADR-059 §4, `08_Security_Model.md` S-3, `Contracts.md`, `Render_Engine.md`, `Export_Engine.md`, `PDF_Engine.md`, `Orchestrator.md` |
 | PDF/A, con la decisión reabierta de ADR-241 | ADR-009 |
 | Seguir con pdf-lib o pasar al fork: **ADR-241**, aceptado. Sigue `pdf-lib`, y se reabre en el ADR de PDF/A | — |
 | La interfaz de carga y de exportar en la 1.2 | `Components.md`, `UX_Guidelines.md` |
