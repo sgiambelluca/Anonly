@@ -2,10 +2,9 @@
 
 # ADR-244 — El PDF con texto lleva solo el texto que se ve
 
-- **Estado**: Borrador del planificador, 2026-11-25, con las rondas 1 a 3
+- **Estado**: Borrador del planificador, 2026-11-25, con las rondas 1 a 4
   del spike, y la decisión del mantenedor sobre los escaneos con capa
-  invisible (§4). Espera la cuarta ronda, que mide la palabra con texto
-  escondido adentro (§3).
+  invisible (§4). Espera que el mantenedor lo acepte.
 - **Fecha**: 2026-11-25.
 - **Decidido por**: el planificador, sobre la decisión del mantenedor del
   2026-11-23 de que el texto preservado entra en la 1.2 (`Plan_1.2.md` §3).
@@ -101,8 +100,8 @@ Una palabra nativa entra solo si su tinta cambia la imagen de la página.
   alto. Con un umbral de luma de 32 se perdía una marca de agua pálida.
 - **Dónde**: en el mismo trabajo `render-page` del export, a la escala del
   export. No es un trabajo nuevo.
-- **Cuesta** un segundo dibujo por página, con las comprobaciones de abajo
-  y el área propia: unos 26 ms a 150 dpi, medido en Node.
+- **Cuesta** un segundo dibujo por página, con las comprobaciones, el área
+  propia y los tramos de abajo: unos 30 ms a 150 dpi, medido en Node.
 - **El orden importa.** Sacar el texto del segundo dibujo deja la página de
   pdfjs sin texto hasta que se limpia (`cleanup()`). El dibujo de la imagen
   del export va antes, o con otra página; si no, la imagen sale sin texto,
@@ -129,20 +128,46 @@ Una palabra nativa entra solo si su tinta cambia la imagen de la página.
   todo el texto su caja cambia igual. En la tercera ronda fugaba desde un
   solape del 25 %, en 24 de 42 páginas trampa.
   - **La regla**: la comparación se hace solo en los píxeles de la caja que
-    no caen en la caja de ninguna otra palabra, redondeada hacia afuera, con
-    los mismos umbrales que arriba, medidos sobre esa área. Si a la palabra
+    no caen en la caja de ninguna otra palabra. Las cajas de las otras se
+    ensanchan 2 px a 150 dpi, cerca de 1 pt, y se redondean hacia afuera.
+    Los umbrales son los de arriba, medidos sobre esa área. Si a la palabra
     no le queda ningún píxel propio, no entra.
-  - **Lo medido**: cierra las 42 trampas, de 1 a 100 % de solape, con tres
-    formas de invisibilidad y fondo claro y oscuro. Pierde 17 de 13.864
-    palabras legítimas (0,12 %, en 3 páginas), y la palabra visible de abajo
-    se conserva. No deja pasar ninguna palabra que la prueba sola descarta.
+  - **Por qué el margen**: con Courier y Times, a 12 y 24 pt, la tinta de
+    una letra visible se sale un poco de su caja y cae en el área propia de
+    la invisible. Sin margen fugaba en 48 de 144 páginas de la cuarta ronda;
+    con 2 px, en ninguna.
+  - **Lo medido**: cierra las 42 trampas de la tercera ronda, de 1 a 100 %
+    de solape, con tres formas de invisibilidad y fondo claro y oscuro. En
+    la cuarta cierra también el solape de costado, dos o tres invisibles
+    apiladas, el texto girado 90, 180 y 270°, y la invisible sobre una
+    imagen o un dibujo. La palabra visible de abajo se conserva. No deja
+    pasar ninguna palabra que la prueba sola descarta.
   - **Por qué sin un mínimo de área propia**: pedir el 25 % o más no cierra
     ninguna trampa más y pierde más palabras, del 0,17 al 1,15 %.
-- **Una palabra con texto escondido adentro** (la mide la cuarta ronda). Si
-  una palabra invisible está en la misma línea que una visible, el PDF
-  Engine las funde en una sola, y la prueba la deja pasar entera, con el
-  texto escondido. La cuarta ronda mide esa fuga y una prueba por tramo de
-  la palabra: si un tramo no se ve, la palabra entera no entra.
+- **Una palabra con texto escondido adentro: se mira cada letra.** Si un
+  texto invisible está pegado a uno visible en la misma línea, el PDF Engine
+  los funde en una sola palabra, y la prueba y el área propia la dejaban
+  pasar entera: 72 de 72 páginas trampa en la cuarta ronda.
+  - **La regla**: la caja de la palabra se parte a lo largo en un tramo por
+    carácter, todos del mismo ancho. Cada tramo tiene que pasar los mismos
+    umbrales que la palabra. Si uno no pasa, la palabra entera no entra,
+    también su parte visible.
+  - **Lo medido**: 0 de 72. Con tramos de 2 caracteres también, pero un
+    tramo de 3 ya deja pasar 3 letras escondidas en el medio de una palabra,
+    así que con tramos de 2 podría pasar una sola. Se usa el de 1.
+  - **Lo que no se midió**: el ancho real de cada glifo, que haría exacto
+    el tramo; una sola letra escondida; glifos vacíos dentro de un mismo
+    operador de texto; y el texto escondido por recorte, máscara o capa
+    opcional pegado a uno visible. Los tests de la implementación suman
+    esas páginas trampa.
+- **Lo que pierden las dos reglas juntas**: 52 de 13.864 palabras
+  legítimas, el 0,38 %, en 16 páginas. Son renglones con interlineado más
+  chico que la caja, un texto con sombra dibujado dos veces, y las
+  etiquetas del eje de un gráfico. Siguen en la imagen; solo no se pueden
+  copiar.
+- **Lo que una prueba de píxeles no puede cerrar, y no tiene que**: el
+  texto del color del fondo sobre una imagen o un dibujo se ve, porque se
+  le nota el contorno. Es tinta, y entra.
 
 ### 4. El escaneo que ya trae una capa invisible
 
@@ -176,8 +201,13 @@ diciendo ese nombre.
     todo lo que pierde son correos, porque el OCR lee mal la `@`. Leyendo
     una capa con el 5 % de letras mal encuentran el 77,7 %; con el 15 %, el
     44,9 %; con una capa falsa, el 3,8 %, y tapan 627 datos que no están en
-    la imagen. El OCR cuesta unos 4 s por página a 300 dpi. La cuarta ronda
-    mide detectar con las dos fuentes a la vez.
+    la imagen. El OCR cuesta unos 4 s por página a 300 dpi.
+  - **Lo que midió la cuarta ronda**: detectando con la capa y con el OCR a
+    la vez, la app encuentra el 100 % con la capa buena, el 98,1 % y el
+    94,1 % con las malas, y el 92,6 % con la falsa. Con la falsa tapa el
+    4,55 % de la hoja donde no hay dato, contra el 1,83 % del OCR solo.
+    Comparar el texto de la capa con el del OCR separa la capa buena de las
+    demás en estas páginas, pero con escaneos reales ese corte se movería.
 - **Cómo se siguió midiendo** (mantenedor, 2026-11-25): las dos salidas se
   miden en tiempo, memoria y calidad de detección (`Plan_1.2.md` §8).
 - **Es una decisión reabrible.** Se revisa al diseñar los varios documentos
@@ -282,8 +312,9 @@ lo entrega si algo no da. Es independiente de quien la escribió.
 Solo al exportar, y solo con `pdf-text`. La importación, el análisis, la
 vista previa y el PDF imagen no cambian.
 
-- **Página con texto nativo**: unos 60 ms más por página, medido en Node.
-  Son 26 ms del segundo dibujo con sus comprobaciones y el área propia,
+- **Página con texto nativo**: unos 65 ms más por página, medido en Node.
+  Son 30 ms del segundo dibujo con sus comprobaciones, el área propia y los
+  tramos,
   menos de 1 ms de la capa, y 35 ms de releer la página con el PDF Engine,
   que da las cajas por palabra que necesita §7. El dibujo y el JPEG de la
   imagen ya cuestan unos 43 ms, así que el export con texto tarda unas dos
@@ -328,7 +359,8 @@ Cambian, después de que el mantenedor acepte:
 | Las palabras de la página tal cual | Fuga 14 de 15 palabras escondidas, incluido el texto debajo de una caja negra (§3 del Contexto) |
 | El OCR de la imagen tapada para todas las páginas | No fuga, pero acierta el 82 % de las palabras, suma de 1,2 a 1,9 s por página, y su verificación es más débil (§7) |
 | El OCR de la imagen tapada en los escaneos con capa invisible | El mantenedor prefirió que esas páginas salgan sin texto en la 1.2, hasta demostrar que una vía con OCR es segura del todo (§4) |
-| Descartar toda palabra cuya caja se pisa con otra | Pierde el 1,5 % de las palabras, y también la palabra visible de abajo; el área propia cierra las mismas trampas perdiendo el 0,12 % (§3) |
+| Descartar toda palabra cuya caja se pisa con otra | Pierde el 1,5 % de las palabras, y también la palabra visible de abajo; el área propia cierra las mismas trampas perdiendo el 0,17 % (§3) |
+| Tramos de 2 a 4 caracteres dentro de la palabra | Pierden menos palabras, pero un tramo que mezcla letras visibles y escondidas tiene tinta y pasa: con 3, fugaban 12 de 72 trampas (§3) |
 | Aceptar la capa invisible de un escaneo si hay tinta debajo | Deja pasar una capa falsa: el nombre tachado con una caja negra sobre el escaneo seguiría en la capa |
 | Una regla más floja para las tapas (más del 10 % del área, o el centro adentro) | Deja en la capa palabras con letras tapadas: con «centro adentro», la palabra entera en 89 de 186 tapas de media palabra |
 | Reemplazar el texto escondido por `[####]` de su largo | Avisa que había algo escondido y cuánto medía, y suma un texto que la imagen no muestra |

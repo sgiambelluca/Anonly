@@ -1146,14 +1146,43 @@ detectores reales de la app corriendo en Node.
   una visible, el PDF Engine las funde en una sola palabra, y la prueba la
   deja pasar entera. No se midió.
 
-**Ronda 4** (en curso):
+**Ronda 4 (2026-11-25)**, informe en
+[`formatos/Texto_Preservado_R4_2026-11-25.md`](./formatos/Texto_Preservado_R4_2026-11-25.md).
+También es todo sintético.
 
-- la palabra con texto escondido adentro, con una prueba por tramo de la
-  palabra;
-- más casos para el área propia: solape horizontal, varias palabras
-  invisibles, texto girado;
-- detectar con la capa y con el OCR a la vez en los escaneos con capa, y si
-  la concordancia entre los dos separa la capa buena de las demás.
+- **La palabra con texto escondido adentro fugaba siempre.** El PDF Engine
+  funde en una sola palabra el texto invisible pegado a uno visible, en la
+  misma línea, en las 72 páginas trampa. La prueba de visibilidad y el área
+  propia la dejaban pasar en las 72.
+- **Mirar cada letra la cierra.** La caja de la palabra se parte en un tramo
+  por carácter, de ancho parejo, y si un tramo no se ve, la palabra entera
+  no entra: 0 de 72. Con tramos de 3 o 4 caracteres todavía fugaba.
+- **El área propia necesitaba un margen.** Con otras fuentes y tamaños, la
+  tinta de una letra visible se sale un poco de su caja y cae en el área
+  propia de la invisible: fugaba en 48 de 144 páginas. Ensanchando 2 px las
+  cajas de las otras palabras, 0 de 144. Sin fugas también con solape de
+  costado, varias invisibles apiladas, texto girado, e invisibles sobre una
+  imagen o un dibujo.
+- **Lo que cuesta**: las dos reglas juntas pierden 52 de 13.864 palabras
+  legítimas (0,38 %): renglones apretados, texto con sombra y etiquetas de
+  un gráfico. La prueba pasa a unos 30 ms por página.
+- **Detectar con la capa y con el OCR a la vez**, en los escaneos con capa:
+
+  | Lee | Capa buena | Capa con 5 % de letras mal | Con 15 % | Capa falsa |
+  |---|---|---|---|---|
+  | La capa | 100 % | 77,7 % | 44,9 % | 3,8 % |
+  | El OCR | 93,1 % | 93,1 % | 93,1 % | 93,1 % |
+  | Las dos | 100 % | 98,1 % | 94,1 % | 92,6 % |
+
+  - Con una capa falsa, leer las dos tapa el 4,55 % de la hoja donde no hay
+    dato, contra el 1,83 % del OCR solo.
+  - Comparar el texto de la capa con el del OCR separa la capa buena de las
+    demás sin errores en estas páginas. Con escaneos reales, el OCR trae
+    errores propios, y ese corte se movería.
+  - En los dos casos, el OCR corre en todas esas páginas, a unos 4 s cada
+    una.
+- **Los 36 DNI de más de la ronda 3** eran el importe `1.250.000` de las
+  páginas armadas.
 
 ## 9. Frentes, orden tentativo
 
