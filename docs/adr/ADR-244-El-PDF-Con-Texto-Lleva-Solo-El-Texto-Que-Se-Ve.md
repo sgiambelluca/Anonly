@@ -2,10 +2,10 @@
 
 # ADR-244 — El PDF con texto lleva solo el texto que se ve
 
-- **Estado**: Borrador del planificador, 2026-11-25, con las rondas 1 y 2
+- **Estado**: Borrador del planificador, 2026-11-25, con las rondas 1 a 3
   del spike, y la decisión del mantenedor sobre los escaneos con capa
-  invisible (§4). Espera la tercera ronda, que fija la regla de la palabra
-  que pisa a otra (§3) y mide la calidad de detección en esos escaneos.
+  invisible (§4). Espera la cuarta ronda, que mide la palabra con texto
+  escondido adentro (§3).
 - **Fecha**: 2026-11-25.
 - **Decidido por**: el planificador, sobre la decisión del mantenedor del
   2026-11-23 de que el texto preservado entra en la 1.2 (`Plan_1.2.md` §3).
@@ -101,8 +101,8 @@ Una palabra nativa entra solo si su tinta cambia la imagen de la página.
   alto. Con un umbral de luma de 32 se perdía una marca de agua pálida.
 - **Dónde**: en el mismo trabajo `render-page` del export, a la escala del
   export. No es un trabajo nuevo.
-- **Cuesta** un segundo dibujo por página, con las comprobaciones de abajo:
-  unos 16 ms a 150 dpi, medido en Node.
+- **Cuesta** un segundo dibujo por página, con las comprobaciones de abajo
+  y el área propia: unos 26 ms a 150 dpi, medido en Node.
 - **El orden importa.** Sacar el texto del segundo dibujo deja la página de
   pdfjs sin texto hasta que se limpia (`cleanup()`). El dibujo de la imagen
   del export va antes, o con otra página; si no, la imagen sale sin texto,
@@ -124,12 +124,25 @@ Una palabra nativa entra solo si su tinta cambia la imagen de la página.
   que no se aplica, los códigos corridos, el campo que desaparece, otra
   lista, y el filtro que saca de más, que es el que sí fugaría. Además, un
   test fija la versión de pdfjs: al actualizarla, tiene que pasar de nuevo.
-- **Una palabra que pisa a otra.** Una palabra invisible cuya caja pisa
-  texto visible pasa la prueba, porque al sacar todo el texto su caja
-  cambia igual (fuga en 2 de 2 páginas armadas). Descartar toda palabra
-  cuya caja se pisa con otra lo cierra, a costa del 1,5 % de las palabras.
-  **La regla la fija la tercera ronda**, que mide una más fina: mirar solo
-  la parte de la caja que no pisa ninguna otra palabra.
+- **Una palabra que pisa a otra: se mira solo su área propia.** Una palabra
+  invisible cuya caja pisa texto visible pasaba la prueba, porque al sacar
+  todo el texto su caja cambia igual. En la tercera ronda fugaba desde un
+  solape del 25 %, en 24 de 42 páginas trampa.
+  - **La regla**: la comparación se hace solo en los píxeles de la caja que
+    no caen en la caja de ninguna otra palabra, redondeada hacia afuera, con
+    los mismos umbrales que arriba, medidos sobre esa área. Si a la palabra
+    no le queda ningún píxel propio, no entra.
+  - **Lo medido**: cierra las 42 trampas, de 1 a 100 % de solape, con tres
+    formas de invisibilidad y fondo claro y oscuro. Pierde 17 de 13.864
+    palabras legítimas (0,12 %, en 3 páginas), y la palabra visible de abajo
+    se conserva. No deja pasar ninguna palabra que la prueba sola descarta.
+  - **Por qué sin un mínimo de área propia**: pedir el 25 % o más no cierra
+    ninguna trampa más y pierde más palabras, del 0,17 al 1,15 %.
+- **Una palabra con texto escondido adentro** (la mide la cuarta ronda). Si
+  una palabra invisible está en la misma línea que una visible, el PDF
+  Engine las funde en una sola, y la prueba la deja pasar entera, con el
+  texto escondido. La cuarta ronda mide esa fuga y una prueba por tramo de
+  la palabra: si un tramo no se ve, la palabra entera no entra.
 
 ### 4. El escaneo que ya trae una capa invisible
 
@@ -156,8 +169,15 @@ diciendo ese nombre.
   - **Se sigue buscando una vía mejor.** La que más promete es leer esas
     páginas con OCR al importar, como un escaneo sin capa: tendrían texto
     con las mismas garantías y la misma verificación que cualquier escaneo,
-    y los detectores leerían lo que se ve. La tercera ronda del spike mide
-    su calidad de detección y su costo.
+    y los detectores leerían lo que se ve.
+  - **Lo que midió la tercera ronda**, con 40 páginas sintéticas y 677
+    datos plantados: leyendo la capa buena, los detectores encuentran el
+    100 % de los datos; leyendo el OCR de la imagen, el 93,1 %, y casi
+    todo lo que pierde son correos, porque el OCR lee mal la `@`. Leyendo
+    una capa con el 5 % de letras mal encuentran el 77,7 %; con el 15 %, el
+    44,9 %; con una capa falsa, el 3,8 %, y tapan 627 datos que no están en
+    la imagen. El OCR cuesta unos 4 s por página a 300 dpi. La cuarta ronda
+    mide detectar con las dos fuentes a la vez.
 - **Cómo se siguió midiendo** (mantenedor, 2026-11-25): las dos salidas se
   miden en tiempo, memoria y calidad de detección (`Plan_1.2.md` §8).
 - **Es una decisión reabrible.** Se revisa al diseñar los varios documentos
@@ -262,11 +282,12 @@ lo entrega si algo no da. Es independiente de quien la escribió.
 Solo al exportar, y solo con `pdf-text`. La importación, el análisis, la
 vista previa y el PDF imagen no cambian.
 
-- **Página con texto nativo**: unos 50 ms más por página, medido en Node.
-  Son 16 ms del segundo dibujo con sus comprobaciones, menos de 1 ms de la
-  capa, y 35 ms de releer la página con el PDF Engine, que da las cajas por
-  palabra que necesita §7. El dibujo y el JPEG de la imagen ya cuestan unos
-  43 ms, así que el export con texto tarda algo más del doble por página.
+- **Página con texto nativo**: unos 60 ms más por página, medido en Node.
+  Son 26 ms del segundo dibujo con sus comprobaciones y el área propia,
+  menos de 1 ms de la capa, y 35 ms de releer la página con el PDF Engine,
+  que da las cajas por palabra que necesita §7. El dibujo y el JPEG de la
+  imagen ya cuestan unos 43 ms, así que el export con texto tarda unas dos
+  veces y media por página.
 - **Página escaneada**: casi nada.
 - **Escaneo con capa invisible**: nada más que la prueba de §3, porque sale
   sin texto (§4).
@@ -279,7 +300,9 @@ vista previa y el PDF imagen no cambian.
   el ADR de la interfaz.
 - **Que los detectores lean un escaneo con capa invisible desde esa capa.**
   Pasa desde la 1.0, también en el PDF imagen: con una capa falsa o mala, la
-  app detecta sobre la capa y no sobre lo que se ve. Se anota aparte.
+  app detecta sobre la capa y no sobre lo que se ve. Se anota aparte. La
+  tercera ronda le puso números (§4): con una capa falsa la app encuentra el
+  3,8 % de los datos de la imagen.
 
 ## Consecuencias
 
@@ -305,6 +328,7 @@ Cambian, después de que el mantenedor acepte:
 | Las palabras de la página tal cual | Fuga 14 de 15 palabras escondidas, incluido el texto debajo de una caja negra (§3 del Contexto) |
 | El OCR de la imagen tapada para todas las páginas | No fuga, pero acierta el 82 % de las palabras, suma de 1,2 a 1,9 s por página, y su verificación es más débil (§7) |
 | El OCR de la imagen tapada en los escaneos con capa invisible | El mantenedor prefirió que esas páginas salgan sin texto en la 1.2, hasta demostrar que una vía con OCR es segura del todo (§4) |
+| Descartar toda palabra cuya caja se pisa con otra | Pierde el 1,5 % de las palabras, y también la palabra visible de abajo; el área propia cierra las mismas trampas perdiendo el 0,12 % (§3) |
 | Aceptar la capa invisible de un escaneo si hay tinta debajo | Deja pasar una capa falsa: el nombre tachado con una caja negra sobre el escaneo seguiría en la capa |
 | Una regla más floja para las tapas (más del 10 % del área, o el centro adentro) | Deja en la capa palabras con letras tapadas: con «centro adentro», la palabra entera en 89 de 186 tapas de media palabra |
 | Reemplazar el texto escondido por `[####]` de su largo | Avisa que había algo escondido y cuánto medía, y suma un texto que la imagen no muestra |

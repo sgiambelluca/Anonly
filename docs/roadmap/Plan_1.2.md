@@ -1110,9 +1110,50 @@ texto escondido. Las palabras salen del PDF Engine real.
 - **Correcciones a la ronda 1**: las imágenes del primer arnés salieron sin
   texto. Con las buenas, la capa suma el 1,2 % al archivo y no el 3 %.
 
-**Ronda 3** (en curso): la calidad de detección en los escaneos con capa
-invisible, buena, mala y falsa, leyendo la capa o la imagen con OCR; y una
-regla más fina para la palabra invisible que pisa texto visible.
+**Ronda 3 (2026-11-25)**, informe en
+[`formatos/Texto_Preservado_R3_2026-11-25.md`](./formatos/Texto_Preservado_R3_2026-11-25.md).
+Es todo sintético: 40 páginas escaneadas con 677 datos plantados, con los
+detectores reales de la app corriendo en Node.
+
+- **Detección en un escaneo con capa invisible**: qué porcentaje de los
+  datos encuentra la app, según de dónde lea el texto.
+
+  | Lee | Capa buena | Capa con 5 % de letras mal | Con 15 % | Capa falsa |
+  |---|---|---|---|---|
+  | La capa | 100 % | 77,7 % | 44,9 % | 3,8 % |
+  | El OCR de la imagen | 93,1 % | 93,1 % | 93,1 % | 93,1 % |
+
+  - Con la capa buena no se pierde nada. Lo que pierde el OCR son casi todos
+    correos: lee mal la `@` en 45 de 107.
+  - En la capa mala, un solo carácter mal ya pierde un DNI o un CUIT.
+  - La capa falsa, además, hace tapar 627 datos que no están en la imagen.
+  - Leer la página con OCR cuesta unos 4 s por página a 300 dpi. Los
+    detectores cuestan lo mismo con cualquier fuente.
+  - El OCR rinde aquí mejor que en los escaneos de la ronda 1: el 93 % es
+    una cota optimista.
+- **La palabra invisible que pisa texto visible queda cerrada** mirando solo
+  el área propia de cada caja, la que no cae en la caja de ninguna otra
+  palabra.
+  - Con la prueba de visibilidad sola fugaba desde un solape del 25 %: 24
+    de 42 páginas trampa.
+  - El área propia cierra las 42, de 1 a 100 % de solape, y pierde 17 de
+    13.864 palabras legítimas (0,12 %). La palabra visible de abajo se
+    conserva.
+  - Descartar las palabras que se pisan también cierra las 42, pero pierde
+    el 1,5 % y además la palabra visible.
+  - La prueba pasa a unos 26 ms por página.
+- **Un hueco nuevo**: si una palabra invisible está en la misma línea que
+  una visible, el PDF Engine las funde en una sola palabra, y la prueba la
+  deja pasar entera. No se midió.
+
+**Ronda 4** (en curso):
+
+- la palabra con texto escondido adentro, con una prueba por tramo de la
+  palabra;
+- más casos para el área propia: solape horizontal, varias palabras
+  invisibles, texto girado;
+- detectar con la capa y con el OCR a la vez en los escaneos con capa, y si
+  la concordancia entre los dos separa la capa buena de las demás.
 
 ## 9. Frentes, orden tentativo
 
