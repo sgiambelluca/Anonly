@@ -122,6 +122,12 @@ diciendo ese nombre.
 - **Cómo se reconoce la página** (lo mide la segunda ronda): la prueba
   rechaza al menos una palabra que tiene tinta debajo, y una imagen cubre al
   menos el 80 % de la página.
+- **Cómo se decide** (mantenedor, 2026-11-25): primero se miden las dos
+  salidas en tiempo, memoria y calidad de detección (`Plan_1.2.md` §8). La
+  1.2 sale con la que elija el mantenedor con esos números, y el camino de
+  fondo se decide al diseñar los varios documentos de la 1.3: con varios
+  documentos en memoria, volver a cargar el OCR al exportar puede no ser
+  eficiente (`Roadmap_1.x.md` §6).
 - **Qué texto lleva**: lo decide el mantenedor entre dos salidas seguras.
   - **OCR al exportar**, que propone el planificador: la capa sale del OCR
     de la imagen ya tapada. Solo puede leer lo que se ve después de las

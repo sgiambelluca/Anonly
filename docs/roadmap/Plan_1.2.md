@@ -95,6 +95,7 @@ trabajo, no entregas.
 | **ADR-243 queda aceptado**: el Word se limpia al entrar y el Word limpio sale de ese paquete, con su verificación (§8.9). Las imágenes vectoriales quedan como vectoriales, para que los detectores vean su texto; si hay que tapar algo adentro de una, ese Word no se exporta y se ofrece el PDF | 11-24 |
 | **El techo del Word limpio es el de memoria de la app** (3,0 GB, ADR-192), no un número fijo de caracteres: el millón que proponía el borrador era una limitación importante. En un Word grande se cierra el conversor antes de alinear, y el alineador de la implementación ocupa menos que el del prototipo. El número sale de la medición de memoria con documentos convertidos (§8). Es por documento y no se acumula (ADR-243 §3) | 11-24 |
 | **En la 1.2, el conversor tiene que andar; optimizarlo viene después.** Hacer LibreOffice más rápido y liviano según lo que la app necesita es trabajo de una versión posterior (§11) | 11-24 |
+| **El escaneo que ya trae una capa invisible, en el PDF con texto, se decide con números**: antes de elegir entre OCR al exportar y dejar esas páginas sin texto, se miden las dos en tiempo, memoria y calidad de detección (§8). El camino de fondo lo decide el mantenedor al diseñar los varios documentos de la 1.3, porque con varios documentos en memoria volver a cargar el OCR al exportar puede no ser eficiente (`Roadmap_1.x.md` §6). La 1.2 sale con una de las dos, elegida con la medición (ADR-244 §4) | 11-25 |
 | **Una página tapada entera, en el Word limpio, se tapa palabra por palabra**: cada palabra de esa página pasa a `█` de su largo y cada imagen que dibuja se tapa entera, como la página negra del PDF. Si algo de esa página no se ubica en el XML, el Word no sale y se ofrece el PDF (ADR-243 §9, punto 7) | 11-24 |
 | **En el Word limpio, «Tapar con negro» escribe un bloque del largo del original**: tantos `█` como caracteres tiene el dato, espacios incluidos, para que se parezca lo más posible a la caja negra del PDF. Un bloque de largo fijo quedaría muy corto con un dato largo y muy largo con uno corto (ADR-243 §5) | 11-24 |
 | ~~Si un Word tiene marca de agua o WordArt, esas páginas pasan también por OCR~~. Reemplazada el mismo día por la fila siguiente, con la medición hecha (§8.6) | 11-24 |
@@ -462,6 +463,15 @@ Para el ADR del conversor, el planificador propone además:
   - cómo se escribe la capa: con la Helvetica estándar o con una fuente
     sin glifos propia, leída con dos lectores independientes;
   - el tamaño, el tiempo y una verificación al exportar.
+- **El escaneo con capa invisible, las dos salidas** (pedido por el
+  mantenedor el 2026-11-25; §3):
+  - **tiempo y fidelidad del texto** de leerlas con OCR al exportar: en la
+    segunda ronda del spike del texto preservado;
+  - **calidad de detección**: en escaneos con una capa buena, una mala y una
+    falsa, qué encuentran los detectores leyendo la capa y qué encuentran
+    leyendo la imagen con OCR. Es también el hallazgo de §6.4;
+  - **memoria**: el pico de volver a cargar el OCR al exportar, en la
+    medición de memoria de abajo, en la app real.
 - **PDF/A**: un PDF imagen y uno con texto, armados con pdf-lib y validados
   con veraPDF. Se prueba también `convertToPDFA()` del fork
   `@cantoo/pdf-lib`, porque ADR-241 se reabre con este ADR.
@@ -474,7 +484,8 @@ Para el ADR del conversor, el planificador propone además:
   propia memoria a la del pipeline, y los techos de ADR-192 son por perfil.
   Fija también los dos números del Word limpio (ADR-243 §3): a partir de
   qué tamaño se cierra el conversor antes de alinear, y cuántos caracteres
-  entran en los 3,0 GB.
+  entran en los 3,0 GB. Y mide el pico de exportar con texto un escaneo con
+  capa invisible, con el OCR cargado de nuevo al exportar (ADR-244 §4).
 - **Documentos reales**: además de los sintéticos, por `ANONLY_REAL_DOC_*`.
   Cada informe dice qué sale solo de sintéticos.
   - Ninguna medición de la 1.2 usó documentos reales todavía.

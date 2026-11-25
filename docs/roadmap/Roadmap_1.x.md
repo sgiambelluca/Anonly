@@ -546,6 +546,13 @@ versión menor, por §1.
     porque un PDF intermedio de una foto puede pesar 25 MB.
   - Falta decidir qué pasa si el usuario suma documentos con la cola ya
     andando: se vuelve a abrir el conversor, o se espera al final.
+- **El escaneo que ya trae una capa de texto invisible, con varios
+  documentos.** En el PDF con texto, esas páginas no pueden usar su capa
+  (ADR-244 §4). Las salidas seguras son leerlas con OCR al exportar o
+  dejarlas sin texto. El mantenedor pidió medir las dos en tiempo, memoria y
+  calidad de detección, y decidir el camino de fondo al diseñar esta
+  versión: con varios documentos en memoria, volver a cargar el OCR al
+  exportar puede no ser eficiente (2026-11-25, `roadmap/Plan_1.2.md` §3).
 - Cómo se revisa y se exporta cada documento de la cola: de a uno, o todos
   con la misma configuración.
 - Qué significa pausar en cada etapa. Hoy cancelar conserva las ediciones
